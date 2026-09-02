@@ -44,10 +44,3 @@ def testSqliteCounterPersistsAcrossOpen(): Unit \ {IO, Assert} =
 @Test
 def testSqliteCounterOpenBadPathIsErr(): Unit \ {IO, Assert} =
     Assert.assertTrue(SqliteCounter.open("/nonexistent-dir-for-test/counter.db") |> Result.isErr)
-
-/// resolvers は Query.counter と Mutation.increment の 2 つを登録している。
-@Test
-def testSqliteCounterResolverKeys(): Unit \ {IO, Assert} =
-    Assert.assertEq(expected = Ok(("Mutation", "increment") :: ("Query", "counter") :: Nil),
-        SqliteCounter.open(tempDatabasePath())
-            |> Result.map(database -> Map.keysOf(Counter.resolvers(database)) |> Set.toList))

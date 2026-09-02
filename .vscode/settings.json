@@ -1,0 +1,4 @@
+{
+  // bin/flix と同じフラグ。無いと純粋なリゾルバのラムダが `\ IO` に広がらず、LSP が大量のエラーを出す
+  "flix.extraFlixArgs": "--Xsubeffecting=lambdas"
+}

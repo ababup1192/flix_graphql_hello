@@ -1,0 +1,9 @@
+[package]
+name        = "schemagen"
+description = "schema.graphql から本体の src/generated/GeneratedSchema.flix を生成する"
+version     = "0.1.0"
+flix        = "0.75.3"
+authors     = ["abab <ababup1192@gmail.com>"]
+
+[mvn-dependencies]
+"com.graphql-java:graphql-java" = "22.3"

@@ -14,6 +14,52 @@ mod JavaValue {
     import java.util.Objects
 
     ///
+    /// graphql-java に渡す不透明な Java オブジェクト。Flix の値（レコード・タプル・enum）を
+    /// そのまま箱詰めして、フィールドの source として往復させる。
+    ///
+    pub enum Boxed {
+        /// 中身は Flix の値か、Value から変換した Java の値
+        case Boxed(Object)
+    }
+
+    ///
+    /// Flix の値を箱詰めする。渡す物は Flix のレコード・タプル・enum（JVM 上でオブジェクトになる物）。
+    /// Out.obj は (Context, 値) のタプルで包んでから渡すので、中身が Int32 でも問題ない。
+    /// スカラー単体は toBoxed（Value 経由）で Integer 等にする。
+    ///
+    pub def box(x: a): Boxed = Boxed.Boxed(unchecked_cast(x as Object))
+
+    ///
+    /// 箱から Flix の値を取り出す。box した時と同じ型で受けること。
+    ///
+    pub def unbox(boxed: Boxed): a =
+        let Boxed.Boxed(obj) = boxed;
+        unchecked_cast(obj as a)
+
+    ///
+    /// Value を Java の値にして箱詰めする。
+    ///
+    pub def toBoxed(value: Value): Boxed \ IO = Boxed.Boxed(toObject(value))
+
+    ///
+    /// null の箱。GraphQL の null になる。
+    ///
+    pub def boxedNull(): Boxed = Boxed.Boxed(asObject(null))
+
+    ///
+    /// 箱の一覧を Java の List にして箱詰めする。
+    ///
+    pub def boxedList(items: List[Boxed]): Boxed \ IO =
+        Boxed.Boxed(asObject(Adaptor.toList(List.map(match Boxed.Boxed(obj) -> obj, items))))
+
+    ///
+    /// 箱の中身を Java オブジェクトとして取り出す。
+    ///
+    pub def toObjectOfBoxed(boxed: Boxed): Object =
+        let Boxed.Boxed(obj) = boxed;
+        obj
+
+    ///
     /// Value を graphql-java に返せる Java オブジェクトへ変換する。
     ///
     pub def toObject(value: Value): Object \ IO = match value {

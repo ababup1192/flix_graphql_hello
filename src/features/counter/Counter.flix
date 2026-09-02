@@ -8,32 +8,24 @@
 mod Counter {
 
     ///
-    /// Query.counter のリゾルバ。今の値を返す。
+    /// CounterStore を剥がして IO にする関数。本番は SqliteCounter.runWithSqlite、テストはメモリ上の偽ハンドラ。
     ///
-    pub def counterResolver(_args: Args): Result[String, Value] \ CounterStore =
-        CounterStore.load() |> Result.map(Value.Int)
+    /// WhyNot: リゾルバの中でハンドラを直接呼ばずに外から受けるのは、リゾルバが graphql-java の
+    /// Java コールバックの中で呼ばれて main のハンドラへ戻れないため、リゾルバを作る時点で
+    /// 包む必要があり、その包み方をテストで差し替えたいため。
+    ///
+    pub type alias StoreRunner = (Unit -> Result[String, Int32] \ CounterStore) -> Result[String, Int32] \ IO
 
     ///
-    /// Mutation.increment のリゾルバ。引数 by だけ増やし、増やした後の値を返す。
+    /// Query.counter。今の値を返す。
     ///
-    pub def incrementResolver(args: Args): Result[String, Value] \ CounterStore =
-        forM (
-            by    <- CalcResolvers.intArg("by", args);
-            value <- CounterStore.increment(by)
-        ) yield Value.Int(value)
+    pub def counter(runStore: StoreRunner, _context: Context): Result[FieldError, Int32] \ IO =
+        runStore(() -> CounterStore.load())
 
     ///
-    /// カウンタのリゾルバ一覧。Query.counter と Mutation.increment。
-    /// CounterStore は SQLite のハンドラで剥がして、Resolver の型（IO）に合わせる。
+    /// Mutation.increment。引数 by だけ増やし、増やした後の値を返す。
     ///
-    /// WhyNot: ハンドラを main で噛ませないのは、リゾルバが graphql-java の Java コールバックの
-    /// 中で呼ばれ、外側のハンドラへは戻れないため。リゾルバを登録する時点で
-    /// 1 つずつハンドラで包み、effect の発行と処理をコールバックの内側で完結させる。
-    ///
-    pub def resolvers(database: SqliteCounter.Database): Map[(String, String), Resolver] =
-        Map#{
-            ("Query", "counter")      => args -> SqliteCounter.runWithSqlite(database, () -> counterResolver(args)),
-            ("Mutation", "increment") => args -> SqliteCounter.runWithSqlite(database, () -> incrementResolver(args))
-        }
+    pub def increment(runStore: StoreRunner, _context: Context, by: Int32): Result[FieldError, Int32] \ IO =
+        runStore(() -> CounterStore.increment(by))
 
 }

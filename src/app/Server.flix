@@ -21,7 +21,7 @@ mod Server {
     ///
     def executeBody(body: String): HttpResponse \ Graphql =
         match JsonValue.parse(body) |> Result.mapErr(message -> "invalid JSON: ${message}") |> Result.flatMap(toRequest) {
-            case Ok(request)  => { status = 200, headers = Nil, body = JsonValue.toJsonString(toValue(Graphql.execute(request))) }
+            case Ok(request)  => { status = 200, headers = Nil, body = JsonValue.toJsonString(toValue(Graphql.execute(request, Context.anonymous()))) }
             case Err(message) => errorResponse(400, Nil, message)
         }
 

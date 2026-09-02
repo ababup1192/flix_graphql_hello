@@ -1,43 +1,20 @@
+use Schema.{arg, field0, field1, field2, objectType}
+use GraphqlTestKit.{appSchema, executeOnce, executeQuery, queryOnly, queryOnlySchema}
+
 ///
-/// Graphql（graphql-java 込み）: buildEngine でエンジンを組み立て、runWithEngine で本当にクエリを流す。
+/// Graphql（graphql-java 込み）: Schema の値からエンジンを組み立て、runWithEngine で本当にクエリを流す。
 ///
 
 ///
-/// テスト用の SDL。CalcResolvers.resolvers() の 2 フィールドに、Err を返すリゾルバ用の fail を足している。
+/// アプリのスキーマ（schema.graphql から生成した物 + AppSchema のリゾルバ）。カウンタはメモリ上。
 ///
-def testSdl(): String =
-    "type Query { add(a: Int!, b: Int!): Int!  fibonacci(n: Int!): Int!  fail: Int }"
+def testSchema(): Schema = appSchema(0)
 
 ///
-/// テスト用のリゾルバ。Query.fail はいつも Err("boom") を返す。
+/// いつも Err("boom") を返す fail だけのスキーマ。
 ///
-def testResolvers(): Map[(String, String), Resolver] =
-    Map.insert(("Query", "fail"), _ -> checked_ecast(Err("boom")), CalcResolvers.resolvers())
-
-///
-/// テスト用のスキーマ（testSdl + testResolvers）。
-///
-def testSchema(): Schema =
-    { sdl = testSdl(), resolvers = testResolvers() }
-
-///
-/// variables も operationName も無い、クエリ文字列だけのリクエスト。
-///
-def queryOnly(queryText: String): GraphqlRequest =
-    { queryText = queryText, variables = Map.empty(), operationName = None }
-
-///
-/// エンジンを組み立ててリクエストを 1 つ流し、GraphqlResponse を返す。組み立てに失敗すれば Err。
-///
-def executeOnce(schema: Schema, request: GraphqlRequest): Result[String, GraphqlResponse] \ IO =
-    Graphql.buildEngine(schema)
-        |> Result.map(engine -> Graphql.runWithEngine(engine, () -> Graphql.execute(request)))
-
-///
-/// errors の先頭の "message" を文字列で取り出す。errors が空か message が文字列でなければ None。
-///
-def firstMessage(response: GraphqlResponse): Option[String] =
-    List.head(response#errors) |> Option.map(Value.field("message")) |> Option.flatMap(Value.asStr)
+def failSchema(): Schema =
+    queryOnlySchema(field0("fail", Out.option(Out.int32()), (_context, _root) -> Err("boom")) :: Nil)
 
 // ---- クエリの実行 ----
 
@@ -45,22 +22,80 @@ def firstMessage(response: GraphqlResponse): Option[String] =
 @Test
 def testGraphqlJavaExecutesQuery(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok((Value.Obj(Map#{ "add" => Value.Int(3), "fibonacci" => Value.Int(55) }), None)),
-        executeOnce(testSchema(), queryOnly("{ add(a: 1, b: 2) fibonacci(n: 10) }"))
-            |> Result.map(response -> (response#data, firstMessage(response))))
+        executeQuery(testSchema(), "{ add(a: 1, b: 2) fibonacci(n: 10) }"))
 
 /// variables で渡した $a がリゾルバの引数 a に届く。
 @Test
 def testGraphqlJavaVariables(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok((Value.Obj(Map#{ "add" => Value.Int(3) }), None)),
         executeOnce(testSchema(), { queryText = "query($a: Int!) { add(a: $a, b: 2) }", variables = Map#{ "a" => Value.Int(1) }, operationName = None })
-            |> Result.map(response -> (response#data, firstMessage(response))))
+            |> Result.map(response -> (response#data, GraphqlTestKit.firstMessage(response))))
 
 /// 名前付きの操作が 2 つあるクエリでは、operationName で選んだ方だけが実行される。
 @Test
 def testGraphqlJavaOperationName(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok((Value.Obj(Map#{ "fibonacci" => Value.Int(55) }), None)),
         executeOnce(testSchema(), { queryText = "query First { add(a: 1, b: 2) } query Second { fibonacci(n: 10) }", variables = Map.empty(), operationName = Some("Second") })
-            |> Result.map(response -> (response#data, firstMessage(response))))
+            |> Result.map(response -> (response#data, GraphqlTestKit.firstMessage(response))))
+
+// ---- ネストしたオブジェクト型（source が型付きで子へ届く） ----
+
+/// post(id) の戻りの Post レコードが source として Post.author に届き、さらに Author.posts まで辿れる。
+///
+///   post(p1) ─▶ author(a1) ─▶ posts: [p1, p2]
+@Test
+def testGraphqlJavaNestedSource(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok((Value.Obj(Map#{ "post" => Value.Obj(Map#{
+            "title"  => Value.Str("Flix で GraphQL"),
+            "author" => Value.Obj(Map#{
+                "name"  => Value.Str("abab"),
+                "posts" => Value.List(Value.Obj(Map#{ "id" => Value.Str("p1") }) :: Value.Obj(Map#{ "id" => Value.Str("p2") }) :: Nil) }) }) }), None)),
+        executeQuery(testSchema(), "{ post(id: \"p1\") { title author { name posts { id } } } }"))
+
+/// 見つからない ID では nullable の post が null になり、errors は無い。
+@Test
+def testGraphqlJavaNullableObject(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok((Value.Obj(Map#{ "post" => Value.Null }), None)),
+        executeQuery(testSchema(), "{ post(id: \"nope\") { title } }"))
+
+/// リストの各要素が source として子フィールドに届く。status を省略すると既定値 PUBLISHED で絞られる。
+@Test
+def testGraphqlJavaListOfObjects(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok((Value.Obj(Map#{ "posts" => Value.List(
+            Value.Obj(Map#{ "id" => Value.Str("p1") }) :: Value.Obj(Map#{ "id" => Value.Str("p2") }) :: Value.Obj(Map#{ "id" => Value.Str("p3") }) :: Nil) }), None)),
+        executeQuery(testSchema(), "{ posts { id } }"))
+
+/// 生成された enum は引数にも戻り値にも使える。DRAFT で絞ると p4 だけで、status もそのまま返る。
+@Test
+def testGraphqlJavaGeneratedEnum(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok((Value.Obj(Map#{ "posts" => Value.List(
+            Value.Obj(Map#{ "id" => Value.Str("p4"), "status" => Value.Str("DRAFT") }) :: Nil) }), None)),
+        executeQuery(testSchema(), "{ posts(status: DRAFT) { id status } }"))
+
+/// 子フィールドのリゾルバは、クエリで選ばれたときだけ走る。
+/// Item.broken は Err を返すが、選ばなければエラーにならない。選べばエラーになる。
+@Test
+def testGraphqlJavaChildRunsOnlyWhenSelected(): Unit \ {Assert, IO} =
+    let itemType = objectType("Item", () ->
+        field0("ok", Out.int32(), (_context, item) -> Ok(item)) ::
+        field0("broken", Out.option(Out.int32()), (_context, _item) -> Err("child boom")) ::
+        Nil);
+    let schema = queryOnlySchema(field0("item", Out.obj(itemType), (_context, _root) -> Ok(7)) :: Nil);
+    Assert.assertEq(
+        expected = (Ok((Value.Obj(Map#{ "item" => Value.Obj(Map#{ "ok" => Value.Int(7) }) }), None)),
+                    Ok((Value.Obj(Map#{ "item" => Value.Obj(Map#{ "broken" => Value.Null }) }), Some("child boom")))),
+        (executeQuery(schema, "{ item { ok } }"), executeQuery(schema, "{ item { broken } }")))
+
+/// Context はルートから子フィールドまで同じ物が届く。
+@Test
+def testGraphqlJavaContextReachesChild(): Unit \ {Assert, IO} =
+    let itemType = objectType("Item", () ->
+        field0("user", Out.option(Out.string()), (context, _item) -> Ok(context#userId)) :: Nil);
+    let schema = queryOnlySchema(field0("item", Out.obj(itemType), (_context, _root) -> Ok(())) :: Nil);
+    Assert.assertEq(expected = Ok(Value.Obj(Map#{ "item" => Value.Obj(Map#{ "user" => Value.Str("u1") }) })),
+        Graphql.buildEngine(schema)
+            |> Result.map(engine -> Graphql.runWithEngine(engine, () -> Graphql.execute(queryOnly("{ item { user } }"), { userId = Some("u1") })))
+            |> Result.map(response -> response#data))
 
 // ---- エラーの報告 ----
 
@@ -69,51 +104,42 @@ def testGraphqlJavaOperationName(): Unit \ {Assert, IO} =
 def testGraphqlJavaUnknownFieldIsError(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok((Value.Null, 1, Some("Validation error (FieldUndefined@[nope]) : Field 'nope' in type 'Query' is undefined"))),
         executeOnce(testSchema(), queryOnly("{ nope }"))
-            |> Result.map(response -> (response#data, List.length(response#errors), firstMessage(response))))
+            |> Result.map(response -> (response#data, List.length(response#errors), GraphqlTestKit.firstMessage(response))))
 
-/// リゾルバが Err を返すと、そのフィールドは null になり、Err のメッセージを含むエラーが 1 つ返る。
+/// リゾルバが Err を返すと、そのフィールドは null になり、Err のメッセージがそのまま message になったエラーが 1 つ返る。
+/// path はそのフィールドの位置。
 @Test
 def testGraphqlJavaResolverErrIsReported(): Unit \ {Assert, IO} =
-    Assert.assertEq(expected = Ok((Value.Obj(Map#{ "fail" => Value.Null }), 1, Some("Exception while fetching data (/fail) : boom"))),
-        executeOnce(testSchema(), queryOnly("{ fail }"))
-            |> Result.map(response -> (response#data, List.length(response#errors), firstMessage(response))))
+    Assert.assertEq(expected = Ok((Value.Obj(Map#{ "fail" => Value.Null }), 1, Some("boom"), Value.List(Value.Str("fail") :: Nil))),
+        executeOnce(failSchema(), queryOnly("{ fail }"))
+            |> Result.map(response -> (response#data, List.length(response#errors), GraphqlTestKit.firstMessage(response),
+                                       List.head(response#errors) |> Option.map(Value.field("path")) |> Option.getWithDefault(Value.Null))))
+
+/// 引数の型が合わないクエリは graphql-java の検証で落ち、リゾルバまで届かない。
+@Test
+def testGraphqlJavaBadArgumentIsValidationError(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok((Value.Null, true)),
+        executeQuery(testSchema(), "{ add(a: \"x\", b: 2) }")
+            |> Result.map(match (data, message) -> (data, message |> Option.map(String.startsWith(prefix = "Validation error")) |> Option.getWithDefault(false))))
 
 // ---- エンジンの組み立て ----
 
-/// 壊れた SDL では buildEngine が Err になる。
+/// 同じ名前で中身の違うオブジェクト型が 2 つあると buildEngine が Err になる。
 @Test
-def testGraphqlJavaBrokenSdlIsErr(): Unit \ {Assert, IO} =
-    Assert.assertTrue(Result.isErr(Graphql.buildEngine({ sdl = "type Query { add(a: Int!", resolvers = testResolvers() })))
-
-/// スキーマに無いフィールドへリゾルバを登録すると、そのフィールド名を含む Err になる。
-@Test
-def testGraphqlJavaUnknownResolverIsErr(): Unit \ {Assert, IO} =
+def testGraphqlJavaConflictingTypeIsErr(): Unit \ {Assert, IO} =
+    let first = objectType("Item", () -> field0("a", Out.int32(), (_context, item) -> Ok(item)) :: Nil);
+    let second = objectType("Item", () -> field0("b", Out.int32(), (_context, item) -> Ok(item)) :: Nil);
+    let schema = queryOnlySchema(
+        field0("x", Out.obj(first), (_context, _root) -> Ok(1)) ::
+        field0("y", Out.obj(second), (_context, _root) -> Ok(2)) :: Nil);
     Assert.assertEq(expected = Err(true),
-        Graphql.buildEngine({ sdl = testSdl(), resolvers = Map.insert(("Query", "nope"), _ -> checked_ecast(Ok(Value.Null)), testResolvers()) })
-            |> Result.map(_ -> false)
-            |> Result.mapErr(String.contains(substr = "Query.nope")))
+        Graphql.buildEngine(schema) |> Result.map(_ -> false) |> Result.mapErr(String.contains(substr = "Item")))
 
-/// Query のフィールドにリゾルバが無いと、そのフィールド名を含む Err になる。
+/// Mutation を持つスキーマでは mutation が実行できる。
 @Test
-def testGraphqlJavaMissingResolverIsErr(): Unit \ {Assert, IO} =
-    Assert.assertEq(expected = Err(true),
-        Graphql.buildEngine({ sdl = testSdl(), resolvers = CalcResolvers.resolvers() })
-            |> Result.map(_ -> false)
-            |> Result.mapErr(String.contains(substr = "Query.fail")))
-
-// ---- リゾルバのマージ ----
-
-/// キーが重ならない一覧同士は、全部を合わせた Map になる。
-@Test
-def testGraphqlMergeResolversDisjoint(): Unit \ Assert =
-    Assert.assertEq(expected = Ok(("Query", "add") :: ("Query", "fail") :: ("Query", "fibonacci") :: Nil),
-        Graphql.mergeResolvers(CalcResolvers.resolvers() :: Map#{ ("Query", "fail") => _ -> checked_ecast(Err("boom")) } :: Nil)
-            |> Result.map(merged -> Map.keysOf(merged) |> Set.toList))
-
-/// 同じキーが 2 つの一覧にあると、そのキー名（Query.add）を含む Err になる。
-@Test
-def testGraphqlMergeResolversDuplicateIsErr(): Unit \ Assert =
-    Assert.assertEq(expected = Err(true),
-        Graphql.mergeResolvers(CalcResolvers.resolvers() :: CalcResolvers.resolvers() :: Nil)
-            |> Result.map(_ -> false)
-            |> Result.mapErr(String.contains(substr = "Query.add")))
+def testGraphqlJavaMutation(): Unit \ {Assert, IO} =
+    let schema = Schema.make(
+        Schema.objectType("Query", () -> field0("ping", Out.string(), (_context, _root) -> Ok("pong")) :: Nil),
+        Some(Schema.objectType("Mutation", () -> field1("echo", arg("text", GqlCodec.string()), Out.string(), (_context, _root, text) -> Ok(text)) :: Nil)));
+    Assert.assertEq(expected = Ok((Value.Obj(Map#{ "echo" => Value.Str("hi") }), None)),
+        executeQuery(schema, "mutation { echo(text: \"hi\") }"))

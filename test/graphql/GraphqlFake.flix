@@ -9,7 +9,7 @@ mod GraphqlFake {
     ///
     pub def runWithEcho(f: Unit -> a \ ef): a \ ef - Graphql =
         run f() with handler Graphql {
-            def execute(request, resume) =
+            def execute(request, _context, resume) =
                 resume({ data = echo(request), errors = Nil })
         }
 
@@ -28,7 +28,7 @@ mod GraphqlFake {
     ///
     pub def runWithFixedResponse(response: GraphqlResponse, f: Unit -> a \ ef): a \ ef - Graphql =
         run f() with handler Graphql {
-            def execute(_request, resume) = resume(response)
+            def execute(_request, _context, resume) = resume(response)
         }
 
 }

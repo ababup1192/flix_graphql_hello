@@ -1,0 +1,31 @@
+type Query {
+  add(a: Int!, b: Int!): Int!
+  """n 番目のフィボナッチ数"""
+  fibonacci(n: Int!): Int!
+  post(id: ID!): Post
+  """status を省くと PUBLISHED だけ。null を渡すと全件"""
+  posts(status: PostStatus = PUBLISHED): [Post!]!
+  counter: Int!
+}
+
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+}
+
+type Post {
+  id: ID!
+  title: String!
+  status: PostStatus!
+  author: Author!
+}
+
+type Author {
+  id: ID!
+  name: String!
+  posts: [Post!]!
+}
+
+type Mutation {
+  increment(by: Int!): Int!
+}

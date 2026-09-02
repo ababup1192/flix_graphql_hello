@@ -1,30 +1,30 @@
 ///
-/// Counter: CounterStore effect だけに依存する Query / Mutation リゾルバ。
-/// SQLite は使わず、メモリ上の偽ハンドラで確かめる。
+/// Counter: CounterStore effect だけに依存する Query / Mutation のリゾルバ。
+/// SQLite は使わず、メモリ上の偽ハンドラを runStore として渡す。
 ///
 
-/// increment は増やした後の値を返し、counter はその値を読む。
-/// 0 → +2 → +3 の順で 2, 5 が返り、最後の読み取りも 5。
+/// counter は保存先の値を読む。
 @Test
-def testCounterIncrementThenLoad(): Unit \ Assert =
-    Assert.assertEq(expected = (Ok(Value.Int(2)), Ok(Value.Int(5)), Ok(Value.Int(5))),
-        CounterFake.runWithMemory(0, () -> (
-            Counter.incrementResolver(Map#{ "by" => Value.Int(2) }),
-            Counter.incrementResolver(Map#{ "by" => Value.Int(3) }),
-            Counter.counterResolver(Map#{}))))
+def testCounterQuery(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok(5),
+        Counter.counter(f -> CounterFake.runWithMemory(5, f), Context.anonymous()))
 
-/// by が無いか Int でなければ Err で、保存先には触らないので値は変わらない。
+/// increment は by だけ増やした後の値を返す（初期値 5 に 3 を足して 8）。
 @Test
-def testCounterIncrementBadArg(): Unit \ Assert =
-    Assert.assertEq(expected = (Err("argument 'by' must be Int"), Ok(Value.Int(7))),
-        CounterFake.runWithMemory(7, () -> (
-            Counter.incrementResolver(Map#{ "by" => Value.Str("x") }),
-            Counter.counterResolver(Map#{}))))
+def testCounterIncrement(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok(8),
+        Counter.increment(f -> CounterFake.runWithMemory(5, f), Context.anonymous(), 3))
 
 /// 保存先の Err はそのままリゾルバの Err になる。
 @Test
-def testCounterStoreErrorPassesThrough(): Unit \ Assert =
+def testCounterStoreErrorPassesThrough(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = (Err("db down"), Err("db down")),
-        CounterFake.runWithBroken("db down", () -> (
-            Counter.counterResolver(Map#{}),
-            Counter.incrementResolver(Map#{ "by" => Value.Int(1) }))))
+        (Counter.counter(f -> CounterFake.runWithBroken("db down", f), Context.anonymous()),
+         Counter.increment(f -> CounterFake.runWithBroken("db down", f), Context.anonymous(), 1)))
+
+/// アプリのスキーマ経由でも counter と increment が動き、保存先の Err は GraphQL のエラーになる。
+@Test
+def testCounterThroughSchema(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = (Ok((Value.Obj(Map#{ "counter" => Value.Int(5) }), None)), Ok((Value.Obj(Map#{ "increment" => Value.Int(8) }), None))),
+        (GraphqlTestKit.executeQuery(GraphqlTestKit.appSchema(5), "{ counter }"),
+         GraphqlTestKit.executeQuery(GraphqlTestKit.appSchema(5), "mutation { increment(by: 3) }")))
