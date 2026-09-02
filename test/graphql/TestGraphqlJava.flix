@@ -8,7 +8,7 @@ use GraphqlTestKit.{appSchema, executeOnce, executeQuery, queryOnly, queryOnlySc
 ///
 /// アプリのスキーマ（schema.graphql から生成した物 + AppSchema のリゾルバ）。カウンタはメモリ上。
 ///
-def testSchema(): Schema = appSchema(0)
+def testSchema(): Schema \ IO = appSchema(0)
 
 ///
 /// いつも Err("boom") を返す fail だけのスキーマ。
@@ -122,6 +122,18 @@ def testGraphqlJavaBadArgumentIsValidationError(): Unit \ {Assert, IO} =
         executeQuery(testSchema(), "{ add(a: \"x\", b: 2) }")
             |> Result.map(match (data, message) -> (data, message |> Option.map(String.startsWith(prefix = "Validation error")) |> Option.getWithDefault(false))))
 
+// ---- リゾルバの効果 ----
+
+/// 人が DSL で書くフィールドも `\ CounterStore` と純粋な物を同じ型に混ぜられ、Schema.make の runner がハンドラで IO に落とす。
+@Test
+def testGraphqlJavaResolverEffectRunsThroughRunner(): Unit \ {Assert, IO} =
+    let root = objectType("Query", () ->
+        field0("stored", Out.int32(), (_context, _root) -> CounterStore.load()) ::
+        field0("pure", Out.int32(), (_context, _root) -> Ok(1)) :: Nil);
+    let schema = Schema.make(root, None, f -> CounterFake.runWithMemory(41, f));
+    Assert.assertEq(expected = Ok((Value.Obj(Map#{ "stored" => Value.Int(41), "pure" => Value.Int(1) }), None)),
+        executeQuery(schema, "{ stored pure }"))
+
 // ---- エンジンの組み立て ----
 
 /// 同じ名前で中身の違うオブジェクト型が 2 つあると buildEngine が Err になる。
@@ -140,6 +152,7 @@ def testGraphqlJavaConflictingTypeIsErr(): Unit \ {Assert, IO} =
 def testGraphqlJavaMutation(): Unit \ {Assert, IO} =
     let schema = Schema.make(
         Schema.objectType("Query", () -> field0("ping", Out.string(), (_context, _root) -> Ok("pong")) :: Nil),
-        Some(Schema.objectType("Mutation", () -> field1("echo", arg("text", GqlCodec.string()), Out.string(), (_context, _root, text) -> Ok(text)) :: Nil)));
+        Some(Schema.objectType("Mutation", () -> field1("echo", arg("text", GqlCodec.string()), Out.string(), (_context, _root, text) -> Ok(text)) :: Nil)),
+        Runner.io());
     Assert.assertEq(expected = Ok((Value.Obj(Map#{ "echo" => Value.Str("hi") }), None)),
         executeQuery(schema, "mutation { echo(text: \"hi\") }"))

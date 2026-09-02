@@ -1,4 +1,4 @@
-.PHONY: run check test query generate
+.PHONY: run check test query generate scaffold
 
 run:
 	bin/flix run
@@ -14,6 +14,13 @@ test:
 # schema.graphql から src/generated/GeneratedSchema.flix を作り直す
 generate:
 	cd schemagen && ../bin/flix run
+
+# 型ごとのリゾルバの雛形 src/resolvers/XResolvers.flix を書く（既にあるファイルは触らない）
+#   make scaffold                 全型
+#   make scaffold TYPE=Post       1 型
+#   make scaffold DEFAULTS=no     既定リゾルバを使わず全フィールドを吐く（source が enum の型向け）
+scaffold:
+	cd schemagen && SCHEMAGEN_MODE=scaffold SCAFFOLD_TYPE=$(TYPE) SCAFFOLD_DEFAULTS=$(DEFAULTS) ../bin/flix run
 
 # 起動中のサーバへサンプルのクエリと mutation を投げる
 query:

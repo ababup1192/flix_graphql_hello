@@ -22,7 +22,7 @@ def colorCodec(): GqlCodec[Color] =
 ///
 /// 値の変換を試すフィールド一覧。
 ///
-def valueFields(): List[Field[Unit]] =
+def valueFields(): List[Field[Unit, IO]] =
     field1("greet", arg("name", GqlCodec.string()) |> Arg.withDefault("world"), Out.string(), (_context, _root, name) -> Ok("hi ${name}")) ::
     field1("half", arg("x", GqlCodec.float64()), Out.float64(), (_context, _root, x) -> Ok(x / 2.0)) ::
     field1("count", arg("ids", GqlCodec.list(GqlCodec.id())), Out.int32(), (_context, _root, ids) -> Ok(List.length(ids))) ::

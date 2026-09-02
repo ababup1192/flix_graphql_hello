@@ -22,6 +22,24 @@ mod Context {
 pub type alias FieldError = String
 
 ///
+/// リゾルバの効果 ef を IO に落とすハンドラ。Schema.make に 1 回だけ渡す。
+/// 受け取る thunk は戻り値の箱詰め（IO）まで済ませた物なので、その効果は ef + IO。
+///
+/// WhyNot: `(Unit -> a \ ef) -> a \ IO` と書かないのは、型別名が自由な型変数 a を持てず、
+/// Flix に rank-2 型も無いため。戻り型を箱に固定すれば ef を多相のまま値として渡せる。
+///
+pub type alias Runner[ef: Eff] = (Unit -> Result[FieldError, JavaValue.Boxed] \ ef + IO) -> Result[FieldError, JavaValue.Boxed] \ IO
+
+mod Runner {
+
+    ///
+    /// IO しか使わないリゾルバ用。thunk をそのまま呼ぶ。
+    ///
+    pub def io(): Runner[IO] = f -> f()
+
+}
+
+///
 /// SDL に出す型参照。オブジェクト型はフィールド一覧を thunk で持つ。
 ///
 /// WhyNot: Object のフィールド一覧を値で持たないのは、Post.author: Author と Author.posts: [Post]
@@ -179,9 +197,13 @@ mod Arg {
 /// 関係なく全フィールドのリゾルバ（IO を含む）が走るため。graphql-java の流儀どおり、
 /// 親は source を返すだけにして、子フィールドは要求されたときだけ動かす。
 ///
-pub enum Out[a] {
+/// WhyNot: typeRef を値でなく Runner を受ける関数で持つのは、TypeRef.Object が IO に落とした
+/// フィールド一覧を持ち、その型消去に Runner が要るが、Out.obj の時点では Runner が手元に無いため。
+/// TypeRef 自身に効果変数を通すと ArgInfo / FieldInfo / GqlCodec まで変数が広がる。
+///
+pub enum Out[a: Type, ef: Eff] {
     /// encode は Context ごと箱詰めして子フィールドへ渡す
-    case Out({ typeRef = TypeRef, encode = Context -> a -> JavaValue.Boxed \ IO })
+    case Out({ typeRef = Runner[ef] -> TypeRef, encode = Context -> a -> JavaValue.Boxed \ IO })
 }
 
 mod Out {
@@ -189,22 +211,22 @@ mod Out {
     ///
     /// スカラーの戻り値。
     ///
-    pub def scalar(codec: GqlCodec[a]): Out[a] =
-        Out.Out({ typeRef = GqlCodec.typeRef(codec), encode = (_context, x) -> JavaValue.toBoxed(GqlCodec.encode(codec, x)) })
+    pub def scalar(codec: GqlCodec[a]): Out[a, ef] =
+        Out.Out({ typeRef = _runner -> GqlCodec.typeRef(codec), encode = (_context, x) -> JavaValue.toBoxed(GqlCodec.encode(codec, x)) })
 
     ///
     /// オブジェクト型の戻り値。値は箱詰めして、子フィールドの source になる。
     ///
-    pub def obj(objectType: ObjectType[a]): Out[a] =
-        Out.Out({ typeRef = ObjectType.typeRef(objectType), encode = (context, x) -> JavaValue.box((context, x)) })
+    pub def obj(objectType: ObjectType[a, ef]): Out[a, ef] =
+        Out.Out({ typeRef = runner -> ObjectType.typeRef(runner, objectType), encode = (context, x) -> JavaValue.box((context, x)) })
 
     ///
     /// nullable にする。None は null。二重に重ねても 1 段。
     ///
-    pub def option(out: Out[a]): Out[Option[a]] =
+    pub def option(out: Out[a, ef]): Out[Option[a], ef] =
         let Out.Out(inner) = out;
         Out.Out({
-            typeRef = TypeRef.nullable(inner#typeRef),
+            typeRef = runner -> TypeRef.nullable((inner#typeRef)(runner)),
             encode  = (context, maybe) -> match maybe {
                 case Some(x) => (inner#encode)(context, x)
                 case None    => JavaValue.boxedNull()
@@ -214,50 +236,55 @@ mod Out {
     ///
     /// リストにする。
     ///
-    pub def list(out: Out[a]): Out[List[a]] =
+    pub def list(out: Out[a, ef]): Out[List[a], ef] =
         let Out.Out(inner) = out;
         Out.Out({
-            typeRef = TypeRef.ListOf(inner#typeRef),
+            typeRef = runner -> TypeRef.ListOf((inner#typeRef)(runner)),
             encode  = (context, items) -> JavaValue.boxedList(List.map(x -> (inner#encode)(context, x), items))
         })
 
     /// Int
-    pub def int32(): Out[Int32] = scalar(GqlCodec.int32())
+    pub def int32(): Out[Int32, ef] = scalar(GqlCodec.int32())
     /// Float
-    pub def float64(): Out[Float64] = scalar(GqlCodec.float64())
+    pub def float64(): Out[Float64, ef] = scalar(GqlCodec.float64())
     /// String
-    pub def string(): Out[String] = scalar(GqlCodec.string())
+    pub def string(): Out[String, ef] = scalar(GqlCodec.string())
     /// Boolean
-    pub def bool(): Out[Bool] = scalar(GqlCodec.bool())
+    pub def bool(): Out[Bool, ef] = scalar(GqlCodec.bool())
     /// ID
-    pub def id(): Out[Id] = scalar(GqlCodec.id())
+    pub def id(): Out[Id, ef] = scalar(GqlCodec.id())
 
     ///
-    /// SDL に出す型参照。
+    /// SDL に出す型参照。オブジェクト型のフィールドを runner で IO に落として型消去する。
     ///
-    pub def typeRef(out: Out[a]): TypeRef =
+    pub def typeRef(runner: Runner[ef], out: Out[a, ef]): TypeRef =
         let Out.Out(inner) = out;
-        inner#typeRef
+        (inner#typeRef)(runner)
 
     ///
     /// 戻り値を箱詰めする。
     ///
-    pub def encode(out: Out[a], context: Context, x: a): JavaValue.Boxed \ IO =
+    pub def encode(out: Out[a, ef], context: Context, x: a): JavaValue.Boxed \ IO =
         let Out.Out(inner) = out;
         (inner#encode)(context, x)
 
 }
 
 ///
-/// オブジェクト型のフィールド 1 つ。source は親オブジェクトの Flix の型（ルートなら Unit）。
-/// resolve は引数のデコードから戻り値の箱詰めまでを閉じた関数で、Err はそのまま GraphQL のエラーになる。
+/// オブジェクト型のフィールド 1 つ。source は親オブジェクトの Flix の型（ルートなら Unit）、
+/// ef はリゾルバの効果。resolve は引数のデコードから戻り値の箱詰めまでを閉じた関数で、
+/// Err はそのまま GraphQL のエラーになる。
 ///
-/// WhyNot: effect を IO に固定するのは、effect 多相にすると List[Field[a]] に並べられないため。
-/// 他の effect を使うリゾルバは、フィールドを作る時点でハンドラで包む（Counter を参照）。
+/// WhyNot: フィールドごとに別の効果変数を持たせないのは、1 つの型のフィールドを List[Field[a, ef]] に
+/// 並べるため。
 ///
-pub enum Field[source] {
-    /// info は SDL 用、resolve は実行用
-    case Field({ info = FieldInfo, resolve = Context -> source -> Args -> Result[FieldError, JavaValue.Boxed] \ IO })
+pub enum Field[source: Type, ef: Eff] {
+    /// typeRef は SDL 用（Runner で型消去してから確定）、resolve は実行用
+    case Field({
+        name = String, args = List[ArgInfo], description = Option[String], deprecated = Option[Deprecation],
+        typeRef = Runner[ef] -> TypeRef,
+        resolve = Context -> source -> Args -> Result[FieldError, JavaValue.Boxed] \ ef + IO
+    })
 }
 
 mod Field {
@@ -265,61 +292,77 @@ mod Field {
     ///
     /// SDL の description を付ける。
     ///
-    pub def withDescription(text: String, field: Field[source]): Field[source] =
+    pub def withDescription(text: String, field: Field[source, ef]): Field[source, ef] =
         let Field.Field(inner) = field;
-        Field.Field({ info = { description = Some(text) | inner#info } | inner })
+        Field.Field({ description = Some(text) | inner })
 
     ///
     /// @deprecated(reason: "...") を付ける。
     ///
-    pub def withDeprecation(reason: String, field: Field[source]): Field[source] =
+    pub def withDeprecation(reason: String, field: Field[source, ef]): Field[source, ef] =
         let Field.Field(inner) = field;
-        Field.Field({ info = { deprecated = Some(Deprecation.Reason(reason)) | inner#info } | inner })
+        Field.Field({ deprecated = Some(Deprecation.Reason(reason)) | inner })
 
     ///
     /// reason 無しの @deprecated を付ける（GraphQL の既定の reason "No longer supported" になる）。
     ///
-    pub def deprecate(field: Field[source]): Field[source] =
+    pub def deprecate(field: Field[source, ef]): Field[source, ef] =
         let Field.Field(inner) = field;
-        Field.Field({ info = { deprecated = Some(Deprecation.NoReason) | inner#info } | inner })
+        Field.Field({ deprecated = Some(Deprecation.NoReason) | inner })
 
     ///
-    /// source の型を消して、graphql-java に渡せる形にする。
+    /// source の型と効果を消して、graphql-java に渡せる形にする。
+    /// 効果は runner で IO に落とす。
     ///
-    pub def erase(field: Field[source]): ErasedField =
+    pub def erase(runner: Runner[ef], field: Field[source, ef]): ErasedField =
         let Field.Field(inner) = field;
-        { info = inner#info, fetch = (boxed, args) -> {
-            let (context, src): (Context, source) = JavaValue.unbox(boxed);
-            (inner#resolve)(context, src, args)
-        } }
+        {
+            info  = { name = inner#name, args = inner#args, typeRef = (inner#typeRef)(runner), description = inner#description, deprecated = inner#deprecated },
+            fetch = (boxed, args) -> runner(() -> {
+                let (context, src): (Context, source) = JavaValue.unbox(boxed);
+                (inner#resolve)(context, src, args)
+            })
+        }
 
 }
 
 ///
-/// オブジェクト型。名前とフィールド一覧。a はこの型を表す Flix の型。
+/// オブジェクト型。名前とフィールド一覧。a はこの型を表す Flix の型、ef はフィールドのリゾルバの効果。
 ///
-pub enum ObjectType[a] {
+pub enum ObjectType[a: Type, ef: Eff] {
     /// フィールド一覧は相互参照を許すため thunk
-    case ObjectType({ name = String, fields = Unit -> List[Field[a]] })
+    case ObjectType({ name = String, fields = Unit -> List[Field[a, ef]] })
 }
 
 mod ObjectType {
 
     ///
-    /// SDL に出す型参照。
+    /// 型の名前。
     ///
-    pub def typeRef(objectType: ObjectType[a]): TypeRef =
+    pub def name(objectType: ObjectType[a, ef]): String =
         let ObjectType.ObjectType(inner) = objectType;
-        TypeRef.Object(inner#name, () -> List.map(Field.erase, (inner#fields)()))
+        inner#name
+
+    ///
+    /// SDL に出す型参照。フィールドは runner で IO に落として型消去する。
+    ///
+    pub def typeRef(runner: Runner[ef], objectType: ObjectType[a, ef]): TypeRef =
+        let ObjectType.ObjectType(inner) = objectType;
+        TypeRef.Object(inner#name, () -> List.map(Field.erase(runner), (inner#fields)()))
 
 }
 
 ///
-/// スキーマ全体。Query と（あれば）Mutation のルート型。
+/// ルート型。名前と、runner で IO に落とした後の型参照。
+///
+pub type alias RootType = { name = String, typeRef = TypeRef }
+
+///
+/// スキーマ全体。Query と（あれば）Mutation のルート型。Schema.make でリゾルバの効果は IO に落ちている。
 ///
 pub enum Schema {
-    /// ルート型の source は無いので Unit
-    case Schema({ queryType = ObjectType[Unit], mutationType = Option[ObjectType[Unit]] })
+    /// ルート型は名前と型消去済みの参照
+    case Schema({ queryType = RootType, mutationType = Option[RootType] })
 }
 
 ///
@@ -337,13 +380,13 @@ mod Schema {
     ///
     /// 引数の無いフィールド。
     ///
-    pub def field0(name: String, out: Out[r], f: Context -> source -> Result[FieldError, r] \ IO): Field[source] =
+    pub def field0(name: String, out: Out[r, ef], f: Context -> source -> Result[FieldError, r] \ ef): Field[source, ef] =
         makeField(name, Nil, out, (context, src, _args) -> f(context, src))
 
     ///
     /// 引数 1 つのフィールド。
     ///
-    pub def field1(name: String, a: Arg[a], out: Out[r], f: Context -> source -> a -> Result[FieldError, r] \ IO): Field[source] =
+    pub def field1(name: String, a: Arg[a], out: Out[r, ef], f: Context -> source -> a -> Result[FieldError, r] \ ef): Field[source, ef] =
         makeField(name, Arg.info(a) :: Nil, out, (context, src, args) ->
             forM (
                 av <- Arg.decode(a, args);
@@ -353,7 +396,7 @@ mod Schema {
     ///
     /// 引数 2 つのフィールド。
     ///
-    pub def field2(name: String, a: Arg[a], b: Arg[b], out: Out[r], f: Context -> source -> a -> b -> Result[FieldError, r] \ IO): Field[source] =
+    pub def field2(name: String, a: Arg[a], b: Arg[b], out: Out[r, ef], f: Context -> source -> a -> b -> Result[FieldError, r] \ ef): Field[source, ef] =
         makeField(name, Arg.info(a) :: Arg.info(b) :: Nil, out, (context, src, args) ->
             forM (
                 av <- Arg.decode(a, args);
@@ -364,7 +407,7 @@ mod Schema {
     ///
     /// 引数 3 つのフィールド。4 つ以上は input 型にまとめる。
     ///
-    pub def field3(name: String, a: Arg[a], b: Arg[b], c: Arg[c], out: Out[r], f: Context -> source -> a -> b -> c -> Result[FieldError, r] \ IO): Field[source] =
+    pub def field3(name: String, a: Arg[a], b: Arg[b], c: Arg[c], out: Out[r, ef], f: Context -> source -> a -> b -> c -> Result[FieldError, r] \ ef): Field[source, ef] =
         makeField(name, Arg.info(a) :: Arg.info(b) :: Arg.info(c) :: Nil, out, (context, src, args) ->
             forM (
                 av <- Arg.decode(a, args);
@@ -377,20 +420,21 @@ mod Schema {
     /// 引数を Args のまま受けるフィールド。引数の個数に上限が無い。
     /// 生成器（schemagen）が使う。人が書くときは field0..3 の方が引数の型が決まって安全。
     ///
-    pub def fieldRaw(name: String, args: List[ArgInfo], out: Out[r], f: Context -> source -> Args -> Result[FieldError, r] \ IO): Field[source] =
+    pub def fieldRaw(name: String, args: List[ArgInfo], out: Out[r, ef], f: Context -> source -> Args -> Result[FieldError, r] \ ef): Field[source, ef] =
         makeField(name, args, out, f)
 
     ///
     /// オブジェクト型を作る。fields は相互参照を許すため thunk で受ける。
     ///
-    pub def objectType(name: String, fields: Unit -> List[Field[a]]): ObjectType[a] =
+    pub def objectType(name: String, fields: Unit -> List[Field[a, ef]]): ObjectType[a, ef] =
         ObjectType.ObjectType({ name = name, fields = fields })
 
     ///
-    /// スキーマを作る。
+    /// スキーマを作る。runner がリゾルバの効果 ef を IO に落とす（graphql-java の DataFetcher から呼ばれる
+    /// Flix のクロージャの中でハンドラを走らせる。別スレッドから呼ばれても動く）。
     ///
-    pub def make(queryType: ObjectType[Unit], mutationType: Option[ObjectType[Unit]]): Schema =
-        Schema.Schema({ queryType = queryType, mutationType = mutationType })
+    pub def make(queryType: ObjectType[Unit, ef], mutationType: Option[ObjectType[Unit, ef]], runner: Runner[ef]): Schema =
+        Schema.Schema({ queryType = root(runner, queryType), mutationType = Option.map(root(runner), mutationType) })
 
     ///
     /// ルート型から到達できる全型宣言（オブジェクト型と enum）を並べる。
@@ -404,7 +448,7 @@ mod Schema {
     ///
     pub def collectTypes(schema: Schema): Result[String, List[TypeDecl]] =
         let Schema.Schema(inner) = schema;
-        let roots = ObjectType.typeRef(inner#queryType) :: (inner#mutationType |> Option.map(ObjectType.typeRef) |> Option.toList);
+        let roots = inner#queryType#typeRef :: (inner#mutationType |> Option.map(root -> root#typeRef) |> Option.toList);
         List.foldLeft((state, root) -> Result.flatMap(visit(root), state), Ok((Map.empty(), Nil)), roots)
             |> Result.map(state -> snd(state) |> List.reverse)
 
@@ -425,11 +469,19 @@ mod Schema {
     ///
     /// フィールドの共通部分。引数のデコード（g の中）と戻り値の箱詰めをつなぐ。
     ///
-    def makeField(name: String, args: List[ArgInfo], out: Out[r], g: Context -> source -> Args -> Result[FieldError, r] \ IO): Field[source] =
+    def makeField(name: String, args: List[ArgInfo], out: Out[r, ef], g: Context -> source -> Args -> Result[FieldError, r] \ ef): Field[source, ef] =
+        let Out.Out(outInner) = out;
         Field.Field({
-            info    = { name = name, args = args, typeRef = Out.typeRef(out), description = None, deprecated = None },
+            name = name, args = args, description = None, deprecated = None,
+            typeRef = outInner#typeRef,
             resolve = (context, src, argMap) -> g(context, src, argMap) |> Result.map(x -> Out.encode(out, context, x))
         })
+
+    ///
+    /// ルート型を runner で型消去する。
+    ///
+    def root(runner: Runner[ef], objectType: ObjectType[Unit, ef]): RootType =
+        { name = ObjectType.name(objectType), typeRef = ObjectType.typeRef(runner, objectType) }
 
     ///
     /// 型宣言の走査状態（名前 → その型のシグネチャ, 訪問順の逆順の一覧）。
@@ -474,10 +526,9 @@ mod Schema {
     ///
     /// schema { query: ... mutation: ... } のブロック。
     ///
-    def schemaBlock(inner: { queryType = ObjectType[Unit], mutationType = Option[ObjectType[Unit]] }): String =
-        let ObjectType.ObjectType(queryInner) = inner#queryType;
-        let mutationLine = inner#mutationType |> Option.map(match ObjectType.ObjectType(m) -> "\n  mutation: ${m#name}") |> Option.getWithDefault("");
-        "schema {\n  query: ${queryInner#name}${mutationLine}\n}"
+    def schemaBlock(inner: { queryType = RootType, mutationType = Option[RootType] }): String =
+        let mutationLine = inner#mutationType |> Option.map(m -> "\n  mutation: ${m#name}") |> Option.getWithDefault("");
+        "schema {\n  query: ${inner#queryType#name}${mutationLine}\n}"
 
     ///
     /// type Name { ... } または enum Name { ... } のブロック。

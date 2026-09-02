@@ -32,8 +32,8 @@ pub eff Graphql {
 /// graphql-java でスキーマを組み立てて実行する。
 /// スキーマは Schema の値から SDL と DataFetcher の両方を導くので、起動時の照合は要らない。
 ///
-/// WhyNot: リゾルバに任意の代数的 effect を許さないのは、リゾルバが graphql-java の Java コールバックの
-/// 中で呼ばれ、そこからは Flix のハンドラへ戻れないため。IO だけがコールバック内でも動く。
+/// WhyNot: DataFetcher に包むクロージャを IO 固定にするのは、リゾルバが graphql-java の Java コールバックの
+/// 中で呼ばれ、そこから main のハンドラへは戻れないため。
 ///
 mod Graphql {
     import graphql.ExecutionInput

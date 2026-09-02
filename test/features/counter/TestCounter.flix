@@ -1,26 +1,32 @@
 ///
 /// Counter: CounterStore effect だけに依存する Query / Mutation のリゾルバ。
-/// SQLite は使わず、メモリ上の偽ハンドラを runStore として渡す。
+/// SQLite は使わず、メモリ上の偽ハンドラで動かす。
 ///
 
 /// counter は保存先の値を読む。
 @Test
-def testCounterQuery(): Unit \ {Assert, IO} =
+def testCounterQuery(): Unit \ Assert =
     Assert.assertEq(expected = Ok(5),
-        Counter.counter(f -> CounterFake.runWithMemory(5, f), Context.anonymous()))
+        CounterFake.runWithMemory(5, () -> Counter.counter(Context.anonymous())))
 
 /// increment は by だけ増やした後の値を返す（初期値 5 に 3 を足して 8）。
 @Test
-def testCounterIncrement(): Unit \ {Assert, IO} =
+def testCounterIncrement(): Unit \ Assert =
     Assert.assertEq(expected = Ok(8),
-        Counter.increment(f -> CounterFake.runWithMemory(5, f), Context.anonymous(), 3))
+        CounterFake.runWithMemory(5, () -> Counter.increment(Context.anonymous(), 3)))
 
 /// 保存先の Err はそのままリゾルバの Err になる。
 @Test
-def testCounterStoreErrorPassesThrough(): Unit \ {Assert, IO} =
+def testCounterStoreErrorPassesThrough(): Unit \ Assert =
     Assert.assertEq(expected = (Err("db down"), Err("db down")),
-        (Counter.counter(f -> CounterFake.runWithBroken("db down", f), Context.anonymous()),
-         Counter.increment(f -> CounterFake.runWithBroken("db down", f), Context.anonymous(), 1)))
+        (CounterFake.runWithBroken("db down", () -> Counter.counter(Context.anonymous())),
+         CounterFake.runWithBroken("db down", () -> Counter.increment(Context.anonymous(), 1))))
+
+/// 1 つのクエリの中で increment を 2 回呼ぶと、2 回目は 1 回目の結果の上に積まれる（fetch ごとに保存先が分かれない）。
+@Test
+def testCounterSharedWithinQuery(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok((Value.Obj(Map#{ "a" => Value.Int(6), "b" => Value.Int(7) }), None)),
+        GraphqlTestKit.executeQuery(GraphqlTestKit.appSchema(5), "mutation { a: increment(by: 1) b: increment(by: 1) }"))
 
 /// アプリのスキーマ経由でも counter と increment が動き、保存先の Err は GraphQL のエラーになる。
 @Test

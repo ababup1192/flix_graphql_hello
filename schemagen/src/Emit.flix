@@ -7,7 +7,7 @@ mod Emit {
     /// 生成器のバージョン。生成物の形が変わる修正をしたら、本体の GeneratedCheck.expectedGeneratorVersion と一緒に上げる
     /// （本体が照合し、再生成が要求される）。
     ///
-    pub def generatorVersion(): String = "1"
+    pub def generatorVersion(): String = "3"
 
     ///
     /// Flix の予約語。SDL の名前がこれに当たれば末尾に _ を付ける。
@@ -25,7 +25,7 @@ mod Emit {
     ///
     def forbiddenTypeNames(): Set[String] = Set#{
         "Schema", "Context", "Field", "Out", "Value", "Id", "Arg", "Option", "Result", "List", "Map", "Unit", "Generated", "GqlCodec", "FieldError",
-        "ObjectType", "Resolvers", "Int32", "Float64", "String", "Bool", "IO", "Nil", "Some", "None", "Ok", "Err", "Set", "Eq", "Order", "ToString"
+        "ObjectType", "Resolvers", "Runner", "Int32", "Float64", "String", "Bool", "IO", "Nil", "Some", "None", "Ok", "Err", "Set", "Eq", "Order", "ToString"
     }
 
     ///
@@ -43,13 +43,15 @@ mod Emit {
     ///
     pub def render(document: SdlDocument, sdl: String): Result[String, String] =
         forM (
-            _        <- validateNames(document);
-            _        <- validateReachable(document);
+            _        <- validate(document);
             enums    <- Result.traverse(renderEnum, document#enums);
             objects  <- Result.traverse(renderObject(document), document#objects)
         ) yield {
+            let fieldAliases = document#objects |> List.flatMap(object -> List.map(renderFieldAlias(document, object), object#fields));
             let resolverAliases = document#objects |> List.map(renderResolverAlias(document));
-            let allResolvers = document#objects |> List.map(object -> "        ${typeLabel(document, object#name)} = ${object#name}Resolvers") |> List.join(",\n");
+            let defaults = document#objects |> List.filterMap(renderDefaults(document));
+            let defaultsSection = if (List.isEmpty(defaults)) Nil else (List.join("\n\n", defaults) + "\n") :: Nil;
+            let allResolvers = document#objects |> List.map(object -> "        ${typeLabel(document, object#name)} = ${object#name}Resolvers[ef]") |> List.join(",\n");
             let mutationExpr = document#mutationName |> Option.map(name -> "Some(${typeFn(name)}(resolvers))") |> Option.getWithDefault("None");
             let enumSection = if (List.isEmpty(enums)) Nil else (List.join("\n\n", enums) + "\n") :: Nil;
             List.join("\n",
@@ -65,14 +67,17 @@ mod Emit {
                 "    pub def generatorVersion(): String = \"${generatorVersion()}\"" ::
                 "" ::
                 enumSection :::
+                List.join("\n", fieldAliases) ::
+                "" ::
                 List.join("\n\n", resolverAliases) ::
                 "" ::
-                "    /// 全型のリゾルバ。1 つでも欠けるとコンパイルエラー" ::
-                "    pub type alias Resolvers = {\n${allResolvers}\n    }" ::
+                defaultsSection :::
+                "    /// 全型のリゾルバ。1 つでも欠けるとコンパイルエラー。ef は全リゾルバで共有する 1 つの効果" ::
+                "    pub type alias Resolvers[ef: Eff] = {\n${allResolvers}\n    }" ::
                 "" ::
-                "    /// リゾルバ一式からスキーマを組み立てる" ::
-                "    pub def schema(resolvers: Resolvers): Schema =" ::
-                "        Schema.make(${typeFn(document#queryName)}(resolvers), ${mutationExpr})" ::
+                "    /// リゾルバ一式からスキーマを組み立てる。runner が ef を IO に落とす" ::
+                "    pub def schema(resolvers: Resolvers[ef], runner: Runner[ef]): Schema =" ::
+                "        Schema.make(${typeFn(document#queryName)}(resolvers), ${mutationExpr}, runner)" ::
                 "" ::
                 List.join("\n\n", objects) ::
                 "" ::
@@ -81,12 +86,25 @@ mod Emit {
         }
 
     ///
-    /// 型名の禁止名・重複・大小文字、フィールド名と引数名の大小文字、enum 値の変換衝突、ルート型の存在を確かめる。
+    /// 生成できる SDL か確かめる。render と scaffold の両方が先に呼ぶ。
+    ///
+    pub def validate(document: SdlDocument): Result[String, Unit] =
+        forM (
+            _ <- validateNames(document);
+            _ <- validateReachable(document)
+        ) yield ()
+
+    ///
+    /// 型名の禁止名・重複・大小文字・生成する別名との衝突、フィールド名と引数名の大小文字、enum 値の変換衝突、ルート型の存在を確かめる。
     ///
     def validateNames(document: SdlDocument): Result[String, Unit] =
         let typeNames = List.map(object -> object#name, document#objects) ::: List.map(enumDef -> enumDef#name, document#enums);
         let forbidden = typeNames |> List.filter(name -> Set.memberOf(name, forbiddenTypeNames()));
         let duplicated = duplicates(typeNames);
+        let generatedNames = document#objects |> List.flatMap(object -> "${object#name}Resolvers" :: List.map(field -> fieldAliasName(object#name, field#name), object#fields));
+        let clashes = typeNames |> List.filter(name -> List.memberOf(name, generatedNames));
+        let duplicatedAliases = duplicates(generatedNames);
+        let resolversFields = document#objects |> List.filter(object -> List.exists(field -> field#name == "resolvers", object#fields)) |> List.map(object -> object#name);
         let lowerTypes = typeNames |> List.filter(name -> not startsUpper(name));
         let upperFields = document#objects |> List.flatMap(object -> object#fields |> List.flatMap(field ->
             (if (startsUpper(field#name)) "${object#name}.${field#name}" :: Nil else Nil)
@@ -103,6 +121,9 @@ mod Emit {
         });
         if (not List.isEmpty(forbidden)) Err("型名 ${List.join(", ", forbidden)} は生成物の名前と衝突するので使えません")
         else if (not List.isEmpty(duplicated)) Err("型 ${List.join(", ", duplicated)} が 2 回定義されています")
+        else if (not List.isEmpty(clashes)) Err("型名 ${List.join(", ", clashes)} は生成する別名と衝突するので使えません")
+        else if (not List.isEmpty(duplicatedAliases)) Err("生成する別名 ${List.join(", ", duplicatedAliases)} が重複します（型名とフィールド名の組み合わせを変えてください）")
+        else if (not List.isEmpty(resolversFields)) Err("型 ${List.join(", ", resolversFields)} のフィールド名 resolvers は雛形の関数名と衝突するので使えません")
         else if (not List.isEmpty(lowerTypes)) Err("型名 ${List.join(", ", lowerTypes)} は大文字で始めてください（Flix の型名の決まり）")
         else if (not List.isEmpty(upperFields)) Err("フィールド名・引数名 ${List.join(", ", upperFields)} は小文字で始めてください（Flix のラベルの決まり）")
         else if (not hasQuery) Err("ルート型 ${document#queryName} がありません")
@@ -187,17 +208,49 @@ mod Emit {
         }
 
     ///
+    /// フィールド 1 つのリゾルバの関数型（X.field → XFieldResolver）。利用側がフィールド単位の関数に注釈するための別名。
+    ///
+    def renderFieldAlias(document: SdlDocument, object: ObjectDef, field: FieldDef): String =
+        let source = if (isRoot(document, object#name)) Nil else object#name :: Nil;
+        let argTypes = List.map(arg -> flixType(document, arg#ty), field#args);
+        let params = ("Context" :: source ::: argTypes) |> List.join(" -> ");
+        "    /// ${object#name}.${field#name}\n    pub type alias ${fieldAliasName(object#name, field#name)}[ef: Eff] = ${params} -> Result[FieldError, ${flixType(document, field#ty)}] \\ ef"
+
+    ///
     /// type X のリゾルバ一式のレコード型。
     ///
     def renderResolverAlias(document: SdlDocument, object: ObjectDef): String =
-        let source = if (isRoot(document, object#name)) Nil else object#name :: Nil;
-        let fields = object#fields |> List.map(field -> {
-            let argTypes = List.map(arg -> flixType(document, arg#ty), field#args);
-            let params = ("Context" :: source ::: argTypes) |> List.join(" -> ");
-            "        ${label(field#name)} = ${params} -> Result[FieldError, ${flixType(document, field#ty)}] \\ IO"
-        }) |> List.join(",\n");
+        let fields = object#fields |> List.map(field -> "        ${label(field#name)} = ${fieldAliasName(object#name, field#name)}[ef]") |> List.join(",\n");
         let sourceNote = if (isRoot(document, object#name)) "" else "。第 2 引数が source";
-        "    /// type ${object#name} のリゾルバ一式${sourceNote}\n    pub type alias ${object#name}Resolvers = {\n${fields}\n    }"
+        "    /// type ${object#name} のリゾルバ一式${sourceNote}。ef はリゾルバの効果\n    pub type alias ${object#name}Resolvers[ef: Eff] = {\n${fields}\n    }"
+
+    ///
+    /// type X の既定リゾルバ。source の同名ラベルをそのまま返す素通しのフィールド（引数が無く、スカラーか enum か
+    /// そのリストを返す物）だけを持つ。ルート型と、素通しのフィールドが無い型は None。
+    ///
+    /// WhyNot: source の型を X と書かず行変数で開けておくのは、X が SDL に無いラベル（authorId など）を
+    /// 持てるようにするため。XResolvers[ef] と合わせた時に行変数が残りのラベルに決まる。
+    ///
+    def renderDefaults(document: SdlDocument, object: ObjectDef): Option[String] =
+        let passthrough = List.filter(isPassthrough(document), object#fields);
+        if (isRoot(document, object#name) or List.isEmpty(passthrough)) None
+        else {
+            let indexed = List.zip(List.range(0, List.length(passthrough)), passthrough);
+            let types = indexed |> List.map(match (index, field) -> {
+                let ty = flixType(document, field#ty);
+                "        ${label(field#name)} = Context -> { ${label(field#name)} = ${ty} | r${index} } -> Result[FieldError, ${ty}] \\ ef"
+            }) |> List.join(",\n");
+            let values = passthrough |> List.map(field -> "        ${label(field#name)} = (_context, src) -> Ok(src#${label(field#name)})") |> List.join(",\n");
+            let skipped = object#fields |> List.filter(field -> not isPassthrough(document, field)) |> List.map(field -> field#name);
+            let note = if (List.isEmpty(skipped)) "" else "。${List.join(", ", skipped)} は含まない（オブジェクト型を返すか、引数を持つ）";
+            Some("    /// type ${object#name} の既定リゾルバ。source の同名ラベルをそのまま返す${note}\n    pub def ${defaultsFn(object#name)}(): {\n${types}\n    } = {\n${values}\n    }")
+        }
+
+    ///
+    /// 素通しにできるフィールドか（引数が無く、スカラーか enum かそのリストを返す）。
+    ///
+    pub def isPassthrough(document: SdlDocument, field: FieldDef): Bool =
+        List.isEmpty(field#args) and not Set.memberOf(baseName(field#ty), document#objectNames)
 
     ///
     /// type X の ObjectType を作る関数。
@@ -207,7 +260,7 @@ mod Emit {
         Result.traverse(renderField(document, object), object#fields) |> Result.map(fields ->
             List.join("\n",
                 "    /// type ${object#name}" ::
-                "    def ${typeFn(object#name)}(resolvers: Resolvers): ObjectType[${sourceType}] =" ::
+                "    def ${typeFn(object#name)}(resolvers: Resolvers[ef]): ObjectType[${sourceType}, ef] =" ::
                 "        Schema.objectType(${stringLiteral(object#name)}, () ->" ::
                 (fields |> List.map(field -> "${field} ::") |> List.join("\n")) ::
                 "            Nil)" ::
@@ -324,7 +377,7 @@ mod Emit {
     ///
     /// name がルート型（Query / Mutation）か。
     ///
-    def isRoot(document: SdlDocument, name: String): Bool =
+    pub def isRoot(document: SdlDocument, name: String): Bool =
         name == document#queryName or Some(name) == document#mutationName
 
     ///
@@ -341,6 +394,19 @@ mod Emit {
     def typeFn(name: String): String = "${lowerFirst(name)}Type"
 
     ///
+    /// 既定リゾルバを返す関数の名前（Post → postDefaults）。
+    ///
+    pub def defaultsFn(name: String): String = "${lowerFirst(name)}Defaults"
+
+    ///
+    /// フィールド 1 つのリゾルバの型別名の名前（Post.author → PostAuthorResolver）。
+    ///
+    /// WhyNot: 末尾に Resolver を付けるのは、Post.status → PostStatus のように型名とフィールド名を
+    /// つなぐだけだと enum PostStatus と衝突するため。
+    ///
+    pub def fieldAliasName(objectName: String, fieldName: String): String = "${objectName}${upperFirst(fieldName)}Resolver"
+
+    ///
     /// enum の Codec を返す関数の名前（Color → colorCodec）。
     ///
     def codecFn(name: String): String = "${lowerFirst(name)}Codec"
@@ -348,7 +414,7 @@ mod Emit {
     ///
     /// 予約語なら末尾に _ を付ける。
     ///
-    def label(name: String): String =
+    pub def label(name: String): String =
         if (Set.memberOf(name, reservedWords())) "${name}_" else name
 
     ///

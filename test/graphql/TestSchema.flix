@@ -7,12 +7,12 @@ use Schema.{arg, field0, field1, field2, objectType}
 ///
 /// Post ⇄ Author の相互参照を含むサンプル（アプリのスキーマそのもの）。
 ///
-def sampleSchema(): Schema = GraphqlTestKit.appSchema(0)
+def sampleSchema(): Schema \ IO = GraphqlTestKit.appSchema(0)
 
 /// Query から到達できる型が深さ優先で Query → Post → PostStatus → Author → Mutation の順に、重複なく 1 回ずつ出る。
 /// Option は nullable、それ以外は !、List は [T!]!。
 @Test
-def testSchemaToSdl(): Unit \ Assert =
+def testSchemaToSdl(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok(List.join("\n",
         "schema {" ::
         "  query: Query" ::
@@ -58,7 +58,7 @@ def testSchemaToSdlDecorations(): Unit \ Assert =
     let schema = Schema.make(objectType("Query", () ->
         (field1("greet", arg("name", GqlCodec.string()) |> Arg.withDefault("world"), Out.string(), (_context, _root, name) -> Ok(name))
             |> Field.withDescription("挨拶") |> Field.withDeprecation("use hello")) ::
-        (field0("old", Out.int32(), (_context, _root) -> Ok(1)) |> Field.deprecate) :: Nil), None);
+        (field0("old", Out.int32(), (_context, _root) -> Ok(1)) |> Field.deprecate) :: Nil), None, Runner.io());
     Assert.assertEq(expected = Ok("schema {\n  query: Query\n}\n\ntype Query {\n  \"挨拶\"\n  greet(name: String! = \"world\"): String! @deprecated(reason: \"use hello\")\n  old: Int! @deprecated\n}"),
         Schema.toSdl(schema))
 
@@ -68,9 +68,9 @@ def testSchemaDuplicateTypeName(): Unit \ Assert =
     let item = objectType("Item", () -> field0("a", Out.int32(), (_context, n) -> Ok(n)) :: Nil);
     let other = objectType("Item", () -> field0("b", Out.int32(), (_context, n) -> Ok(n)) :: Nil);
     let same = Schema.make(objectType("Query", () ->
-        field0("x", Out.obj(item), (_context, _root) -> Ok(1)) :: field0("y", Out.obj(item), (_context, _root) -> Ok(2)) :: Nil), None);
+        field0("x", Out.obj(item), (_context, _root) -> Ok(1)) :: field0("y", Out.obj(item), (_context, _root) -> Ok(2)) :: Nil), None, Runner.io());
     let conflicting = Schema.make(objectType("Query", () ->
-        field0("x", Out.obj(item), (_context, _root) -> Ok(1)) :: field0("y", Out.obj(other), (_context, _root) -> Ok(2)) :: Nil), None);
+        field0("x", Out.obj(item), (_context, _root) -> Ok(1)) :: field0("y", Out.obj(other), (_context, _root) -> Ok(2)) :: Nil), None, Runner.io());
     Assert.assertEq(expected = (Ok(2), true),
         (Schema.collectTypes(same) |> Result.map(List.length), Schema.toSdl(conflicting) |> Result.isErr))
 
@@ -86,7 +86,7 @@ def testSchemaArgDecode(): Unit \ Assert =
 @Test
 def testSchemaOptionCollapses(): Unit \ Assert =
     Assert.assertEq(expected = "Int",
-        TypeRef.toSdl(Out.typeRef(Out.option(Out.option(Out.int32())))))
+        TypeRef.toSdl(Out.typeRef(Runner.io(), Out.option(Out.option(Out.int32())))))
 
 /// src/generated/GeneratedSchema.flix は今の schema.graphql から、本体が期待する版の生成器で作った物（生成し忘れの検出）。
 @Test

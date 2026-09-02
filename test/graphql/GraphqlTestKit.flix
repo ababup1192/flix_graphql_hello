@@ -2,6 +2,7 @@
 /// graphql-java 込みのテストで使う共通の道具。
 ///
 mod GraphqlTestKit {
+    import java.util.concurrent.atomic.AtomicInteger
 
     ///
     /// variables も operationName も無い、クエリ文字列だけのリクエスト。
@@ -30,14 +31,16 @@ mod GraphqlTestKit {
 
     ///
     /// アプリのスキーマ（AppSchema）を、メモリ上のカウンタ（初期値 initial）で組み立てる。
+    /// カウンタは 1 つのスキーマの中の全 fetch で共有される。
     ///
-    pub def appSchema(initial: Int32): Schema =
-        AppSchema.make(f -> CounterFake.runWithMemory(initial, f))
+    pub def appSchema(initial: Int32): Schema \ IO =
+        let cell = new AtomicInteger(initial);
+        AppSchema.make(f -> CounterFake.runWithCell(cell, f))
 
     ///
-    /// Query だけのスキーマ。
+    /// Query だけの、IO しか使わないスキーマ。
     ///
-    pub def queryOnlySchema(fields: List[Field[Unit]]): Schema =
-        Schema.make(Schema.objectType("Query", () -> fields), None)
+    pub def queryOnlySchema(fields: List[Field[Unit, IO]]): Schema =
+        Schema.make(Schema.objectType("Query", () -> fields), None, Runner.io())
 
 }

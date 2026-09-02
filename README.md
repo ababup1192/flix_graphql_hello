@@ -21,7 +21,7 @@ make check     # 型検査
 make test      # テスト（graphql-java も SQLite も使うが、HTTP サーバは起動しない）
 ```
 
-`bin/flix` は `--Xsubeffecting=lambdas` を付けて呼ぶ（純粋なリゾルバのラムダをそのまま `\ IO` の関数型に置くため）。
+`bin/flix` は `--Xsubeffecting=lambdas` を付けて呼ぶ（純粋なリゾルバのラムダをそのまま `\ AppEff` の関数型に置くため）。
 VS Code の Flix 拡張にも同じフラグが要り、`.vscode/settings.json` の `flix.extraFlixArgs` で渡している。
 フラグが効く前の診断が残っていたら「Developer: Reload Window」で読み直す。
 
@@ -89,49 +89,83 @@ Query / Mutation から届かない型、大文字始まりのフィールド名
 配線するコードで、人は読まない。
 
 ```flix
-pub type alias PostResolvers = {
-    id     = Context -> Post -> Result[FieldError, Id] \ IO,
-    title  = Context -> Post -> Result[FieldError, String] \ IO,
-    author = Context -> Post -> Result[FieldError, Author] \ IO
-}
+/// Post.author
+pub type alias PostAuthorResolver[ef: Eff] = Context -> Post -> Result[FieldError, Author] \ ef
+
+/// type Post のリゾルバ一式
+pub type alias PostResolvers[ef: Eff] = { id = PostIdResolver[ef], title = PostTitleResolver[ef], author = PostAuthorResolver[ef] }
+
+/// type Post の既定リゾルバ。source の同名ラベルをそのまま返す。author は含まない
+pub def postDefaults(): { id = Context -> { id = Id | r0 } -> Result[FieldError, Id] \ ef, title = … } = …
 ```
+
+`ef` はリゾルバが使う効果で、実装側が決める（`\ IO` に固定していない）。既定リゾルバは引数が無く
+スカラー・enum・そのリストを返すフィールドの分だけ作られ、source の型は行変数で開いている
+（`Post` が SDL に無いラベルを持ってよい）。
 
 `enum` は Flix の enum と Codec ごと生成される（`enum Status { IN_PROGRESS }` → `Generated.Status.InProgress`）。
 
-### 3. 生成されたレコード型に合わせてリゾルバを書く
+### 3. `make scaffold` で雛形を作り、リゾルバを書く
+
+```bash
+make scaffold                 # 全型。src/resolvers/XResolvers.flix を書く（既にあるファイルは触らない）
+make scaffold TYPE=Post       # 1 型だけ
+make scaffold DEFAULTS=no     # 既定リゾルバを使わず全フィールドを吐く（source が enum の型向け）
+```
+
+`src/resolvers/PostResolvers.flix` は人が所有するファイルで、gqlgen の resolver.go に当たる。
+フィールドごとの関数と、それを既定リゾルバに足すレコードが入っている。
 
 ```flix
-pub def post(): Generated.PostResolvers = {
-    id     = (_context, post) -> Ok(post#id),
-    title  = (_context, post) -> Ok(post#title),
-    author = (_context, post) -> Post.findAuthor(post#authorId) |> Option.toOk("author not found")
+mod PostResolvers {
+    /// Post.author
+    pub def author(): Generated.PostAuthorResolver[AppEff] =
+        (_context, post) -> Post.findAuthor(post#authorId) |> Option.toOk("author not found")
+
+    /// type Post のリゾルバ一式
+    pub def resolvers(): Generated.PostResolvers[AppEff] =
+        { +author = author() | Generated.postDefaults() }
 }
 ```
 
-SDL の `type Post` に対応する Flix の型 `Post` は人が定義する（トップレベルの `pub type alias` か `pub enum`。
-名前を揃える）。SDL に無いフィールドを持ってよい。
+`id` / `title` / `status` は書かない（既定リゾルバが source の同名ラベルを返す）。既定を上書きしたい
+フィールドは `{ id = …, +author = … | Generated.postDefaults() }` のように更新構文で置き換える。
 
-最後に `src/app/AppSchema.flix` で全部を `Generated.schema({ queryRoot = ..., post = ..., ... })` に渡す。
+SDL の `type Post` に対応する Flix の型 `Post` は人が定義する（トップレベルの `pub type alias` か `pub enum`。
+名前を揃える）。SDL に無いフィールドを持ってよい。`Post` が enum なら既定リゾルバは使えないので
+`DEFAULTS=no` で全フィールドを書く。
+
+`AppEff` は `src/app/AppEff.flix` にある、このサーバのリゾルバが使う効果の和（今は `CounterStore`）。
+リゾルバは `counter = context -> Counter.counter(context)` のように `\ CounterStore` のまま書け、
+純粋な物は `ef` に吸収される。効果を足すときは `AppEff` に `+` でつなぐ。
+
+最後に `src/app/AppSchema.flix` で全部を `Generated.schema({ queryRoot = QueryResolvers.resolvers(), post = PostResolvers.resolvers(), ... }, runApp)` に渡す。
+`runApp: Runner[AppEff]` は `AppEff` を IO に落とすハンドラで、本番は `SqliteCounter.runWithSqlite`、
+テストは `CounterFake.runWithMemory`。ハンドラを渡すのはここ 1 回だけ。
 
 ### コンパイルで落ちる物
 
 | ズレ | エラー |
 |---|---|
-| SDL にフィールドを足したがリゾルバが無い | レコードのラベル不足（Missing label） |
+| SDL にフィールドを足したがリゾルバが無い | レコードのラベル不足。エラーの 1 行目に足りないラベル名が出る |
 | SDL から消したのにリゾルバが残っている | レコードのラベル余分（Extra label） |
-| 引数の型・個数、戻り値の型が SDL と違う | 関数型の不一致 |
+| 引数の型・個数、戻り値の型が SDL と違う | 関数型の不一致。フィールドごとの関数（`def author(): Generated.PostAuthorResolver[AppEff]`）の行に出る |
 | ある型のリゾルバ一式を丸ごと書き忘れ | `Resolvers` のラベル不足 |
 | `type Post` に対応する Flix の `Post` が無い | 未定義の型 |
-| リゾルバで `CounterStore` などの effect を剥がし忘れ | effect が `\ IO` に収まらない |
+| リゾルバが `AppEff` に無い effect を使う | `Unexpected effect 'Clock' in function declared as {'CounterStore'}`（別名は展開されて出る。`AppEff` に足すか、ハンドラで包む） |
+| source の型（`Post`）に既定リゾルバが要るラベルが無い、または Option の有無が違う | `resolvers()` の行で `( )` と `( title = String \| r0 )` の不一致。「source に無い」とは出ないので、ラベル名を見て `Post` を直す |
 | `make generate` し忘れ、または古い生成器で作った生成物 | テスト `testSchemaGeneratedIsUpToDate` が落ち、`make run` も起動を拒否する |
 
 ### 書き方の決まり
 
-- **レコードの値は必ずラムダで書く。** `add = CalcResolvers.add` のように純粋な def をそのまま置くと、
-  サブエフェクトはラムダにしか効かないので `\ IO` に広がらずコンパイルエラーになる。
-- **型ごとに注釈付きの関数で作る**（`def post(): Generated.PostResolvers`）。1 つのレコードに全部書くと、
-  型が 1 つ違うだけでレコード全体がエラーにダンプされる。型ごとに分ければその型の分だけになる。
-  それでも「どのフィールドか」は出ないので、エラーの Expected と Actual を上から見比べる。
+- **効果が `AppEff` と一致しない def はラムダで包む。** `add = CalcResolvers.add` のように純粋な def をそのまま置くと、
+  サブエフェクトはラムダにしか効かないので `\ AppEff` に広がらずコンパイルエラーになる。
+  効果がちょうど `AppEff` の def は参照のままで通る。
+- **効果は `AppEff` 1 つで書く。** 型ごとに `PostResolvers[CounterStore]` と `AuthorResolvers[Clock]` のように
+  別の効果を書くと、`Resolvers[ef]` の `ef` はレコード全体で 1 つなので合わない。
+- **フィールドごとに注釈付きの関数で書く**（`def author(): Generated.PostAuthorResolver[AppEff]`）。レコードに
+  直接ラムダを書くと、型が 1 つ違うだけでレコード全体がエラーにダンプされ「どのフィールドか」が出ない。
+  `make scaffold` の雛形はこの形になっている。
 - SDL の名前が Flix の予約語（`from` `run` `query` など）のときは、生成物のラベルは末尾に `_` が付く（`from_`）。
 
 ## アーキテクチャ
@@ -164,8 +198,11 @@ HttpServer.listen ──▶ Http.parse* / render ──▶ Server.handle ──�
 オブジェクト型は `Value.Obj` に潰さず、Flix の値を `(Context, 値)` で箱詰めして graphql-java の source として渡す。
 クエリで選ばれた子フィールドのリゾルバだけが走る（graphql-java の流儀どおり。DataLoader もこの上に乗る）。
 
-リゾルバの effect は `IO` に固定している。リゾルバは graphql-java の Java コールバックの中で呼ばれ、
-そこから Flix のハンドラへは戻れないため。他の effect を使う物はリゾルバを作る時点でハンドラで包む（`Counter` を参照）。
+リゾルバの effect は型変数 `ef`（`Field[source, ef]` / `ObjectType[a, ef]` / `Out[a, ef]`）で、実装側が決める。
+リゾルバは graphql-java の Java コールバックの中で呼ばれ、そこから `main` のハンドラへは戻れないので、
+`Schema.make(query, mutation, runner)` が受け取った `Runner[ef]` をコールバックのクロージャの中で走らせて IO に落とす。
+ハンドラは別スレッドから呼ばれても動く。`Runner` の戻り型が箱（`JavaValue.Boxed`）に固定なのは、
+型別名が自由な型変数を持てず rank-2 型も無いため。
 
 ### 2. GraphQL の実行は代数的 effect
 
@@ -203,8 +240,9 @@ pub eff CounterStore {
 }
 ```
 
-`Counter.counter(runStore, context)` はハンドラを外から受ける。本番は `SqliteCounter.runWithSqlite`、
-テストは `CounterFake.runWithMemory`（メモリ上の `Ref`）を渡すので、リゾルバの検証に SQLite は要らない。
+`Counter.counter(context)` は `\ CounterStore` のまま書く。ハンドラは `AppSchema.make(runApp)` に 1 回渡す。
+本番は `SqliteCounter.runWithSqlite`、テストは `CounterFake.runWithMemory`（メモリ上の `Ref`）なので、
+リゾルバの検証に SQLite は要らない。
 
 SQLite 側は `SqliteCounter.open` で `Database`（JDBC の URL）を作り、テーブル 1 行に値を置く。
 Flix 側に可変状態を持たず、並行アクセスの直列化も SQLite のロックに任せる。
@@ -231,14 +269,15 @@ Flix は Maven の jar を独自のクラスローダで読むため `DriverMana
 
 1. `schema.graphql` にフィールドを足す
 2. `make generate`
-3. `make check` が落ちる場所（ラベル不足）にリゾルバを書く。外部に触るなら `CounterStore` のように
-   effect を宣言し、リゾルバを作る時点でハンドラで包む
+3. `make check` が落ちる場所（`XResolvers` のラベル不足）に、`src/resolvers/XResolvers.flix` のフィールド関数を足す。
+   素通しのフィールドなら既定リゾルバが拾うので何も書かない。新しい型なら `make scaffold TYPE=X` で雛形を作る。
+   外部に触るなら `CounterStore` のように effect を宣言して `AppEff` に足し、ハンドラを `main` の `runApp` に重ねる
 
 ## ディレクトリ
 
 ```
 schema.graphql           SDL（正。人が書く）
-schemagen/               生成器（別プロジェクト）。SdlReader（graphql-java の AST を読む）、Emit（Flix コードを組む）
+schemagen/               生成器（別プロジェクト）。SdlReader（graphql-java の AST を読む）、Emit（生成物を組む）、Scaffold（雛形を組む）
 src/
   Main.flix              起動（生成物の照合、SQLite を開く、エンジン組み立て、listen）
   generated/
@@ -256,10 +295,13 @@ src/
     HttpServer.flix      ソケット、接続ごとのスレッド、ログ
   app/                   HTTP と GraphQL をつなぐ層
     Server.flix          HttpRequest -> GraphqlRequest -> レスポンス JSON
-    AppSchema.flix       Generated.Resolvers に各 feature のリゾルバを当てはめる
-  features/              リゾルバの実装
+    AppSchema.flix       Generated.Resolvers に src/resolvers/ の型ごとのリゾルバを当てはめる
+    AppEff.flix          リゾルバが使う効果の和（Runner を渡す単位）
+  resolvers/             型ごとのリゾルバ（make scaffold の雛形に実装を書いた物。人が所有する）
+    QueryResolvers.flix / MutationResolvers.flix / PostResolvers.flix / AuthorResolvers.flix
+  features/              リゾルバから呼ぶロジックとデータ
     calc/                Calc（純粋な計算）
-    post/                Post（固定データ）、PostResolvers（type Post / Author のリゾルバ）
+    post/                Post（固定データ）
     counter/             CounterStore（eff）、Counter（Query.counter / Mutation.increment）、SqliteCounter（JDBC）
 test/                    src と同じ構成。偽ハンドラ（*Fake.flix）と GraphqlTestKit もここ
 docs/design/             設計メモ（typed-schema.md: DSL、sdl-first-codegen.md: 生成）

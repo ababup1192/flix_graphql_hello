@@ -9,7 +9,7 @@ mod GeneratedCheck {
     /// WhyNot: 生成物に埋まった Generated.generatorVersion だけを見ないのは、それだと古い生成物が
     /// 自分の版で自分を検証してしまい、生成器を直しても再生成が要求されないため。
     ///
-    pub def expectedGeneratorVersion(): String = "1"
+    pub def expectedGeneratorVersion(): String = "3"
 
     ///
     /// 生成物に埋まった SDL 本文と生成器バージョンを、schema.graphql の本文と期待する版に照らす。

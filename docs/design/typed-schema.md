@@ -189,6 +189,7 @@ SDL を残し、Flix 側は案 B の `field*` で型付きに登録する。起�
 3. `objectType(name, () -> fields)` と thunk にし、SDL は `TypeRef` を名前で dedupe しながら辿る。
 4. `GqlCodec` は enum（値）。`Id` は newtype。名前は stdlib の `Util.Codec` と衝突させない。
 5. `Field` の effect は `\ IO` に固定。effect 付きリゾルバは今までどおり登録時にハンドラで包む。
+   （その後 effect 多相に変更。`Field[source, ef]` と `Runner[ef]`。docs/design/sdl-first-codegen.md の「リゾルバの effect 多相」を参照）
 6. **純粋リゾルバの書き味は `--Xsubeffecting=lambdas` を `bin/flix` に載せて解決する。**
    experimental フラグだが、無いと全リゾルバに `checked_ecast` が要り、DSL の利点が半減する。
    フラグが将来消えた場合の退路は `checked_ecast` を規約にする事（機械的に直せる）。

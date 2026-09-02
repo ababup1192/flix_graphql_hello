@@ -50,46 +50,43 @@ type Mutation {
 }
 ```
 
-### 2. リゾルバ一式（生成されたレコード型に合わせる）
+### 2. リゾルバ（`make scaffold` の雛形にフィールドごとの関数を書く）
 
 ```flix
-mod CalcResolvers {
-    /// Query のうち Calc が担う分
-    pub def add(_context: Context, a: Int32, b: Int32): Result[FieldError, Int32] = Ok(Calc.add(a, b))
+/// リゾルバが使う効果の和（利用側の規約。Resolvers[ef] の ef はレコード全体で 1 つ）
+pub type alias AppEff = CounterStore
+
+/// src/resolvers/PostResolvers.flix。make scaffold が作り、人が所有する
+mod PostResolvers {
+    /// Post.author
+    pub def author(): Generated.PostAuthorResolver[AppEff] =
+        (_context, post) -> Post.findAuthor(post#authorId) |> Option.toOk("author not found")
+
+    /// type Post のリゾルバ一式。id / title / status は既定リゾルバが source の同名ラベルを返す
+    pub def resolvers(): Generated.PostResolvers[AppEff] =
+        { +author = author() | Generated.postDefaults() }
 }
 
 mod AppSchema {
-    pub def make(runStore: Counter.StoreRunner): Schema =
+    /// runApp が AppEff を IO に落とす。ハンドラを渡すのはここ 1 回
+    pub def make(runApp: Runner[AppEff]): Schema =
         Generated.schema({
-            queryRoot    = queryResolvers(runStore),
-            mutationRoot = mutationResolvers(runStore),
-            post         = postResolvers(),
-            author       = authorResolvers()
-        })
-
-    /// 型ごとに注釈付きで作る（規約。型エラーをこの型の中に閉じ込めるため）
-    def queryResolvers(runStore: Counter.StoreRunner): Generated.QueryResolvers = {
-        add     = (context, a, b) -> CalcResolvers.add(context, a, b),
-        post    = (_context, id) -> Ok(Post.find(id)),
-        counter = _context -> runStore(() -> CounterStore.load())
-    }
-
-    def postResolvers(): Generated.PostResolvers = {
-        id     = (_context, post) -> Ok(post#id),
-        title  = (_context, post) -> Ok(post#title),
-        author = (_context, post) -> Post.findAuthor(post#authorId) |> Option.toOk("author not found")
-    }
+            queryRoot    = QueryResolvers.resolvers(),
+            mutationRoot = MutationResolvers.resolvers(),
+            post         = PostResolvers.resolvers(),
+            author       = AuthorResolvers.resolvers()
+        }, runApp)
 }
 ```
 
-**規約 1: レコードの値は必ずラムダで書く。** `add = CalcResolvers.add` のように純粋な def を
-そのまま置くと、`--Xsubeffecting=lambdas` はラムダにしか効かないので `\ IO` に広がらず
-コンパイルエラー（E6218）になる。ラムダで包めば通る。
+**規約 1: 効果が `AppEff` と一致しない def はラムダで包む。** `add = CalcResolvers.add` のように純粋な def を
+そのまま置くと、`--Xsubeffecting=lambdas` はラムダにしか効かないので `\ AppEff` に広がらず
+コンパイルエラー（E6218）になる。ラムダで包めば通る。効果がちょうど `AppEff` の def は参照のままで通る。
 
-**規約 2: 型ごとに `def xxxResolvers(): Generated.XxxResolvers` を書き、注釈を付ける。**
-1 つのレコードに全部書くと、型が 1 つ違うだけで `Resolvers` 全体（100 フィールドで 148 KB）が
-エラーにダンプされる。型ごとに分ければその型の分だけになる。それでも「どのフィールドか」は
-出ないので、Expected と Actual を見比べる（README に手順を書く）。
+**規約 2: フィールドごとに `def author(): Generated.PostAuthorResolver[AppEff]` を書き、注釈を付ける。**
+レコードに直接ラムダを書くと、型が 1 つ違うだけで `Resolvers` 全体（100 フィールドで 148 KB）が
+エラーにダンプされ「どのフィールドか」が出ない。フィールドごとの関数なら、エラーはその関数の行に出る。
+`make scaffold` の雛形はこの形。
 
 ### 3. オブジェクト型の Flix 側の型（source）
 
@@ -120,29 +117,33 @@ mod Generated {
     /// 生成元の SDL 本文。テストと起動時に schema.graphql と照合する
     pub def sdlText(): String = "…"
 
-    /// type Query のリゾルバ一式
-    pub type alias QueryResolvers = {
-        add     = Context -> Int32 -> Int32 -> Result[FieldError, Int32] \ IO,
-        post    = Context -> Id -> Result[FieldError, Option[Post]] \ IO,
-        counter = Context -> Result[FieldError, Int32] \ IO
-    }
+    /// Query.add
+    pub type alias QueryAddResolver[ef: Eff] = Context -> Int32 -> Int32 -> Result[FieldError, Int32] \ ef
+    /// Post.author
+    pub type alias PostAuthorResolver[ef: Eff] = Context -> Post -> Result[FieldError, Author] \ ef
+
+    /// type Query のリゾルバ一式。ef はリゾルバの効果
+    pub type alias QueryResolvers[ef: Eff] = { add = QueryAddResolver[ef], post = QueryPostResolver[ef], counter = QueryCounterResolver[ef] }
 
     /// type Post のリゾルバ一式。第 2 引数が source
-    pub type alias PostResolvers = {
-        id     = Context -> Post -> Result[FieldError, Id] \ IO,
-        title  = Context -> Post -> Result[FieldError, String] \ IO,
-        author = Context -> Post -> Result[FieldError, Author] \ IO
+    pub type alias PostResolvers[ef: Eff] = { id = PostIdResolver[ef], title = PostTitleResolver[ef], author = PostAuthorResolver[ef] }
+
+    /// type Post の既定リゾルバ。source の同名ラベルをそのまま返す。author は含まない
+    pub def postDefaults(): {
+        id    = Context -> { id = Id | r0 } -> Result[FieldError, Id] \ ef,
+        title = Context -> { title = String | r1 } -> Result[FieldError, String] \ ef
+    } = { id = (_context, src) -> Ok(src#id), title = (_context, src) -> Ok(src#title) }
+
+    /// 全型のリゾルバ。1 つでも欠けるとコンパイルエラー。ef は全リゾルバで共有する 1 つの効果
+    pub type alias Resolvers[ef: Eff] = {
+        queryRoot = QueryResolvers[ef], mutationRoot = MutationResolvers[ef], post = PostResolvers[ef], author = AuthorResolvers[ef]
     }
 
-    /// 全型のリゾルバ。1 つでも欠けるとコンパイルエラー
-    pub type alias Resolvers = {
-        queryRoot = QueryResolvers, mutationRoot = MutationResolvers, post = PostResolvers, author = AuthorResolvers
-    }
+    /// runner が ef を IO に落とす
+    pub def schema(resolvers: Resolvers[ef], runner: Runner[ef]): Schema =
+        Schema.make(queryType(resolvers), Some(mutationType(resolvers)), runner)
 
-    pub def schema(resolvers: Resolvers): Schema =
-        Schema.make(queryType(resolvers), Some(mutationType(resolvers)))
-
-    def queryType(resolvers: Resolvers): ObjectType[Unit] =
+    def queryType(resolvers: Resolvers[ef]): ObjectType[Unit, ef] =
         Schema.objectType("Query", () ->
             {
                 let arg0 = Schema.arg("a", GqlCodec.int32());
@@ -153,7 +154,7 @@ mod Generated {
             } ::
             ...)
 
-    def postType(resolvers: Resolvers): ObjectType[Post] =
+    def postType(resolvers: Resolvers[ef]): ObjectType[Post, ef] =
         Schema.objectType("Post", () ->
             Schema.field0("author", Out.obj(authorType(resolvers)), (context, post) -> (resolvers#post#author)(context, post)) :: ...)
 }
@@ -184,7 +185,8 @@ SDL のフィールド名・型名・引数名が Flix の予約語（`from` `ru
 | 引数の型・個数、戻り値の型が SDL と違う | 関数型の不一致 |
 | ある型のリゾルバ一式を丸ごと書き忘れ | `Resolvers` のフィールド不足 |
 | SDL の `type Post` に対応する Flix の `Post` が無い | 未定義の型 |
-| リゾルバで `CounterStore` を剥がし忘れ | effect が `\ IO` に収まらない |
+| リゾルバが `AppEff` に無い effect を使う | effect が `\ AppEff` に収まらない |
+| source の型に既定リゾルバが要るラベルが無い（Option の有無も含む） | `resolvers()` の行で `( )` と `( title = String | r0 )` の不一致 |
 | 生成し忘れ（SDL だけ変えた） | テスト `sdlText` の不一致。加えて `main` が起動時に照合し、不一致なら起動を拒否 |
 
 「足りない」だけでなく「余っている」も落ちるのが、生成物が関数を名前で呼びに行く方式との差。
@@ -237,7 +239,7 @@ DSL の `field0..3` は 3 個まで。生成器は個数に関係なく書ける
 常に `fieldRaw` を使う**（生成器のコードパスを 1 本にする）。
 
 ```flix
-pub def fieldRaw(name: String, args: List[ArgInfo], out: Out[r], f: Context -> source -> Args -> Result[FieldError, r] \ IO): Field[source]
+pub def fieldRaw(name: String, args: List[ArgInfo], out: Out[r, ef], f: Context -> source -> Args -> Result[FieldError, r] \ ef): Field[source, ef]
 ```
 
 生成物は `let a = Schema.arg(...)` を束ねてから `Arg.info(a) :: …` と `Arg.decode(a, args)` を
@@ -322,6 +324,39 @@ typed-schema の `testSchemaFileIsUpToDate`（DSL → SDL の向き）は役目�
   型が増えても `schema` の署名が変わらない。ただし規約 2（型ごとに注釈付きの def）とセット
 - リゾルバの純粋 def は `--Xsubeffecting=mod-defs` を足せば参照できるが、フラグ依存を増やさず
   規約 1（ラムダで包む）で行く
+
+## リゾルバの effect 多相（段 0）
+
+生成物のリゾルバ型は `\ IO` 固定ではなく効果変数 `ef` を持つ。実装側は `AppEff`（効果の和の別名）で
+全リゾルバを書き、`Generated.schema(resolvers, runner)` に `Runner[AppEff]` を 1 回渡す。
+
+- `Runner[ef] = (Unit -> Result[FieldError, JavaValue.Boxed] \ ef + IO) -> Result[FieldError, JavaValue.Boxed] \ IO`。
+  戻り型を箱に固定するのは、型別名が自由な型変数を持てず rank-2 型も無いため
+  （`(Unit -> a \ ef) -> a \ IO` は `Undefined type variable 'a'`）
+- 効果変数は `Field[source, ef]` / `ObjectType[a, ef]` / `Out[a, ef]` に通し、`TypeRef` には通さない。
+  `Out` の `typeRef` は `Runner[ef] -> TypeRef` の遅延で持ち、`Schema.make(query, mutation, runner)` が
+  型消去する時に確定する。`TypeRef` に通すと `ArgInfo` / `FieldInfo` / `GqlCodec` まで変数が広がる
+- `ef` はレコード全体で 1 つ。`PostResolvers[CounterStore]` と `AuthorResolvers[Clock]` は
+  `Resolvers[CounterStore + Clock]` に入らない（subeffecting は型の付いた値には効かない）。
+  利用側は `AppEff` 1 つで書く
+- ハンドラは graphql-java のコールバック（別スレッドを含む）の中で走る。SqliteCounter は
+  呼び出しごとに Connection を開くのでスレッドの心配は無い
+
+## 書き味（段 1）
+
+- **既定リゾルバ** `Generated.postDefaults()`。引数が無くスカラー・enum・そのリストを返すフィールドの分だけ、
+  source の同名ラベルを返すレコードを生成する。source の型は `{ id = Id | r0 }` の行変数で開いており、
+  `PostResolvers[ef]` と合わせた時に残りのラベルに決まる。効果も `\ ef` の自由変数で、利用側の `AppEff` に決まる。
+  ルート型と、素通しのフィールドが無い型には作らない
+- **フィールド単位の別名** `Generated.PostAuthorResolver[ef: Eff]`。`XResolvers` のレコード型はこの別名で組む。
+  利用側がフィールドごとの関数に注釈すると、型違いのエラーがその関数の行に出る。名前の末尾に `Resolver` を
+  付けるのは `Post.status` → `PostStatus` が enum と衝突するため。型名が生成する別名と衝突する SDL と、
+  別名が重複する SDL（`Post.authorName` と `PostAuthor.name`）は生成器が Err にする
+- **雛形** `make scaffold [TYPE=X] [DEFAULTS=no]`。`src/resolvers/XResolvers.flix` に、素通しでないフィールドの
+  空の関数と `{ +author = author() | Generated.postDefaults() }` の `resolvers()` を書く。既にあるファイルは
+  触らない（人が所有する）。`DEFAULTS=no` は source が enum の型向けで、全フィールドを空の関数にする。
+  `flix run` はプログラム引数を受け取れないので、モードと型名は環境変数で渡す
+- 型が 1 つだけ既定を上書きしたいときは `{ id = …, +author = … | Generated.postDefaults() }` の更新構文
 
 ## レビューの実験結果（要点）
 

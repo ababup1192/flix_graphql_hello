@@ -28,8 +28,8 @@ def errorOf(source: Result[String, String]): String = match source {
 @Test
 def testGenerateScalars(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok(Nil), missing(
-        "half = Context -> Float64 -> Result[FieldError, Option[Float64]] \\ IO" ::
-        "tags = Context -> Option[List[Option[String]]] -> Result[FieldError, List[Id]] \\ IO" ::
+        "pub type alias QueryHalfResolver[ef: Eff] = Context -> Float64 -> Result[FieldError, Option[Float64]] \\ ef" ::
+        "pub type alias QueryTagsResolver[ef: Eff] = Context -> Option[List[Option[String]]] -> Result[FieldError, List[Id]] \\ ef" ::
         "Schema.arg(\"x\", GqlCodec.float64())" ::
         "Schema.arg(\"xs\", GqlCodec.option(GqlCodec.list(GqlCodec.option(GqlCodec.string()))))" ::
         "Out.list(Out.id())" ::
@@ -40,12 +40,12 @@ def testGenerateScalars(): Unit \ {Assert, IO} =
 @Test
 def testGenerateObjects(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok(Nil), missing(
-        "author = Context -> Post -> Result[FieldError, Author] \\ IO" ::
-        "posts = Context -> Author -> Result[FieldError, List[Post]] \\ IO" ::
+        "pub type alias PostAuthorResolver[ef: Eff] = Context -> Post -> Result[FieldError, Author] \\ ef" :: "author = PostAuthorResolver[ef]" ::
+        "pub type alias AuthorPostsResolver[ef: Eff] = Context -> Author -> Result[FieldError, List[Post]] \\ ef" ::
         "Out.option(Out.obj(postType(resolvers)))" ::
-        "def postType(resolvers: Resolvers): ObjectType[Post]" ::
+        "def postType(resolvers: Resolvers[ef]): ObjectType[Post, ef]" ::
         "(resolvers#author#posts)(context, src)" ::
-        "post = PostResolvers" :: Nil,
+        "post = PostResolvers[ef]" :: Nil,
         generate("type Query { post(id: ID!): Post }  type Post { author: Author! }  type Author { posts: [Post!]! }")))
 
 /// enum は Flix の enum と Codec を生成し、値名は先頭大文字・残り小文字（_ 区切り）になる。
@@ -56,7 +56,7 @@ def testGenerateEnum(): Unit \ {Assert, IO} =
         "case InProgress" ::
         "case Status.InProgressFake => \"IN_PROGRESS_FAKE\"" ::
         "GqlCodec.enumOf(\"Status\", value -> match value { case Status.Draft => \"DRAFT\" case Status.InProgress => \"IN_PROGRESS\"" ::
-        "status = Context -> Status -> Result[FieldError, Status] \\ IO" ::
+        "pub type alias QueryStatusResolver[ef: Eff] = Context -> Status -> Result[FieldError, Status] \\ ef" ::
         "Out.scalar(statusCodec())" :: Nil,
         generate("enum Status { DRAFT IN_PROGRESS IN_PROGRESS_FAKE }  type Query { status(s: Status!): Status! }")))
 
@@ -77,7 +77,7 @@ def testGenerateDecorations(): Unit \ {Assert, IO} =
 @Test
 def testGenerateReservedWord(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok(Nil), missing(
-        "from_ = Context -> Result[FieldError, String] \\ IO" ::
+        "pub type alias QueryFromResolver[ef: Eff] = Context -> Result[FieldError, String] \\ ef" :: "from_ = QueryFromResolver[ef]" ::
         "Schema.fieldRaw(\"from\"" ::
         "(resolvers#queryRoot#from_)(context)" :: Nil,
         generate("type Query { from: String! }")))
@@ -86,8 +86,8 @@ def testGenerateReservedWord(): Unit \ {Assert, IO} =
 @Test
 def testGenerateSchemaBlock(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok(Nil), missing(
-        "queryRoot = RootResolvers" ::
-        "Schema.make(rootType(resolvers), None)" :: Nil,
+        "queryRoot = RootResolvers[ef]" ::
+        "Schema.make(rootType(resolvers), None, runner)" :: Nil,
         generate("schema { query: Root }  type Root { ping: String! }")))
 
 // ---- エラー ----
@@ -158,10 +158,81 @@ def testGenerateMoreDecorations(): Unit \ {Assert, IO} =
 @Test
 def testGenerateRootsAndEnumNames(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = (Ok(Nil), Ok(Nil), Ok(Nil)),
-        (missing("Schema.make(queryType(resolvers), Some(changesType(resolvers)))" :: "mutationRoot = ChangesResolvers" :: Nil,
+        (missing("Schema.make(queryType(resolvers), Some(changesType(resolvers)), runner)" :: "mutationRoot = ChangesResolvers[ef]" :: Nil,
             generate("schema { query: Query mutation: Changes }  type Query { a: Int! }  type Changes { b: Int! }")),
-         missing("Schema.make(queryType(resolvers), None)" :: Nil, generate("type Query { a: Int! }")),
+         missing("Schema.make(queryType(resolvers), None, runner)" :: Nil, generate("type Query { a: Int! }")),
          missing("case Http2" :: "case Status.Http2 => \"HTTP_2\"" :: Nil, generate("enum Status { HTTP_2 }  type Query { s: Status! }"))))
+
+// ---- 既定リゾルバと雛形 ----
+
+///
+/// 雛形の本文。型名で 1 つ選ぶ。
+///
+def scaffoldOf(sdl: String, typeName: String, useDefaults: Bool): Result[String, String] \ IO =
+    SdlReader.read(sdl) |> Result.flatMap(document ->
+        List.find(object -> object#name == typeName, document#objects)
+            |> Option.map(object -> Scaffold.render(document, object, useDefaults))
+            |> Option.toOk("no type ${typeName}"))
+
+/// 既定リゾルバは引数の無いスカラー・enum・そのリストのフィールドだけを持ち、source は行変数で開いている。
+/// オブジェクト型を返す author と引数を持つ slug は入らない。
+@Test
+def testGenerateDefaults(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = (Ok(Nil), Ok(true)),
+        (missing(
+            "pub def postDefaults(): {" ::
+            "id = Context -> { id = Id | r0 } -> Result[FieldError, Id] \\ ef," ::
+            "tags = Context -> { tags = List[Option[String]] | r1 } -> Result[FieldError, List[Option[String]]] \\ ef" ::
+            "id = (_context, src) -> Ok(src#id)," ::
+            "author, slug は含まない" :: Nil,
+            generate("enum S { A }  type Query { post: Post! }  type Post { id: ID!  tags: [String]!  author: Author!  slug(n: Int!): String! }  type Author { s: S! }")),
+         generate("type Query { post: Post! }  type Post { author: Author! }  type Author { post: Post! }")
+            |> Result.map(text -> not String.contains(substr = "Defaults()", text))))
+
+/// ルート型には既定リゾルバを作らない。
+@Test
+def testGenerateNoDefaultsForRoots(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok(false),
+        generate("type Query { a: Int! }") |> Result.map(String.contains(substr = "queryDefaults")))
+
+/// 型名が生成する別名（XResolvers / XFieldResolver）と衝突すると Err。型名とフィールド名の組み合わせで別名が重複しても Err。
+@Test
+def testGenerateAliasClashes(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = ("型名 PostAuthorResolver は生成する別名と衝突するので使えません", "生成する別名 PostAuthorNameResolver が重複します（型名とフィールド名の組み合わせを変えてください）"),
+        (generate("type Query { p: Post!  r: PostAuthorResolver! }  type Post { author: Int! }  type PostAuthorResolver { x: Int! }") |> errorOf,
+         generate("type Query { p: Post!  pa: PostAuthor! }  type Post { authorName: Int! }  type PostAuthor { name: Int! }") |> errorOf))
+
+/// フィールド名 resolvers は雛形の resolvers() と衝突するので Err。
+@Test
+def testGenerateResolversFieldName(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = "型 Query のフィールド名 resolvers は雛形の関数名と衝突するので使えません",
+        generate("type Query { resolvers: Int! }") |> errorOf)
+
+/// 雛形は素通しでないフィールドだけ空の関数にし、既定リゾルバに足す形でレコードを作る。
+@Test
+def testScaffoldWithDefaults(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok(Nil), missing(
+        "mod PostResolvers {" ::
+        "    pub def author(): Generated.PostAuthorResolver[AppEff] =\n        (_context, _src) -> Err(\"not implemented: Post.author\")" ::
+        "    pub def slug(): Generated.PostSlugResolver[AppEff] =\n        (_context, _src, _n) -> Err(\"not implemented: Post.slug\")" ::
+        "    pub def resolvers(): Generated.PostResolvers[AppEff] =\n        { +author = author(), +slug = slug() | Generated.postDefaults() }" :: Nil,
+        scaffoldOf("type Query { post: Post! }  type Post { id: ID!  author: Author!  slug(n: Int!): String! }  type Author { id: ID! }", "Post", true)))
+
+/// 既定を使わない指定（source が enum の型）とルート型は全フィールドを空の関数にする。
+@Test
+def testScaffoldWithoutDefaults(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = (Ok(Nil), Ok(Nil)),
+        (missing("    pub def id(): Generated.PostIdResolver[AppEff] =" :: "{ id = id(), author = author() }" :: Nil,
+            scaffoldOf("type Query { post: Post! }  type Post { id: ID!  author: Author! }  type Author { id: ID! }", "Post", false)),
+         missing("mod QueryResolvers {" :: "        _context -> Err(\"not implemented: Query.n\")" :: "{ n = n(), from_ = from_() }" :: Nil,
+            scaffoldOf("type Query { n: Int!  from: String! }", "Query", true))))
+
+/// 素通しのフィールドしか無い型の雛形は既定リゾルバをそのまま返す。
+@Test
+def testScaffoldOnlyDefaults(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok(Nil), missing(
+        "    pub def resolvers(): Generated.AuthorResolvers[AppEff] =\n        Generated.authorDefaults()" :: Nil,
+        scaffoldOf("type Query { a: Author! }  type Author { id: ID!  name: String! }", "Author", true)))
 
 /// 壊れた SDL は Err（例外にならない）。
 @Test
