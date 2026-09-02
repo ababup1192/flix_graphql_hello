@@ -1,0 +1,9 @@
+type Query {
+  add(a: Int!, b: Int!): Int!
+  fibonacci(n: Int!): Int!
+  counter: Int!
+}
+
+type Mutation {
+  increment(by: Int!): Int!
+}
