@@ -6,26 +6,49 @@ type Query {
   """status を省くと PUBLISHED だけ。null を渡すと全件"""
   posts(status: PostStatus = PUBLISHED): [Post!]!
   counter: Int!
+  """title か name に text を含む記事と書き手"""
+  search(text: String!): [SearchResult!]!
+  node(id: ID!): Node
 }
 
+"""ID で引ける物"""
+interface Node {
+  id: ID!
+}
+
+"""検索結果"""
+union SearchResult = Post | Author
+
+"""記事の公開状態"""
 enum PostStatus {
+  """下書き。一覧には出ない"""
   DRAFT
   PUBLISHED
 }
 
-type Post {
+"""記事"""
+type Post implements Node {
   id: ID!
   title: String!
   status: PostStatus!
   author: Author!
 }
 
-type Author {
+type Author implements Node {
   id: ID!
   name: String!
   posts: [Post!]!
 }
 
+"""createPost の入力"""
+input PostInput {
+  title: String!
+  status: PostStatus = DRAFT
+  authorId: ID!
+}
+
 type Mutation {
   increment(by: Int!): Int!
+  """保存はしない。input から組み立てた Post を返すだけ"""
+  createPost(input: PostInput!): Post!
 }

@@ -122,6 +122,82 @@ def testGraphqlJavaBadArgumentIsValidationError(): Unit \ {Assert, IO} =
         executeQuery(testSchema(), "{ add(a: \"x\", b: 2) }")
             |> Result.map(match (data, message) -> (data, message |> Option.map(String.startsWith(prefix = "Validation error")) |> Option.getWithDefault(false))))
 
+// ---- union / interface ----
+
+/// union は __typename で枝が分かれ、inline fragment で枝ごとのフィールドが引ける。枝のリゾルバは通常のオブジェクト型と同じ経路。
+@Test
+def testGraphqlJavaUnion(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok((Value.Obj(Map#{ "search" => Value.List(
+            Value.Obj(Map#{ "__typename" => Value.Str("Post"), "title" => Value.Str("Raspberry Pi で自宅サーバ"), "author" => Value.Obj(Map#{ "name" => Value.Str("guest") }) }) ::
+            Value.Obj(Map#{ "__typename" => Value.Str("Author"), "name" => Value.Str("abab") }) :: Nil) }), None)),
+        executeQuery(testSchema(), "{ search(text: \"b\") { __typename ... on Post { title author { name } } ... on Author { name } } }"))
+
+/// interface は共通フィールドをそのまま選べ、実装型のフィールドは inline fragment で引ける。無ければ null。
+@Test
+def testGraphqlJavaInterface(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok((Value.Obj(Map#{
+            "a" => Value.Obj(Map#{ "id" => Value.Str("p1"), "__typename" => Value.Str("Post"), "title" => Value.Str("Flix で GraphQL") }),
+            "b" => Value.Obj(Map#{ "id" => Value.Str("a2"), "__typename" => Value.Str("Author") }),
+            "c" => Value.Null }), None)),
+        executeQuery(testSchema(), "{ a: node(id: \"p1\") { id __typename ... on Post { title } } b: node(id: \"a2\") { id __typename } c: node(id: \"zz\") { id } }"))
+
+/// interface のリスト。要素ごとに TypeResolver が呼ばれ、枝ごとの inline fragment が効く（DSL を直接書く）。
+@Test
+def testGraphqlJavaInterfaceList(): Unit \ {Assert, IO} =
+    let item = objectType("Item", () -> field0("id", Out.id(), (_context, n) -> Ok(Id.Id("i${n}"))) :: field0("n", Out.int32(), (_context, n) -> Ok(n)) :: Nil) |> ObjectType.implementing("Node" :: Nil);
+    let node = Out.interface("Node", Schema.abstractField("id", Nil, Out.id()) :: Nil, Out.member(item) :: Nil, (context, n) -> Out.taggedObj(item, context, n));
+    let schema = queryOnlySchema(field0("nodes", Out.list(node), (_context, _root) -> Ok(1 :: 2 :: Nil)) :: Nil);
+    Assert.assertEq(expected = Ok((Value.Obj(Map#{ "nodes" => Value.List(
+            Value.Obj(Map#{ "id" => Value.Str("i1"), "n" => Value.Int(1) }) :: Value.Obj(Map#{ "id" => Value.Str("i2"), "n" => Value.Int(2) }) :: Nil) }), None)),
+        executeQuery(schema, "{ nodes { id ... on Item { n } } }"))
+
+/// Out.union の encode で taggedObj を使わず型名のタグが無いと、graphql-java が具体型を決められずエラーになる。
+@Test
+def testGraphqlJavaUntaggedUnionValueIsError(): Unit \ {Assert, IO} =
+    let item = objectType("Item", () -> field0("n", Out.int32(), (_context, n) -> Ok(n)) :: Nil);
+    let bad = Out.union("U", Out.member(item) :: Nil, (context, n) -> Out.encode(Out.obj(item), context, n));
+    let schema = queryOnlySchema(field0("u", bad, (_context, _root) -> Ok(1)) :: Nil);
+    Assert.assertEq(expected = Ok(true),
+        executeQuery(schema, "{ u { ... on Item { n } } }") |> Result.map(match (_, message) -> message |> Option.map(String.contains(substr = "Could not determine the exact type")) |> Option.getWithDefault(false)))
+
+/// interface の枝に入れた型が implementing していないと、SDL を出す前に Err になる（手書きの DSL の書き忘れ）。
+@Test
+def testGraphqlJavaInterfaceMemberWithoutImplementsIsErr(): Unit \ Assert =
+    let item: ObjectType[Int32, IO] = objectType("Item", () -> field0("id", Out.id(), (_context, _n) -> Ok(Id.Id("x"))) :: Nil);
+    let node: Out[Int32, IO] = Out.interface("Node", Schema.abstractField("id", Nil, Out.id()) :: Nil, Out.member(item) :: Nil, (context, n) -> Out.taggedObj(item, context, n));
+    let schema = queryOnlySchema(field0("node", node, (_context, _root) -> Ok(1)) :: Nil);
+    Assert.assertEq(expected = Err("型 Item は interface Node の枝ですが implements していません"), Schema.toSdl(schema))
+
+// ---- introspection ----
+
+/// 型と enum 値の description は introspection でクライアントに見える。
+@Test
+def testGraphqlJavaIntrospectionDescriptions(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok((Value.Obj(Map#{ "__type" => Value.Obj(Map#{
+            "description" => Value.Str("記事の公開状態"),
+            "enumValues" => Value.List(
+                Value.Obj(Map#{ "name" => Value.Str("DRAFT"), "description" => Value.Str("下書き。一覧には出ない") }) ::
+                Value.Obj(Map#{ "name" => Value.Str("PUBLISHED"), "description" => Value.Null }) :: Nil) }) }), None)),
+        executeQuery(testSchema(), "{ __type(name: \"PostStatus\") { description enumValues { name description } } }"))
+
+// ---- input 型 ----
+
+/// input は variables でも直書きでも Flix のレコードで届き、省いたフィールドは SDL の既定値になる。
+@Test
+def testGraphqlJavaInputObject(): Unit \ {Assert, IO} =
+    let request = { queryText = "mutation ($p: PostInput!) { createPost(input: $p) { title status author { name } } }",
+                    variables = Map#{ "p" => Value.Obj(Map#{ "title" => Value.Str("new post"), "authorId" => Value.Str("a1") }) },
+                    operationName = None };
+    Assert.assertEq(expected = Ok(Value.Obj(Map#{ "createPost" => Value.Obj(Map#{ "title" => Value.Str("new post"), "status" => Value.Str("DRAFT"), "author" => Value.Obj(Map#{ "name" => Value.Str("abab") }) }) })),
+        executeOnce(testSchema(), request) |> Result.map(response -> response#data))
+
+/// input のフィールドの型違いは graphql-java の validation で止まり、リゾルバは走らない。
+@Test
+def testGraphqlJavaInputObjectBadFieldIsValidationError(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok((Value.Null, true)),
+        executeQuery(testSchema(), "mutation { createPost(input: { title: 1, authorId: \"a1\" }) { title } }")
+            |> Result.map(match (data, message) -> (data, message |> Option.map(String.startsWith(prefix = "Validation error")) |> Option.getWithDefault(false))))
+
 // ---- リゾルバの効果 ----
 
 /// 人が DSL で書くフィールドも `\ CounterStore` と純粋な物を同じ型に混ぜられ、Schema.make の runner がハンドラで IO に落とす。

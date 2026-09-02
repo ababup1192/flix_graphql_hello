@@ -42,17 +42,26 @@ mod Graphql {
     import graphql.ErrorType
     import graphql.GraphQLError
     import graphql.GraphQLException
+    import graphql.TypeResolutionEnvironment
     import graphql.execution.DataFetcherResult
     import graphql.language.SourceLocation
     import graphql.schema.DataFetcher
     import graphql.schema.DataFetchingEnvironment
     import graphql.schema.FieldCoordinates
     import graphql.schema.GraphQLCodeRegistry
+    import graphql.schema.GraphQLObjectType
     import graphql.schema.GraphQLSchema
+    import graphql.schema.TypeResolver
     import graphql.schema.idl.RuntimeWiring
+    import graphql.schema.idl.RuntimeWiring$Builder
     import graphql.schema.idl.SchemaGenerator
     import graphql.schema.idl.SchemaParser
+    import graphql.schema.idl.TypeRuntimeWiring
+    import java.lang.Class
     import java.lang.Object
+    import java.lang.invoke.MethodHandles
+    import java.lang.invoke.MethodType
+    import java.util.ArrayList
     import java.util.{List => JList}
     import java.util.{Map => JMap}
 
@@ -120,15 +129,53 @@ mod Graphql {
             let registry = new SchemaParser().parse(sdl);
             let codeRegistryBuilder = GraphQLCodeRegistry.newCodeRegistry();
             List.forEach(decl -> match decl {
-                case TypeDecl.EnumDecl(_, _)             => ()
-                case TypeDecl.ObjectDecl(typeName, fields) => List.forEach(field ->
-                    discard codeRegistryBuilder.dataFetcher(FieldCoordinates.coordinates(typeName, field#info#name), toDataFetcher(field)),
-                    fields)
+                case TypeDecl.ObjectDecl(object) => List.forEach(field ->
+                    discard codeRegistryBuilder.dataFetcher(FieldCoordinates.coordinates(object#name, field#info#name), toDataFetcher(field)),
+                    object#fields)
+                case _ => ()
             }, types);
-            let wiring = RuntimeWiring.newRuntimeWiring().codeRegistry(codeRegistryBuilder.build()).build();
-            Ok(new SchemaGenerator().makeExecutableSchema(registry, wiring))
+            let builder = RuntimeWiring.newRuntimeWiring().codeRegistry(codeRegistryBuilder.build());
+            List.forEach(decl -> match decl {
+                case TypeDecl.UnionDecl(union)         => registerTypeResolver(builder, union#name)
+                case TypeDecl.InterfaceDecl(interface) => registerTypeResolver(builder, interface#name)
+                case _                                 => ()
+            }, types);
+            Ok(new SchemaGenerator().makeExecutableSchema(registry, builder.build()))
         } catch {
             case e: GraphQLException => Err("スキーマを組み立てられません: ${e.getMessage()}")
+        }
+
+    ///
+    /// union / interface に TypeResolver を登録する。
+    ///
+    /// WhyNot: GraphQLCodeRegistry.Builder.typeResolver に登録しないのは、graphql-java 22 の SchemaTypeChecker が
+    /// RuntimeWiring 側の TypeResolver しか見ず「There is no type resolver defined for」で止まるため。
+    /// RuntimeWiring.Builder.type を直接呼ばないのは `type` が Flix の予約語でパースできないため、
+    /// WiringFactory の無名クラスを使わないのは Flix 0.75.3 がオーバーロードを名前だけで選び
+    /// 「Duplicate method name」の内部エラーになるため。MethodHandle で `type` を呼ぶ。
+    ///
+    def registerTypeResolver(builder: RuntimeWiring$Builder, typeName: String): Unit \ IO =
+        let typeWiring = TypeRuntimeWiring.newTypeWiring(typeName).typeResolver(typeResolver()).build();
+        let builderClass = Class.forName("graphql.schema.idl.RuntimeWiring$Builder");
+        let wiringClass = Class.forName("graphql.schema.idl.TypeRuntimeWiring");
+        let handle = MethodHandles.lookup().findVirtual(builderClass, "type", MethodType.methodType(builderClass, wiringClass));
+        let args = new ArrayList();
+        let builderObject: Object = checked_cast(builder);
+        let wiringObject: Object = checked_cast(typeWiring);
+        discard args.add(builderObject);
+        discard args.add(wiringObject);
+        discard handle.invokeWithArguments(args)
+
+    ///
+    /// union / interface の値の具体型を決める。source の箱に付いた型名のタグ（Out.taggedObj）を読む。
+    /// タグが無ければ（手書きの Out.union で taggedObj を使わなかった等）null を返し、graphql-java が
+    /// 「Could not determine the exact type of」のエラーにする。
+    ///
+    def typeResolver(): TypeResolver \ IO =
+        new TypeResolver {
+            def getType(_this: TypeResolver, env: TypeResolutionEnvironment): GraphQLObjectType \ IO =
+                let (tag, _) = JavaValue.untag(JavaValue.Boxed.Boxed(env.getObject()));
+                env.getSchema().getObjectType(Option.getWithDefault("", tag))
         }
 
     ///

@@ -68,10 +68,70 @@ mod GqlCodec {
     pub def enumOf(typeName: String, toName: a -> String, values: List[a]): GqlCodec[a] =
         let byName = values |> List.map(value -> (toName(value), value)) |> List.toMap;
         GqlCodec.GqlCodec({
-            typeRef = TypeRef.Enum(typeName, List.map(toName, values)),
+            typeRef = TypeRef.Enum(typeName, None, values |> List.map(value -> { name = toName(value), description = None, deprecated = None })),
             encode  = value -> Value.Str(toName(value)),
             decode  = value -> Value.asStr(value) |> Option.flatMap(name -> Map.get(name, byName)) |> Option.toOk("expected ${typeName}")
         })
+
+    ///
+    /// GraphQL の input 型。infos は SDL に出すフィールド一覧、build は引数と同じ Map から各フィールドを
+    /// 取り出して Flix のレコードにする（生成物が Arg.decodeField を並べて書く）。
+    ///
+    /// WhyNot: encode を Value.Null にしているのは、input は引数専用で Flix の値から Value に戻す場面が無く、
+    /// レコードを Value に戻す手段もこの Codec には無いため。input の既定値は Arg.withDefault（encode を通る）ではなく
+    /// Arg.withDefaultValue で Value のまま渡す（生成器はそうしている）。
+    ///
+    pub def inputObject(typeName: String, infos: List[ArgInfo], build: Args -> Result[String, a]): GqlCodec[a] =
+        GqlCodec.GqlCodec({
+            typeRef = TypeRef.InputObject(typeName, None, infos),
+            encode  = _ -> Value.Null,
+            decode  = value -> match value {
+                case Value.Obj(fields) => build(fields)
+                case _                 => Err("expected ${typeName}")
+            }
+        })
+
+    ///
+    /// enum / input 型に SDL の description を付ける。enumOf / inputObject の直後（option / list で包む前）に付ける。
+    /// スカラーには効かない（SDL に description の置き場が無い）。
+    ///
+    /// WhyNot: Nullable / ListOf を剥いて中の型に付けないのは、description は型の属性で、包んだ側は
+    /// 「その型を使う場所」の情報だから。付ける場所を 1 つに決めた方が、同じ enum が 2 箇所で違う
+    /// description を持って collectTypes の「別の中身」で落ちる事故が起きにくい。
+    ///
+    pub def describe(text: String, codec: GqlCodec[a]): GqlCodec[a] =
+        let GqlCodec.GqlCodec(inner) = codec;
+        GqlCodec.GqlCodec({ typeRef = TypeRef.describe(text, inner#typeRef) | inner })
+
+    ///
+    /// enum の値 1 つに SDL の description を付ける。
+    ///
+    /// WhyNot: 値を SDL の名前（"DRAFT"）でなく Flix の値で受けるのは、名前の打ち間違いが黙って素通りしないため
+    /// （Flix の値なら存在しない case はコンパイルで落ちる）。
+    ///
+    pub def describeValue(value: a, text: String, codec: GqlCodec[a]): GqlCodec[a] =
+        updateValue(value, info -> { description = Some(text) | info }, codec)
+
+    ///
+    /// enum の値 1 つを @deprecated にする。
+    ///
+    pub def deprecateValue(value: a, deprecation: Deprecation, codec: GqlCodec[a]): GqlCodec[a] =
+        updateValue(value, info -> { deprecated = Some(deprecation) | info }, codec)
+
+    ///
+    /// enum の値の情報を書き換える。enum 以外の Codec や、option / list で包んだ後の Codec ならそのまま。
+    ///
+    /// WhyNot: enum 以外を Err にしないのは、GqlCodec[a] が enum かどうかを型に持たず、戻り値を Result に
+    /// すると生成物と手書きの両方でパイプが書けなくなるため。生成器は enumOf の直後にしか付けない。
+    ///
+    def updateValue(value: a, f: EnumValueInfo -> EnumValueInfo, codec: GqlCodec[a]): GqlCodec[a] =
+        let GqlCodec.GqlCodec(inner) = codec;
+        match ((inner#typeRef), (inner#encode)(value)) {
+            case (TypeRef.Enum(typeName, description, infos), Value.Str(name)) =>
+                let updated = infos |> List.map(info -> if (info#name == name) f(info) else info);
+                GqlCodec.GqlCodec({ typeRef = TypeRef.Enum(typeName, description, updated) | inner })
+            case _ => codec
+        }
 
     ///
     /// nullable にする。Flix の None が GraphQL の null。

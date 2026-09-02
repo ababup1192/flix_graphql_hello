@@ -257,10 +257,12 @@ match を吐く（`case Color.Red => "RED"`）。
 | 要素 | 扱い |
 |---|---|
 | フィールド・引数の description、`@deprecated`（reason 無しも）、引数の既定値 | 生成物に載せる。既定値は AST の `Value` を `Value` へ変換し `Arg.withDefaultValue(value: Value)` に渡す。reason 無しは `Field.deprecate` |
-| object 型の description、enum 値の description | DSL に無い。**今回は黙って落とす**。DSL に足したら生成器も追随 |
-| object 型・enum・enum 値の directive（enum 値の `@deprecated` を含む） | DSL に無いので Err（黙って落とさない） |
+| object / enum / input 型の description、enum 値の description と `@deprecated` | 生成物に載せる（`ObjectType.withDescription`、`GqlCodec.describe` / `describeValue` / `deprecateValue`）。enum 値の description は `case` の doc コメントにもなる |
+| object 型・enum・input・enum 値の directive（enum 値の `@deprecated` 以外） | DSL に無いので Err（黙って落とさない） |
 | `schema { query: X mutation: Y }` ブロック | ルート型名として読む。無ければ `Query` / `Mutation` |
-| input 型、interface、union、Subscription、custom scalar、その他の directive、`extend` | **生成器がエラー**（未対応を黙って通さない） |
+| input 型 | レコード型の別名と `GqlCodec.inputObject` の Codec。フィールドは引数と同じ `Arg` で組み `Arg.decodeField` で取り出す（エラー文が `argument 'input' must be PostInput!: field 'status' must be …` とつながる）。オブジェクト型の参照・input 同士の循環・戻り値での使用・空の input は Err |
+| union、interface | 枝（実装型）ごとの case を持つ Flix の enum と `Out.union` / `Out.interface`。TypeResolver は箱に付けた型名のタグで解決する。詳細は「union と interface（段 4）」 |
+| Subscription、custom scalar、その他の directive、`extend`、interface の implements | **生成器がエラー**（未対応を黙って通さない） |
 | ルート型から届かない型 | **生成器がエラー**（生成物の未使用関数で本体が落ちるより、SDL の書き間違いとして止める） |
 | 大文字始まりのフィールド名・引数名、小文字始まりの型名 | **生成器がエラー**（Flix の識別子の決まりに合わない） |
 
@@ -357,6 +359,49 @@ typed-schema の `testSchemaFileIsUpToDate`（DSL → SDL の向き）は役目�
   触らない（人が所有する）。`DEFAULTS=no` は source が enum の型向けで、全フィールドを空の関数にする。
   `flix run` はプログラム引数を受け取れないので、モードと型名は環境変数で渡す
 - 型が 1 つだけ既定を上書きしたいときは `{ id = …, +author = … | Generated.postDefaults() }` の更新構文
+
+## input 型（段 2）
+
+- DSL: `TypeRef.InputObject(name, description, List[ArgInfo])` と `TypeDecl.InputDecl`。`collectTypes` は引数の型も辿るので
+  input はルート型から引数経由で届く。SDL 出力は `input X { … }` で、各行は引数と同じ `argText`
+- `GqlCodec.inputObject(name, infos, build)`。decode は `Value.Obj` のときだけ `build(fields)`、それ以外は
+  `expected X`。encode は `Value.Null`（input は引数専用で Flix の値から戻す場面が無い。既定値は
+  `Arg.withDefaultValue` で Value のまま渡す）
+- 生成物: `pub type alias PostInput = { … }` と `postInputCodec()`。フィールドは `Schema.arg` で組み、
+  `forM` に `Arg.decodeField` を並べてレコードにする。ネストした input は Codec の呼び出しで再帰する
+- 生成器の検査: input 内のオブジェクト型参照、input 同士の循環（Flix のレコードの別名は再帰できない）、
+  input を戻り値に使う、フィールドの無い input、はどれも Err。禁止名・大小文字・到達性は object と同じ規則
+- 引数の既定値にオブジェクトリテラルを書くのは未対応（`対応していない既定値です: ObjectValue`）。対応するなら
+  `Schema.literal` がオブジェクトの中の enum 値を引用符付きで出す問題も一緒に直す（TypeRef で型付きにする）
+- graphql-java は input のフィールドの型を validation で検査するので、`decodeField` の Err が実行時に
+  出るのは Int → Float のように graphql-java が通す変換だけ。エラー文の形は `TestGqlCodec` で確かめる
+
+## 説明と deprecated を型に載せる（段 3）
+
+- `TypeRef.Object / Enum / InputObject` が description を持ち、enum の値は `EnumValueInfo`（名前・description・deprecated）。
+  `TypeDecl` も同じ形で、SDL 出力は型の直前の行に description、enum 値はフィールドと同じ書式
+- DSL: `ObjectType.withDescription`、`GqlCodec.describe`（enum / input）、`GqlCodec.describeValue` / `deprecateValue`。
+  値は SDL 名でなく Flix の値で受ける（存在しない case はコンパイルで落ち、名前の打ち間違いが素通りしない）
+- 生成器: enum 値の `@deprecated` を Err から外した。他の directive は引き続き Err
+
+## union と interface（段 4）
+
+- Flix 側の表現は枝（実装型）ごとの case を持つ enum（`pub enum SearchResult { case Post(Post) case Author(Author) }`）。
+  trait にしないのは、生成物が trait と instance を吐くと利用側の型ごとに instance を書かせる事になるため
+- DSL: `TypeRef.Union` / `TypeRef.Interface`（レコード）、`TypeDecl.UnionDecl` / `InterfaceDecl`、`Out.union(name, members, encode)`、
+  `Out.interface(name, fields, members, encode)`、`Out.member(objectType)`（型消去した枝の参照）、`Out.taggedObj`、
+  `Schema.abstractField`（interface のフィールドの形だけ。resolve は呼ばれない）、`ObjectType.implementing`
+- 型名の届け方: `Out.taggedObj` が `JavaValue.tag(型名, 箱)` で `SimpleImmutableEntry` に包む。`Field.erase` の unbox が
+  `untag` で剥がし、`Graphql.typeResolver` がタグを読んで `getObjectType(型名)` を返す。入れ物に Flix の enum を使わないのは
+  Java 側から instanceof で見分けるのに JVM のクラス名が決まっていないため
+- TypeResolver の登録: `GraphQLCodeRegistry.typeResolver` は graphql-java 22 の SchemaTypeChecker が見ないので不可。
+  `RuntimeWiring.Builder.type` は `type` が Flix の予約語で呼べず、`WiringFactory` の無名クラスは Flix 0.75.3 の
+  オーバーロード解決の内部エラーになる。`TypeRuntimeWiring` を作って MethodHandle で `type` を呼ぶ
+- interface の宣言はそれを返すフィールドから辿って SDL に出す（オブジェクト側の `implements` は名前だけ）。
+  そのため、どのフィールドの型にも使われない union / interface は生成器が Err にする。実装型は interface から
+  members として辿るので、フィールドから届かなくても到達扱い
+- 生成器の検査: union の枝はオブジェクト型で重複なし、interface は実装型が 1 つ以上、実装型が interface の全フィールドを
+  同じ名前・型・引数で持つ（description と既定値は問わない）、implements 先が interface、union / interface は引数に使えない
 
 ## レビューの実験結果（要点）
 

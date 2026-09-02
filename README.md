@@ -61,6 +61,12 @@ curl -s -X POST localhost:8080/graphql -d '{"query": "mutation { increment(by: 3
 | リクエスト行が壊れている / Content-Length が数字でない | 400 |
 | 接続の処理中に例外が起きた（read のタイムアウト、レスポンス変換の失敗など） | 500（ボディ無し） |
 
+### 落とし穴
+
+- graphql-java 22 の good-faith introspection: 1 つのクエリに `__type` や `__schema` を複数並べると
+  「This request is not asking for introspection in good faith」で data が null になる。GraphiQL は問題ないが、
+  自前のクライアントは introspection を 1 つずつ投げる。
+
 ## スキーマの書き方
 
 ### 1. `schema.graphql` を書く
@@ -78,9 +84,25 @@ type Post {
 }
 ```
 
-対応しているのは `type`、`enum`、`schema { }` ブロック、組み込みスカラー（`Int / Float / String / Boolean / ID`）、
-リスト、nullable、description、`@deprecated`、引数の既定値。`input` / `interface` / `union` /
-`subscription` / custom scalar / `extend` / それ以外の directive は生成器がエラーにする。
+対応しているのは `type`、`enum`、`input`、`union`、`interface`、`schema { }` ブロック、組み込みスカラー
+（`Int / Float / String / Boolean / ID`）、リスト、nullable、description（型・フィールド・引数・enum 値）、
+`@deprecated`（フィールド・enum 値）、引数と input フィールドの既定値。enum 値の description は生成された `case` の
+doc コメントにもなる。`subscription` / custom scalar / `extend` / それ以外の directive / interface が interface を implements する形は
+生成器がエラーにする。
+
+`input` は Flix のレコード型の別名と Codec になる（`input PostInput { title: String!  status: PostStatus = DRAFT }`
+→ `Generated.PostInput = { title = String, status = Option[PostStatus] }`）。リゾルバには `input#title` で届く。
+input の中にオブジェクト型を書く、input 同士を循環させる、input を戻り値にする、のどれも生成器が止める
+（循環は Flix のレコード型の別名が再帰できないため）。
+
+`union` と `interface` は枝（実装型）ごとの case を持つ Flix の enum になり、リゾルバはその enum に包んで返す
+（`Generated.SearchResult.Post(post)`）。`__typename` と inline fragment は graphql-java が処理し、枝のリゾルバは
+通常のオブジェクト型と同じ経路で動く。interface のフィールドは実装型が持つので、interface 自身にリゾルバは無い。
+生成器は、実装型が interface の全フィールドを同じ型で持つか、union の枝がオブジェクト型か、union / interface が
+どこかのフィールドの型に使われているか（implements だけでは SDL に宣言が出ない）を検査する。
+
+引数の既定値にオブジェクトリテラル
+（`input: PostInput = {title: "x"}`）を書くのは未対応で、生成器が止める（input のフィールド側の既定値は使える）。
 Query / Mutation から届かない型、大文字始まりのフィールド名、小文字始まりの型名も生成器が止める（Flix の識別子にならないため）。
 
 ### 2. `make generate` で生成する
@@ -286,7 +308,7 @@ src/
     Value.flix           GraphQL の値（JSON 相当の enum）
     JsonValue.flix       Value <-> JSON 文字列
     JavaValue.flix       Value <-> Java Object、Flix の値の箱詰め（Boxed）
-    GqlCodec.flix        スカラー・enum の Codec、Id
+    GqlCodec.flix        スカラー・enum・input の Codec、Id
     Schema.flix          Context / TypeRef / Arg / Out / Field / ObjectType / Schema、field0..3 / fieldRaw、toSdl
     GeneratedCheck.flix  生成物に埋まった SDL 本文・生成器バージョンと schema.graphql の照合
     Graphql.flix         eff Graphql、buildEngine / runWithEngine

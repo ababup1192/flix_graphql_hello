@@ -18,7 +18,10 @@ mod SdlReader {
     import graphql.language.EnumValueDefinition
     import graphql.language.FieldDefinition
     import graphql.language.FloatValue
+    import graphql.language.InputObjectTypeDefinition
     import graphql.language.InputValueDefinition
+    import graphql.language.InterfaceTypeDefinition
+    import graphql.language.UnionTypeDefinition
     import graphql.language.IntValue
     import graphql.language.ListType
     import graphql.language.NonNullType
@@ -37,8 +40,8 @@ mod SdlReader {
     import java.util.Objects
 
     ///
-    /// SDL 文字列を読む。対応していない定義（input / interface / union / scalar / directive / subscription / extend）や、
-    /// 型・enum 値に付いた directive があれば Err。
+    /// SDL 文字列を読む。対応していない定義（scalar / directive / subscription / extend）や、
+    /// 型・input に付いた directive、enum 値の @deprecated 以外の directive があれば Err。
     ///
     pub def read(sdl: String): Result[String, SdlDocument] \ IO =
         try {
@@ -46,19 +49,28 @@ mod SdlReader {
             let definitions: List[Definition[Object]] = Adaptor.fromList(document.getDefinitions());
             let objects = definitions |> List.filter(isA("graphql.language.ObjectTypeDefinition")) |> List.map(readObject) |> Result.sequence;
             let enums = definitions |> List.filter(isA("graphql.language.EnumTypeDefinition")) |> List.map(readEnum) |> Result.sequence;
+            let inputs = definitions |> List.filter(isA("graphql.language.InputObjectTypeDefinition")) |> List.map(readInput) |> Result.sequence;
+            let unions = definitions |> List.filter(isA("graphql.language.UnionTypeDefinition")) |> List.map(readUnion) |> Result.sequence;
+            let interfaces = definitions |> List.filter(isA("graphql.language.InterfaceTypeDefinition")) |> List.map(readInterface) |> Result.sequence;
             let roots = readRoots(definitions);
             let extensions = definitions |> List.filter(isExtension) |> List.map(unsupported) |> firstErr;
-            let others = definitions |> List.filter(definition -> not (isA("graphql.language.ObjectTypeDefinition", definition) or isA("graphql.language.EnumTypeDefinition", definition) or isA("graphql.language.SchemaDefinition", definition))) |> List.map(unsupported) |> firstErr;
+            let others = definitions |> List.filter(definition -> not (isA("graphql.language.ObjectTypeDefinition", definition) or isA("graphql.language.EnumTypeDefinition", definition) or isA("graphql.language.InputObjectTypeDefinition", definition) or isA("graphql.language.UnionTypeDefinition", definition) or isA("graphql.language.InterfaceTypeDefinition", definition) or isA("graphql.language.SchemaDefinition", definition))) |> List.map(unsupported) |> firstErr;
             forM (
                 _          <- extensions;
                 _          <- others;
                 objectDefs <- objects;
                 enumDefs   <- enums;
+                inputDefs  <- inputs;
+                unionDefs  <- unions;
+                ifaceDefs  <- interfaces;
                 rootNames  <- roots
             ) yield {
-                objects = objectDefs, enums = enumDefs,
+                objects = objectDefs, enums = enumDefs, inputs = inputDefs, unions = unionDefs, interfaces = ifaceDefs,
                 objectNames = objectDefs |> List.map(object -> object#name) |> List.toSet,
                 enumNames = enumDefs |> List.map(enumDef -> enumDef#name) |> List.toSet,
+                inputNames = inputDefs |> List.map(inputDef -> inputDef#name) |> List.toSet,
+                unionNames = unionDefs |> List.map(unionDef -> unionDef#name) |> List.toSet,
+                interfaceNames = ifaceDefs |> List.map(ifaceDef -> ifaceDef#name) |> List.toSet,
                 queryName = fst(rootNames), mutationName = snd(rootNames)
             }
         } catch {
@@ -88,6 +100,9 @@ mod SdlReader {
     def isExtension(definition: Definition[Object]): Bool \ IO =
         isA("graphql.language.ObjectTypeExtensionDefinition", definition)
             or isA("graphql.language.EnumTypeExtensionDefinition", definition)
+            or isA("graphql.language.InputObjectTypeExtensionDefinition", definition)
+            or isA("graphql.language.UnionTypeExtensionDefinition", definition)
+            or isA("graphql.language.InterfaceTypeExtensionDefinition", definition)
             or isA("graphql.language.SchemaExtensionDefinition", definition)
 
     ///
@@ -120,11 +135,69 @@ mod SdlReader {
         let fields: List[FieldDefinition] = Adaptor.fromList(objectDefinition.getFieldDefinitions());
         let directives: List[Directive] = Adaptor.fromList(objectDefinition.getDirectives());
         let name = objectDefinition.getName();
+        let description = descriptionOf(objectDefinition.getDescription());
+        let implements: List[Type[Object]] = Adaptor.fromList(objectDefinition.getImplements());
         let fieldDefs = fields |> List.map(readField) |> Result.sequence;
         forM (
-            _      <- noDirectives(directives);
+            _          <- noDirectives(directives);
+            interfaces <- implements |> List.map(readNamedType) |> Result.sequence;
+            fields_    <- fieldDefs
+        ) yield { name = name, description = description, interfaces = interfaces, fields = fields_ }
+
+    ///
+    /// union Name = A | B を読む。
+    ///
+    def readUnion(definition: Definition[Object]): Result[String, UnionDef] \ IO =
+        let unionDefinition = unchecked_cast(definition as UnionTypeDefinition);
+        let memberTypes: List[Type[Object]] = Adaptor.fromList(unionDefinition.getMemberTypes());
+        let directives: List[Directive] = Adaptor.fromList(unionDefinition.getDirectives());
+        let name = unionDefinition.getName();
+        let description = descriptionOf(unionDefinition.getDescription());
+        forM (
+            _       <- noDirectives(directives);
+            members <- memberTypes |> List.map(readNamedType) |> Result.sequence
+        ) yield { name = name, description = description, members = members }
+
+    ///
+    /// interface Name { ... } を読む。interface が interface を implements するのは未対応。
+    ///
+    def readInterface(definition: Definition[Object]): Result[String, InterfaceDef] \ IO =
+        let interfaceDefinition = unchecked_cast(definition as InterfaceTypeDefinition);
+        let fields: List[FieldDefinition] = Adaptor.fromList(interfaceDefinition.getFieldDefinitions());
+        let directives: List[Directive] = Adaptor.fromList(interfaceDefinition.getDirectives());
+        let implements: List[Type[Object]] = Adaptor.fromList(interfaceDefinition.getImplements());
+        let name = interfaceDefinition.getName();
+        let description = descriptionOf(interfaceDefinition.getDescription());
+        let fieldDefs = fields |> List.map(readField) |> Result.sequence;
+        forM (
+            _       <- noDirectives(directives);
+            _       <- if (List.isEmpty(implements)) Ok(()) else Err("interface ${name} が interface を implements するのは未対応です");
             fields_ <- fieldDefs
-        ) yield { name = name, fields = fields_ }
+        ) yield { name = name, description = description, fields = fields_ }
+
+    ///
+    /// 名前だけの型参照（implements や union の枝）。リストや ! は SDL の文法上ここに来ない。
+    ///
+    def readNamedType(ty: Type[Object]): Result[String, String] \ IO =
+        readType(ty) |> Result.flatMap(read -> match read {
+            case Ty.Named(name) => Ok(name)
+            case other          => Err("型名だけを書く場所に ${other} があります")
+        })
+
+    ///
+    /// input Name { ... } を読む。フィールドは引数と同じ読み方。
+    ///
+    def readInput(definition: Definition[Object]): Result[String, InputDef] \ IO =
+        let inputDefinition = unchecked_cast(definition as InputObjectTypeDefinition);
+        let values: List[InputValueDefinition] = Adaptor.fromList(inputDefinition.getInputValueDefinitions());
+        let directives: List[Directive] = Adaptor.fromList(inputDefinition.getDirectives());
+        let name = inputDefinition.getName();
+        let description = descriptionOf(inputDefinition.getDescription());
+        let fieldDefs = values |> List.map(readArg) |> Result.sequence;
+        forM (
+            _       <- noDirectives(directives);
+            fields_ <- fieldDefs
+        ) yield { name = name, description = description, fields = fields_ }
 
     ///
     /// フィールド 1 つ。
@@ -150,7 +223,7 @@ mod SdlReader {
         directives |> List.filter(directive -> directive.getName() != "deprecated") |> noDirectives
 
     ///
-    /// directive が 1 つでもあれば Err（型・enum・enum 値・引数には対応する directive が無い）。
+    /// directive が 1 つでもあれば Err（型・enum・input・引数には対応する directive が無い。enum 値は onlyDeprecated 経由）。
     ///
     def noDirectives(directives: List[Directive]): Result[String, Unit] \ IO =
         directives |> List.map(directive -> "対応していない directive です: @${directive.getName()}") |> firstErr
@@ -217,17 +290,29 @@ mod SdlReader {
         if (String.contains(substr = ".", plain)) plain else "${plain}.0"
 
     ///
-    /// enum Name { ... } を読む。
+    /// enum Name { ... } を読む。値の description と @deprecated も読む。
     ///
     def readEnum(definition: Definition[Object]): Result[String, EnumDef] \ IO =
         let enumDefinition = unchecked_cast(definition as EnumTypeDefinition);
         let values: List[EnumValueDefinition] = Adaptor.fromList(enumDefinition.getEnumValueDefinitions());
         let directives: List[Directive] = Adaptor.fromList(enumDefinition.getDirectives());
-        let valueDirectives = values |> List.flatMap(value -> { let ds: List[Directive] = Adaptor.fromList(value.getDirectives()); ds });
+        let name = enumDefinition.getName();
+        let description = descriptionOf(enumDefinition.getDescription());
+        let valueDefs = values |> List.map(readEnumValue) |> Result.sequence;
         forM (
-            _ <- noDirectives(directives);
-            _ <- noDirectives(valueDirectives)
-        ) yield { name = enumDefinition.getName(), values = List.map(value -> value.getName(), values) }
+            _       <- noDirectives(directives);
+            values_ <- valueDefs
+        ) yield { name = name, description = description, values = values_ }
+
+    ///
+    /// enum の値 1 つ。
+    ///
+    def readEnumValue(value: EnumValueDefinition): Result[String, EnumValueDef] \ IO =
+        let directives: List[Directive] = Adaptor.fromList(value.getDirectives());
+        let name = value.getName();
+        let description = descriptionOf(value.getDescription());
+        let deprecated = deprecationOf(directives);
+        onlyDeprecated(directives) |> Result.map(_ -> { name = name, description = description, deprecated = deprecated })
 
     ///
     /// description。無ければ None。

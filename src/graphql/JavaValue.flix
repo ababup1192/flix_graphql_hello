@@ -3,6 +3,7 @@
 /// graphql-java との境界でだけ使う。
 ///
 mod JavaValue {
+    import java.util.AbstractMap$SimpleImmutableEntry
     import java.lang.Boolean
     import java.lang.Class
     import java.lang.Double
@@ -35,6 +36,31 @@ mod JavaValue {
     pub def unbox(boxed: Boxed): a =
         let Boxed.Boxed(obj) = boxed;
         unchecked_cast(obj as a)
+
+    ///
+    /// 箱に型名のタグを付ける。union / interface の値を子フィールドの source にするときに使い、
+    /// graphql-java の TypeResolver がタグを読んで具体型を決める。
+    ///
+    /// WhyNot: タグの入れ物に Flix の enum やタプルを使わないのは、Java 側から instanceof で見分けるのに
+    /// Flix が生成する JVM クラス名が決まっていないため。SimpleImmutableEntry なら名前で判定できる。
+    ///
+    pub def tag(typeName: String, boxed: Boxed): Boxed \ IO =
+        let Boxed.Boxed(obj) = boxed;
+        let key: Object = checked_cast(typeName);
+        Boxed.Boxed(checked_cast(new AbstractMap$SimpleImmutableEntry(key, obj)))
+
+    ///
+    /// タグ付きの箱なら (Some(型名), 中身)、そうでなければ (None, そのまま)。
+    ///
+    pub def untag(boxed: Boxed): (Option[String], Boxed) \ IO =
+        let Boxed.Boxed(obj) = boxed;
+        if (isInstance("java.util.AbstractMap$SimpleImmutableEntry", obj)) {
+            let entry = unchecked_cast(obj as AbstractMap$SimpleImmutableEntry[Object, Object]);
+            if (isInstance("java.lang.String", entry.getKey())) {
+                let name: String = unchecked_cast(entry.getKey() as String);
+                (Some(name), Boxed.Boxed(entry.getValue()))
+            } else (None, boxed)
+        } else (None, boxed)
 
     ///
     /// Value を Java の値にして箱詰めする。

@@ -95,9 +95,9 @@ def testGenerateSchemaBlock(): Unit \ {Assert, IO} =
 /// 未対応の定義、引数へのオブジェクト型、禁止した型名、未定義の型、enum 値の衝突はどれも Err。
 @Test
 def testGenerateErrors(): Unit \ {Assert, IO} =
-    Assert.assertEq(expected = ("対応していない定義です: InputObjectTypeDefinition", "オブジェクト型 Post は引数に使えません（input 型は未対応）",
+    Assert.assertEq(expected = ("対応していない定義です: ScalarTypeDefinition", "オブジェクト型 Post は引数に使えません（input 型にしてください）",
                                 "型名 Value は生成物の名前と衝突するので使えません", "型 Missing が定義されていません", "enum E の値が Flix の名前に変換すると衝突します"),
-        (generate("input In { a: Int }  type Query { x: Int }") |> errorOf,
+        (generate("scalar Date  type Query { x: Int }") |> errorOf,
          generate("type Query { x(p: Post!): Int }  type Post { a: Int }") |> errorOf,
          generate("type Query { v: Value! }  type Value { a: Int }") |> errorOf,
          generate("type Query { v: Missing! }") |> errorOf,
@@ -126,13 +126,13 @@ def testGenerateUnsupportedErrors(): Unit \ {Assert, IO} =
          generate("type Query { a(x: Int! @auth): Int! }") |> errorOf,
          generate("type Query { a: Int! }  extend type Query { b: Int! }") |> errorOf))
 
-/// 型・enum・enum 値に付いた directive と extend schema は黙って落とさず Err。生成物の名前と重なる型名（ObjectType）も Err。
+/// 型・enum に付いた directive、enum 値の @deprecated 以外の directive、extend schema は黙って落とさず Err。生成物の名前と重なる型名（ObjectType）も Err。
 @Test
 def testGenerateTypeLevelUnsupportedErrors(): Unit \ {Assert, IO} =
-    Assert.assertEq(expected = ("対応していない directive です: @key", "対応していない directive です: @deprecated", "対応していない directive です: @internal",
+    Assert.assertEq(expected = ("対応していない directive です: @key", "対応していない directive です: @tag", "対応していない directive です: @internal",
                                 "対応していない定義です: SchemaExtensionDefinition", "型名 ObjectType は生成物の名前と衝突するので使えません"),
         (generate("type Query @key(fields: \"a\") { a: Int! }") |> errorOf,
-         generate("enum E { A @deprecated(reason: \"x\") B }  type Query { e: E! }") |> errorOf,
+         generate("enum E { A @tag B }  type Query { e: E! }") |> errorOf,
          generate("enum E @internal { A }  type Query { e: E! }") |> errorOf,
          generate("extend schema @foo { query: Query }  type Query { a: Int! }") |> errorOf,
          generate("type Query { o: ObjectType! }  type ObjectType { a: Int! }") |> errorOf))
@@ -162,6 +162,112 @@ def testGenerateRootsAndEnumNames(): Unit \ {Assert, IO} =
             generate("schema { query: Query mutation: Changes }  type Query { a: Int! }  type Changes { b: Int! }")),
          missing("Schema.make(queryType(resolvers), None, runner)" :: Nil, generate("type Query { a: Int! }")),
          missing("case Http2" :: "case Status.Http2 => \"HTTP_2\"" :: Nil, generate("enum Status { HTTP_2 }  type Query { s: Status! }"))))
+
+// ---- 型・enum 値の description と @deprecated ----
+
+/// 型・enum・input の description と enum 値の description / @deprecated が生成物に載る。enum の case の doc は description になる。
+@Test
+def testGenerateTypeDescriptions(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok(Nil), missing(
+        "            Nil) |> ObjectType.withDescription(\"記事\")" ::
+        "    /// enum Status。状態" ::
+        "        /// 下書き\n        case Draft" ::
+        "        /// OLD\n        case Old" ::
+        " |> GqlCodec.describe(\"状態\") |> GqlCodec.describeValue(Status.Draft, \"下書き\") |> GqlCodec.deprecateValue(Status.Old, Deprecation.Reason(\"use DRAFT\")) |> GqlCodec.deprecateValue(Status.Gone, Deprecation.NoReason)" ::
+        "yield { a = v0 }) |> GqlCodec.describe(\"入力\")" :: Nil,
+        generate("\"\"\"状態\"\"\" enum Status { \"\"\"下書き\"\"\" DRAFT  OLD @deprecated(reason: \"use DRAFT\")  GONE @deprecated }  \"\"\"入力\"\"\" input In { a: Int! }  type Query { p(i: In!): Post! }  \"\"\"記事\"\"\" type Post { s: Status! }")))
+
+/// 複数行の description は doc コメントの行ごとに /// が付く（生成物がパースエラーにならない）。
+@Test
+def testGenerateMultilineDescription(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok(Nil), missing(
+        "        /// 下書き。\n        /// 一覧には出ない\n        case Draft" ::
+        "    /// enum Status。状態\n    /// 2 行目" ::
+        "GqlCodec.describeValue(Status.Draft, \"下書き。\\n一覧には出ない\")" :: Nil,
+        generate("\"\"\"\n状態\n2 行目\n\"\"\" enum Status { \"\"\"\n下書き。\n一覧には出ない\n\"\"\" DRAFT }  type Query { s: Status! }")))
+
+// ---- union / interface ----
+
+/// union は枝ごとの case を持つ enum と Out.union になり、フィールドの Out はその関数を呼ぶ。interface は実装型が case になり、
+/// フィールドは Schema.abstractField、実装型には ObjectType.implementing が付く。
+@Test
+def testGenerateUnionAndInterface(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok(Nil), missing(
+        "    /// union Hit。検索結果。人はこの enum に包んで返す\n    pub enum Hit {\n        /// Post\n        case Post(Post)\n        /// Author\n        case Author(Author)\n    }" ::
+        "    def hitOut(resolvers: Resolvers[ef]): Out[Hit, ef] =" ::
+        "Out.union(\"Hit\", Out.member(postType(resolvers)) :: Out.member(authorType(resolvers)) :: Nil, (context, value) -> match value { case Hit.Post(x) => Out.taggedObj(postType(resolvers), context, x) case Hit.Author(x) => Out.taggedObj(authorType(resolvers), context, x) }) |> Out.describe(\"検索結果\")" ::
+        "Out.list(hitOut(resolvers))" ::
+        "pub enum Node {\n        /// Post\n        case Post(Post)\n    }" ::
+        "Out.interface(\"Node\"," ::
+        "Schema.abstractField(\"id\", Nil, Out.id())" ::
+        "                let arg0 = Schema.arg(\"n\", GqlCodec.int32());\n                Schema.abstractField(\"rel\", Arg.info(arg0) :: Nil, Out.option(hitOut(resolvers)))" ::
+        "Nil, Out.member(postType(resolvers)) :: Nil, (context, value) -> match value { case Node.Post(x) => Out.taggedObj(postType(resolvers), context, x) })" ::
+        "            Nil) |> ObjectType.implementing(\"Node\" :: Nil)" ::
+        "pub type alias QueryNodeResolver[ef: Eff] = Context -> Result[FieldError, Option[Node]] \\ ef" :: Nil,
+        generate("\"\"\"検索結果\"\"\" union Hit = Post | Author  interface Node { id: ID!  rel(n: Int!): Hit }  type Post implements Node { id: ID!  rel(n: Int!): Hit  t: String! }  type Author { a: Int! }  type Query { hits: [Hit!]!  node: Node }")))
+
+/// union / interface を返すフィールドは既定リゾルバに入らない。
+@Test
+def testGenerateAbstractNotPassthrough(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok(true),
+        generate("union U = A  type A { n: Int! }  type Post { id: ID!  u: U! }  type Query { p: Post! }") |> Result.map(text -> String.contains(substr = "u は含まない", text) and not String.contains(substr = "u = Context -> { u", text)))
+
+/// union の枝がオブジェクト型でない、枝の重複、interface の実装型が無い、実装型にフィールドが無い、implements 先が interface でない、
+/// どのフィールドにも使われない、引数に使う、はどれも Err。
+@Test
+def testGenerateAbstractErrors(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = ("union の枝 U の E はオブジェクト型ではありません", "union の枝 U の A が重複しています", "interface I を implements する型がありません",
+                                "A に I.id が無いか型が違います", "implements A の X は interface ではありません", "union / interface U はどのフィールドの型にも使われていません（実装型からは辿れないので、SDL に出せません）",
+                                "union / interface 型 U は引数に使えません"),
+        (generate("enum E { X }  union U = E  type Query { u: U! }") |> errorOf,
+         generate("union U = A | A  type A { n: Int! }  type Query { u: U! }") |> errorOf,
+         generate("interface I { id: ID! }  type Query { i: I }") |> errorOf,
+         generate("interface I { id: ID! }  type A implements I { id: String! }  type Query { i: I }") |> errorOf,
+         generate("type A implements X { n: Int! }  type Query { a: A! }") |> errorOf,
+         generate("union U = A  type A { n: Int! }  type Query { a: A! }") |> errorOf,
+         generate("union U = A  type A { n: Int! }  type Query { a(u: U!): A!  u: U! }") |> errorOf))
+
+// ---- input 型 ----
+
+/// input はレコード型の別名と Codec になる。フィールドは引数と同じ Arg で組み、既定値・description・ネストした input・予約語も通る。
+@Test
+def testGenerateInput(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = Ok(Nil), missing(
+        "pub type alias PostInput = { title = String, status = Option[Status], meta = Option[Meta], from_ = Option[Int32] }" ::
+        "pub def postInputCodec(): GqlCodec[PostInput] =" ::
+        "let f1 = Schema.arg(\"status\", GqlCodec.option(statusCodec())) |> Arg.withDefaultValue(Value.Str(\"DRAFT\"));" ::
+        "let f2 = Schema.arg(\"meta\", GqlCodec.option(metaCodec())) |> Arg.withDescription(\"付加情報\");" ::
+        "GqlCodec.inputObject(\"PostInput\", Arg.info(f0) :: Arg.info(f1) :: Arg.info(f2) :: Arg.info(f3) :: Nil, fields ->" ::
+        "forM (v0 <- Arg.decodeField(f0, fields); v1 <- Arg.decodeField(f1, fields); v2 <- Arg.decodeField(f2, fields); v3 <- Arg.decodeField(f3, fields)) yield { title = v0, status = v1, meta = v2, from_ = v3 })" ::
+        "pub type alias Meta = { tags = List[String] }" ::
+        "Schema.arg(\"input\", postInputCodec())" ::
+        "pub type alias MutationCreateResolver[ef: Eff] = Context -> PostInput -> Result[FieldError, Int32] \\ ef" :: Nil,
+        generate("enum Status { DRAFT }  input Meta { tags: [String!]! }  input PostInput { title: String!  status: Status = DRAFT  \"\"\"付加情報\"\"\" meta: Meta  from: Int }  type Query { a: Int! }  type Mutation { create(input: PostInput!): Int! }")))
+
+/// input のフィールドにオブジェクト型、input 同士の循環、戻り値に input、空の input はどれも Err。
+@Test
+def testGenerateInputErrors(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = ("input 型のフィールド In.p にオブジェクト型は使えません（input 型か、スカラー・enum にしてください）",
+                                "input 型 A, B が循環しています（Flix のレコード型の別名は再帰できません）",
+                                "input 型 In は戻り値に使えません",
+                                "input In にフィールドがありません"),
+        (generate("input In { p: Post }  type Post { a: Int! }  type Query { x(i: In!): Post! }") |> errorOf,
+         generate("input A { b: B }  input B { a: A }  type Query { x(i: A!): Int! }") |> errorOf,
+         generate("input In { a: Int! }  type Query { x(i: In!): In! }") |> errorOf,
+         generate("input In { }  type Query { x(i: In!): Int! }") |> errorOf))
+
+/// input のフィールドの型が未定義なら「定義されていません」、同じ名前のフィールドが 2 つあれば「2 回定義」。
+@Test
+def testGenerateInputFieldErrors(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = ("型 Missing が定義されていません", "input 型のフィールド In.a が 2 回定義されています"),
+        (generate("input In { a: Missing }  type Query { x(i: In!): Int! }") |> errorOf,
+         generate("input In { a: Int  a: Int }  type Query { x(i: In!): Int! }") |> errorOf))
+
+/// Query / Mutation から届かない input は Err（他の型と同じ）。
+@Test
+def testGenerateInputUnreachable(): Unit \ {Assert, IO} =
+    Assert.assertEq(expected = "型 In は Query / Mutation から届きません",
+        generate("input In { a: Int! }  type Query { x: Int! }") |> errorOf)
 
 // ---- 既定リゾルバと雛形 ----
 

@@ -9,7 +9,7 @@ use Schema.{arg, field0, field1, field2, objectType}
 ///
 def sampleSchema(): Schema \ IO = GraphqlTestKit.appSchema(0)
 
-/// Query から到達できる型が深さ優先で Query → Post → PostStatus → Author → Mutation の順に、重複なく 1 回ずつ出る。
+/// Query から到達できる型が深さ優先で Query → Post → PostStatus → Author → SearchResult → Node → Mutation → PostInput の順に、重複なく 1 回ずつ出る。
 /// Option は nullable、それ以外は !、List は [T!]!。
 @Test
 def testSchemaToSdl(): Unit \ {Assert, IO} =
@@ -27,28 +27,51 @@ def testSchemaToSdl(): Unit \ {Assert, IO} =
         "  \"status を省くと PUBLISHED だけ。null を渡すと全件\"" ::
         "  posts(status: PostStatus = PUBLISHED): [Post!]!" ::
         "  counter: Int!" ::
+        "  \"title か name に text を含む記事と書き手\"" ::
+        "  search(text: String!): [SearchResult!]!" ::
+        "  node(id: ID!): Node" ::
         "}" ::
         "" ::
-        "type Post {" ::
+        "\"記事\"" ::
+        "type Post implements Node {" ::
         "  id: ID!" ::
         "  title: String!" ::
         "  status: PostStatus!" ::
         "  author: Author!" ::
         "}" ::
         "" ::
+        "\"記事の公開状態\"" ::
         "enum PostStatus {" ::
+        "  \"下書き。一覧には出ない\"" ::
         "  DRAFT" ::
         "  PUBLISHED" ::
         "}" ::
         "" ::
-        "type Author {" ::
+        "type Author implements Node {" ::
         "  id: ID!" ::
         "  name: String!" ::
         "  posts: [Post!]!" ::
         "}" ::
         "" ::
+        "\"検索結果\"" ::
+        "union SearchResult = Post | Author" ::
+        "" ::
+        "\"ID で引ける物\"" ::
+        "interface Node {" ::
+        "  id: ID!" ::
+        "}" ::
+        "" ::
         "type Mutation {" ::
         "  increment(by: Int!): Int!" ::
+        "  \"保存はしない。input から組み立てた Post を返すだけ\"" ::
+        "  createPost(input: PostInput!): Post!" ::
+        "}" ::
+        "" ::
+        "\"createPost の入力\"" ::
+        "input PostInput {" ::
+        "  title: String!" ::
+        "  status: PostStatus = DRAFT" ::
+        "  authorId: ID!" ::
         "}" :: Nil)),
         Schema.toSdl(sampleSchema()))
 
@@ -60,6 +83,15 @@ def testSchemaToSdlDecorations(): Unit \ Assert =
             |> Field.withDescription("挨拶") |> Field.withDeprecation("use hello")) ::
         (field0("old", Out.int32(), (_context, _root) -> Ok(1)) |> Field.deprecate) :: Nil), None, Runner.io());
     Assert.assertEq(expected = Ok("schema {\n  query: Query\n}\n\ntype Query {\n  \"挨拶\"\n  greet(name: String! = \"world\"): String! @deprecated(reason: \"use hello\")\n  old: Int! @deprecated\n}"),
+        Schema.toSdl(schema))
+
+/// 型の description は宣言の直前の行、enum 値の description は値の直前の行、enum 値の @deprecated は末尾に出る（Color は TestGraphqlJavaValues の enum）。
+@Test
+def testSchemaTypeDescriptions(): Unit \ Assert =
+    let color = GqlCodec.enumOf("Color", c -> match c { case Color.Red => "RED" case Color.Blue => "BLUE" }, Color.Red :: Color.Blue :: Nil)
+        |> GqlCodec.describe("色") |> GqlCodec.describeValue(Color.Red, "赤") |> GqlCodec.deprecateValue(Color.Blue, Deprecation.NoReason);
+    let schema = Schema.make(objectType("Query", () -> field0("c", Out.scalar(color), (_context, _root) -> Ok(Color.Red)) :: Nil) |> ObjectType.withDescription("root"), None, Runner.io());
+    Assert.assertEq(expected = Ok("schema {\n  query: Query\n}\n\n\"root\"\ntype Query {\n  c: Color!\n}\n\n\"色\"\nenum Color {\n  \"赤\"\n  RED\n  BLUE @deprecated\n}"),
         Schema.toSdl(schema))
 
 /// 同じ名前で中身が違うオブジェクト型は Err。同じ中身なら 1 回だけ出る。

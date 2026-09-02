@@ -49,10 +49,16 @@ mod Runner {
 pub enum TypeRef {
     /// 組み込みスカラー（Int / Float / String / Boolean / ID）
     case Scalar(String)
-    /// オブジェクト型。名前と、型消去済みのフィールド一覧
-    case Object(String, Unit -> List[ErasedField])
-    /// enum 型。名前と値の名前一覧
-    case Enum(String, List[String])
+    /// オブジェクト型。implements する interface は名前だけ（interface 自身の宣言はそれを返すフィールドから辿る）
+    case Object({ name = String, description = Option[String], interfaces = List[String], fields = Unit -> List[ErasedField] })
+    /// union 型。members はオブジェクト型の参照
+    case Union({ name = String, description = Option[String], members = List[TypeRef] })
+    /// interface 型。fields は SDL に出す形だけ（リゾルバは実装型が持つ）、members は実装するオブジェクト型の参照
+    case Interface({ name = String, description = Option[String], fields = List[FieldInfo], members = List[TypeRef] })
+    /// enum 型。名前、description、値の一覧
+    case Enum(String, Option[String], List[EnumValueInfo])
+    /// input 型。名前、description、フィールド一覧（引数と同じ形。値で持てるのは input の循環参照を生成器が禁じているため）
+    case InputObject(String, Option[String], List[ArgInfo])
     /// [T]
     case ListOf(TypeRef)
     /// nullable の T（Flix の Option）
@@ -78,10 +84,22 @@ mod TypeRef {
     }
 
     ///
+    /// 型に description を付ける。Object / Enum / InputObject 以外（スカラー、nullable やリストで包んだ物）はそのまま。
+    ///
+    pub def describe(text: String, typeRef: TypeRef): TypeRef = match typeRef {
+        case TypeRef.Object(inner)                => TypeRef.Object({ description = Some(text) | inner })
+        case TypeRef.Union(inner)                 => TypeRef.Union({ description = Some(text) | inner })
+        case TypeRef.Interface(inner)             => TypeRef.Interface({ description = Some(text) | inner })
+        case TypeRef.Enum(name, _, values)        => TypeRef.Enum(name, Some(text), values)
+        case TypeRef.InputObject(name, _, fields) => TypeRef.InputObject(name, Some(text), fields)
+        case _                                    => typeRef
+    }
+
+    ///
     /// enum 型か。SDL のリテラルで引用符を付けるかどうかに使う。
     ///
     pub def isEnum(typeRef: TypeRef): Bool = match typeRef {
-        case TypeRef.Enum(_, _)      => true
+        case TypeRef.Enum(_, _, _)   => true
         case TypeRef.Nullable(inner) => isEnum(inner)
         case _                       => false
     }
@@ -89,15 +107,23 @@ mod TypeRef {
     ///
     /// ! を付けない型名。
     ///
-    def bareName(typeRef: TypeRef): String = match typeRef {
+    pub def bareName(typeRef: TypeRef): String = match typeRef {
         case TypeRef.Scalar(name)    => name
-        case TypeRef.Object(name, _) => name
-        case TypeRef.Enum(name, _)   => name
+        case TypeRef.Object(inner)           => inner#name
+        case TypeRef.Union(inner)            => inner#name
+        case TypeRef.Interface(inner)        => inner#name
+        case TypeRef.Enum(name, _, _)        => name
+        case TypeRef.InputObject(name, _, _) => name
         case TypeRef.ListOf(inner)   => "[${toSdl(inner)}]"
         case TypeRef.Nullable(inner) => bareName(inner)
     }
 
 }
+
+///
+/// SDL に出す enum 値の情報。
+///
+pub type alias EnumValueInfo = { name = String, description = Option[String], deprecated = Option[Deprecation] }
 
 ///
 /// SDL に出す引数の情報。
@@ -129,10 +155,16 @@ pub type alias ErasedField = { info = FieldInfo, fetch = JavaValue.Boxed -> Args
 /// SDL に出す型宣言。ルート型から到達できる物を Schema.collectTypes が集める。
 ///
 pub enum TypeDecl {
-    /// type Name { ... }。フィールドは DataFetcher の配線にも使う
-    case ObjectDecl(String, List[ErasedField])
+    /// type Name implements I { ... }。フィールドは DataFetcher の配線にも使う
+    case ObjectDecl({ name = String, description = Option[String], interfaces = List[String], fields = List[ErasedField] })
+    /// union Name = A | B。TypeResolver の登録にも使う
+    case UnionDecl({ name = String, description = Option[String], members = List[String] })
+    /// interface Name { ... }。TypeResolver の登録にも使う。members は実装型の名前（SDL には出ず、implements の検査に使う）
+    case InterfaceDecl({ name = String, description = Option[String], fields = List[FieldInfo], members = List[String] })
     /// enum Name { ... }
-    case EnumDecl(String, List[String])
+    case EnumDecl(String, Option[String], List[EnumValueInfo])
+    /// input Name { ... }
+    case InputDecl(String, Option[String], List[ArgInfo])
 }
 
 ///
@@ -160,6 +192,7 @@ mod Arg {
 
     ///
     /// クライアントが省略したときの値。Flix の値で受け、SDL には codec で変換して出す。
+    /// input 型の引数には使えない（encode が無いので SDL に null が出る）。withDefaultValue で Value を渡す。
     ///
     pub def withDefault(value: a, arg: Arg[a]): Arg[a] =
         let Arg.Arg(inner) = arg;
@@ -184,9 +217,22 @@ mod Arg {
     /// 型が合わなければ引数名と SDL の型を含む Err。
     ///
     pub def decode(arg: Arg[a], args: Args): Result[FieldError, a] =
+        decodeAs("argument", arg, args)
+
+    ///
+    /// input 型のフィールドとして取り出す。エラー文が「field 'x' must be ...」になる以外は decode と同じ。
+    /// 外側の decode がこの文を包むので、ネストした位置（argument 'input' must be PostInput!: field 'status' must be ...）が読める。
+    ///
+    pub def decodeField(arg: Arg[a], fields: Args): Result[FieldError, a] =
+        decodeAs("field", arg, fields)
+
+    ///
+    /// decode / decodeField の共通部分。kind はエラー文の頭。
+    ///
+    def decodeAs(kind: String, arg: Arg[a], args: Args): Result[FieldError, a] =
         let Arg.Arg(inner) = arg;
         GqlCodec.decode(inner#codec, Map.getWithDefault(inner#name, Value.Null, args))
-            |> Result.mapErr(reason -> "argument '${inner#name}' must be ${TypeRef.toSdl(GqlCodec.typeRef(inner#codec))}: ${reason}")
+            |> Result.mapErr(reason -> "${kind} '${inner#name}' must be ${TypeRef.toSdl(GqlCodec.typeRef(inner#codec))}: ${reason}")
 
 }
 
@@ -219,6 +265,44 @@ mod Out {
     ///
     pub def obj(objectType: ObjectType[a, ef]): Out[a, ef] =
         Out.Out({ typeRef = runner -> ObjectType.typeRef(runner, objectType), encode = (context, x) -> JavaValue.box((context, x)) })
+
+    ///
+    /// union / interface の枝になるオブジェクト型の参照（型消去済み）。
+    ///
+    pub def member(objectType: ObjectType[b, ef]): MemberRef[ef] =
+        runner -> ObjectType.typeRef(runner, objectType)
+
+    ///
+    /// union 型の戻り値。encode は Flix の enum の値を枝の型で箱詰めする（taggedObj を使う）。
+    ///
+    pub def union(name: String, members: List[MemberRef[ef]], encode: Context -> a -> JavaValue.Boxed \ IO): Out[a, ef] =
+        Out.Out({ typeRef = runner -> TypeRef.Union({ name = name, description = None, members = List.map(m -> m(runner), members) }), encode = encode })
+
+    ///
+    /// interface 型の戻り値。fields は SDL に出す形（Schema.abstractField で作る）、members は実装するオブジェクト型。
+    ///
+    pub def interface(name: String, fields: List[Field[Unit, ef]], members: List[MemberRef[ef]], encode: Context -> a -> JavaValue.Boxed \ IO): Out[a, ef] =
+        Out.Out({
+            typeRef = runner -> TypeRef.Interface({
+                name = name, description = None,
+                fields = List.map(field -> Field.erase(runner, field)#info, fields),
+                members = List.map(m -> m(runner), members)
+            }),
+            encode = encode
+        })
+
+    ///
+    /// union / interface の枝の値を、その型のオブジェクトとして箱詰めし、型名のタグを付ける。
+    ///
+    pub def taggedObj(objectType: ObjectType[b, ef], context: Context, x: b): JavaValue.Boxed \ IO =
+        JavaValue.tag(ObjectType.name(objectType), encode(obj(objectType), context, x))
+
+    ///
+    /// union / interface / オブジェクト型に SDL の description を付ける。
+    ///
+    pub def describe(text: String, out: Out[a, ef]): Out[a, ef] =
+        let Out.Out(inner) = out;
+        Out.Out({ typeRef = runner -> TypeRef.describe(text, (inner#typeRef)(runner)) | inner })
 
     ///
     /// nullable にする。None は null。二重に重ねても 1 段。
@@ -319,7 +403,8 @@ mod Field {
         {
             info  = { name = inner#name, args = inner#args, typeRef = (inner#typeRef)(runner), description = inner#description, deprecated = inner#deprecated },
             fetch = (boxed, args) -> runner(() -> {
-                let (context, src): (Context, source) = JavaValue.unbox(boxed);
+                let (_, untagged) = JavaValue.untag(boxed);
+                let (context, src): (Context, source) = JavaValue.unbox(untagged);
                 (inner#resolve)(context, src, args)
             })
         }
@@ -330,11 +415,30 @@ mod Field {
 /// オブジェクト型。名前とフィールド一覧。a はこの型を表す Flix の型、ef はフィールドのリゾルバの効果。
 ///
 pub enum ObjectType[a: Type, ef: Eff] {
-    /// フィールド一覧は相互参照を許すため thunk
-    case ObjectType({ name = String, fields = Unit -> List[Field[a, ef]] })
+    /// フィールド一覧は相互参照を許すため thunk。interfaces は implements する interface の名前
+    case ObjectType({ name = String, description = Option[String], interfaces = List[String], fields = Unit -> List[Field[a, ef]] })
 }
 
+///
+/// union / interface の枝の参照。Runner で型消去してから TypeRef になる。
+///
+pub type alias MemberRef[ef: Eff] = Runner[ef] -> TypeRef
+
 mod ObjectType {
+
+    ///
+    /// implements する interface の名前を付ける。interface のフィールドを全部持つかは graphql-java（と生成器）が検査する。
+    ///
+    pub def implementing(names: List[String], objectType: ObjectType[a, ef]): ObjectType[a, ef] =
+        let ObjectType.ObjectType(inner) = objectType;
+        ObjectType.ObjectType({ interfaces = names | inner })
+
+    ///
+    /// SDL の description を付ける。
+    ///
+    pub def withDescription(text: String, objectType: ObjectType[a, ef]): ObjectType[a, ef] =
+        let ObjectType.ObjectType(inner) = objectType;
+        ObjectType.ObjectType({ description = Some(text) | inner })
 
     ///
     /// 型の名前。
@@ -348,7 +452,7 @@ mod ObjectType {
     ///
     pub def typeRef(runner: Runner[ef], objectType: ObjectType[a, ef]): TypeRef =
         let ObjectType.ObjectType(inner) = objectType;
-        TypeRef.Object(inner#name, () -> List.map(Field.erase(runner), (inner#fields)()))
+        TypeRef.Object({ name = inner#name, description = inner#description, interfaces = inner#interfaces, fields = () -> List.map(Field.erase(runner), (inner#fields)()) })
 
 }
 
@@ -427,7 +531,16 @@ mod Schema {
     /// オブジェクト型を作る。fields は相互参照を許すため thunk で受ける。
     ///
     pub def objectType(name: String, fields: Unit -> List[Field[a, ef]]): ObjectType[a, ef] =
-        ObjectType.ObjectType({ name = name, fields = fields })
+        ObjectType.ObjectType({ name = name, description = None, interfaces = Nil, fields = fields })
+
+    ///
+    /// interface のフィールド。SDL の形だけを持ち、リゾルバは実装型の物が使われる。
+    ///
+    /// WhyNot: FieldInfo を直接作らせず Field にするのは、description / deprecated の付け方（Field.withDescription 等）と
+    /// 戻り値の型の遅延（Runner を待つ）を通常のフィールドと共有するため。resolve は呼ばれない。
+    ///
+    pub def abstractField(name: String, args: List[ArgInfo], out: Out[r, ef]): Field[Unit, ef] =
+        makeField(name, args, out, (_context, _src, _args) -> Err("interface field is resolved by the implementing type"))
 
     ///
     /// スキーマを作る。runner がリゾルバの効果 ef を IO に落とす（graphql-java の DataFetcher から呼ばれる
@@ -451,6 +564,29 @@ mod Schema {
         let roots = inner#queryType#typeRef :: (inner#mutationType |> Option.map(root -> root#typeRef) |> Option.toList);
         List.foldLeft((state, root) -> Result.flatMap(visit(root), state), Ok((Map.empty(), Nil)), roots)
             |> Result.map(state -> snd(state) |> List.reverse)
+            |> Result.flatMap(checkImplements)
+
+    ///
+    /// interface の枝（Out.interface の members）に入っている型が ObjectType.implementing でその interface を名乗っているか。
+    /// 生成物は生成器が揃えるが、手書きの DSL では片方だけ書けてしまう。
+    ///
+    /// WhyNot: declBlock のシグネチャ（同名の型の同一判定）に members を含めて済ませないのは、
+    /// SDL に出ない情報で「別の中身」と判定すると原因が読めないため。別の検査にして文言を出す。
+    ///
+    def checkImplements(types: List[TypeDecl]): Result[String, List[TypeDecl]] =
+        let interfacesOf = name -> types |> List.findMap(decl -> match decl {
+            case TypeDecl.ObjectDecl(object) if object#name == name => Some(object#interfaces)
+            case _                                                 => None
+        }) |> Option.getWithDefault(Nil);
+        let missing = types |> List.flatMap(decl -> match decl {
+            case TypeDecl.InterfaceDecl(interface) =>
+                interface#members |> List.filter(member -> not List.memberOf(interface#name, interfacesOf(member))) |> List.map(member -> "型 ${member} は interface ${interface#name} の枝ですが implements していません")
+            case _ => Nil
+        });
+        match missing {
+            case Nil          => Ok(types)
+            case message :: _ => Err(message)
+        }
 
     ///
     /// SDL を出す。
@@ -496,11 +632,21 @@ mod Schema {
             case TypeRef.Scalar(_)               => Ok(state)
             case TypeRef.ListOf(inner)           => visit(inner, state)
             case TypeRef.Nullable(inner)         => visit(inner, state)
-            case TypeRef.Enum(name, values)      => declare(name, TypeDecl.EnumDecl(name, values), state, Ok)
-            case TypeRef.Object(name, fieldsOf)  =>
-                let fields = fieldsOf();
-                declare(name, TypeDecl.ObjectDecl(name, fields), state, declared ->
+            case TypeRef.Enum(name, description, values) => declare(name, TypeDecl.EnumDecl(name, description, values), state, Ok)
+            case TypeRef.InputObject(name, description, fields) =>
+                declare(name, TypeDecl.InputDecl(name, description, fields), state, declared ->
+                    List.foldLeft((accumulated, field) -> Result.flatMap(visit(field#typeRef), accumulated), Ok(declared), fields))
+            case TypeRef.Object(inner) =>
+                let fields = (inner#fields)();
+                declare(inner#name, TypeDecl.ObjectDecl({ name = inner#name, description = inner#description, interfaces = inner#interfaces, fields = fields }), state, declared ->
                     List.foldLeft((accumulated, field) -> Result.flatMap(visitField(field), accumulated), Ok(declared), fields))
+            case TypeRef.Union(inner) =>
+                declare(inner#name, TypeDecl.UnionDecl({ name = inner#name, description = inner#description, members = List.map(TypeRef.bareName, inner#members) }), state, declared ->
+                    List.foldLeft((accumulated, member) -> Result.flatMap(visit(member), accumulated), Ok(declared), inner#members))
+            case TypeRef.Interface(inner) =>
+                declare(inner#name, TypeDecl.InterfaceDecl({ name = inner#name, description = inner#description, fields = inner#fields, members = List.map(TypeRef.bareName, inner#members) }), state, declared ->
+                    List.foldLeft((accumulated, field) -> Result.flatMap(visitInfo(field), accumulated), Ok(declared), inner#fields)
+                        |> Result.flatMap(afterFields -> List.foldLeft((accumulated, member) -> Result.flatMap(visit(member), accumulated), Ok(afterFields), inner#members)))
         }
 
     ///
@@ -520,8 +666,14 @@ mod Schema {
     /// フィールドの引数の型と戻り値の型を辿る。
     ///
     def visitField(field: ErasedField, state: VisitState): Result[String, VisitState] =
-        List.foldLeft((accumulated, arg) -> Result.flatMap(visit(arg#typeRef), accumulated), Ok(state), field#info#args)
-            |> Result.flatMap(visit(field#info#typeRef))
+        visitInfo(field#info, state)
+
+    ///
+    /// フィールドの情報から引数の型と戻り値の型を辿る。
+    ///
+    def visitInfo(info: FieldInfo, state: VisitState): Result[String, VisitState] =
+        List.foldLeft((accumulated, arg) -> Result.flatMap(visit(arg#typeRef), accumulated), Ok(state), info#args)
+            |> Result.flatMap(visit(info#typeRef))
 
     ///
     /// schema { query: ... mutation: ... } のブロック。
@@ -531,16 +683,47 @@ mod Schema {
         "schema {\n  query: ${inner#queryType#name}${mutationLine}\n}"
 
     ///
-    /// type Name { ... } または enum Name { ... } のブロック。
+    /// type / enum / input / union / interface の宣言ブロック。
     ///
     def declBlock(decl: TypeDecl): String = match decl {
-        case TypeDecl.ObjectDecl(name, fields) =>
-            let body = fields |> List.map(field -> fieldLine(field#info)) |> List.join("\n");
-            "type ${name} {\n${body}\n}"
-        case TypeDecl.EnumDecl(name, values) =>
-            let body = values |> List.map(value -> "  ${value}") |> List.join("\n");
-            "enum ${name} {\n${body}\n}"
+        case TypeDecl.InputDecl(name, description, fields) =>
+            let body = fields |> List.map(field -> "  ${argText(field)}") |> List.join("\n");
+            "${typeDescription(description)}input ${name} {\n${body}\n}"
+        case TypeDecl.ObjectDecl(inner) =>
+            let body = inner#fields |> List.map(field -> fieldLine(field#info)) |> List.join("\n");
+            let implements = if (List.isEmpty(inner#interfaces)) "" else " implements " + List.join(" & ", inner#interfaces);
+            "${typeDescription(inner#description)}type ${inner#name}${implements} {\n${body}\n}"
+        case TypeDecl.UnionDecl(inner) =>
+            "${typeDescription(inner#description)}union ${inner#name} = ${List.join(" | ", inner#members)}"
+        case TypeDecl.InterfaceDecl(inner) =>
+            let body = inner#fields |> List.map(fieldLine) |> List.join("\n");
+            "${typeDescription(inner#description)}interface ${inner#name} {\n${body}\n}"
+        case TypeDecl.EnumDecl(name, description, values) =>
+            let body = values |> List.map(enumValueLine) |> List.join("\n");
+            "${typeDescription(description)}enum ${name} {\n${body}\n}"
     }
+
+    ///
+    /// 型の description。あれば宣言の直前の行に出す。
+    ///
+    def typeDescription(description: Option[String]): String =
+        description |> Option.map(text -> "${stringLiteral(text)}\n") |> Option.getWithDefault("")
+
+    ///
+    /// enum 値 1 行。フィールドと同じく description は直前の行、deprecated は末尾。
+    ///
+    def enumValueLine(value: EnumValueInfo): String =
+        let description = value#description |> Option.map(text -> "  ${stringLiteral(text)}\n") |> Option.getWithDefault("");
+        "${description}  ${value#name}${deprecatedText(value#deprecated)}"
+
+    ///
+    /// @deprecated の末尾表記。無ければ空。
+    ///
+    def deprecatedText(deprecated: Option[Deprecation]): String =
+        deprecated |> Option.map(deprecation -> match deprecation {
+            case Deprecation.Reason(text) => " @deprecated(reason: ${stringLiteral(text)})"
+            case Deprecation.NoReason     => " @deprecated"
+        }) |> Option.getWithDefault("")
 
     ///
     /// フィールド 1 行。description があれば直前の行に、deprecated があれば末尾に付く。
@@ -550,11 +733,7 @@ mod Schema {
     ///
     def fieldLine(info: FieldInfo): String =
         let description = info#description |> Option.map(text -> "  ${stringLiteral(text)}\n") |> Option.getWithDefault("");
-        let deprecated = info#deprecated |> Option.map(deprecation -> match deprecation {
-            case Deprecation.Reason(text) => " @deprecated(reason: ${stringLiteral(text)})"
-            case Deprecation.NoReason     => " @deprecated"
-        }) |> Option.getWithDefault("");
-        "${description}  ${info#name}${argsBlock(info#args)}: ${TypeRef.toSdl(info#typeRef)}${deprecated}"
+        "${description}  ${info#name}${argsBlock(info#args)}: ${TypeRef.toSdl(info#typeRef)}${deprecatedText(info#deprecated)}"
 
     ///
     /// (a: Int!, b: Int! = 1) の部分。引数が無ければ空。

@@ -33,15 +33,39 @@ pub type alias FieldDef = { name = String, args = List[ArgDef], ty = Ty, descrip
 ///
 /// type Name { ... }
 ///
-pub type alias ObjectDef = { name = String, fields = List[FieldDef] }
+pub type alias ObjectDef = { name = String, description = Option[String], interfaces = List[String], fields = List[FieldDef] }
+
+///
+/// union Name = A | B
+///
+pub type alias UnionDef = { name = String, description = Option[String], members = List[String] }
+
+///
+/// interface Name { ... }
+///
+pub type alias InterfaceDef = { name = String, description = Option[String], fields = List[FieldDef] }
+
+///
+/// input Name { ... }。フィールドは引数と同じ形。
+///
+pub type alias InputDef = { name = String, description = Option[String], fields = List[ArgDef] }
+
+///
+/// enum の値 1 つ。
+///
+pub type alias EnumValueDef = { name = String, description = Option[String], deprecated = Option[Deprecation] }
 
 ///
 /// enum Name { ... }
 ///
-pub type alias EnumDef = { name = String, values = List[String] }
+pub type alias EnumDef = { name = String, description = Option[String], values = List[EnumValueDef] }
 
 ///
 /// SDL 全体。queryName / mutationName は `schema { }` ブロックで変えられる（無ければ Query と、あれば Mutation）。
 /// objectNames / enumNames は objects / enums の名前の集合（型参照の解決で毎回リストを走査しないため）。
 ///
-pub type alias SdlDocument = { objects = List[ObjectDef], enums = List[EnumDef], objectNames = Set[String], enumNames = Set[String], queryName = String, mutationName = Option[String] }
+pub type alias SdlDocument = {
+    objects = List[ObjectDef], enums = List[EnumDef], inputs = List[InputDef], unions = List[UnionDef], interfaces = List[InterfaceDef],
+    objectNames = Set[String], enumNames = Set[String], inputNames = Set[String], unionNames = Set[String], interfaceNames = Set[String],
+    queryName = String, mutationName = Option[String]
+}

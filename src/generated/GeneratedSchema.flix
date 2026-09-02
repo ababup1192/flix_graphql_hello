@@ -4,14 +4,14 @@
 mod Generated {
 
     /// 生成元の SDL 本文（改行は LF）。GeneratedCheck が schema.graphql と照合する
-    pub def sdlText(): String = "type Query {\n  add(a: Int!, b: Int!): Int!\n  \"\"\"n 番目のフィボナッチ数\"\"\"\n  fibonacci(n: Int!): Int!\n  post(id: ID!): Post\n  \"\"\"status を省くと PUBLISHED だけ。null を渡すと全件\"\"\"\n  posts(status: PostStatus = PUBLISHED): [Post!]!\n  counter: Int!\n}\n\nenum PostStatus {\n  DRAFT\n  PUBLISHED\n}\n\ntype Post {\n  id: ID!\n  title: String!\n  status: PostStatus!\n  author: Author!\n}\n\ntype Author {\n  id: ID!\n  name: String!\n  posts: [Post!]!\n}\n\ntype Mutation {\n  increment(by: Int!): Int!\n}\n"
+    pub def sdlText(): String = "type Query {\n  add(a: Int!, b: Int!): Int!\n  \"\"\"n 番目のフィボナッチ数\"\"\"\n  fibonacci(n: Int!): Int!\n  post(id: ID!): Post\n  \"\"\"status を省くと PUBLISHED だけ。null を渡すと全件\"\"\"\n  posts(status: PostStatus = PUBLISHED): [Post!]!\n  counter: Int!\n  \"\"\"title か name に text を含む記事と書き手\"\"\"\n  search(text: String!): [SearchResult!]!\n  node(id: ID!): Node\n}\n\n\"\"\"ID で引ける物\"\"\"\ninterface Node {\n  id: ID!\n}\n\n\"\"\"検索結果\"\"\"\nunion SearchResult = Post | Author\n\n\"\"\"記事の公開状態\"\"\"\nenum PostStatus {\n  \"\"\"下書き。一覧には出ない\"\"\"\n  DRAFT\n  PUBLISHED\n}\n\n\"\"\"記事\"\"\"\ntype Post implements Node {\n  id: ID!\n  title: String!\n  status: PostStatus!\n  author: Author!\n}\n\ntype Author implements Node {\n  id: ID!\n  name: String!\n  posts: [Post!]!\n}\n\n\"\"\"createPost の入力\"\"\"\ninput PostInput {\n  title: String!\n  status: PostStatus = DRAFT\n  authorId: ID!\n}\n\ntype Mutation {\n  increment(by: Int!): Int!\n  \"\"\"保存はしない。input から組み立てた Post を返すだけ\"\"\"\n  createPost(input: PostInput!): Post!\n}\n"
 
     /// 生成した schemagen のバージョン
-    pub def generatorVersion(): String = "3"
+    pub def generatorVersion(): String = "6"
 
-    /// enum PostStatus
+    /// enum PostStatus。記事の公開状態
     pub enum PostStatus with Eq, Order, ToString {
-        /// DRAFT
+        /// 下書き。一覧には出ない
         case Draft
         /// PUBLISHED
         case Published
@@ -19,7 +19,46 @@ mod Generated {
 
     /// PostStatus の Codec
     pub def postStatusCodec(): GqlCodec[PostStatus] =
-        GqlCodec.enumOf("PostStatus", value -> match value { case PostStatus.Draft => "DRAFT" case PostStatus.Published => "PUBLISHED" }, PostStatus.Draft :: PostStatus.Published :: Nil)
+        GqlCodec.enumOf("PostStatus", value -> match value { case PostStatus.Draft => "DRAFT" case PostStatus.Published => "PUBLISHED" }, PostStatus.Draft :: PostStatus.Published :: Nil) |> GqlCodec.describe("記事の公開状態") |> GqlCodec.describeValue(PostStatus.Draft, "下書き。一覧には出ない")
+
+    /// input PostInput
+    pub type alias PostInput = { title = String, status = Option[PostStatus], authorId = Id }
+
+    /// PostInput の Codec
+    pub def postInputCodec(): GqlCodec[PostInput] =
+        let f0 = Schema.arg("title", GqlCodec.string());
+        let f1 = Schema.arg("status", GqlCodec.option(postStatusCodec())) |> Arg.withDefaultValue(Value.Str("DRAFT"));
+        let f2 = Schema.arg("authorId", GqlCodec.id());
+        GqlCodec.inputObject("PostInput", Arg.info(f0) :: Arg.info(f1) :: Arg.info(f2) :: Nil, fields ->
+            forM (v0 <- Arg.decodeField(f0, fields); v1 <- Arg.decodeField(f1, fields); v2 <- Arg.decodeField(f2, fields)) yield { title = v0, status = v1, authorId = v2 }) |> GqlCodec.describe("createPost の入力")
+
+    /// union SearchResult。検索結果。人はこの enum に包んで返す
+    pub enum SearchResult {
+        /// Post
+        case Post(Post)
+        /// Author
+        case Author(Author)
+    }
+
+    /// union SearchResult の Out
+    def searchResultOut(resolvers: Resolvers[ef]): Out[SearchResult, ef] =
+        Out.union("SearchResult", Out.member(postType(resolvers)) :: Out.member(authorType(resolvers)) :: Nil, (context, value) -> match value { case SearchResult.Post(x) => Out.taggedObj(postType(resolvers), context, x) case SearchResult.Author(x) => Out.taggedObj(authorType(resolvers), context, x) }) |> Out.describe("検索結果")
+
+    /// interface Node。ID で引ける物。人はこの enum に包んで返す
+    pub enum Node {
+        /// Post
+        case Post(Post)
+        /// Author
+        case Author(Author)
+    }
+
+    /// interface Node の Out
+    def nodeOut(resolvers: Resolvers[ef]): Out[Node, ef] =
+        Out.interface("Node",
+            {
+                Schema.abstractField("id", Nil, Out.id())
+            } ::
+            Nil, Out.member(postType(resolvers)) :: Out.member(authorType(resolvers)) :: Nil, (context, value) -> match value { case Node.Post(x) => Out.taggedObj(postType(resolvers), context, x) case Node.Author(x) => Out.taggedObj(authorType(resolvers), context, x) }) |> Out.describe("ID で引ける物")
 
     /// Query.add
     pub type alias QueryAddResolver[ef: Eff] = Context -> Int32 -> Int32 -> Result[FieldError, Int32] \ ef
@@ -31,6 +70,10 @@ mod Generated {
     pub type alias QueryPostsResolver[ef: Eff] = Context -> Option[PostStatus] -> Result[FieldError, List[Post]] \ ef
     /// Query.counter
     pub type alias QueryCounterResolver[ef: Eff] = Context -> Result[FieldError, Int32] \ ef
+    /// Query.search
+    pub type alias QuerySearchResolver[ef: Eff] = Context -> String -> Result[FieldError, List[SearchResult]] \ ef
+    /// Query.node
+    pub type alias QueryNodeResolver[ef: Eff] = Context -> Id -> Result[FieldError, Option[Node]] \ ef
     /// Post.id
     pub type alias PostIdResolver[ef: Eff] = Context -> Post -> Result[FieldError, Id] \ ef
     /// Post.title
@@ -47,6 +90,8 @@ mod Generated {
     pub type alias AuthorPostsResolver[ef: Eff] = Context -> Author -> Result[FieldError, List[Post]] \ ef
     /// Mutation.increment
     pub type alias MutationIncrementResolver[ef: Eff] = Context -> Int32 -> Result[FieldError, Int32] \ ef
+    /// Mutation.createPost
+    pub type alias MutationCreatePostResolver[ef: Eff] = Context -> PostInput -> Result[FieldError, Post] \ ef
 
     /// type Query のリゾルバ一式。ef はリゾルバの効果
     pub type alias QueryResolvers[ef: Eff] = {
@@ -54,7 +99,9 @@ mod Generated {
         fibonacci = QueryFibonacciResolver[ef],
         post = QueryPostResolver[ef],
         posts = QueryPostsResolver[ef],
-        counter = QueryCounterResolver[ef]
+        counter = QueryCounterResolver[ef],
+        search = QuerySearchResolver[ef],
+        node = QueryNodeResolver[ef]
     }
 
     /// type Post のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
@@ -74,7 +121,8 @@ mod Generated {
 
     /// type Mutation のリゾルバ一式。ef はリゾルバの効果
     pub type alias MutationResolvers[ef: Eff] = {
-        increment = MutationIncrementResolver[ef]
+        increment = MutationIncrementResolver[ef],
+        createPost = MutationCreatePostResolver[ef]
     }
 
     /// type Post の既定リゾルバ。source の同名ラベルをそのまま返す。author は含まない（オブジェクト型を返すか、引数を持つ）
@@ -137,6 +185,16 @@ mod Generated {
                 Schema.fieldRaw("counter", Nil, Out.int32(), (context, _src, _args) ->
                     (resolvers#queryRoot#counter)(context))
             } ::
+            {
+                let arg0 = Schema.arg("text", GqlCodec.string());
+                Schema.fieldRaw("search", Arg.info(arg0) :: Nil, Out.list(searchResultOut(resolvers)), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#queryRoot#search)(context, v0)) yield result) |> Field.withDescription("title か name に text を含む記事と書き手")
+            } ::
+            {
+                let arg0 = Schema.arg("id", GqlCodec.id());
+                Schema.fieldRaw("node", Arg.info(arg0) :: Nil, Out.option(nodeOut(resolvers)), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#queryRoot#node)(context, v0)) yield result)
+            } ::
             Nil)
 
     /// type Post
@@ -158,7 +216,7 @@ mod Generated {
                 Schema.fieldRaw("author", Nil, Out.obj(authorType(resolvers)), (context, src, _args) ->
                     (resolvers#post#author)(context, src))
             } ::
-            Nil)
+            Nil) |> ObjectType.withDescription("記事") |> ObjectType.implementing("Node" :: Nil)
 
     /// type Author
     def authorType(resolvers: Resolvers[ef]): ObjectType[Author, ef] =
@@ -175,7 +233,7 @@ mod Generated {
                 Schema.fieldRaw("posts", Nil, Out.list(Out.obj(postType(resolvers))), (context, src, _args) ->
                     (resolvers#author#posts)(context, src))
             } ::
-            Nil)
+            Nil) |> ObjectType.implementing("Node" :: Nil)
 
     /// type Mutation
     def mutationType(resolvers: Resolvers[ef]): ObjectType[Unit, ef] =
@@ -184,6 +242,11 @@ mod Generated {
                 let arg0 = Schema.arg("by", GqlCodec.int32());
                 Schema.fieldRaw("increment", Arg.info(arg0) :: Nil, Out.int32(), (context, _src, args) ->
                     forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#increment)(context, v0)) yield result)
+            } ::
+            {
+                let arg0 = Schema.arg("input", postInputCodec());
+                Schema.fieldRaw("createPost", Arg.info(arg0) :: Nil, Out.obj(postType(resolvers)), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#createPost)(context, v0)) yield result) |> Field.withDescription("保存はしない。input から組み立てた Post を返すだけ")
             } ::
             Nil)
 
