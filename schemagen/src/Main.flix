@@ -5,10 +5,11 @@
 /// - `make scaffold [TYPE=Post] [DEFAULTS=no]`: リゾルバの雛形を書く（既にあれば触らない）
 ///
 /// どの SDL をどこへ書くかは環境変数で受ける。
-/// - SCHEMAGEN_SDL: SDL のパス（既定 ../schema.graphql）
-/// - SCHEMAGEN_MODULE: 生成物のモジュール名（既定 Generated）。出力先は ../src/generated/graphql/<Module>Schema.flix
-/// - SCHEMAGEN_EFF: 雛形が使う効果の別名（既定 AppEff）
-/// - SCAFFOLD_DIR: 雛形の置き場所（既定 ../src/sample/resolvers）
+/// - SCHEMAGEN_SDL: SDL のパス（既定 ../admin.graphql）
+/// - SCHEMAGEN_MODULE: 生成物のモジュール名（既定 GeneratedAdmin）
+/// - SCHEMAGEN_OUT: 出力先（既定 ../src/generated/graphql/<Module>Schema.flix）
+/// - SCHEMAGEN_EFF: 雛形が使う効果の別名（既定 AdminEff）
+/// - SCAFFOLD_DIR: 雛形の置き場所（既定 ../src/admin）
 ///
 /// WhyNot: モードと型名をコマンドライン引数で受けないのは、`flix run` がプログラム引数を受け取れないため。
 /// 環境変数 SCHEMAGEN_MODE / SCAFFOLD_TYPE / SCAFFOLD_DEFAULTS で受ける。
@@ -40,16 +41,16 @@ def main(): Unit \ {IO, Fs.FileRead, Fs.FileWrite, Sys.Env, Sys.Exit} =
 type alias Target = { sdlPath = String, moduleName = String, outputPath = String, effName = String, scaffoldDir = String }
 
 ///
-/// 環境変数から対象を組む。既定は schema.graphql → Generated。
+/// 環境変数から対象を組む。既定は admin.graphql → GeneratedAdmin。見本は make generate が test/sample へ向ける。
 ///
 def targetFromEnv(): Target \ Sys.Env =
-    let moduleName = Sys.Env.getVar("SCHEMAGEN_MODULE") |> Option.getWithDefault("Generated");
+    let moduleName = Sys.Env.getVar("SCHEMAGEN_MODULE") |> Option.getWithDefault("GeneratedAdmin");
     {
-        sdlPath     = Sys.Env.getVar("SCHEMAGEN_SDL") |> Option.getWithDefault("../schema.graphql"),
+        sdlPath     = Sys.Env.getVar("SCHEMAGEN_SDL") |> Option.getWithDefault("../admin.graphql"),
         moduleName  = moduleName,
-        outputPath  = "../src/generated/graphql/${moduleName}Schema.flix",
-        effName     = Sys.Env.getVar("SCHEMAGEN_EFF") |> Option.getWithDefault("AppEff"),
-        scaffoldDir = Sys.Env.getVar("SCAFFOLD_DIR") |> Option.getWithDefault("../src/sample/resolvers")
+        outputPath  = Sys.Env.getVar("SCHEMAGEN_OUT") |> Option.getWithDefault("../src/generated/graphql/${moduleName}Schema.flix"),
+        effName     = Sys.Env.getVar("SCHEMAGEN_EFF") |> Option.getWithDefault("AdminEff"),
+        scaffoldDir = Sys.Env.getVar("SCAFFOLD_DIR") |> Option.getWithDefault("../src/admin")
     }
 
 ///

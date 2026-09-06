@@ -5,11 +5,12 @@ Java interop で使い、Flix 側は代数的 effect でそれを境界に閉じ
 
 API は 2 つある。
 
-- `/admin/graphql`: 管理 API。content type とフィールドの定義を読み書きする。スキーマは `admin.graphql`（SDL）が正で、
+- `/admin/graphql`: 管理 API。content type とフィールドの定義、entry の下書きを読み書きする。スキーマは `admin.graphql`（SDL）が正で、
   そこから型付きの Flix コードを生成する。人が書くのは SDL と、生成されたレコード型に合わせたリゾルバだけで、
   スキーマとリゾルバのズレはコンパイルで落ちる
-- `/graphql`: 今は graphql-java を試した見本（`schema.graphql`。add / fibonacci / 固定の Post / SQLite のカウンタ）。
-  コンテンツ API（型の定義から実行時に組む）に置き換わる予定
+- `/graphql`: コンテンツ API。型の定義から graphql-java のスキーマを実行時に組む。`blogs` 型を作れば
+  `blog(id)` / `blogs(where, orderBy, first, skip, stage)` と `Blog` / `BlogWhere` / `BlogOrderBy` / `BlogConnection` が生え、
+  定義を変えると次のリクエストで組み直す。読むだけ（リゾルバの効果が `\ DbRead` に閉じる）
 
 HTTP サーバは `java.net.ServerSocket` の上に手書きした最小の HTTP/1.1。設計と作る順番は
 [docs/design/cms-spec](https://claude.ai/code/artifact/bdc58ed6-4ee0-45bf-9282-a842a0fcc988) にある。
@@ -61,6 +62,20 @@ curl -s -X POST localhost:8080/admin/graphql -d '{"query": "{ contentTypes { api
 ```
 
 名前の規則（lowerCamel の apiId、予約名、他の型との衝突）に合わない入力は `errors[].message` に理由が並ぶ。
+
+### コンテンツ API の例
+
+型 `blogs`（title / views）と entry があれば、`/graphql` にこう投げられる。公開（ステップ 5）まではまだ `stage: DRAFT` で引く。
+
+```bash
+curl -s -X POST localhost:8080/graphql -H 'Content-Type: application/json' \
+  -d '{"query": "{ blogs(stage: DRAFT, where: { title_contains: \"flix\", OR: [{ views_gte: 10 }] }, orderBy: [views_DESC], first: 10) { totalCount nodes { id title views } } }"}'
+curl -s -X POST localhost:8080/graphql -d '{"query": "{ blog(id: \"b1\", stage: DRAFT) { title updatedAt } }"}'
+curl -s -X POST localhost:8080/graphql -d '{"query": "{ __type(name: \"BlogWhere\") { inputFields { name } } }"}'
+```
+
+`where` はフィールドの kind ごとに `_eq` / `_in` / `_contains` / `_startsWith`（文字列）、`_eq` / `_gt` / `_gte` / `_lt` / `_lte`（数値）、
+`_eq`（真偽値）、`_isNull` が生え、`OR` / `AND` は 1 段（`BlogWhereLeaf` のリスト）。値は全部プレースホルダで SQL に渡す。
 
 entry（下書き）は `fields: JSON` で中身を渡す。型に無いフィールドや kind に合わない値は invalid。`updateEntry` は
 `expectedVersion` が今の version と違えば conflict（楽観ロック）。

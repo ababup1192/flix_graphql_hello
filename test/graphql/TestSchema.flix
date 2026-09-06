@@ -124,7 +124,8 @@ def testSchemaOptionCollapses(): Unit \ Assert =
 @Test
 def testSchemaGeneratedIsUpToDate(): Unit \ {Assert, Fs.FileRead} =
     Assert.assertEq(expected = Ok(()),
-        Fs.FileRead.read("schema.graphql") |> Result.mapErr(ToString.toString) |> Result.flatMap(sdl -> GeneratedCheck.check(GeneratedCheck.schema(), sdl)))
+        Fs.FileRead.read("schema.graphql") |> Result.mapErr(ToString.toString) |> Result.flatMap(sdl -> GeneratedCheck.check(
+            { label = "test/sample/GeneratedSchema.flix", sdlPath = "schema.graphql", sdlText = Generated.sdlText(), generatorVersion = Generated.generatorVersion() }, sdl)))
 
 /// src/generated/GeneratedAdminSchema.flix も同じく admin.graphql と一致する。
 @Test

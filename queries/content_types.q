@@ -32,3 +32,8 @@ query touchContentType(id: Int64) -> exec {
 query deleteContentType(id: Int64) -> exec {
     DELETE FROM content_types WHERE id = :id
 }
+
+// 型の定義が変わったかの目印。コンテンツ API のスキーマを組み直すかの判断に使う
+query schemaFingerprint() -> one {
+    SELECT count(*)::bigint AS types, max(updated_at)::timestamptz AS latest FROM content_types
+}

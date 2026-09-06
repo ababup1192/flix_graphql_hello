@@ -7,7 +7,7 @@ mod ContentTypesQueries {
     ///
     /// 生成元 content_types.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -935590346
+    pub def sourceHash(): Int32 = 539140839
 
     ///
     /// listContentTypes の 1 行。
@@ -132,5 +132,24 @@ mod ContentTypesQueries {
         let sql = "DELETE FROM content_types WHERE id = $1";
         let params = List#{SqlValue.Int64(id)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// schemaFingerprint の 1 行。
+    ///
+    pub type alias SchemaFingerprintRow = { types = Option[Int64], latest = Option[Timestamp.Timestamp] }
+
+    def schemaFingerprintDecoder(): Decoder[SchemaFingerprintRow] =
+        forA (
+            types <- Decoder.opt(Decoder.int64("types"));
+            latest <- Decoder.opt(Decoder.timestamp("latest"))
+        ) yield { types = types, latest = latest }
+
+    ///
+    /// schemaFingerprint: SELECT count(*)::bigint AS types, max(updated_at)::timestamptz AS latest FROM content_types
+    ///
+    pub def schemaFingerprint(): Option[SchemaFingerprintRow] \ DbRead =
+        let sql = "SELECT count(*)::bigint AS types, max(updated_at)::timestamptz AS latest FROM content_types";
+        let params = Nil;
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(schemaFingerprintDecoder(), sql, params))
 
 }

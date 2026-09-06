@@ -34,7 +34,7 @@ make test-pg   # 実 PostgreSQL 込み（コンテナの起動と停止まで）
 make db-up     # PostgreSQL を起動
 make migrate   # migrations/ を当てる
 make run       # サーバ起動（CMS_DSN 等は Makefile が渡す）
-make generate  # schema.graphql / admin.graphql → src/generated/graphql/（schemagen）
+make generate  # admin.graphql → src/generated/graphql/、schema.graphql（見本）→ test/sample/（schemagen）
 make gen       # migrations/ + queries/*.q → src/generated/sql/（sqlfx の生成器。flix_db 側で動く）
 ```
 
@@ -51,14 +51,15 @@ src/generated/graphql/ schemagen の生成物（触らない）。GeneratedSchem
 src/generated/sql/     sqlfx の生成物（触らない）。*Queries / Tables
 src/cms/model/         ドメインの型。Ids（TypeId / FieldId / ApiId / TypeName）、ContentType（enum・レコード・Draft / Changes・FieldConfig）、Entry（EntryId / Stage / EntryData / IdGen）
 src/cms/rules/         純粋な規則。Naming（予約名・衝突・kind と config）、EntryValidation（下書きの中身。緩い）
-src/cms/db/            行とドメインの値の変換。列名を知るのはここだけ
+src/cms/db/            行とドメインの値の変換と、絞り込みの SQL 化（EntryFilterSql）。列名と JSONB の式を知るのはここだけ
 src/cms/               ユースケース（ContentTypes / ContentEntries）と業務エラー（CmsErr）
 src/admin/             管理 API。AdminMapping（GraphQL の型 ↔ ドメイン）、リゾルバ、AdminRunner（最初の SQL で借りる Tx）
+src/content/           コンテンツ API。ContentSchemaBuilder（定義 → Schema）、ContentEngine（目印で組み直す置き場）、ContentRunner（読むだけ）
 src/app/               Server（ルーティング・CORS・/health）、DbConfig、Health
 src/http/              手書き HTTP/1.1 と Cors
 src/graphql/           graphql-java の境界と Schema の DSL
-src/sample/            graphql-java を試した見本（add / fibonacci / Post / SQLite のカウンタ）。コンテンツ API ができたら消す
 test/                  src と同じ構成。test/Pg/ だけ実 PG
+test/sample/           graphql-java の境界のテストで使う見本のスキーマ（schema.graphql → GeneratedSchema.flix、Post / Counter）。本番では使わない
 ```
 
 ## 型の決まり

@@ -38,6 +38,23 @@ mod CmsTestKit {
         { apiId = apiId(api), name = api, kind = kind, many = false, required = false, unique = false, localized = false, config = config }
 
     ///
+    /// entry の中身。(apiId, 値) の並びから。
+    ///
+    pub def entryData(pairs: List[(String, Util.Json.Json)]): EntryData =
+        pairs |> List.map(match (key, value) -> (apiId(key), value)) |> List.toMap
+
+    ///
+    /// 整数の JSON 値。
+    ///
+    pub def intJson(n: Int32): Util.Json.Json = Util.Json.Json.JNumber(Int32.toBigDecimal(n))
+
+    ///
+    /// 小数の JSON 値。表せなければ null。
+    ///
+    pub def floatJson(x: Float64): Util.Json.Json =
+        Float64.tryToBigDecimal(x) |> Option.map(Util.Json.Json.JNumber) |> Option.getWithDefault(Util.Json.Json.JNull)
+
+    ///
     /// 誤りのパスだけ取り出す（メッセージの文言はテストしない）。
     ///
     pub def violationPaths(violations: List[Violation]): List[String] =

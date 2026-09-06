@@ -22,12 +22,6 @@ mod GeneratedCheck {
     pub def expectedGeneratorVersion(): String = "6"
 
     ///
-    /// schema.graphql と src/generated/graphql/GeneratedSchema.flix（mod Generated）の組。
-    ///
-    pub def schema(): Generated =
-        { label = "src/generated/graphql/GeneratedSchema.flix", sdlPath = "schema.graphql", sdlText = Generated.sdlText(), generatorVersion = Generated.generatorVersion() }
-
-    ///
     /// admin.graphql と src/generated/graphql/GeneratedAdminSchema.flix（mod GeneratedAdmin）の組。
     ///
     pub def admin(): Generated =

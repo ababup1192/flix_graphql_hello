@@ -1,32 +1,33 @@
 ///
-/// 起動。SDL と生成物の一致、PostgreSQL の接続、migrations の適用済みを確かめ、2 つのエンジン（見本の /graphql と
-/// 管理 API の /admin/graphql）を組み立てて 8080 番で待つ。起動に失敗したらメッセージを出して終了コード 1 で終わる。
+/// 起動。SDL と生成物の一致、PostgreSQL の接続、migrations の適用済みを確かめ、管理 API（/admin/graphql）と
+/// コンテンツ API（/graphql。型の定義から実行時に組み、定義が変われば組み直す）を 8080 番で待つ。
+/// 起動に失敗したらメッセージを出して終了コード 1 で終わる。
 ///
 /// 環境変数: CMS_DSN / CMS_DB_USER / CMS_DB_PASSWORD（DbConfig）、CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）
 ///
 def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
     let started = forM (
-        _           <- checkGenerated(GeneratedCheck.schema());
         _           <- checkGenerated(GeneratedCheck.admin());
         connection  <- DbConfig.fromEnv();
         pool        <- openPool(connection);
         _           <- checkMigrations(connection);
-        database    <- SqliteCounter.open("counter.db");
-        engine      <- Graphql.buildEngine(AppSchema.make(f -> SqliteCounter.runWithSqlite(database, f)));
         adminEngine <- Graphql.buildEngine(AdminSchema.make(AdminRunner.make(pool)))
-    ) yield (pool, engine, adminEngine);
+    ) yield (pool, adminEngine);
     match started {
         case Err(message) => { println(message); Sys.Exit.exit(1) }
-        case Ok((pool, engine, adminEngine)) =>
+        case Ok((pool, adminEngine)) =>
             let cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins };
-            let config = { cors = cors, graphqlPath = "/graphql" };
+            let contentConfig = { cors = cors, graphqlPath = "/graphql" };
             let adminConfig = { cors = cors, graphqlPath = "/admin/graphql" };
+            let contentEngines = ContentEngine.create();
             HttpServer.listen(8080, request ->
                 Health.runWithPool(pool, () ->
                     if (Server.pathOf(request#path) == adminConfig#graphqlPath)
                         Graphql.runWithEngine(adminEngine, () -> Server.handle(adminConfig, request))
-                    else
-                        Graphql.runWithEngine(engine, () -> Server.handle(config, request))))
+                    else match ContentEngine.current(contentEngines, pool) {
+                        case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(contentConfig, request))
+                        case Err(message) => Server.unavailable(message)
+                    }))
     }
 
 ///

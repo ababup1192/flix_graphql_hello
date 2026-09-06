@@ -36,6 +36,33 @@ mod ContentEntries {
     pub def countOfType(typeId: TypeId): Int64 \ DbRead =
         EntriesQueries.countEntriesOfType(TypeId.toInt64(typeId)) |> Option.flatMap(row -> row#total) |> Option.getWithDefault(0i64)
 
+    // ---- コンテンツ API（stage の行を読む）----
+
+    ///
+    /// stage の行を id で 1 つ。その stage の中身が無ければ（未公開など）None。
+    ///
+    pub def findByStage(id: EntryId, stage: Stage): Option[Entry] \ DbRead =
+        EntriesQueries.findEntryByStage({ id = EntryId.text(id), stage = EntryRows.stageToDb(stage) }) |> Option.map(EntryRows.toEntry)
+
+    ///
+    /// stage の行の一覧。絞り込みと並び順は EntryFilterSql が SQL にする。SQL は 2 本（一覧と件数）。
+    ///
+    pub def listByStage(owner: ContentType, stage: Stage, listQuery: ListQuery): EntryPage \ DbRead =
+        let typeId = TypeId.toInt64(owner#id);
+        let stageText = EntryRows.stageToDb(stage);
+        let filter = EntryFilterSql.pred(listQuery#filter);
+        let entries = EntriesQueries.listEntriesByStage(
+            { typeId = typeId, stage = stageText, limit = Int32.toInt64(listQuery#first), offset = Int32.toInt64(listQuery#skip) },
+            filter, EntryFilterSql.order(owner#fields, listQuery#orderBy)) |> List.map(EntryRows.toEntry);
+        let total = EntriesQueries.countEntriesByStage({ typeId = typeId, stage = stageText }, filter) |> Option.flatMap(row -> row#total) |> Option.getWithDefault(0i64);
+        { entries = entries, totalCount = total }
+
+    ///
+    /// singleton 用。stage の行を 1 つだけ（更新が新しい物）。
+    ///
+    pub def firstByStage(owner: ContentType, stage: Stage): Option[Entry] \ DbRead =
+        listByStage(owner, stage, { filter = Nil, orderBy = Nil, first = 1, skip = 0 }) |> (page -> List.head(page#entries))
+
     // ---- 書く ----
 
     ///

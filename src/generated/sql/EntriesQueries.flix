@@ -7,7 +7,7 @@ mod EntriesQueries {
     ///
     /// 生成元 entries.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -1549181074
+    pub def sourceHash(): Int32 = -1843406565
 
     ///
     /// findEntry の 1 行。
@@ -144,5 +144,78 @@ mod EntriesQueries {
         let sql = "INSERT INTO entry_contents (entry_id, stage, data) VALUES ($1, $2, $3)\n    ON CONFLICT (entry_id, stage) DO UPDATE SET data = EXCLUDED.data, updated_at = now()";
         let params = List#{SqlValue.Str(args#entryId), SqlValue.Str(args#stage), SqlValue.ofJson(args#data)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// findEntryByStage の 1 行。
+    ///
+    pub type alias FindEntryByStageRow = { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Util.Json.Json }
+
+    def findEntryByStageDecoder(): Decoder[FindEntryByStageRow] =
+        forA (
+            id <- Decoder.str("id");
+            typeId <- Decoder.int64("type_id");
+            version <- Decoder.int32("version");
+            stage <- Decoder.str("stage");
+            publishedAt <- Decoder.opt(Decoder.timestamp("published_at"));
+            createdAt <- Decoder.timestamp("created_at");
+            updatedAt <- Decoder.timestamp("updated_at");
+            data <- Decoder.json("data")
+        ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data }
+
+    ///
+    /// findEntryByStage: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 WHERE e.id = $2 AND e.deleted_at IS NULL
+    ///
+    pub def findEntryByStage(args: { id = String, stage = String }): Option[FindEntryByStageRow] \ DbRead =
+        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    WHERE e.id = $2 AND e.deleted_at IS NULL";
+        let params = List#{SqlValue.Str(args#stage), SqlValue.Str(args#id)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(findEntryByStageDecoder(), sql, params))
+
+    ///
+    /// listEntriesByStage の 1 行。
+    ///
+    pub type alias ListEntriesByStageRow = { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Util.Json.Json }
+
+    def listEntriesByStageDecoder(): Decoder[ListEntriesByStageRow] =
+        forA (
+            id <- Decoder.str("id");
+            typeId <- Decoder.int64("type_id");
+            version <- Decoder.int32("version");
+            stage <- Decoder.str("stage");
+            publishedAt <- Decoder.opt(Decoder.timestamp("published_at"));
+            createdAt <- Decoder.timestamp("created_at");
+            updatedAt <- Decoder.timestamp("updated_at");
+            data <- Decoder.json("data")
+        ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data }
+
+    ///
+    /// listEntriesByStage: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 WHERE e.type_id = $2 AND e.deleted_at IS NULL AND TRUE LIMIT $3 OFFSET $4
+    ///
+    pub def listEntriesByStage(args: { typeId = Int64, stage = String, limit = Int64, offset = Int64 }, filter: Fragment.Pred[EntryContentsTable.EntryContentsTable], order: Fragment.Order[EntryContentsTable.EntryContentsTable]): List[ListEntriesByStageRow] \ DbRead =
+        let params0 = List#{SqlValue.Str(args#stage), SqlValue.Int64(args#typeId), SqlValue.Int64(args#limit), SqlValue.Int64(args#offset)};
+        let (filterSql, params1) = Fragment.appendPred(filter, params0);
+        let orderSql = Fragment.renderOrder(order);
+        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    WHERE e.type_id = $2 AND e.deleted_at IS NULL AND " + filterSql + "\n    " + orderSql + "\n    LIMIT $3 OFFSET $4";
+        let params = params1;
+        RawSql.runWithAllow(() -> Sql.fetchAs(listEntriesByStageDecoder(), sql, params))
+
+    ///
+    /// countEntriesByStage の 1 行。
+    ///
+    pub type alias CountEntriesByStageRow = { total = Option[Int64] }
+
+    def countEntriesByStageDecoder(): Decoder[CountEntriesByStageRow] =
+        forA (
+            total <- Decoder.opt(Decoder.int64("total"))
+        ) yield { total = total }
+
+    ///
+    /// countEntriesByStage: SELECT count(*)::bigint AS total FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 WHERE e.type_id = $2 AND e.deleted_at IS NULL AND TRUE
+    ///
+    pub def countEntriesByStage(args: { typeId = Int64, stage = String }, filter: Fragment.Pred[EntryContentsTable.EntryContentsTable]): Option[CountEntriesByStageRow] \ DbRead =
+        let params0 = List#{SqlValue.Str(args#stage), SqlValue.Int64(args#typeId)};
+        let (filterSql, params1) = Fragment.appendPred(filter, params0);
+        let sql = "SELECT count(*)::bigint AS total\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    WHERE e.type_id = $2 AND e.deleted_at IS NULL AND " + filterSql;
+        let params = params1;
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(countEntriesByStageDecoder(), sql, params))
 
 }

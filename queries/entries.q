@@ -53,3 +53,31 @@ query upsertContent(entryId: String, stage: String, data: Json) -> exec {
     INSERT INTO entry_contents (entry_id, stage, data) VALUES (:entryId, :stage, :data)
     ON CONFLICT (entry_id, stage) DO UPDATE SET data = EXCLUDED.data, updated_at = now()
 }
+
+// ---- コンテンツ API ----
+// stage の行を読む。where は断片 DSL のスロットで、JSONB の式（c.data->>'title'）を EntryFilterSql が組む
+
+query findEntryByStage(id: String, stage: String) -> one {
+    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data
+    FROM entries AS e
+    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = :stage
+    WHERE e.id = :id AND e.deleted_at IS NULL
+}
+
+query listEntriesByStage(typeId: Int64, stage: String, limit: Int64, offset: Int64) -> many
+    with filter: Pred[entry_contents], order: Order[entry_contents]
+{
+    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data
+    FROM entries AS e
+    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = :stage
+    WHERE e.type_id = :typeId AND e.deleted_at IS NULL AND {filter}
+    {order}
+    LIMIT :limit OFFSET :offset
+}
+
+query countEntriesByStage(typeId: Int64, stage: String) -> one with filter: Pred[entry_contents] {
+    SELECT count(*)::bigint AS total
+    FROM entries AS e
+    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = :stage
+    WHERE e.type_id = :typeId AND e.deleted_at IS NULL AND {filter}
+}

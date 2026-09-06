@@ -39,10 +39,11 @@ db-up:
 db-down:
 	docker compose down -v
 
-# SDL から src/generated/ を作り直す。schema.graphql → Generated、admin.graphql → GeneratedAdmin
+# SDL から生成物を作り直す。admin.graphql → src/generated/graphql/GeneratedAdminSchema.flix、
+# schema.graphql（graphql-java の境界のテスト用の見本）→ test/sample/GeneratedSchema.flix
 generate:
 	cd schemagen && ../bin/flix run
-	cd schemagen && SCHEMAGEN_SDL=../admin.graphql SCHEMAGEN_MODULE=GeneratedAdmin ../bin/flix run
+	cd schemagen && SCHEMAGEN_SDL=../schema.graphql SCHEMAGEN_MODULE=Generated SCHEMAGEN_OUT=../test/sample/GeneratedSchema.flix ../bin/flix run
 
 # ---- sqlfx（生成器と migrate は flix_db 側の main で動かす。.fpkg には入っていない）----
 FLIX_DB = $(HOME)/Desktop/flix_db
@@ -74,13 +75,13 @@ migrate-new:   # make migrate-new NAME=add_entries
 scaffold:
 	cd schemagen && SCHEMAGEN_MODE=scaffold SCAFFOLD_TYPE=$(TYPE) SCAFFOLD_DEFAULTS=$(DEFAULTS) ../bin/flix run
 
-# 起動中のサーバへサンプルのクエリと mutation を投げる
+# 起動中のサーバへ /health と、管理 API・コンテンツ API のサンプルを投げる
 query:
 	curl -s localhost:8080/health
 	@echo
-	curl -s -X POST localhost:8080/graphql -H 'Content-Type: application/json' \
-		-d '{"query": "{ add(a: 1, b: 2) fibonacci(n: 10) post(id: \"p1\") { title author { name } } }"}'
+	curl -s -X POST localhost:8080/admin/graphql -H 'Content-Type: application/json' \
+		-d '{"query": "{ contentTypes { apiId singular fields { apiId kind } } }"}'
 	@echo
 	curl -s -X POST localhost:8080/graphql -H 'Content-Type: application/json' \
-		-d '{"query": "mutation { increment(by: 1) }"}'
+		-d '{"query": "{ __schema { queryType { fields { name } } } }"}'
 	@echo

@@ -7,9 +7,6 @@ use CmsErr.CmsFailure
 
 def entryId(text: String): EntryId = EntryId.parse(text) |> Option.getWithDefault(EntryId.EntryId("invalid"))
 
-def draftData(pairs: List[(String, Json)]): EntryData =
-    pairs |> List.map(match (key, value) -> (CmsTestKit.apiId(key), value)) |> List.toMap
-
 ///
 /// blogs 型（title / views）を作って id を返す。
 ///
@@ -32,9 +29,9 @@ def withIds(ids: List[String], body: Unit -> a \ ef): a \ ef - IdGen =
 def testPgEntryLifecycle(): Unit \ {IO, Assert} =
     let result = PgTestSupport.withDb(() -> withIds(List#{"a1"}, () -> {
         let blogs = blogsWithFields();
-        let created = ContentEntries.create(blogs, None, draftData(List#{("title", Json.JString("hello")), ("views", Json.JNumber(Int32.toBigDecimal(3)))}));
-        let renamed = ContentEntries.update(created#id, draftData(List#{("title", Json.JString("hi"))}), created#version);
-        let cleared = ContentEntries.update(created#id, draftData(List#{("views", Json.JNull)}), renamed#version);
+        let created = ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("hello")), ("views", Json.JNumber(Int32.toBigDecimal(3)))}));
+        let renamed = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("hi"))}), created#version);
+        let cleared = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("views", Json.JNull)}), renamed#version);
         ContentEntries.delete(created#id);
         ((EntryId.text(created#id), created#version, created#stage, Map.size(created#data)),
          (renamed#version, Map.get(CmsTestKit.apiId("title"), renamed#data)),
@@ -48,9 +45,9 @@ def testPgEntryLifecycle(): Unit \ {IO, Assert} =
 def testPgEntryConflict(): Unit \ {IO, Assert} =
     let result = PgTestSupport.withDb(() -> withIds(List#{"c1"}, () -> {
         let blogs = blogsWithFields();
-        let created = ContentEntries.create(blogs, None, draftData(List#{("title", Json.JString("v1"))}));
-        discard ContentEntries.update(created#id, draftData(List#{("title", Json.JString("v2"))}), 1);
-        let stale = CmsErr.runWithResult(() -> ContentEntries.update(created#id, draftData(List#{("title", Json.JString("v3"))}), 1));
+        let created = ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("v1"))}));
+        discard ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("v2"))}), 1);
+        let stale = CmsErr.runWithResult(() -> ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("v3"))}), 1));
         (stale |> Result.map(entry -> entry#version), ContentEntries.get(created#id) |> (entry -> Map.get(CmsTestKit.apiId("title"), entry#data)))
     }));
     Assert.assertEq(expected = Ok(Ok((Err(CmsFailure.Conflict(Entity.Entry, "c1", 2)), Some(Json.JString("v2"))))), result)
@@ -60,9 +57,9 @@ def testPgEntryConflict(): Unit \ {IO, Assert} =
 def testPgEntryList(): Unit \ {IO, Assert} =
     let result = PgTestSupport.withDb(() -> withIds(List#{"unused"}, () -> {
         let blogs = blogsWithFields();
-        discard ContentEntries.create(blogs, Some(entryId("first")), draftData(List#{("title", Json.JString("apple"))}));
-        discard ContentEntries.create(blogs, Some(entryId("second")), draftData(List#{("title", Json.JString("banana"))}));
-        discard ContentEntries.create(blogs, Some(entryId("third")), draftData(List#{("title", Json.JString("apricot"))}));
+        discard ContentEntries.create(blogs, Some(entryId("first")), CmsTestKit.entryData(List#{("title", Json.JString("apple"))}));
+        discard ContentEntries.create(blogs, Some(entryId("second")), CmsTestKit.entryData(List#{("title", Json.JString("banana"))}));
+        discard ContentEntries.create(blogs, Some(entryId("third")), CmsTestKit.entryData(List#{("title", Json.JString("apricot"))}));
         let all = ContentEntries.list(blogs, { search = "", first = 10, skip = 0 });
         let searched = ContentEntries.list(blogs, { search = "ap", first = 10, skip = 0 });
         let paged = ContentEntries.list(blogs, { search = "", first = 1, skip = 1 });
@@ -75,8 +72,8 @@ def testPgEntryList(): Unit \ {IO, Assert} =
 def testPgEntrySearchEscapes(): Unit \ {IO, Assert} =
     let result = PgTestSupport.withDb(() -> withIds(List#{"s1", "s2"}, () -> {
         let blogs = blogsWithFields();
-        discard ContentEntries.create(blogs, None, draftData(List#{("title", Json.JString("100% flix"))}));
-        discard ContentEntries.create(blogs, None, draftData(List#{("title", Json.JString("plain"))}));
+        discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("100% flix"))}));
+        discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("plain"))}));
         let byKey = ContentEntries.list(blogs, { search = "title", first = 10, skip = 0 });
         let byPercent = ContentEntries.list(blogs, { search = "100%", first = 10, skip = 0 });
         let byBarePercent = ContentEntries.list(blogs, { search = "%", first = 10, skip = 0 });
@@ -89,9 +86,9 @@ def testPgEntrySearchEscapes(): Unit \ {IO, Assert} =
 def testPgEntryIdNotReusedFromTrash(): Unit \ {IO, Assert} =
     let result = PgTestSupport.withDb(() -> withIds(List#{"t1"}, () -> {
         let blogs = blogsWithFields();
-        let created = ContentEntries.create(blogs, None, draftData(Nil));
+        let created = ContentEntries.create(blogs, None, CmsTestKit.entryData(Nil));
         ContentEntries.delete(created#id);
-        CmsErr.runWithResult(() -> ContentEntries.create(blogs, Some(created#id), draftData(Nil))) |> Result.map(entry -> entry#version) |> Result.mapErr(CmsErr.toMessage)
+        CmsErr.runWithResult(() -> ContentEntries.create(blogs, Some(created#id), CmsTestKit.entryData(Nil))) |> Result.map(entry -> entry#version) |> Result.mapErr(CmsErr.toMessage)
     }));
     Assert.assertEq(expected = Ok(Ok(Err("id: 't1' は既にあります（ゴミ箱の物を含む）"))), result)
 
@@ -100,8 +97,8 @@ def testPgEntryIdNotReusedFromTrash(): Unit \ {IO, Assert} =
 def testPgEntryGuards(): Unit \ {IO, Assert} =
     let result = PgTestSupport.withDb(() -> withIds(List#{"g1"}, () -> {
         let blogs = blogsWithFields();
-        let invalid = CmsErr.runWithResult(() -> ContentEntries.create(blogs, None, draftData(List#{("title", Json.JString("0123456789ab"))})));
-        discard ContentEntries.create(blogs, None, draftData(List#{("title", Json.JString("ok"))}));
+        let invalid = CmsErr.runWithResult(() -> ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("0123456789ab"))})));
+        discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("ok"))}));
         let blocked = CmsErr.runWithResult(() -> ContentTypes.delete(blogs));
         (invalid |> Result.map(entry -> entry#version) |> Result.mapErr(CmsErr.toMessage), blocked |> Result.mapErr(CmsErr.toMessage))
     }));

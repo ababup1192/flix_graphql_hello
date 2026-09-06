@@ -42,6 +42,12 @@ mod Server {
         }
 
     ///
+    /// 503。コンテンツ API のスキーマを組めなかった時など、サーバ側の一時的な失敗。
+    ///
+    pub def unavailable(message: String): HttpResponse =
+        errorResponse(503, Nil, message)
+
+    ///
     /// パスからクエリ文字列を落とす（"/health?probe=1" → "/health"）。
     ///
     pub def pathOf(path: String): String =
