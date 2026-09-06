@@ -14,7 +14,7 @@ mod ContentEntries {
         let owner = TypeId.toInt64(typeId);
         let needle = EntrySearch.escapeLike(page#search);
         let entries = EntriesQueries.listEntries({ typeId = owner, search = needle, limit = Int32.toInt64(page#first), offset = Int32.toInt64(page#skip) })
-            |> List.map(EntryRows.toEntry);
+            |> List.map(EntryRows.toEntry(Stage.Draft));
         let total = EntriesQueries.countEntries({ typeId = owner, search = needle }) |> Option.flatMap(row -> row#total) |> Option.getWithDefault(0i64);
         { entries = entries, totalCount = total }
 
@@ -22,7 +22,7 @@ mod ContentEntries {
     /// id で 1 つ。無ければ（ゴミ箱の物も）None。
     ///
     pub def find(id: EntryId): Option[Entry] \ DbRead =
-        EntriesQueries.findEntry(EntryId.text(id)) |> Option.map(EntryRows.toEntry)
+        EntriesQueries.findEntry(EntryId.text(id)) |> Option.map(EntryRows.toEntry(Stage.Draft))
 
     ///
     /// id で 1 つ。無ければ notFound。
@@ -39,10 +39,13 @@ mod ContentEntries {
     // ---- コンテンツ API（stage の行を読む）----
 
     ///
-    /// stage の行を id で 1 つ。その stage の中身が無ければ（未公開など）None。
+    /// stage の行を id で 1 つ。その stage の中身が無ければ（未公開など）None。参照先は 1 段先読みする。
     ///
-    pub def findByStage(id: EntryId, stage: Stage): Option[Entry] \ DbRead =
-        EntriesQueries.findEntryByStage({ id = EntryId.text(id), stage = EntryRows.stageToDb(stage) }) |> Option.map(EntryRows.toEntry)
+    pub def findByStage(owner: ContentType, id: EntryId, stage: Stage): Option[Entry] \ DbRead =
+        EntriesQueries.findEntryByStage({ id = EntryId.text(id), stage = EntryRows.stageToDb(stage) })
+            |> Option.map(EntryRows.toEntry(stage))
+            |> Option.map(entry -> attachLinked(owner, stage, entry :: Nil))
+            |> Option.flatMap(List.head)
 
     ///
     /// stage の行の一覧。絞り込みと並び順は EntryFilterSql が SQL にする。SQL は 2 本（一覧と件数）。
@@ -50,10 +53,10 @@ mod ContentEntries {
     pub def listByStage(owner: ContentType, stage: Stage, listQuery: ListQuery): EntryPage \ DbRead =
         let typeId = TypeId.toInt64(owner#id);
         let stageText = EntryRows.stageToDb(stage);
-        let filter = EntryFilterSql.pred(listQuery#filter);
+        let filter = RawSql.runWithAllow(() -> EntryFilterSql.pred(listQuery#filter));
         let entries = EntriesQueries.listEntriesByStage(
             { typeId = typeId, stage = stageText, limit = Int32.toInt64(listQuery#first), offset = Int32.toInt64(listQuery#skip) },
-            filter, EntryFilterSql.order(owner#fields, listQuery#orderBy)) |> List.map(EntryRows.toEntry);
+            filter, EntryFilterSql.order(owner#fields, listQuery#orderBy)) |> List.map(EntryRows.toEntry(stage)) |> attachLinked(owner, stage);
         let total = EntriesQueries.countEntriesByStage({ typeId = typeId, stage = stageText }, filter) |> Option.flatMap(row -> row#total) |> Option.getWithDefault(0i64);
         { entries = entries, totalCount = total }
 
@@ -77,6 +80,7 @@ mod ContentEntries {
         CmsErr.raiseIfAny(if (taken) Violation.Violation("id", "'${id}' は既にあります（ゴミ箱の物を含む）") :: Nil else Nil);
         discard EntriesQueries.insertEntry({ id = EntryId.text(id), typeId = TypeId.toInt64(typeId) });
         discard EntriesQueries.upsertContent({ entryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft), data = EntryRows.dataToJson(data) });
+        replaceLinks(id, Stage.Draft, owner, data);
         get(id)
 
     ///
@@ -89,6 +93,7 @@ mod ContentEntries {
         let merged = EntryValidation.merge(existing#data, patch);
         CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, merged));
         discard EntriesQueries.upsertContent({ entryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft), data = EntryRows.dataToJson(merged) });
+        replaceLinks(id, Stage.Draft, owner, merged);
         let advanced = EntriesQueries.bumpEntryVersion({ id = EntryId.text(id), expected = expectedVersion });
         if (advanced == 0) CmsErr.conflict(Entity.Entry, EntryId.text(id), existing#version + 1) else ();
         get(id)
@@ -99,21 +104,32 @@ mod ContentEntries {
     pub def delete(id: EntryId): Unit \ Db + CmsErr =
         let existing = get(id);
         if (existing#stage == Stage.Published) discard unpublish(id) else ();
+        discard EntriesQueries.deleteLinks({ fromEntryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft) });
         discard EntriesQueries.softDeleteEntry(EntryId.text(id))
 
     // ---- 公開 ----
 
     ///
-    /// 下書きを公開する。required と unique を検査し、draft の行を published の行へ写し、版を積む。
+    /// 下書きを公開する。required と unique と参照先の公開を検査し、draft の行を published の行へ写し、版を積む。
     /// 既に公開中なら公開側を下書きで上書きする（再公開）。
+    /// 参照先が未公開なら invalid。withDependencies なら参照先を先に（再帰的に）公開する。循環は 1 度だけ辿る。
     ///
-    pub def publish(id: EntryId, author: String): Entry \ Db + CmsErr =
+    pub def publish(id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr =
+        publishWithin(Nil, id, author, withDependencies)
+
+    def publishWithin(visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr =
         let existing = get(id);
         let owner = ContentTypes.get(existing#typeId);
         CmsErr.raiseIfAny(EntryValidation.publish(owner#fields, existing#data) ::: uniqueViolations(owner, existing));
+        let pending = EntriesQueries.unpublishedTargets(EntryId.text(id)) |> List.filterMap(row -> EntryId.parse(row#toEntryId));
+        if (withDependencies)
+            List.forEach(dependency -> if (List.memberOf(dependency, id :: visited)) () else discard publishWithin(id :: visited, dependency, author, true), pending)
+        else
+            CmsErr.raiseIfAny(pending |> List.map(dependency -> Violation.Violation("references", "参照先 '${dependency}' が未公開です（withDependencies: true で一緒に公開できます）")));
         discard EntriesQueries.deleteUniquesOfEntry(EntryId.text(id));
         List.forEach(match (field, value) -> discard EntriesQueries.insertUnique({ typeId = TypeId.toInt64(owner#id), fieldId = FieldId.toInt64(field#id), value = value, entryId = EntryId.text(id) }), uniqueValues(owner, existing));
         discard EntriesQueries.upsertContent({ entryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Published), data = EntryRows.dataToJson(existing#data) });
+        replaceLinks(id, Stage.Published, owner, existing#data);
         discard EntriesQueries.insertVersion({ entryId = EntryId.text(id), version = existing#version, data = EntryRows.dataToJson(existing#data), author = author, reason = EntryRows.reasonToDb(VersionReason.Publish) });
         discard EntriesQueries.markPublished(EntryId.text(id));
         get(id)
@@ -123,10 +139,34 @@ mod ContentEntries {
     ///
     pub def unpublish(id: EntryId): Entry \ Db + CmsErr =
         discard get(id);
+        let referrers = EntriesQueries.publishedReferrers(EntryId.text(id)) |> List.map(row -> row#fromEntryId) |> List.filter(referrer -> referrer != EntryId.text(id));
+        CmsErr.raiseIfAny(referrers |> List.map(referrer -> Violation.Violation("references", "公開中の entry '${referrer}' が参照しています。先にそちらを取り下げるか、参照を外してください")));
+        discard EntriesQueries.deleteLinks({ fromEntryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Published) });
         discard EntriesQueries.deleteContent({ entryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Published) });
         discard EntriesQueries.deleteUniquesOfEntry(EntryId.text(id));
         discard EntriesQueries.markUnpublished(EntryId.text(id));
         get(id)
+
+    ///
+    /// entry_links を (entry, stage) の分だけ入れ直す。
+    ///
+    def replaceLinks(id: EntryId, stage: Stage, owner: ContentType, data: EntryData): Unit \ DbWrite =
+        discard EntriesQueries.deleteLinks({ fromEntryId = EntryId.text(id), stage = EntryRows.stageToDb(stage) });
+        EntryLinks.extract(owner#fields, data) |> List.forEach(link ->
+            discard EntriesQueries.insertLink({ fromEntryId = EntryId.text(id), stage = EntryRows.stageToDb(stage), fieldId = FieldId.toInt64(link#field#id), toEntryId = EntryId.text(link#target), position = link#position }))
+
+    ///
+    /// 参照先を同じ stage で 1 本の SELECT で先読みし、各 entry の linked に載せる。参照が無ければ SQL を出さない。
+    ///
+    def attachLinked(owner: ContentType, stage: Stage, entries: List[Entry]): List[Entry] \ DbRead =
+        let targets = entries |> List.flatMap(entry -> EntryLinks.targets(owner#fields, entry#data)) |> List.distinct;
+        if (List.isEmpty(targets)) entries else {
+            let fetched = EntriesQueries.findEntriesByStage({ ids = List.map(EntryId.text, targets), stage = EntryRows.stageToDb(stage) })
+                |> List.map(EntryRows.toEntry(stage))
+                |> List.map(found -> (found#id, found))
+                |> List.toMap;
+            entries |> List.map(entry -> { linked = Linked.Linked(fetched) | entry })
+        }
 
     ///
     /// unique なフィールドの (フィールド, 値の文字列)。値が無いフィールドは含めない。
@@ -177,6 +217,7 @@ mod ContentEntries {
         let owner = ContentTypes.get(existing#typeId);
         CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, found#data));
         discard EntriesQueries.upsertContent({ entryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft), data = EntryRows.dataToJson(found#data) });
+        replaceLinks(id, Stage.Draft, owner, found#data);
         let advanced = EntriesQueries.bumpEntryVersion({ id = EntryId.text(id), expected = expectedVersion });
         if (advanced == 0) CmsErr.conflict(Entity.Entry, EntryId.text(id), existing#version + 1) else ();
         get(id)

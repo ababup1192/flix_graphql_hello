@@ -26,11 +26,11 @@ def testPgPublishLifecycle(): Unit \ {IO, Assert} =
     let result = PgTestSupport.withDb(() -> IdGen.runWithFixed(List.filterMap(EntryId.parse, List#{"p1"}), () -> {
         let blogs = blogsForPublish();
         let created = ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("slug", Json.JString("hello"))}));
-        let missing = CmsErr.runWithResult(() -> ContentEntries.publish(created#id, "tester")) |> Result.map(entry -> entry#version) |> Result.mapErr(CmsErr.toMessage);
+        let missing = CmsErr.runWithResult(() -> ContentEntries.publish(created#id, "tester", false)) |> Result.map(entry -> entry#version) |> Result.mapErr(CmsErr.toMessage);
         let withTitle = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("Hello"))}), created#version);
-        let published = ContentEntries.publish(created#id, "tester");
+        let published = ContentEntries.publish(created#id, "tester", false);
         let edited = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("views", CmsTestKit.intJson(5))}), withTitle#version);
-        let republished = ContentEntries.publish(created#id, "tester");
+        let republished = ContentEntries.publish(created#id, "tester", false);
         let unpublished = ContentEntries.unpublish(created#id);
         let versions = ContentEntries.versions(created#id) |> List.map(version -> (version#version, version#reason, version#author));
         (missing,
@@ -55,11 +55,11 @@ def testPgPublishUnique(): Unit \ {IO, Assert} =
         let blogs = blogsForPublish();
         let first = ContentEntries.create(blogs, None, titled("One", "same"));
         let second = ContentEntries.create(blogs, None, titled("Two", "same"));
-        discard ContentEntries.publish(first#id, "tester");
-        let blocked = CmsErr.runWithResult(() -> ContentEntries.publish(second#id, "tester")) |> Result.map(entry -> entry#version) |> Result.mapErr(CmsErr.toMessage);
-        let again = CmsErr.runWithResult(() -> ContentEntries.publish(first#id, "tester")) |> Result.map(entry -> entry#stage) |> Result.mapErr(CmsErr.toMessage);
+        discard ContentEntries.publish(first#id, "tester", false);
+        let blocked = CmsErr.runWithResult(() -> ContentEntries.publish(second#id, "tester", false)) |> Result.map(entry -> entry#version) |> Result.mapErr(CmsErr.toMessage);
+        let again = CmsErr.runWithResult(() -> ContentEntries.publish(first#id, "tester", false)) |> Result.map(entry -> entry#stage) |> Result.mapErr(CmsErr.toMessage);
         discard ContentEntries.unpublish(first#id);
-        let freed = CmsErr.runWithResult(() -> ContentEntries.publish(second#id, "tester")) |> Result.map(entry -> entry#stage) |> Result.mapErr(CmsErr.toMessage);
+        let freed = CmsErr.runWithResult(() -> ContentEntries.publish(second#id, "tester", false)) |> Result.map(entry -> entry#stage) |> Result.mapErr(CmsErr.toMessage);
         (blocked, again, freed)
     }));
     Assert.assertEq(expected = Ok(Ok((Err("fields.slug: 'same' は公開中の entry 'u1' が使っています"), Ok(Stage.Published), Ok(Stage.Published)))), result)
@@ -86,7 +86,7 @@ def testPgPublishedVisibleInContentApi(): Unit \ {IO, Assert} =
     discard PgTestSupport.withDb(() -> IdGen.runWithFixed(List.filterMap(EntryId.parse, List#{"c1"}), () -> {
         let blogs = blogsForPublish();
         let created = ContentEntries.create(blogs, None, titled("Public", "public"));
-        discard ContentEntries.publish(created#id, "tester");
+        discard ContentEntries.publish(created#id, "tester", false);
         discard ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("Edited"))}), created#version)
     }));
     let cache = ContentEngine.create();

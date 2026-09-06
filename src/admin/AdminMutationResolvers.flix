@@ -48,7 +48,7 @@ mod AdminMutationResolvers {
 
     /// Mutation.publishEntry
     pub def publishEntry(): GeneratedAdmin.MutationPublishEntryResolver[AdminEff] =
-        (context, id) -> Ok(ContentEntries.publish(AdminMapping.entryId("id", id), AdminMapping.authorOf(context)))
+        (context, id, withDependencies) -> Ok(ContentEntries.publish(AdminMapping.entryId("id", id), AdminMapping.authorOf(context), withDependencies |> Option.getWithDefault(false)))
 
     /// Mutation.unpublishEntry
     pub def unpublishEntry(): GeneratedAdmin.MutationUnpublishEntryResolver[AdminEff] =

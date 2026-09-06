@@ -17,45 +17,45 @@ mod ContentSchemaBuilder {
     /// 型の定義から Schema を組む。定義が無ければ Query は `_types: Int!`（型の数）だけ（graphql-java は空の Query を許さない）。
     ///
     pub def build(types: List[ContentType], runner: Runner[ContentEff]): Schema =
-        let rootFields = types |> List.flatMap(rootFieldsOf);
+        let rootFields = types |> List.flatMap(rootFieldsOf(types));
         let fallback = Schema.field0("_types", Out.int32(), (_context, _root) -> Ok(List.length(types))) |> Field.withDescription("content type の数。型を作るとここに Query が生える");
         Schema.make(Schema.objectType("Query", () -> fallback :: rootFields), None, runner)
 
     // ---- ルートのフィールド ----
 
-    def rootFieldsOf(owner: ContentType): List[Field[Unit, ContentEff]] = match owner#kind {
-        case TypeKind.Singleton  => singletonField(owner) :: Nil
-        case TypeKind.Collection => oneField(owner) :: manyField(owner) :: Nil
+    def rootFieldsOf(all: List[ContentType], owner: ContentType): List[Field[Unit, ContentEff]] = match owner#kind {
+        case TypeKind.Singleton  => singletonField(all, owner) :: Nil
+        case TypeKind.Collection => oneField(all, owner) :: manyField(all, owner) :: Nil
     }
 
     ///
     /// `<singular>(id: ID!, stage: Stage = PUBLISHED): <Singular>`
     ///
-    def oneField(owner: ContentType): Field[Unit, ContentEff] =
-        Schema.field2(queryName(owner), Schema.arg("id", GqlCodec.id()), stageArg(), Out.option(Out.obj(entryType(owner))), (_context, _root, id, stage) -> {
+    def oneField(all: List[ContentType], owner: ContentType): Field[Unit, ContentEff] =
+        Schema.field2(queryName(owner), Schema.arg("id", GqlCodec.id()), stageArg(), Out.option(Out.obj(entryType(all, owner))), (_context, _root, id, stage) -> {
             let Id.Id(text) = id;
-            Ok(EntryId.parse(text) |> Option.flatMap(entryId -> ContentEntries.findByStage(entryId, stageOrDefault(stage))) |> Option.filter(entry -> entry#typeId == owner#id))
+            Ok(EntryId.parse(text) |> Option.flatMap(entryId -> ContentEntries.findByStage(owner, entryId, stageOrDefault(stage))) |> Option.filter(entry -> entry#typeId == owner#id))
         }) |> Field.withDescription("${TypeName.text(owner#singular)} を id で 1 つ。無ければ null")
 
     ///
     /// `<singular>(stage: Stage = PUBLISHED): <Singular>`（singleton）
     ///
-    def singletonField(owner: ContentType): Field[Unit, ContentEff] =
-        Schema.field1(queryName(owner), stageArg(), Out.option(Out.obj(entryType(owner))), (_context, _root, stage) ->
+    def singletonField(all: List[ContentType], owner: ContentType): Field[Unit, ContentEff] =
+        Schema.field1(queryName(owner), stageArg(), Out.option(Out.obj(entryType(all, owner))), (_context, _root, stage) ->
             Ok(ContentEntries.firstByStage(owner, stageOrDefault(stage))))
             |> Field.withDescription("${TypeName.text(owner#singular)}（1 件だけ）")
 
     ///
     /// `<plural>(where, orderBy, first, skip, stage): <Singular>Connection!`
     ///
-    def manyField(owner: ContentType): Field[Unit, ContentEff] =
+    def manyField(all: List[ContentType], owner: ContentType): Field[Unit, ContentEff] =
         let whereArg = Schema.arg("where", GqlCodec.option(whereCodec(owner)));
         let orderArg = Schema.arg("orderBy", GqlCodec.option(GqlCodec.list(orderByCodec(owner))));
         let firstArg = Schema.arg("first", GqlCodec.option(GqlCodec.int32())) |> Arg.withDefaultValue(Value.Int(20));
         let skipArg = Schema.arg("skip", GqlCodec.option(GqlCodec.int32())) |> Arg.withDefaultValue(Value.Int(0));
         let stage = stageArg();
         let infos = Arg.info(whereArg) :: Arg.info(orderArg) :: Arg.info(firstArg) :: Arg.info(skipArg) :: Arg.info(stage) :: Nil;
-        Schema.fieldRaw(ApiId.text(owner#plural), infos, Out.obj(connectionType(owner)), (_context, _root, args) ->
+        Schema.fieldRaw(ApiId.text(owner#plural), infos, Out.obj(connectionType(all, owner)), (_context, _root, args) ->
             forM (
                 filter  <- Arg.decode(whereArg, args);
                 orderBy <- Arg.decode(orderArg, args);
@@ -82,20 +82,21 @@ mod ContentSchemaBuilder {
     ///
     /// `<Singular>`。共通のフィールドと、定義されたフィールド。
     ///
-    def entryType(owner: ContentType): ObjectType[Entry, ContentEff] =
+    def entryType(all: List[ContentType], owner: ContentType): ObjectType[Entry, ContentEff] =
         Schema.objectType(TypeName.text(owner#singular), () ->
             Schema.field0("id", Out.id(), (_context, entry) -> Ok(Id.Id(EntryId.text(entry#id)))) ::
             Schema.field0("stage", Out.scalar(stageCodec()), (_context, entry) -> Ok(entry#stage)) ::
             Schema.field0("publishedAt", Out.option(Out.string()), (_context, entry) -> Ok(entry#publishedAt |> Option.map(Timestamp.toIso8601))) ::
             Schema.field0("createdAt", Out.string(), (_context, entry) -> Ok(Timestamp.toIso8601(entry#createdAt))) ::
             Schema.field0("updatedAt", Out.string(), (_context, entry) -> Ok(Timestamp.toIso8601(entry#updatedAt))) ::
-            List.map(customField, owner#fields))
+            List.map(customField(all, owner), owner#fields))
             |> ObjectType.withDescription(owner#name)
 
     ///
     /// 定義されたフィールド 1 つ。kind と many で GraphQL の型が決まり、値は中身の JSON から取り出す。
+    /// Select は型ごとの enum、Reference は参照先の型（先読みした linked に無ければ同じ stage で引く）。
     ///
-    def customField(field: FieldDef): Field[Entry, ContentEff] =
+    def customField(all: List[ContentType], owner: ContentType, field: FieldDef): Field[Entry, ContentEff] =
         let name = ApiId.text(field#apiId);
         let described = fieldDescription(field);
         match (field#kind, field#many) {
@@ -103,9 +104,43 @@ mod ContentSchemaBuilder {
             case (FieldKind.Number, true)   => Schema.field0(name, Out.list(Out.float64()), (_context, entry) -> Ok(EntryValues.numbers(field#apiId, entry#data))) |> described
             case (FieldKind.Boolean, false) => Schema.field0(name, Out.option(Out.bool()), (_context, entry) -> Ok(EntryValues.bool(field#apiId, entry#data))) |> described
             case (FieldKind.Boolean, true)  => Schema.field0(name, Out.list(Out.bool()), (_context, entry) -> Ok(EntryValues.bools(field#apiId, entry#data))) |> described
+            case (FieldKind.Select, false)  => Schema.field0(name, Out.option(Out.scalar(selectCodec(owner, field))), (_context, entry) -> Ok(EntryValues.text(field#apiId, entry#data) |> Option.filter(text -> List.memberOf(text, field#config#options)))) |> described
+            case (FieldKind.Select, true)   => Schema.field0(name, Out.list(Out.scalar(selectCodec(owner, field))), (_context, entry) -> Ok(EntryValues.texts(field#apiId, entry#data) |> List.filter(text -> List.memberOf(text, field#config#options)))) |> described
+            case (FieldKind.Reference, false) => match targetOf(all, field) {
+                case Some(target) => Schema.field0(name, Out.option(Out.obj(entryType(all, target))), (_context, entry) -> Ok(EntryValues.text(field#apiId, entry#data) |> Option.flatMap(EntryId.parse) |> Option.flatMap(resolveLink(target, entry)))) |> described
+                case None         => Schema.field0(name, Out.option(Out.id()), (_context, entry) -> Ok(EntryValues.text(field#apiId, entry#data) |> Option.map(Id.Id))) |> described
+            }
+            case (FieldKind.Reference, true) => match targetOf(all, field) {
+                case Some(target) => Schema.field0(name, Out.list(Out.obj(entryType(all, target))), (_context, entry) -> Ok(EntryValues.texts(field#apiId, entry#data) |> List.filterMap(EntryId.parse) |> List.filterMap(resolveLink(target, entry)))) |> described
+                case None         => Schema.field0(name, Out.list(Out.id()), (_context, entry) -> Ok(EntryValues.texts(field#apiId, entry#data) |> List.map(Id.Id))) |> described
+            }
             case (_, false)                 => Schema.field0(name, Out.option(Out.string()), (_context, entry) -> Ok(EntryValues.text(field#apiId, entry#data))) |> described
             case (_, true)                  => Schema.field0(name, Out.list(Out.string()), (_context, entry) -> Ok(EntryValues.texts(field#apiId, entry#data))) |> described
         }
+
+    ///
+    /// 参照先の型。定義に無ければ None（型が消えた直後など。その時は id だけ返す）。
+    ///
+    def targetOf(all: List[ContentType], field: FieldDef): Option[ContentType] =
+        field#target |> Option.flatMap(target -> List.find(candidate -> candidate#id == target, all))
+
+    ///
+    /// 参照先 1 つ。先読みした linked にあればそれ、無ければ同じ stage で引く（2 段目以降）。
+    ///
+    def resolveLink(target: ContentType, entry: Entry, id: EntryId): Option[Entry] \ ContentEff =
+        match Linked.get(id, entry#linked) {
+            case Some(found) => Some(found)
+            case None        => ContentEntries.findByStage(target, id, entry#contentStage)
+        }
+
+    ///
+    /// Select の enum。`<Singular><Field>`（Blog + category → BlogCategory）。値は config.options。
+    ///
+    def selectCodec(owner: ContentType, field: FieldDef): GqlCodec[String] =
+        GqlCodec.enumOf("${TypeName.text(owner#singular)}${upperFirst(ApiId.text(field#apiId))}", option -> option, field#config#options)
+
+    def upperFirst(text: String): String =
+        String.toUpperCase(String.takeLeft(1, text)) + String.dropLeft(1, text)
 
     def fieldDescription(field: FieldDef): Field[Entry, ContentEff] -> Field[Entry, ContentEff] =
         if (field#name == "") (built -> built) else Field.withDescription(field#name)
@@ -113,9 +148,9 @@ mod ContentSchemaBuilder {
     ///
     /// `<Singular>Connection { nodes, totalCount }`
     ///
-    def connectionType(owner: ContentType): ObjectType[EntryPage, ContentEff] =
+    def connectionType(all: List[ContentType], owner: ContentType): ObjectType[EntryPage, ContentEff] =
         Schema.objectType("${TypeName.text(owner#singular)}Connection", () ->
-            Schema.field0("nodes", Out.list(Out.obj(entryType(owner))), (_context, page) -> Ok(page#entries)) ::
+            Schema.field0("nodes", Out.list(Out.obj(entryType(all, owner))), (_context, page) -> Ok(page#entries)) ::
             Schema.field0("totalCount", Out.int32(), (_context, page) -> Ok(Int64.clampToInt32(min = 0, max = Int32.maxValue(), page#totalCount))) :: Nil)
 
     // ---- 引数 ----
@@ -137,7 +172,7 @@ mod ContentSchemaBuilder {
     ///
     def orderByCodec(owner: ContentType): GqlCodec[(SortKey, Direction)] =
         let keys = SortKey.ById :: SortKey.ByPublishedAt :: SortKey.ByUpdatedAt :: SortKey.ByCreatedAt ::
-            (owner#fields |> List.filter(field -> not field#many) |> List.map(field -> SortKey.ByField(field#apiId)));
+            (owner#fields |> List.filter(field -> not field#many and field#kind != FieldKind.Reference) |> List.map(field -> SortKey.ByField(field#apiId)));
         let values = keys |> List.flatMap(key -> (key, Direction.Asc) :: (key, Direction.Desc) :: Nil);
         GqlCodec.enumOf("${TypeName.text(owner#singular)}OrderBy", orderByName, values)
 
@@ -215,7 +250,20 @@ mod ContentSchemaBuilder {
         let name = ApiId.text(apiId);
         let isNull = leafArg("${name}_isNull", GqlCodec.bool(), flag -> Condition.IsNull(apiId, flag) :: Nil);
         match (field#kind, field#many) {
-            case (_, true) => isNull :: Nil
+            case (FieldKind.Number, true)  => isNull :: Nil
+            case (FieldKind.Boolean, true) => isNull :: Nil
+            case (FieldKind.Reference, true) =>
+                isNull :: leafArg("${name}_contains", GqlCodec.id(), id -> { let Id.Id(text) = id; Condition.ArrayContains(apiId, text) :: Nil }) :: Nil
+            case (_, true) =>
+                isNull :: leafArg("${name}_contains", GqlCodec.string(), text -> Condition.ArrayContains(apiId, text) :: Nil) :: Nil
+            case (FieldKind.Select, false) =>
+                isNull ::
+                leafArg("${name}_eq", GqlCodec.string(), text -> Condition.TextEq(apiId, text) :: Nil) ::
+                leafArg("${name}_in", GqlCodec.list(GqlCodec.string()), texts -> Condition.TextIn(apiId, texts) :: Nil) :: Nil
+            case (FieldKind.Reference, false) =>
+                isNull ::
+                leafArg("${name}_id_eq", GqlCodec.id(), id -> { let Id.Id(text) = id; Condition.TextEq(apiId, text) :: Nil }) ::
+                leafArg("${name}_id_in", GqlCodec.list(GqlCodec.id()), ids -> Condition.TextIn(apiId, ids |> List.map(id -> { let Id.Id(text) = id; text })) :: Nil) :: Nil
             case (FieldKind.Number, false) =>
                 isNull ::
                 leafArg("${name}_eq", GqlCodec.float64(), x -> Condition.NumberEq(apiId, x) :: Nil) ::

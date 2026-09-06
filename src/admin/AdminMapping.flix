@@ -71,6 +71,8 @@ mod AdminMapping {
         case GeneratedAdmin.FieldKind.Slug     => FieldKind.Slug
         case GeneratedAdmin.FieldKind.Number   => FieldKind.Number
         case GeneratedAdmin.FieldKind.Boolean  => FieldKind.Boolean
+        case GeneratedAdmin.FieldKind.Select   => FieldKind.Select
+        case GeneratedAdmin.FieldKind.Reference => FieldKind.Reference
     }
 
     pub def fieldKindToGql(kind: FieldKind): GeneratedAdmin.FieldKind = match kind {
@@ -79,6 +81,8 @@ mod AdminMapping {
         case FieldKind.Slug     => GeneratedAdmin.FieldKind.Slug
         case FieldKind.Number   => GeneratedAdmin.FieldKind.Number
         case FieldKind.Boolean  => GeneratedAdmin.FieldKind.Boolean
+        case FieldKind.Select   => GeneratedAdmin.FieldKind.Select
+        case FieldKind.Reference => GeneratedAdmin.FieldKind.Reference
     }
 
     ///
@@ -198,6 +202,7 @@ mod AdminMapping {
             required  = input#required |> Option.getWithDefault(false),
             unique    = input#unique |> Option.getWithDefault(false),
             localized = input#localized |> Option.getWithDefault(false),
+            target    = input#targetTypeId |> Option.map(typeId("targetTypeId")),
             config    = input#config |> Option.map(config) |> Option.getWithDefault(FieldConfig.empty())
         }
 
@@ -222,7 +227,8 @@ mod AdminMapping {
             sourceField = input#sourceField |> Option.map(apiId("config.sourceField")),
             min         = input#min,
             max         = input#max,
-            integer     = input#integer
+            integer     = input#integer,
+            options     = input#options |> Option.getWithDefault(Nil)
         }
 
     def apiId(argument: String, text: String): ApiId \ CmsErr = match ApiId.parse(text) {

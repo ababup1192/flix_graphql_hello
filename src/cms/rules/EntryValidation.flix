@@ -59,6 +59,10 @@ mod EntryValidation {
             case (FieldKind.Slug, Json.JString(text))     => checkLength(path, field#config, text)
             case (FieldKind.Number, Json.JNumber(n))      => checkNumber(path, field#config, n)
             case (FieldKind.Boolean, Json.JBool(_))       => Nil
+            case (FieldKind.Select, Json.JString(text))   => if (List.memberOf(text, field#config#options)) Nil else Violation.Violation(path, "選択肢（${List.join(", ", field#config#options)}）にありません") :: Nil
+            case (FieldKind.Reference, Json.JString(text)) => if (Option.nonEmpty(EntryId.parse(text))) Nil else Violation.Violation(path, "entry の id（${EntryId.rule()}）にしてください") :: Nil
+            case (FieldKind.Select, _)                    => Violation.Violation(path, "文字列にしてください") :: Nil
+            case (FieldKind.Reference, _)                 => Violation.Violation(path, "entry の id にしてください") :: Nil
             case (FieldKind.Text, _)                      => Violation.Violation(path, "文字列にしてください") :: Nil
             case (FieldKind.TextArea, _)                  => Violation.Violation(path, "文字列にしてください") :: Nil
             case (FieldKind.Slug, _)                      => Violation.Violation(path, "文字列にしてください") :: Nil

@@ -47,6 +47,8 @@ pub enum Condition with Eq, Order, ToString {
     case BoolEq(ApiId, Bool)
     /// true なら値が無い物、false なら値がある物
     case IsNull(ApiId, Bool)
+    /// 配列のフィールド（文字列・select・reference）がこの値を含む
+    case ArrayContains(ApiId, String)
     /// どれかの組（それぞれは AND）に合う物。Where の OR
     case AnyOf(List[List[Condition]])
 }

@@ -20,7 +20,7 @@ mod PgTestSupport {
     /// テーブルを消して migrations/ を当て直す。migrate 自体もここで毎回通る。
     ///
     pub def resetSchema(): Unit \ DbWrite + RawSql + IO =
-        discard Sql.execute("DROP TABLE IF EXISTS entry_versions, entry_unique_values, entry_contents, entries, content_fields, content_types, sqlfx_migrations CASCADE", Nil);
+        discard Sql.execute("DROP TABLE IF EXISTS entry_links, entry_versions, entry_unique_values, entry_contents, entries, content_fields, content_types, sqlfx_migrations CASCADE", Nil);
         let applied = run {
             Migrate.runWithResult(() -> Migrate.apply(Migrate.defaultConfig(config()), "migrations"))
         } with Fs.ReadFile.runWithFileRead

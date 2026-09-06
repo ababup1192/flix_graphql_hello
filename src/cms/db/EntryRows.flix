@@ -47,7 +47,7 @@ mod EntryRows {
     /// changedSincePublish は「読んだ stage の行の updated_at」と「published の行の updated_at」の比較。
     /// 管理 API は draft の行を読むので下書きが進んだかが分かり、コンテンツ API が published の行を読めば常に false。
     ///
-    pub def toEntry(row: { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Json, draftUpdatedAt = Timestamp.Timestamp, publishedUpdatedAt = Option[Timestamp.Timestamp] | r }): Entry \ DbErr =
+    pub def toEntry(contentStage: Stage, row: { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Json, draftUpdatedAt = Timestamp.Timestamp, publishedUpdatedAt = Option[Timestamp.Timestamp] | r }): Entry \ DbErr =
         let stage = stageFromDb(row#stage) |> orRaise("entries.stage", row#stage);
         {
             id          = EntryId.parse(row#id) |> orRaise("entries.id", row#id),
@@ -57,6 +57,8 @@ mod EntryRows {
             data        = dataFromJson(row#data),
             publishedAt = row#publishedAt,
             changedSincePublish = stage == Stage.Published and (row#publishedUpdatedAt |> Option.map(published -> Timestamp.toEpochMicros(row#draftUpdatedAt) > Timestamp.toEpochMicros(published)) |> Option.getWithDefault(false)),
+            contentStage = contentStage,
+            linked      = Linked.empty(),
             createdAt   = row#createdAt,
             updatedAt   = row#updatedAt
         }

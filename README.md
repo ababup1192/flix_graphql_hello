@@ -84,7 +84,18 @@ curl -s -X POST localhost:8080/graphql -d '{"query": "{ __type(name: \"BlogWhere
 ```
 
 `where` はフィールドの kind ごとに `_eq` / `_in` / `_contains` / `_startsWith`（文字列）、`_eq` / `_gt` / `_gte` / `_lt` / `_lte`（数値）、
-`_eq`（真偽値）、`_isNull` が生え、`OR` / `AND` は 1 段（`BlogWhereLeaf` のリスト）。値は全部プレースホルダで SQL に渡す。
+`_eq`（真偽値）、`_eq` / `_in`（select）、`_id_eq` / `_id_in`（reference）、配列のフィールドには `_contains`、全部に `_isNull` が生え、
+`OR` / `AND` は 1 段（`BlogWhereLeaf` のリスト）。値は全部プレースホルダで SQL に渡す。
+
+### 参照と選択肢
+
+`REFERENCE`（`targetTypeId` で参照先の型）はコンテンツ API で参照先の型として展開され、同じ stage の物を返す。一覧では参照先を
+1 本の SELECT で先読みする。公開時は参照先が公開済みである事を検査し（`publishEntry(withDependencies: true)` で一緒に公開）、
+公開中の entry から参照されている物は取り下げられない。`SELECT`（`config.options`、UPPER_SNAKE）は型ごとの enum（`BlogCategory`）になる。
+
+```bash
+curl -s -X POST localhost:8080/graphql -d '{"query": "{ blogs(where: { category_eq: \"NEWS\", tags_contains: \"t1\" }) { nodes { title profile { name } tags { label } } } }"}'
+```
 
 entry（下書き）は `fields: JSON` で中身を渡す。型に無いフィールドや kind に合わない値は invalid。`updateEntry` は
 `expectedVersion` が今の version と違えば conflict（楽観ロック）。

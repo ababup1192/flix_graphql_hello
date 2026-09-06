@@ -22,6 +22,10 @@ pub enum FieldKind with Eq, Order, ToString {
     case Number
     /// 真偽値
     case Boolean
+    /// 決まった選択肢から 1 つ。config.options
+    case Select
+    /// 他の entry への参照。target が参照先の型
+    case Reference
 }
 
 ///
@@ -31,8 +35,9 @@ pub enum FieldKind with Eq, Order, ToString {
 /// - sourceField: Slug の元にするフィールドの apiId
 /// - min / max: Number の範囲
 /// - integer: Number を整数に限るか
+/// - options: Select の選択肢。コンテンツ API では enum の値になるので UPPER_SNAKE
 ///
-pub type alias FieldConfig = { maxLength = Option[Int32], sourceField = Option[ApiId], min = Option[Float64], max = Option[Float64], integer = Option[Bool] }
+pub type alias FieldConfig = { maxLength = Option[Int32], sourceField = Option[ApiId], min = Option[Float64], max = Option[Float64], integer = Option[Bool], options = List[String] }
 
 ///
 /// フィールドの定義。
@@ -46,6 +51,7 @@ pub type alias FieldConfig = { maxLength = Option[Int32], sourceField = Option[A
 /// - required: 公開時に値が要るか
 /// - unique: 型の中で値が一意か
 /// - localized: 言語ごとに値を持つか
+/// - target: Reference の参照先の型。それ以外は None
 /// - config: kind ごとの設定
 /// - position: 並び順（0 始まり）
 ///
@@ -59,6 +65,7 @@ pub type alias FieldDef = {
     required = Bool,
     unique = Bool,
     localized = Bool,
+    target = Option[TypeId],
     config = FieldConfig,
     position = Int32
 }
@@ -102,7 +109,7 @@ pub type alias ContentTypeChanges = { name = Option[String], singular = Option[T
 ///
 /// 足すフィールド。
 ///
-pub type alias FieldDraft = { apiId = ApiId, name = String, kind = FieldKind, many = Bool, required = Bool, unique = Bool, localized = Bool, config = FieldConfig }
+pub type alias FieldDraft = { apiId = ApiId, name = String, kind = FieldKind, many = Bool, required = Bool, unique = Bool, localized = Bool, target = Option[TypeId], config = FieldConfig }
 
 ///
 /// フィールドの変更。None は「触らない」。config は丸ごと置き換える。
@@ -116,7 +123,7 @@ mod FieldConfig {
     ///
     /// 何も設定していない config。
     ///
-    pub def empty(): FieldConfig = { maxLength = None, sourceField = None, min = None, max = None, integer = None }
+    pub def empty(): FieldConfig = { maxLength = None, sourceField = None, min = None, max = None, integer = None, options = Nil }
 
     ///
     /// content_fields.config の JSON にする。None の項目はキー自体を出さない。
@@ -130,6 +137,7 @@ mod FieldConfig {
             ("min", config#min |> Option.flatMap(Float64.tryToBigDecimal) |> Option.map(Json.JNumber)) ::
             ("max", config#max |> Option.flatMap(Float64.tryToBigDecimal) |> Option.map(Json.JNumber)) ::
             ("integer", config#integer |> Option.map(Json.JBool)) ::
+            ("options", if (List.isEmpty(config#options)) None else Some(Json.JArray(config#options |> List.map(Json.JString) |> List.toVector))) ::
             Nil;
         Json.JObject(entries |> List.filterMap(match (key, value) -> Option.map(json -> (key, json), value)) |> List.toMap)
 
@@ -146,7 +154,8 @@ mod FieldConfig {
             sourceField = Map.get("sourceField", fields) |> Option.flatMap(asString) |> Option.flatMap(ApiId.parse),
             min         = Map.get("min", fields) |> Option.flatMap(asFloat64),
             max         = Map.get("max", fields) |> Option.flatMap(asFloat64),
-            integer     = Map.get("integer", fields) |> Option.flatMap(asBool)
+            integer     = Map.get("integer", fields) |> Option.flatMap(asBool),
+            options     = Map.get("options", fields) |> Option.map(asStrings) |> Option.getWithDefault(Nil)
         }
 
     def asInt32(json: Json): Option[Int32] = match json {
@@ -162,6 +171,11 @@ mod FieldConfig {
     def asString(json: Json): Option[String] = match json {
         case Json.JString(s) => Some(s)
         case _               => None
+    }
+
+    def asStrings(json: Json): List[String] = match json {
+        case Json.JArray(items) => items |> Vector.toList |> List.filterMap(asString)
+        case _                  => Nil
     }
 
     def asBool(json: Json): Option[Bool] = match json {

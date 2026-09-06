@@ -128,3 +128,37 @@ query listVersions(entryId: String) -> many {
 query findVersion(id: Int64) -> one {
     SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE id = :id
 }
+
+// ---- 参照 ----
+
+query findEntriesByStage(ids: List[String], stage: String) -> many {
+    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at
+    FROM entries AS e
+    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = :stage
+    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'
+    WHERE e.id = ANY(:ids) AND e.deleted_at IS NULL
+}
+
+query deleteLinks(fromEntryId: String, stage: String) -> exec {
+    DELETE FROM entry_links WHERE from_entry_id = :fromEntryId AND stage = :stage
+}
+
+query insertLink(fromEntryId: String, stage: String, fieldId: Int64, toEntryId: String, position: Int32) -> exec {
+    INSERT INTO entry_links (from_entry_id, stage, field_id, to_entry_id, position) VALUES (:fromEntryId, :stage, :fieldId, :toEntryId, :position)
+}
+
+// 下書きが参照している entry のうち、公開されていない物（ゴミ箱の物と無い物を含む）
+query unpublishedTargets(fromEntryId: String) -> many {
+    SELECT DISTINCT l.to_entry_id
+    FROM entry_links AS l
+    LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL AND e.stage = 'published'
+    WHERE l.from_entry_id = :fromEntryId AND l.stage = 'draft' AND e.id IS NULL
+}
+
+// この entry を公開側で参照している entry（取り下げ・削除の防止用）
+query publishedReferrers(toEntryId: String) -> many {
+    SELECT DISTINCT l.from_entry_id
+    FROM entry_links AS l
+    JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL
+    WHERE l.to_entry_id = :toEntryId AND l.stage = 'published'
+}

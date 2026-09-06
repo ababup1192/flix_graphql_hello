@@ -16,7 +16,7 @@ def dryRunner(): Runner[ContentEff] =
 ///
 def sampleTypes(): List[ContentType] =
     let at = Timestamp.at("2026-09-01T00:00:00Z");
-    let fieldBase = { id = FieldId.FieldId(0i64), typeId = TypeId.TypeId(1i64), apiId = CmsTestKit.apiId("x"), name = "", kind = FieldKind.Text, many = false, required = false, unique = false, localized = false, config = FieldConfig.empty(), position = 0 };
+    let fieldBase = { id = FieldId.FieldId(0i64), typeId = TypeId.TypeId(1i64), apiId = CmsTestKit.apiId("x"), name = "", kind = FieldKind.Text, many = false, required = false, unique = false, localized = false, target = None, config = FieldConfig.empty(), position = 0 };
     let blogs = {
         id = TypeId.TypeId(1i64), apiId = CmsTestKit.apiId("blogs"), kind = TypeKind.Collection, name = "記事",
         singular = CmsTestKit.typeName("Blog"), plural = CmsTestKit.apiId("blogs"), previewUrl = None,

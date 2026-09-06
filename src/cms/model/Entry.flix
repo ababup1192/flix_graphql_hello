@@ -56,6 +56,8 @@ pub type alias EntryData = Map[ApiId, Util.Json.Json]
 /// - data: 下書きの中身
 /// - publishedAt: 公開した時刻。未公開なら None
 /// - changedSincePublish: 公開中で、公開後に下書きが進んでいるか（管理画面の CHANGED バッジ）
+/// - contentStage: data がどの stage の行か（コンテンツ API が参照先を同じ stage で引くため）
+/// - linked: 参照先の entry を先読みした物。無ければ参照のたびに引く
 /// - createdAt / updatedAt: 作成と更新の時刻
 ///
 pub type alias Entry = {
@@ -66,8 +68,27 @@ pub type alias Entry = {
     data = EntryData,
     publishedAt = Option[Timestamp.Timestamp],
     changedSincePublish = Bool,
+    contentStage = Stage,
+    linked = Linked,
     createdAt = Timestamp.Timestamp,
     updatedAt = Timestamp.Timestamp
+}
+
+///
+/// 先読みした参照先。id → entry。
+///
+/// WhyNot: Entry のレコードに Map[EntryId, Entry] を直に置かないのは、型の別名が自分を参照できないため。enum で切る。
+///
+pub enum Linked {
+    case Linked(Map[EntryId, Entry])
+}
+
+mod Linked {
+    pub def empty(): Linked = Linked.Linked(Map.empty())
+
+    pub def get(id: EntryId, linked: Linked): Option[Entry] =
+        let Linked.Linked(map) = linked;
+        Map.get(id, map)
 }
 
 ///

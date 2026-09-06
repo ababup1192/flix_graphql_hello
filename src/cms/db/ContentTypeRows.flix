@@ -23,6 +23,8 @@ mod ContentTypeRows {
         case FieldKind.Slug     => "slug"
         case FieldKind.Number   => "number"
         case FieldKind.Boolean  => "boolean"
+        case FieldKind.Select   => "select"
+        case FieldKind.Reference => "reference"
     }
 
     ///
@@ -43,6 +45,8 @@ mod ContentTypeRows {
         case "slug"     => Some(FieldKind.Slug)
         case "number"   => Some(FieldKind.Number)
         case "boolean"  => Some(FieldKind.Boolean)
+        case "select"   => Some(FieldKind.Select)
+        case "reference" => Some(FieldKind.Reference)
         case _          => None
     }
 
@@ -67,7 +71,7 @@ mod ContentTypeRows {
     ///
     /// content_fields の行から FieldDef を組む。
     ///
-    pub def toFieldDef(row: { id = Int64, typeId = Int64, apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, config = Json, position = Int32 | r }): FieldDef \ DbErr =
+    pub def toFieldDef(row: { id = Int64, typeId = Int64, apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, targetTypeId = Option[Int64], config = Json, position = Int32 | r }): FieldDef \ DbErr =
         {
             id        = FieldId.FieldId(row#id),
             typeId    = TypeId.TypeId(row#typeId),
@@ -78,6 +82,7 @@ mod ContentTypeRows {
             required  = row#isRequired,
             unique    = row#isUnique,
             localized = row#isLocalized,
+            target    = row#targetTypeId |> Option.map(TypeId.TypeId),
             config    = FieldConfig.fromJson(row#config),
             position  = row#position
         }

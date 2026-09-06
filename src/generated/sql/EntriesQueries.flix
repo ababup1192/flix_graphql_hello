@@ -7,7 +7,7 @@ mod EntriesQueries {
     ///
     /// 生成元 entries.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 446261280
+    pub def sourceHash(): Int32 = 1861726501
 
     ///
     /// findEntry の 1 行。
@@ -349,5 +349,84 @@ mod EntriesQueries {
         let sql = "SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE id = $1";
         let params = List#{SqlValue.Int64(id)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findVersionDecoder(), sql, params))
+
+    ///
+    /// findEntriesByStage の 1 行。
+    ///
+    pub type alias FindEntriesByStageRow = { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Util.Json.Json, draftUpdatedAt = Timestamp.Timestamp, publishedUpdatedAt = Option[Timestamp.Timestamp] }
+
+    def findEntriesByStageDecoder(): Decoder[FindEntriesByStageRow] =
+        forA (
+            id <- Decoder.str("id");
+            typeId <- Decoder.int64("type_id");
+            version <- Decoder.int32("version");
+            stage <- Decoder.str("stage");
+            publishedAt <- Decoder.opt(Decoder.timestamp("published_at"));
+            createdAt <- Decoder.timestamp("created_at");
+            updatedAt <- Decoder.timestamp("updated_at");
+            data <- Decoder.json("data");
+            draftUpdatedAt <- Decoder.timestamp("draft_updated_at");
+            publishedUpdatedAt <- Decoder.opt(Decoder.timestamp("published_updated_at"))
+        ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data, draftUpdatedAt = draftUpdatedAt, publishedUpdatedAt = publishedUpdatedAt }
+
+    ///
+    /// findEntriesByStage: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published' WHERE e.id = ANY($2) AND e.deleted_at IS NULL
+    ///
+    pub def findEntriesByStage(args: { ids = List[String], stage = String }): List[FindEntriesByStageRow] \ DbRead =
+        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'\n    WHERE e.id = ANY($2) AND e.deleted_at IS NULL";
+        let params = List#{SqlValue.Str(args#stage), SqlValue.StrArray(args#ids)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(findEntriesByStageDecoder(), sql, params))
+
+    ///
+    /// deleteLinks: DELETE FROM entry_links WHERE from_entry_id = $1 AND stage = $2
+    ///
+    pub def deleteLinks(args: { fromEntryId = String, stage = String }): Int32 \ DbWrite =
+        let sql = "DELETE FROM entry_links WHERE from_entry_id = $1 AND stage = $2";
+        let params = List#{SqlValue.Str(args#fromEntryId), SqlValue.Str(args#stage)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// insertLink: INSERT INTO entry_links (from_entry_id, stage, field_id, to_entry_id, position) VALUES ($1, $2, $3, $4, $5)
+    ///
+    pub def insertLink(args: { fromEntryId = String, stage = String, fieldId = Int64, toEntryId = String, position = Int32 }): Int32 \ DbWrite =
+        let sql = "INSERT INTO entry_links (from_entry_id, stage, field_id, to_entry_id, position) VALUES ($1, $2, $3, $4, $5)";
+        let params = List#{SqlValue.Str(args#fromEntryId), SqlValue.Str(args#stage), SqlValue.Int64(args#fieldId), SqlValue.Str(args#toEntryId), SqlValue.Int32(args#position)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// unpublishedTargets の 1 行。
+    ///
+    pub type alias UnpublishedTargetsRow = { toEntryId = String }
+
+    def unpublishedTargetsDecoder(): Decoder[UnpublishedTargetsRow] =
+        forA (
+            toEntryId <- Decoder.str("to_entry_id")
+        ) yield { toEntryId = toEntryId }
+
+    ///
+    /// unpublishedTargets: SELECT DISTINCT l.to_entry_id FROM entry_links AS l LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL AND e.stage = 'published' WHERE l.from_entry_id = $1 AND l.stage = 'draft' AND e.id IS NULL
+    ///
+    pub def unpublishedTargets(fromEntryId: String): List[UnpublishedTargetsRow] \ DbRead =
+        let sql = "SELECT DISTINCT l.to_entry_id\n    FROM entry_links AS l\n    LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL AND e.stage = 'published'\n    WHERE l.from_entry_id = $1 AND l.stage = 'draft' AND e.id IS NULL";
+        let params = List#{SqlValue.Str(fromEntryId)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(unpublishedTargetsDecoder(), sql, params))
+
+    ///
+    /// publishedReferrers の 1 行。
+    ///
+    pub type alias PublishedReferrersRow = { fromEntryId = String }
+
+    def publishedReferrersDecoder(): Decoder[PublishedReferrersRow] =
+        forA (
+            fromEntryId <- Decoder.str("from_entry_id")
+        ) yield { fromEntryId = fromEntryId }
+
+    ///
+    /// publishedReferrers: SELECT DISTINCT l.from_entry_id FROM entry_links AS l JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL WHERE l.to_entry_id = $1 AND l.stage = 'published'
+    ///
+    pub def publishedReferrers(toEntryId: String): List[PublishedReferrersRow] \ DbRead =
+        let sql = "SELECT DISTINCT l.from_entry_id\n    FROM entry_links AS l\n    JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL\n    WHERE l.to_entry_id = $1 AND l.stage = 'published'";
+        let params = List#{SqlValue.Str(toEntryId)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(publishedReferrersDecoder(), sql, params))
 
 }

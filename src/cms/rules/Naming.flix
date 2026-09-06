@@ -95,6 +95,21 @@ mod Naming {
         if (many and unique) Violation.Violation("unique", "配列のフィールドには付けられません") :: Nil else Nil
 
     ///
+    /// 参照先の有無。Reference には要り、他には付けられない。参照先の型が存在するかはユースケースが見る。
+    ///
+    pub def validateTarget(kind: FieldKind, target: Option[TypeId]): List[Violation] = match (kind, target) {
+        case (FieldKind.Reference, None) => Violation.Violation("targetTypeId", "REFERENCE には参照先の型が要ります") :: Nil
+        case (FieldKind.Reference, _)    => Nil
+        case (_, Some(_))                => Violation.Violation("targetTypeId", "REFERENCE 以外には付けられません") :: Nil
+        case (_, None)                   => Nil
+    }
+
+    ///
+    /// Select の選択肢の綴り。コンテンツ API の enum の値になるので UPPER_SNAKE（[A-Z][A-Z0-9_]*）。
+    ///
+    pub def isEnumValue(text: String): Bool = String.isMatch(regex = "^[A-Z][A-Z0-9_]*$", text)
+
+    ///
     /// kind と config の組み合わせを検査する。siblings は同じ型の既存のフィールドの apiId（slug の sourceField の検査用）。
     ///
     pub def validateConfig(siblings: List[ApiId], kind: FieldKind, config: FieldConfig): List[Violation] =
@@ -105,6 +120,14 @@ mod Naming {
         let rangeChecks = match (config#min, config#max) {
             case (Some(low), Some(high)) if low > high => Violation.Violation("config.max", "min 以下にはできません") :: Nil
             case _                                     => Nil
+        };
+        let optionChecks = match kind {
+            case FieldKind.Select =>
+                if (List.isEmpty(config#options)) Violation.Violation("config.options", "SELECT には選択肢が 1 つ以上要ります") :: Nil
+                else if (List.exists(option -> not isEnumValue(option), config#options)) Violation.Violation("config.options", "選択肢は UPPER_SNAKE（[A-Z][A-Z0-9_]*）にしてください") :: Nil
+                else if (List.length(List.distinct(config#options)) != List.length(config#options)) Violation.Violation("config.options", "選択肢が重複しています") :: Nil
+                else Nil
+            case _ => if (List.isEmpty(config#options)) Nil else Violation.Violation("config.options", "options は SELECT だけの設定です") :: Nil
         };
         let kindChecks = match kind {
             case FieldKind.Slug => match config#sourceField {
@@ -117,6 +140,6 @@ mod Naming {
                 let numberOnly = Option.isEmpty(config#min) and Option.isEmpty(config#max) and Option.isEmpty(config#integer);
                 if (numberOnly) Nil else Violation.Violation("config", "min / max / integer は NUMBER だけの設定です") :: Nil
         };
-        lengthChecks ::: rangeChecks ::: kindChecks
+        lengthChecks ::: rangeChecks ::: optionChecks ::: kindChecks
 
 }

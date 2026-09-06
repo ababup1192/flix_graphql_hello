@@ -39,6 +39,7 @@ mod FieldDefResolvers {
             required  = (_context, source) -> Ok(source#required),
             unique    = (_context, source) -> Ok(source#unique),
             localized = (_context, source) -> Ok(source#localized),
+            targetTypeId = (_context, source) -> Ok(source#target |> Option.map(AdminMapping.idOfType)),
             config    = (_context, source) -> Ok(source#config),
             position  = (_context, source) -> Ok(source#position)
         }
@@ -59,7 +60,8 @@ mod FieldConfigResolvers {
             sourceField = (_context, source) -> Ok(source#sourceField |> Option.map(ApiId.text)),
             min         = (_context, source) -> Ok(source#min),
             max         = (_context, source) -> Ok(source#max),
-            integer     = (_context, source) -> Ok(source#integer)
+            integer     = (_context, source) -> Ok(source#integer),
+            options     = (_context, source) -> Ok(if (List.isEmpty(source#options)) None else Some(source#options))
         }
 
 }

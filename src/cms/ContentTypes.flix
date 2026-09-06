@@ -101,7 +101,12 @@ mod ContentTypes {
     pub def addField(typeId: TypeId, draft: FieldDraft): FieldDef \ Db + CmsErr =
         let owner = get(typeId);
         let siblings = owner#fields |> List.map(field -> field#apiId);
-        CmsErr.raiseIfAny(Naming.validateFieldApiId(siblings, draft#apiId) ::: Naming.validateFlags(draft#many, draft#unique) ::: Naming.validateConfig(siblings, draft#kind, draft#config));
+        CmsErr.raiseIfAny(Naming.validateFieldApiId(siblings, draft#apiId) ::: Naming.validateFlags(draft#many, draft#unique) ::: Naming.validateTarget(draft#kind, draft#target) ::: Naming.validateConfig(siblings, draft#kind, draft#config));
+        let targetMissing = match draft#target {
+            case Some(target) => Option.isEmpty(find(target))
+            case None         => false
+        };
+        CmsErr.raiseIfAny(if (targetMissing) Violation.Violation("targetTypeId", "型 '${draft#target |> Option.map(target -> "${target}") |> Option.getWithDefault("")}' がありません") :: Nil else Nil);
         let position = ContentFieldsQueries.nextFieldPosition(TypeId.toInt64(typeId)) |> Option.flatMap(row -> row#next) |> Option.getWithDefault(0);
         let inserted = ContentFieldsQueries.insertField({
             typeId      = TypeId.toInt64(typeId),
@@ -115,6 +120,7 @@ mod ContentTypes {
             config      = FieldConfig.toJson(draft#config),
             position    = position
         }) |> expectRow;
+        Option.forEach(target -> discard ContentFieldsQueries.setFieldTarget({ id = inserted, targetTypeId = TypeId.toInt64(target) }), draft#target);
         touch(typeId);
         getField(FieldId.FieldId(inserted))
 

@@ -35,7 +35,7 @@ mod CmsTestKit {
     /// フィールドの入力。many / required / unique / localized は全部 false。
     ///
     pub def fieldDraft(api: String, kind: FieldKind, config: FieldConfig): FieldDraft =
-        { apiId = apiId(api), name = api, kind = kind, many = false, required = false, unique = false, localized = false, config = config }
+        { apiId = apiId(api), name = api, kind = kind, many = false, required = false, unique = false, localized = false, target = None, config = config }
 
     ///
     /// entry の中身。(apiId, 値) の並びから。

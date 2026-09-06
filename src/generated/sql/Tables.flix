@@ -22,6 +22,7 @@ mod ContentFieldsTable {
     pub def isLocalized(): Fragment.Col[ContentFieldsTable, Bool, Fragment.NotNull] = Fragment.Col.Col("is_localized", SqlValue.Bool)
     pub def config(): Fragment.Col[ContentFieldsTable, Util.Json.Json, Fragment.NotNull] = Fragment.Col.Col("config", SqlValue.ofJson)
     pub def position(): Fragment.Col[ContentFieldsTable, Int32, Fragment.NotNull] = Fragment.Col.Col("position", SqlValue.Int32)
+    pub def targetTypeId(): Fragment.Col[ContentFieldsTable, Int64, Fragment.Nullable] = Fragment.Col.Col("target_type_id", SqlValue.Int64)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
@@ -31,6 +32,8 @@ mod ContentFieldsTable {
         case TypeIdFkey
         /// content_fields_api_id_key (unique)
         case ApiIdKey
+        /// content_fields_target_type_id_fkey (foreign key)
+        case TargetTypeIdFkey
     }
 
     ///
@@ -47,11 +50,13 @@ mod ContentFieldsTable {
     pub def raiseConstraint(constraint: Constraint): a \ DbErr = match constraint {
         case Constraint.TypeIdFkey => DbErr.foreignKeyViolation("content_fields_type_id_fkey")
         case Constraint.ApiIdKey => DbErr.uniqueViolation("content_fields_api_id_key")
+        case Constraint.TargetTypeIdFkey => DbErr.foreignKeyViolation("content_fields_target_type_id_fkey")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
         case "content_fields_type_id_fkey" => Some(Constraint.TypeIdFkey)
         case "content_fields_api_id_key" => Some(Constraint.ApiIdKey)
+        case "content_fields_target_type_id_fkey" => Some(Constraint.TargetTypeIdFkey)
         case _ => None
     }
 
@@ -211,6 +216,61 @@ mod EntryContentsTable {
     def constraintOf(name: String): Option[Constraint] = match name {
         case "entry_contents_entry_id_fkey" => Some(Constraint.EntryIdFkey)
         case "entry_contents_stage_check" => Some(Constraint.StageCheck)
+        case _ => None
+    }
+
+}
+
+///
+/// entry_links テーブル。enum は断片 DSL の型に付ける印、関数は列。
+///
+mod EntryLinksTable {
+
+    use SqlValue.SqlValue
+
+    pub enum EntryLinksTable {
+        case EntryLinksTable
+    }
+
+    pub def fromEntryId(): Fragment.Col[EntryLinksTable, String, Fragment.NotNull] = Fragment.Col.Col("from_entry_id", SqlValue.Str)
+    pub def stage(): Fragment.Col[EntryLinksTable, String, Fragment.NotNull] = Fragment.Col.Col("stage", SqlValue.Str)
+    pub def fieldId(): Fragment.Col[EntryLinksTable, Int64, Fragment.NotNull] = Fragment.Col.Col("field_id", SqlValue.Int64)
+    pub def toEntryId(): Fragment.Col[EntryLinksTable, String, Fragment.NotNull] = Fragment.Col.Col("to_entry_id", SqlValue.Str)
+    pub def position(): Fragment.Col[EntryLinksTable, Int32, Fragment.NotNull] = Fragment.Col.Col("position", SqlValue.Int32)
+
+    ///
+    /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
+    ///
+    pub enum Constraint with Eq, Order, ToString {
+        /// entry_links_from_fkey (foreign key)
+        case FromFkey
+        /// entry_links_field_fkey (foreign key)
+        case FieldFkey
+        /// entry_links_stage_check (check)
+        case StageCheck
+    }
+
+    ///
+    /// このテーブルへの書き込みを、制約違反を `translate` で翻訳しながら実行する。
+    /// translate は thunk と同じ型の値を返すか、業務エラーのエフェクトを投げる。翻訳しない case は `raiseConstraint`。
+    /// enum に無い名前の違反と、制約違反以外の DbErr はそのまま上へ。Tx の外で呼ぶ（違反で abort した Tx に COMMIT を出さない）。
+    ///
+    pub def onConstraint(translate: Constraint -> a \ ef1, thunk: Unit -> a \ ef2): a \ ef1 + ef2 + {TransientDbErr, DbErr} =
+        DbError.onConstraintWith(constraintOf, translate, thunk)
+
+    ///
+    /// 翻訳しない制約を元の DbErr に戻す。`onConstraint` に渡す関数の中で使う。
+    ///
+    pub def raiseConstraint(constraint: Constraint): a \ DbErr = match constraint {
+        case Constraint.FromFkey => DbErr.foreignKeyViolation("entry_links_from_fkey")
+        case Constraint.FieldFkey => DbErr.foreignKeyViolation("entry_links_field_fkey")
+        case Constraint.StageCheck => DbErr.checkViolation("entry_links_stage_check")
+    }
+
+    def constraintOf(name: String): Option[Constraint] = match name {
+        case "entry_links_from_fkey" => Some(Constraint.FromFkey)
+        case "entry_links_field_fkey" => Some(Constraint.FieldFkey)
+        case "entry_links_stage_check" => Some(Constraint.StageCheck)
         case _ => None
     }
 

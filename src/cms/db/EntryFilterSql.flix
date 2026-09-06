@@ -14,9 +14,9 @@ mod EntryFilterSql {
     use SqlValue.SqlValue
 
     ///
-    /// 絞り込みを述語にする。
+    /// 絞り込みを述語にする。配列の「含む」だけ生 SQL（jsonb_array_elements_text の副問い合わせ）なので RawSql が付く。
     ///
-    pub def pred(conditions: Where): Pred[EntryContentsTable.EntryContentsTable] =
+    pub def pred(conditions: Where): Pred[EntryContentsTable.EntryContentsTable] \ RawSql =
         Fragment.all(List.map(condition, conditions))
 
     ///
@@ -49,7 +49,7 @@ mod EntryFilterSql {
             case Direction.Desc => Order.Desc(expression)
         }
 
-    def condition(given: Condition): Pred[EntryContentsTable.EntryContentsTable] = match given {
+    def condition(given: Condition): Pred[EntryContentsTable.EntryContentsTable] \ RawSql = match given {
         case Condition.IdEq(id)                  => Pred.Compare("e.id", CompareOp.Eq, SqlValue.Str(EntryId.text(id)))
         case Condition.IdIn(ids)                 => Pred.In("e.id", ids |> List.map(id -> SqlValue.Str(EntryId.text(id))))
         case Condition.TextEq(apiId, text)       => Pred.Compare(textExpr(apiId), CompareOp.Eq, SqlValue.Str(text))
@@ -64,6 +64,8 @@ mod EntryFilterSql {
         case Condition.BoolEq(apiId, b)          => Pred.Compare(boolExpr(apiId), CompareOp.Eq, SqlValue.Bool(b))
         case Condition.IsNull(apiId, true)       => Pred.IsNull(textExpr(apiId))
         case Condition.IsNull(apiId, false)      => Pred.IsNotNull(textExpr(apiId))
+        case Condition.ArrayContains(apiId, text) =>
+            Fragment.rawPredWith("EXISTS (SELECT 1 FROM jsonb_array_elements_text(c.data->'${ApiId.text(apiId)}') AS elem WHERE elem = ?)", SqlValue.Str(text) :: Nil)
         case Condition.AnyOf(groups)             => Fragment.any(List.map(pred, groups))
     }
 
