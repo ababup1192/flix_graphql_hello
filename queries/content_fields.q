@@ -48,3 +48,8 @@ query nextFieldPosition(typeId: Int64) -> one {
 query nextChildPosition(parentFieldId: Int64) -> one {
     SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE parent_field_id = :parentFieldId
 }
+
+// この型を参照先にしている REFERENCE のフィールドの数（型を消せるかの判断用。FK に ON DELETE が無いので先に見る）
+query countFieldsTargeting(typeId: Int64) -> one {
+    SELECT count(*)::bigint AS total FROM content_fields WHERE target_type_id = :typeId
+}

@@ -100,9 +100,16 @@ mod Http {
     /// ボディが空なら Content-Type は付けない。
     /// response#headers は Content-Type / Content-Length / Connection の後ろに並べる。
     ///
+    ///
+    /// ヘッダ値から行を壊す文字（CR / LF）を落とす。
+    ///
+    def headerValue(value: String): String =
+        value |> String.replace(src = "\r", dst = "") |> String.replace(src = "\n", dst = "")
+
     pub def render(response: HttpResponse): String =
         let contentType = if (response#body == "") "" else "Content-Type: application/json; charset=utf-8\r\n";
-        let extraHeaders = response#headers |> List.map(match (name, value) -> "${name}: ${value}\r\n") |> List.join("");
+        // WhyNot: 値の CR / LF を落とすのは、Origin をそのまま返す CORS のヘッダで、行中の裸の CR がレスポンス分割になるのを防ぐため
+        let extraHeaders = response#headers |> List.map(match (name, value) -> "${name}: ${headerValue(value)}\r\n") |> List.join("");
         let headers =
             "HTTP/1.1 ${response#status} ${reasonPhrase(response#status)}\r\n" +
             contentType +

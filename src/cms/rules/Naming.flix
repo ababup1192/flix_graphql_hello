@@ -72,7 +72,14 @@ mod Naming {
         if (List.memberOf(singular, reservedTypeNames())) Violation.Violation("singular", "'${singular}' はコンテンツ API が使う型名なので使えません") :: Nil
         else if (List.exists(suffix -> String.endsWith(suffix = suffix, singular), reservedSuffixes())) Violation.Violation("singular", "'${singular}' は ${List.join(" / ", reservedSuffixes())} で終わる名前なので使えません（他の型から生える型と衝突します）") :: Nil
         else if (List.exists(other -> other#singular == candidate#singular, others)) Violation.Violation("singular", "'${singular}' は既に他の型が使っています") :: Nil
+        else if (List.exists(other -> ApiId.text(other#plural) == lowerFirst(singular), others)) Violation.Violation("singular", "'${singular}' の 1 件のクエリ名（${lowerFirst(singular)}）が他の型の一覧のクエリ名と衝突します") :: Nil
         else Nil
+
+    ///
+    /// 先頭を小文字に。singular から 1 件のクエリ名を作る（Blog → blog）。コンテンツ API のクエリ名はこの規則で生える。
+    ///
+    pub def lowerFirst(text: String): String =
+        String.toLowerCase(String.takeLeft(1, text)) + String.dropLeft(1, text)
 
     def validatePlural(others: List[TypeNames], candidate: TypeNames): List[Violation] =
         let plural = ApiId.text(candidate#plural);
@@ -112,17 +119,27 @@ mod Naming {
     }
 
     ///
-    /// 親子の組み合わせ。Blocks の子は Object（variant）だけ。Object の子に Blocks は置けない（入れ子の union は複雑になる）。
+    /// 親子の組み合わせ。Blocks の子は Object（variant）だけで、variant は配列にできない。Object の子に Blocks は置けない（入れ子の union は複雑になる）。
     /// 親が無ければ何でもよい。
     ///
-    pub def validateParent(parentKind: Option[FieldKind], childKind: FieldKind): List[Violation] = match (parentKind, childKind) {
+    pub def validateParent(parentKind: Option[FieldKind], childKind: FieldKind, childMany: Bool): List[Violation] = match (parentKind, childKind) {
         case (None, _)                              => Nil
-        case (Some(FieldKind.Blocks), FieldKind.Object) => Nil
+        case (Some(FieldKind.Blocks), FieldKind.Object) => if (childMany) Violation.Violation("many", "BLOCKS の variant は配列にできません") :: Nil else Nil
         case (Some(FieldKind.Blocks), _)            => Violation.Violation("parentFieldId", "BLOCKS の子は OBJECT（variant）だけです") :: Nil
         case (Some(FieldKind.Object), FieldKind.Blocks) => Violation.Violation("parentFieldId", "OBJECT の中に BLOCKS は置けません") :: Nil
         case (Some(FieldKind.Object), _)            => Nil
         case (Some(_), _)                           => Violation.Violation("parentFieldId", "子を持てるのは OBJECT と BLOCKS だけです") :: Nil
     }
+
+    ///
+    /// 子フィールドの性質。required と unique は最上位だけ（公開の検査と一意の写しは最上位の値しか見ない）。
+    ///
+    /// WhyNot: 子でも黙って受けて無視しないのは、付けた人が効いていると思い込むため。効かせるなら検査と一意の写しを入れ子に広げてから外す。
+    ///
+    pub def validateChildFlags(hasParent: Bool, required: Bool, unique: Bool): List[Violation] =
+        if (not hasParent) Nil
+        else (if (required) Violation.Violation("required", "子フィールドには付けられません（公開の検査は最上位だけ）") :: Nil else Nil)
+             ::: (if (unique) Violation.Violation("unique", "子フィールドには付けられません（一意は最上位だけ）") :: Nil else Nil)
 
     ///
     /// Select の選択肢の綴り。コンテンツ API の enum の値になるので UPPER_SNAKE（[A-Z][A-Z0-9_]*）。

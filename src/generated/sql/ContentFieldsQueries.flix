@@ -7,7 +7,7 @@ mod ContentFieldsQueries {
     ///
     /// 生成元 content_fields.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -541611684
+    pub def sourceHash(): Int32 = 225501244
 
     ///
     /// listAllFields の 1 行。
@@ -196,5 +196,23 @@ mod ContentFieldsQueries {
         let sql = "SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE parent_field_id = $1";
         let params = List#{SqlValue.Int64(parentFieldId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(nextChildPositionDecoder(), sql, params))
+
+    ///
+    /// countFieldsTargeting の 1 行。
+    ///
+    pub type alias CountFieldsTargetingRow = { total = Option[Int64] }
+
+    def countFieldsTargetingDecoder(): Decoder[CountFieldsTargetingRow] =
+        forA (
+            total <- Decoder.opt(Decoder.int64("total"))
+        ) yield { total = total }
+
+    ///
+    /// countFieldsTargeting: SELECT count(*)::bigint AS total FROM content_fields WHERE target_type_id = $1
+    ///
+    pub def countFieldsTargeting(typeId: Int64): Option[CountFieldsTargetingRow] \ DbRead =
+        let sql = "SELECT count(*)::bigint AS total FROM content_fields WHERE target_type_id = $1";
+        let params = List#{SqlValue.Int64(typeId)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(countFieldsTargetingDecoder(), sql, params))
 
 }

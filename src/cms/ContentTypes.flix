@@ -74,13 +74,16 @@ mod ContentTypes {
         get(id)
 
     ///
-    /// content type をフィールドごと消す。無ければ notFound。entry が残っていれば invalid（先に entry を消す）。
+    /// content type をフィールドごと消す。無ければ notFound。entry が残っていれば、他の型から参照されていれば invalid。
     /// ゴミ箱の entry は型と一緒に消す（残すと型が消せない）。
     ///
     pub def delete(id: TypeId): Unit \ Db + CmsErr =
         discard get(id);
         let remaining = EntriesQueries.countEntriesOfType(TypeId.toInt64(id)) |> Rows.total;
-        CmsErr.raiseIfAny(if (remaining == 0i64) Nil else Violation.Violation("id", "entry が ${remaining} 件あります。先に消してください") :: Nil);
+        let referrers = ContentFieldsQueries.countFieldsTargeting(TypeId.toInt64(id)) |> Rows.total;
+        CmsErr.raiseIfAny(
+            (if (remaining == 0i64) Nil else Violation.Violation("id", "entry が ${remaining} 件あります。先に消してください") :: Nil)
+            ::: (if (referrers == 0i64) Nil else Violation.Violation("id", "他の型の REFERENCE のフィールド ${referrers} 本が参照先にしています。先にそのフィールドを消してください") :: Nil));
         discard EntriesQueries.purgeDeletedEntries(TypeId.toInt64(id));
         discard ContentTypesQueries.deleteContentType(TypeId.toInt64(id))
 
@@ -110,7 +113,9 @@ mod ContentTypes {
         let existing = getField(id);
         let taken = takenApiIds(fieldsOf(existing#typeId), Some(id));
         let config = changes#config |> Option.getWithDefault(existing#config);
-        CmsErr.raiseIfAny(Naming.validateFlags(existing#kind, existing#many, changes#unique |> Option.getWithDefault(existing#unique)) ::: Naming.validateConfig(taken, existing#kind, config));
+        let unique = changes#unique |> Option.getWithDefault(existing#unique);
+        let required = changes#required |> Option.getWithDefault(existing#required);
+        CmsErr.raiseIfAny(Naming.validateFlags(existing#kind, existing#many, unique) ::: Naming.validateChildFlags(Option.nonEmpty(existing#parent), required, unique) ::: Naming.validateConfig(taken, existing#kind, config));
         discard ContentFieldsQueries.updateField(FieldId.toInt64(id), ContentTypeRows.fieldChanges(changes));
         touch(existing#typeId);
         getField(id)
@@ -144,7 +149,8 @@ mod ContentTypes {
         Naming.validateFieldApiId(taken, draft#apiId)
             ::: Naming.validateFlags(draft#kind, draft#many, draft#unique)
             ::: Naming.validateTarget(draft#kind, draft#target)
-            ::: Naming.validateParent(parent |> Option.map(found -> found#kind), draft#kind)
+            ::: Naming.validateParent(parent |> Option.map(found -> found#kind), draft#kind, draft#many)
+            ::: Naming.validateChildFlags(Option.nonEmpty(parent), draft#required, draft#unique)
             ::: Naming.validateConfig(taken, draft#kind, draft#config)
 
     ///

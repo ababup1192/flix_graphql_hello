@@ -17,9 +17,26 @@ mod ContentSchemaBuilder {
     /// 型の定義から Schema を組む。定義が無ければ Query は `_types: Int!`（型の数）だけ（graphql-java は空の Query を許さない）。
     ///
     pub def build(types: List[ContentType], runner: Runner[ContentEff]): Schema =
-        let rootFields = types |> List.flatMap(rootFieldsOf(types));
+        let buildable = types |> List.map(owner -> { fields = withShape(owner#fields) | owner });
+        let rootFields = buildable |> List.flatMap(rootFieldsOf(buildable));
         let fallback = Schema.field0("_types", Out.int32(), (_context, _root) -> Ok(List.length(types))) |> Field.withDescription("content type の数。型を作るとここに Query が生える");
         Schema.make(Schema.objectType("Query", () -> fallback :: rootFields), None, runner)
+
+    ///
+    /// 型を生やせるフィールドだけ残す。子の無い OBJECT と、子（variant）の無い BLOCKS は落とす。
+    ///
+    /// WhyNot: 空の型を生やさないのは、graphql-java が `type X {}` / `union X =` を受け付けず、親を作ってから子を足す
+    /// 途中の 1 フィールドでコンテンツ API 全体が組めなくなるため。子を足せば次の組み直しで生える。
+    ///
+    def withShape(fields: List[FieldDef]): List[FieldDef] =
+        fields |> List.filterMap(field -> match field#kind {
+            case FieldKind.Object => withShape(Children.toList(field#children)) |> nonEmptyChildren(field)
+            case FieldKind.Blocks => withShape(Children.toList(field#children)) |> nonEmptyChildren(field)
+            case _                => Some(field)
+        })
+
+    def nonEmptyChildren(field: FieldDef, children: List[FieldDef]): Option[FieldDef] =
+        if (List.isEmpty(children)) None else Some({ children = Children.Children(children) | field })
 
     // ---- ルートのフィールド ----
 
@@ -241,9 +258,11 @@ mod ContentSchemaBuilder {
                 ors  <- Arg.decodeField(orArg, fields)
             ) yield {
                 let anded = ands |> Option.getWithDefault(Nil) |> List.flatten;
-                let ored = match ors |> Option.getWithDefault(Nil) {
-                    case Nil    => Nil
-                    case groups => Condition.AnyOf(groups) :: Nil
+                // WhyNot: OR: [] を「条件無し」にしないのは、どれにも合わない集合の OR は偽であり、全件に広がると絞り込みのつもりが漏れになるため
+                let ored = match ors {
+                    case None         => Nil
+                    case Some(Nil)    => Condition.Never :: Nil
+                    case Some(groups) => Condition.AnyOf(groups) :: Nil
                 };
                 own ::: anded ::: ored
             })

@@ -44,6 +44,16 @@ def testNamingValidateTypePlural(): Unit \ Assert =
         (CmsTestKit.violationPaths(Naming.validateType(existing(), CmsTestKit.names("news", "News", "news"))),
          CmsTestKit.violationPaths(Naming.validateType(existing(), CmsTestKit.names("posts", "Post", "tags")))))
 
+/// singular の 1 件のクエリ名（先頭小文字）が既存の型の一覧のクエリ名と同じだと Query のフィールドが重なるので使えない。
+///
+///   既存: apiId "news"（plural news）→ 候補 singular "News" は 1 件のクエリ名が news になり衝突
+@Test
+def testNamingValidateTypeSingularVsExistingPlural(): Unit \ Assert =
+    let others = CmsTestKit.names("news", "Article", "news") :: Nil;
+    Assert.assertEq(expected = (List#{"singular"}, Nil),
+        (CmsTestKit.violationPaths(Naming.validateType(others, CmsTestKit.names("stories", "News", "stories"))),
+         CmsTestKit.violationPaths(Naming.validateType(others, CmsTestKit.names("stories", "Story", "stories")))))
+
 /// singular と plural の誤りはまとめて返る。
 @Test
 def testNamingValidateTypeBoth(): Unit \ Assert =
@@ -60,6 +70,15 @@ def testNamingValidateFieldApiId(): Unit \ Assert =
         (CmsTestKit.violationPaths(Naming.validateFieldApiId(siblings, CmsTestKit.apiId("memberOnly"))),
          CmsTestKit.violationPaths(Naming.validateFieldApiId(siblings, CmsTestKit.apiId("id"))),
          CmsTestKit.violationPaths(Naming.validateFieldApiId(siblings, CmsTestKit.apiId("title")))))
+
+/// 子フィールドには required / unique を付けられず、BLOCKS の variant は配列にできない。最上位なら構わない。
+@Test
+def testNamingValidateChildFlags(): Unit \ Assert =
+    Assert.assertEq(expected = (Nil, List#{"required", "unique"}, List#{"many"}, Nil),
+        (CmsTestKit.violationPaths(Naming.validateChildFlags(false, true, true)),
+         CmsTestKit.violationPaths(Naming.validateChildFlags(true, true, true)),
+         CmsTestKit.violationPaths(Naming.validateParent(Some(FieldKind.Blocks), FieldKind.Object, true)),
+         CmsTestKit.violationPaths(Naming.validateParent(Some(FieldKind.Blocks), FieldKind.Object, false))))
 
 // ---- config ----
 

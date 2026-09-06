@@ -14,11 +14,11 @@ mod TestEntryFilterSql {
         CmsTestKit.fieldDef("flag", FieldKind.Boolean) ::
         { many = true | CmsTestKit.fieldDef("tags", FieldKind.Text) } :: Nil
 
-    /// 条件は式とプレースホルダになる。値は SQL の文面に出ない。
+    /// 条件は式とプレースホルダになる。値は SQL の文面に出ない。数値と真偽値は jsonb_typeof で見てからキャストする（型の違う古い値で落ちない）。
     @Test
     def testEntryFilterSqlPred(): Unit \ Assert =
         let conditions = Condition.TextEq(CmsTestKit.apiId("title"), "Flix") :: Condition.NumberGt(CmsTestKit.apiId("views"), 10.0) :: Condition.BoolEq(CmsTestKit.apiId("flag"), true) :: Nil;
-        Assert.assertEq(expected = ("((((c.data->>'title') = $1) AND (((c.data->>'views')::numeric) > $2)) AND (((c.data->>'flag')::boolean) = $3))", List#{SqlValue.Str("Flix"), SqlValue.Float64(10.0), SqlValue.Bool(true)}),
+        Assert.assertEq(expected = ("((((c.data->>'title') = $1) AND (((CASE WHEN jsonb_typeof(c.data->'views') = 'number' THEN c.data->>'views' END)::numeric) > $2)) AND (((CASE WHEN jsonb_typeof(c.data->'flag') = 'boolean' THEN c.data->>'flag' END)::boolean) = $3))", List#{SqlValue.Str("Flix"), SqlValue.Float64(10.0), SqlValue.Bool(true)}),
             run { Fragment.renderPred(EntryFilterSql.pred(conditions), 1) } with RawSql.runWithAllow)
 
     /// contains は小文字にして LIKE、% はエスケープされる。isNull は ->> の NULL を見る。OR は括弧で括る。
@@ -42,7 +42,7 @@ mod TestEntryFilterSql {
     /// 並び順は kind で式が変わり、末尾に e.id を足す。空なら更新が新しい順。
     @Test
     def testEntryFilterSqlOrder(): Unit \ Assert =
-        Assert.assertEq(expected = ("ORDER BY ((c.data->>'views')::numeric) DESC, (c.data->>'title') ASC, e.id ASC", "ORDER BY e.updated_at DESC, e.id ASC"),
+        Assert.assertEq(expected = ("ORDER BY ((CASE WHEN jsonb_typeof(c.data->'views') = 'number' THEN c.data->>'views' END)::numeric) DESC, (c.data->>'title') ASC, e.id ASC", "ORDER BY e.updated_at DESC, e.id ASC"),
             (Fragment.renderOrder(EntryFilterSql.order(filterFields(), (SortKey.ByField(CmsTestKit.apiId("views")), Direction.Desc) :: (SortKey.ByField(CmsTestKit.apiId("title")), Direction.Asc) :: Nil)),
              Fragment.renderOrder(EntryFilterSql.order(filterFields(), Nil))))
 

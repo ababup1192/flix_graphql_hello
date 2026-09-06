@@ -40,6 +40,14 @@ mod TestEntryValidation {
                 ("views", CmsTestKit.floatJson(150.5)),
                 ("tags", Json.JArray(Vector#{Json.JString("ok"), CmsTestKit.floatJson(1.0)}))}))) |> List.sort)
 
+    /// integer は小数部の有無だけ見る。Int32 を超える整数も通り、1.5 は落ちる。
+    @Test
+    def testEntryValidationIntegerBeyondInt32(): Unit \ Assert =
+        let fields = { config = { integer = Some(true) | FieldConfig.empty() } | CmsTestKit.fieldDef("views", FieldKind.Number) } :: Nil;
+        Assert.assertEq(expected = (Nil, List#{"fields.views"}),
+            (CmsTestKit.violationPaths(EntryValidation.draft(fields, CmsTestKit.entryData(List#{("views", CmsTestKit.floatJson(3000000000.0))}))),
+             CmsTestKit.violationPaths(EntryValidation.draft(fields, CmsTestKit.entryData(List#{("views", CmsTestKit.floatJson(1.5))})))))
+
     /// merge は patch のキーだけ上書きし、null は消す。
     @Test
     def testEntryValidationMerge(): Unit \ Assert =

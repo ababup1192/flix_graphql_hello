@@ -98,10 +98,9 @@ mod EntryValidation {
             case (Some(high), Some(x)) if x > high => Violation.Violation(path, "${high} 以下にしてください") :: Nil
             case _                                 => Nil
         };
-        let integerChecks = match (config#integer, BigDecimal.tryToInt32(number), asFloat) {
-            case (Some(true), Some(whole), Some(x)) if Int32.toFloat64(whole) != x => Violation.Violation(path, "整数にしてください") :: Nil
-            case (Some(true), None, _)                                              => Violation.Violation(path, "整数にしてください") :: Nil
-            case _                                                                  => Nil
+        let integerChecks = match (config#integer, asFloat) {
+            case (Some(true), Some(x)) if Float64.floor(x) != x => Violation.Violation(path, "整数にしてください") :: Nil
+            case _                                              => Nil
         };
         lowChecks ::: highChecks ::: integerChecks
 

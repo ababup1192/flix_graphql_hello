@@ -83,8 +83,17 @@ mod EntryFilterSql {
     ///
     def textExpr(apiId: ApiId): String = "(c.data->>'${ApiId.text(apiId)}')"
 
-    def numberExpr(apiId: ApiId): String = "((c.data->>'${ApiId.text(apiId)}')::numeric)"
+    ///
+    /// 数値として取り出す式。数値でない値は NULL。
+    ///
+    /// WhyNot: 素の ::numeric にしないのは、フィールドの kind を変えて作り直した後に古い文字列が残っていると
+    /// キャストで PG の例外になり、一覧のクエリ全体が落ちるため。jsonb_typeof で見てから落とす
+    ///
+    def numberExpr(apiId: ApiId): String = "(${typedExpr(apiId, "number")}::numeric)"
 
-    def boolExpr(apiId: ApiId): String = "((c.data->>'${ApiId.text(apiId)}')::boolean)"
+    def boolExpr(apiId: ApiId): String = "(${typedExpr(apiId, "boolean")}::boolean)"
+
+    def typedExpr(apiId: ApiId, jsonType: String): String =
+        "(CASE WHEN jsonb_typeof(c.data->'${ApiId.text(apiId)}') = '${jsonType}' THEN c.data->>'${ApiId.text(apiId)}' END)"
 
 }

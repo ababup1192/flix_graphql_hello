@@ -45,7 +45,12 @@ mod ContentEngine {
         Cache.Cache(new AtomicReference(unchecked_cast(empty as Object)))
 
     ///
-    /// 今の定義に合ったエンジン。目印が変わっていなければ前の物を返す。定義の読み込みや組み立てに失敗すれば Err。
+    /// 今の定義に合ったエンジン。目印が変わっていなければ前の物を返す。定義の読み込みや組み立てに失敗すれば、
+    /// 前に組めた物があればそれを返し続け、無ければ Err。
+    ///
+    /// WhyNot: 組み直しに失敗した時に前のエンジンを捨てないのは、管理 API の 1 操作（名前の衝突など）で公開サイトが
+    /// 全断するのを避けるため。目印は更新しないので、定義が直れば次のリクエストで組み直す。
+    /// 2 つのリクエストが同時に組み直すと後の書き込みが勝つが、どちらも同じ目印から組んだ物なので構わない。
     ///
     pub def current(cache: Cache, pool: Pool): Result[String, Graphql.Engine] \ IO =
         let Cache.Cache(slot) = cache;
@@ -54,7 +59,10 @@ mod ContentEngine {
             fingerprint <- readFingerprint(pool);
             engine <- match stored {
                 case Some((known, engine)) if known == fingerprint => Ok(engine)
-                case _ => rebuild(pool) |> Result.map(engine -> { slot.set(unchecked_cast(Some((fingerprint, engine)) as Object)); engine })
+                case _ => match rebuild(pool) {
+                    case Ok(engine)   => { slot.set(unchecked_cast(Some((fingerprint, engine)) as Object)); Ok(engine) }
+                    case Err(message) => stored |> Option.map(snd) |> Option.toOk(message)
+                }
             }
         ) yield engine
 

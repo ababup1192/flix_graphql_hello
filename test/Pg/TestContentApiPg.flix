@@ -45,16 +45,15 @@ mod TestContentApiPg {
                 (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }), "blog" => Value.Null }), None)),
             (byContains, byOr, paged, one, published))
 
-    /// 規則外の id で絞ると全件ではなく 0 件（条件が消えない）。
+    /// 規則外の id で絞ると全件ではなく 0 件（条件が消えない）。OR: [] も「どれにも合わない」なので 0 件。
     @Test
-    def testPgContentApiBadIdFilterMatchesNothing(): Unit \ {IO, Assert} =
-        let (byBadId, byBadIdIn) = PgTestSupport.withContentApi(seed, ask ->
+    def testPgContentApiEmptyFiltersMatchNothing(): Unit \ {IO, Assert} =
+        let none = (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }) }), None);
+        let (byBadId, byBadIdIn, byEmptyOr) = PgTestSupport.withContentApi(seed, ask ->
             (ask("{ blogs(stage: DRAFT, where: { id_eq: \"not an id!\" }) { totalCount } }"),
-             ask("{ blogs(stage: DRAFT, where: { id_in: [\"not an id!\"] }) { totalCount } }")));
-        Assert.assertEq(
-            expected = ((Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }) }), None),
-                        (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }) }), None)),
-            (byBadId, byBadIdIn))
+             ask("{ blogs(stage: DRAFT, where: { id_in: [\"not an id!\"] }) { totalCount } }"),
+             ask("{ blogs(stage: DRAFT, where: { OR: [] }) { totalCount } }")));
+        Assert.assertEq(expected = (none, none, none), (byBadId, byBadIdIn, byEmptyOr))
 
     /// 型の定義が変わるとエンジンが組み直される。フィールドを足せば引けるようになり、型を足せば query が増え、型を消せば query が消える。
     ///

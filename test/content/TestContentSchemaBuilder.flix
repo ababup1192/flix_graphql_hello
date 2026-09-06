@@ -34,6 +34,16 @@ mod TestContentSchemaBuilder {
              String.contains(substr = "tags: [String!]!", sdl) and String.contains(substr = "views: Float", sdl),
              String.contains(substr = "siteSettings(", sdl)))
 
+    /// 子の無い OBJECT / BLOCKS は生やさない（空の型で graphql-java が落ちない）。子があれば生える。
+    @Test
+    def testContentSchemaBuilderSkipsEmptyNested(): Unit \ Assert =
+        let empties = CmsTestKit.fieldDef("related", FieldKind.Object) :: { many = true | CmsTestKit.fieldDef("sections", FieldKind.Blocks) } :: Nil;
+        let filled = { children = Children.Children(CmsTestKit.fieldDef("label", FieldKind.Text) :: Nil) | CmsTestKit.fieldDef("related", FieldKind.Object) } :: Nil;
+        let sdlOf = fields -> Schema.toSdl(ContentSchemaBuilder.build(CmsTestKit.contentType(1i64, "blogs", TypeKind.Collection, "記事", fields) :: Nil, dryRunner()));
+        Assert.assertEq(expected = (Ok((false, false)), Ok(true)),
+            (sdlOf(empties) |> Result.map(sdl -> (String.contains(substr = "related", sdl), String.contains(substr = "sections", sdl))),
+             sdlOf(filled) |> Result.map(String.contains(substr = "related: BlogRelated"))))
+
     /// 型が 1 つも無くても Query は組める（_types だけ）。
     @Test
     def testContentSchemaBuilderEmpty(): Unit \ Assert =

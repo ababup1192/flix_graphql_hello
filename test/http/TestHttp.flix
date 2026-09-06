@@ -88,6 +88,13 @@ def testHttpRenderExtraHeaders(): Unit \ Assert =
         expected = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: 2\r\nConnection: close\r\nX-A: 1\r\nX-B: 2\r\n\r\n{}",
         Http.render({ status = 200, headers = ("X-A", "1") :: ("X-B", "2") :: Nil, body = "{}" }))
 
+/// ヘッダ値の CR / LF は落とす（Origin をそのまま返す CORS でレスポンス分割にならない）。
+@Test
+def testHttpRenderStripsLineBreaksInHeaderValue(): Unit \ Assert =
+    Assert.assertEq(
+        expected = "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\nAccess-Control-Allow-Origin: http://aX: y\r\n\r\n",
+        Http.render({ status = 204, headers = ("Access-Control-Allow-Origin", "http://a\rX: y\n") :: Nil, body = "" }))
+
 /// 日本語ボディの Content-Length は文字数（4）ではなく UTF-8 のバイト数（8）。
 @Test
 def testHttpRenderNonAsciiBody(): Unit \ Assert =

@@ -37,6 +37,19 @@ mod TestReferencesPg {
             Err("config.options: 選択肢は UPPER_SNAKE（[A-Z][A-Z0-9_]*）にしてください"),
             Err("fields.category: 選択肢（KNOWLEDGE, NEWS）にありません; fields.profile: entry の id（英数字と _ - を 1 〜 64 文字）にしてください")))), result)
 
+    /// 参照先になっている型は消せない（FK の 500 ではなく invalid で止める）。参照しているフィールドを消せば消せる。
+    @Test
+    def testPgDeleteReferencedType(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> {
+            let (profiles, blogs, _) = typesWithReferences();
+            let blocked = CmsTestKit.failureMessage(() -> ContentTypes.delete(profiles));
+            let profileField = ContentTypes.get(blogs) |> (owner -> owner#fields |> List.find(field -> ApiId.text(field#apiId) == "profile"));
+            Option.forEach(field -> ContentTypes.removeField(field#id), profileField);
+            ContentTypes.delete(profiles);
+            (blocked, ContentTypes.find(profiles) |> Option.isEmpty)
+        });
+        Assert.assertEq(expected = Ok(Ok((Err("id: 他の型の REFERENCE のフィールド 1 本が参照先にしています。先にそのフィールドを消してください"), true))), result)
+
     /// 参照先が未公開なら publish は止まり、withDependencies で一緒に公開できる。公開中に参照されている物は取り下げられない。
     ///
     ///   blog b1 → profile p1、tags [t1, t2]
