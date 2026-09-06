@@ -46,13 +46,13 @@ mod CmsTestKit {
           target = None, parent = None, children = Children.none(), config = FieldConfig.empty(), position = 0 }
 
     ///
-    /// content type の定義。singular / plural は apiId から導く。
+    /// content type の定義。singular / plural は apiId から導く。fields の typeId はこの型の id に合わせる。
     ///
     pub def contentType(id: Int64, api: String, kind: TypeKind, name: String, fields: List[FieldDef]): ContentType =
         let at = Timestamp.at("2026-09-01T00:00:00Z");
         { id = TypeId.TypeId(id), apiId = apiId(api), kind = kind, name = name,
           singular = Naming.deriveSingular(apiId(api)), plural = Naming.derivePlural(apiId(api)), previewUrl = None,
-          fields = fields, createdAt = at, updatedAt = at }
+          fields = fields |> List.map(field -> { typeId = TypeId.TypeId(id) | field }), createdAt = at, updatedAt = at }
 
     ///
     /// entry の中身。(apiId, 値) の並びから。

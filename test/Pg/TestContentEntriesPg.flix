@@ -48,7 +48,7 @@ mod TestContentEntriesPg {
     /// 一覧は更新が新しい順、search で絞れ、totalCount は絞った後の件数。渡した id はそのまま使われる。
     @Test
     def testPgEntryList(): Unit \ {IO, Assert} =
-        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"unused"}, () -> {
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(Nil, () -> {
             let blogs = blogsWithFields();
             discard ContentEntries.create(blogs, Some(CmsTestKit.entryId("first")), CmsTestKit.entryData(List#{("title", Json.JString("apple"))}));
             discard ContentEntries.create(blogs, Some(CmsTestKit.entryId("second")), CmsTestKit.entryData(List#{("title", Json.JString("banana"))}));
@@ -102,23 +102,22 @@ mod TestContentEntriesPg {
     def testPgAdminEntryRoundTrip(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withAdminApi(blogsWithFields, (schema, blogs) -> {
             let typeId = "${blogs}";
-            let created = GraphqlTestKit.executeQuery(schema,
+            let created = GraphqlTestKit.ask(schema,
                 "mutation { createEntry(typeId: \"${typeId}\", id: \"e1\", fields: { title: \"hello\", views: 7 }) { id version stage fields } }");
-            let updated = GraphqlTestKit.executeQuery(schema,
+            let updated = GraphqlTestKit.ask(schema,
                 "mutation { updateEntry(id: \"e1\", expectedVersion: 1, fields: { views: null }) { version fields } }");
-            let badKey = GraphqlTestKit.executeRequest(schema, {
-                queryText = "mutation($f: JSON!) { updateEntry(id: \"e1\", expectedVersion: 2, fields: $f) { version } }",
-                variables = Map#{ "f" => Value.Obj(Map#{ "Bad Key" => Value.Int(1) }) },
-                operationName = None }) |> Result.map(snd);
-            let listed = GraphqlTestKit.executeQuery(schema, "{ entries(typeId: \"${typeId}\") { totalCount nodes { id } } }");
+            let badKey = GraphqlTestKit.askRequest(schema, GraphqlTestKit.request(
+                "mutation($f: JSON!) { updateEntry(id: \"e1\", expectedVersion: 2, fields: $f) { version } }",
+                Map#{ "f" => Value.Obj(Map#{ "Bad Key" => Value.Int(1) }) })) |> snd;
+            let listed = GraphqlTestKit.ask(schema, "{ entries(typeId: \"${typeId}\") { totalCount nodes { id } } }");
             (created, updated, badKey, listed)
         });
         Assert.assertEq(
             expected = (
-                Ok((Value.Obj(Map#{ "createEntry" => Value.Obj(Map#{ "id" => Value.Str("e1"), "version" => Value.Int(1), "stage" => Value.Str("DRAFT"), "fields" => Value.Obj(Map#{ "title" => Value.Str("hello"), "views" => Value.Int(7) }) }) }), None)),
-                Ok((Value.Obj(Map#{ "updateEntry" => Value.Obj(Map#{ "version" => Value.Int(2), "fields" => Value.Obj(Map#{ "title" => Value.Str("hello") }) }) }), None)),
-                Ok(Some("fields.Bad Key: フィールドの apiId は lowerCamel の識別子（[a-z][A-Za-z0-9]*）です")),
-                Ok((Value.Obj(Map#{ "entries" => Value.Obj(Map#{ "totalCount" => Value.Int(1), "nodes" => Value.List(Value.Obj(Map#{ "id" => Value.Str("e1") }) :: Nil) }) }), None))),
+                (Value.Obj(Map#{ "createEntry" => Value.Obj(Map#{ "id" => Value.Str("e1"), "version" => Value.Int(1), "stage" => Value.Str("DRAFT"), "fields" => Value.Obj(Map#{ "title" => Value.Str("hello"), "views" => Value.Int(7) }) }) }), None),
+                (Value.Obj(Map#{ "updateEntry" => Value.Obj(Map#{ "version" => Value.Int(2), "fields" => Value.Obj(Map#{ "title" => Value.Str("hello") }) }) }), None),
+                Some("fields.Bad Key: フィールドの apiId は lowerCamel の識別子（[a-z][A-Za-z0-9]*）です"),
+                (Value.Obj(Map#{ "entries" => Value.Obj(Map#{ "totalCount" => Value.Int(1), "nodes" => Value.List(Value.Obj(Map#{ "id" => Value.Str("e1") }) :: Nil) }) }), None)),
             outcome)
 
 }

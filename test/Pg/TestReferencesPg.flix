@@ -77,7 +77,7 @@ mod TestReferencesPg {
             Err("references: 公開中の entry 'b1' が参照しています。先にそちらを取り下げるか、参照を外してください"),
             Stage.Draft))), result)
 
-    /// コンテンツ API で参照が展開され、select は出力も絞り込みも enum、配列の参照は _contains で絞れる。参照の展開は同じ stage で行う。
+    /// コンテンツ API で参照が展開され、select は出力も絞り込みも enum、配列の参照は _contains で絞れる。規則外の id の参照は 0 件。参照の展開は同じ stage で行う。
     @Test
     def testPgContentApiReferences(): Unit \ {IO, Assert} =
         let seed = () -> CmsTestKit.withIds(List#{"p1", "t1", "t2", "b1", "b2"}, () -> {
@@ -89,17 +89,19 @@ mod TestReferencesPg {
             discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("Two")), ("category", Json.JString("NEWS")), ("tags", Json.JArray(Vector#{Json.JString("t2")}))}));
             discard ContentEntries.publish(CmsTestKit.entryId("b1"), "tester", true)
         });
-        let (expanded, byTag, byCategory, sdl) = PgTestSupport.withContentApi(seed, ask ->
+        let (expanded, byTag, byCategory, sdl, byBadRef) = PgTestSupport.withContentApi(seed, ask ->
             (ask("{ blog(id: \"b1\") { title category profile { name } tags { label } } }"),
              ask("{ blogs(stage: DRAFT, where: { tags_contains: \"t1\" }) { nodes { id } } }"),
              ask("{ blogs(stage: DRAFT, where: { category_eq: NEWS }) { nodes { id } } }"),
-             ask("{ __type(name: \"BlogCategory\") { enumValues { name } } }")));
+             ask("{ __type(name: \"BlogCategory\") { enumValues { name } } }"),
+             ask("{ blogs(stage: DRAFT, where: { profile_id_eq: \"not an id!\" }) { nodes { id } } }")));
         Assert.assertEq(
             expected = (
                 (Value.Obj(Map#{ "blog" => Value.Obj(Map#{ "title" => Value.Str("One"), "category" => Value.Str("KNOWLEDGE"), "profile" => Value.Obj(Map#{ "name" => Value.Str("abab") }), "tags" => Value.List(Value.Obj(Map#{ "label" => Value.Str("flix") }) :: Value.Obj(Map#{ "label" => Value.Str("graphql") }) :: Nil) }) }), None),
                 (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "nodes" => Value.List(Value.Obj(Map#{ "id" => Value.Str("b1") }) :: Nil) }) }), None),
                 (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "nodes" => Value.List(Value.Obj(Map#{ "id" => Value.Str("b2") }) :: Nil) }) }), None),
-                (Value.Obj(Map#{ "__type" => Value.Obj(Map#{ "enumValues" => Value.List(Value.Obj(Map#{ "name" => Value.Str("KNOWLEDGE") }) :: Value.Obj(Map#{ "name" => Value.Str("NEWS") }) :: Nil) }) }), None)),
-            (expanded, byTag, byCategory, sdl))
+                (Value.Obj(Map#{ "__type" => Value.Obj(Map#{ "enumValues" => Value.List(Value.Obj(Map#{ "name" => Value.Str("KNOWLEDGE") }) :: Value.Obj(Map#{ "name" => Value.Str("NEWS") }) :: Nil) }) }), None),
+                (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "nodes" => Value.List(Nil) }) }), None)),
+            (expanded, byTag, byCategory, sdl, byBadRef))
 
 }

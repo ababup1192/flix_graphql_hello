@@ -19,12 +19,6 @@ mod TestContentApiPg {
             discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b3")), CmsTestKit.entryData(List#{("title", Json.JString("flix と PostgreSQL")), ("views", CmsTestKit.intJson(20))}))
         })
 
-    ///
-    /// プール越しに 1 つの Tx で書く（エンジンの組み直しを見るテストは withDb の外から触る）。
-    ///
-    def mutate(pool: Pool, thunk: Unit -> a \ ef): Result[DbError.DbFailure, Result[CmsErr.CmsFailure, a]] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, CmsErr}) + IO =
-        DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Pool.withLazyTx(pool, thunk)))
-
     /// where / orderBy / first / skip / stage が効き、値は kind の型で返る。PUBLISHED はまだ無いので 0 件。
     @Test
     def testPgContentApiQueries(): Unit \ {IO, Assert} =
@@ -55,31 +49,45 @@ mod TestContentApiPg {
              ask("{ blogs(stage: DRAFT, where: { OR: [] }) { totalCount } }")));
         Assert.assertEq(expected = (none, none, none), (byBadId, byBadIdIn, byEmptyOr))
 
+    /// 検証をすり抜けた古い値（配列のはずの tags が文字列、数値のはずの views が文字列）があっても、絞り込みと並び替えは落ちずにその entry を外す。
+    @Test
+    def testPgContentApiTolerantOfStaleShapes(): Unit \ {IO, Assert} =
+        let stale = () -> {
+            seed();
+            discard EntriesQueries.upsertContent({ entryId = "b3", stage = "draft", data = Util.Json.Json.JObject(Map#{ "title" => Util.Json.Json.JString("stale"), "tags" => Util.Json.Json.JString("flix"), "views" => Util.Json.Json.JString("many") }) })
+        };
+        let (byTag, byViews, ordered) = PgTestSupport.withContentApi(stale, ask ->
+            (ask("{ blogs(stage: DRAFT, where: { tags_contains: \"flix\" }) { nodes { id } } }"),
+             ask("{ blogs(stage: DRAFT, where: { views_gte: 0 }) { nodes { id } } }"),
+             ask("{ blogs(stage: DRAFT, orderBy: [views_DESC]) { totalCount } }")));
+        Assert.assertEq(
+            expected = ((Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "nodes" => Value.List(Value.Obj(Map#{ "id" => Value.Str("b1") }) :: Nil) }) }), None),
+                        (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "nodes" => Value.List(Value.Obj(Map#{ "id" => Value.Str("b2") }) :: Value.Obj(Map#{ "id" => Value.Str("b1") }) :: Nil) }) }), None),
+                        (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(3) }) }), None)),
+            (byTag, byViews, ordered))
+
     /// 型の定義が変わるとエンジンが組み直される。フィールドを足せば引けるようになり、型を足せば query が増え、型を消せば query が消える。
     ///
     ///   blog { excerpt } ── 無い ──▶ addField(excerpt) ──▶ null で引ける
     ///   tags             ── 無い ──▶ create(tags)     ──▶ 引ける ──▶ delete(tags) ──▶ 無い
     @Test
     def testPgContentEngineRebuilds(): Unit \ {IO, Assert} =
-        let outcome = PgTestSupport.withPool(pool -> {
-            discard PgTestSupport.withDb(seed);
-            let cache = ContentEngine.create();
-            let ask = queryText -> GraphqlTestKit.askEngine(PgTestSupport.engineOrBug(cache, pool), queryText);
-            let before = ask("{ blog(id: \"b1\", stage: DRAFT) { excerpt } }") |> snd |> Option.nonEmpty;
-            let added = mutate(pool, () -> {
+        let outcome = PgTestSupport.withContentApiAndPool(seed, (pool, ask) -> {
+            let before = ask("{ blog(id: \"b1\", stage: DRAFT) { excerpt } }") |> snd |> GraphqlTestKit.isValidationError;
+            let added = PgTestSupport.mutate(pool, () -> {
                 let blogs = ContentTypes.findByApiId(CmsTestKit.apiId("blogs")) |> CmsErr.orNotFound(Entity.ContentType, "blogs");
                 discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("excerpt", FieldKind.TextArea, FieldConfig.empty()))
             });
             let after = ask("{ blog(id: \"b1\", stage: DRAFT) { excerpt } }") |> fst;
-            let askTags = () -> ask("{ tags(stage: DRAFT) { totalCount } }") |> (found -> (fst(found), snd(found) |> Option.nonEmpty));
+            let askTags = () -> ask("{ tags(stage: DRAFT) { totalCount } }") |> (found -> (fst(found), snd(found) |> GraphqlTestKit.isValidationError));
             let noTags = askTags();
-            let tagsCreated = mutate(pool, () -> {
+            let tagsCreated = PgTestSupport.mutate(pool, () -> {
                 let tags = ContentTypes.create(CmsTestKit.typeDraft("tags", "タグ"));
                 discard ContentTypes.addField(tags#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
                 tags#id
             });
             let withTags = askTags();
-            let tagsDeleted = tagsCreated |> Result.map(Result.map(tagsId -> mutate(pool, () -> ContentTypes.delete(tagsId))));
+            let tagsDeleted = tagsCreated |> Result.map(Result.map(tagsId -> PgTestSupport.mutate(pool, () -> ContentTypes.delete(tagsId))));
             let withoutTags = askTags();
             (before, added, after, noTags, withTags, tagsDeleted, withoutTags)
         });

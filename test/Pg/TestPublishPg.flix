@@ -83,19 +83,17 @@ mod TestPublishPg {
     /// 公開するとコンテンツ API の既定（PUBLISHED）で引け、下書きの編集は公開側に出ない。消すと公開側からも消える。
     @Test
     def testPgPublishedVisibleInContentApi(): Unit \ {IO, Assert} =
-        let outcome = PgTestSupport.withPool(pool -> {
-            discard PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"c1"}, () -> {
-                let blogs = blogsForPublish();
-                let created = ContentEntries.create(blogs, None, titled("Public", "public"));
-                discard ContentEntries.publish(created#id, "tester", false);
-                discard ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("Edited"))}), created#version)
-            }));
-            let cache = ContentEngine.create();
-            let ask = queryText -> GraphqlTestKit.askEngine(PgTestSupport.engineOrBug(cache, pool), queryText) |> fst;
-            let published = ask("{ blog(id: \"c1\") { title stage } blogs { totalCount } }");
-            let draft = ask("{ blog(id: \"c1\", stage: DRAFT) { title } }");
-            discard DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Pool.withLazyTx(pool, () -> ContentEntries.delete(CmsTestKit.entryId("c1")))));
-            let afterDelete = ask("{ blogs { totalCount } }");
+        let seed = () -> CmsTestKit.withIds(List#{"c1"}, () -> {
+            let blogs = blogsForPublish();
+            let created = ContentEntries.create(blogs, None, titled("Public", "public"));
+            discard ContentEntries.publish(created#id, "tester", false);
+            discard ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("Edited"))}), created#version)
+        });
+        let outcome = PgTestSupport.withContentApiAndPool(seed, (pool, ask) -> {
+            let published = ask("{ blog(id: \"c1\") { title stage } blogs { totalCount } }") |> fst;
+            let draft = ask("{ blog(id: \"c1\", stage: DRAFT) { title } }") |> fst;
+            discard PgTestSupport.mutate(pool, () -> ContentEntries.delete(CmsTestKit.entryId("c1")));
+            let afterDelete = ask("{ blogs { totalCount } }") |> fst;
             (published, draft, afterDelete)
         });
         Assert.assertEq(

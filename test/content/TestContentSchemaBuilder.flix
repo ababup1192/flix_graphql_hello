@@ -23,7 +23,10 @@ mod TestContentSchemaBuilder {
     /// collection には 1 件と一覧のクエリ、singleton には 1 件だけが生える。Where / OrderBy / Connection は型ごと。
     @Test
     def testContentSchemaBuilderSdl(): Unit \ Assert =
-        let sdl = Schema.toSdl(ContentSchemaBuilder.build(sampleTypes(), dryRunner())) |> Result.getWithDefault("");
+        let sdl = match Schema.toSdl(ContentSchemaBuilder.build(sampleTypes(), dryRunner())) {
+            case Ok(text)     => text
+            case Err(message) => bug!("sdl: ${message}")
+        };
         Assert.assertEq(expected = (true, true, true, true, true, true, true, false),
             (String.contains(substr = "blog(id: ID!, stage: Stage = PUBLISHED): Blog", sdl),
              String.contains(substr = "blogs(where: BlogWhere, orderBy: [BlogOrderBy!], first: Int = 20, skip: Int = 0, stage: Stage = PUBLISHED): BlogConnection!", sdl),

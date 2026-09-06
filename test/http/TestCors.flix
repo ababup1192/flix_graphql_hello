@@ -1,80 +1,83 @@
 ///
 /// Cors: オリジンの許可判定と、レスポンスに足すヘッダ。純粋関数だけ。
 ///
-
 ///
 /// 指定したオリジンからの GET /graphql。
 ///
-def requestFrom(origin: String): HttpRequest =
-    { method = "GET", path = "/graphql", headers = ("origin", origin) :: ("host", "api") :: Nil, body = "" }
+mod TestCors {
 
-///
-/// 管理画面のオリジンだけ許す設定。
-///
-def adminOnly(): CorsConfig = { allowedOrigins = "https://admin.example.com" :: Nil }
+    def requestFrom(origin: String): HttpRequest =
+        { method = "GET", path = "/graphql", headers = ("origin", origin) :: ("host", "api") :: Nil, body = "" }
 
-// ---- 設定の読み取り ----
+    ///
+    /// 管理画面のオリジンだけ許す設定。
+    ///
+    def adminOnly(): CorsConfig = { allowedOrigins = "https://admin.example.com" :: Nil }
 
-/// カンマ区切りを一覧にする。空白は落とし、空の要素は捨てる。
-@Test
-def testCorsParseOrigins(): Unit \ Assert =
-    Assert.assertEq(expected = "https://a.example" :: "https://b.example" :: Nil,
-        Cors.parseOrigins(" https://a.example, https://b.example ,, "))
+    // ---- 設定の読み取り ----
 
-/// 空文字列は許すオリジン無し。
-@Test
-def testCorsParseOriginsEmpty(): Unit \ Assert =
-    Assert.assertEq(expected = Nil, Cors.parseOrigins(""))
+    /// カンマ区切りを一覧にする。空白は落とし、空の要素は捨てる。
+    @Test
+    def testCorsParseOrigins(): Unit \ Assert =
+        Assert.assertEq(expected = "https://a.example" :: "https://b.example" :: Nil,
+            Cors.parseOrigins(" https://a.example, https://b.example ,, "))
 
-// ---- 許可判定 ----
+    /// 空文字列は許すオリジン無し。
+    @Test
+    def testCorsParseOriginsEmpty(): Unit \ Assert =
+        Assert.assertEq(expected = Nil, Cors.parseOrigins(""))
 
-/// 一覧にあるオリジンだけ許す。"*" があれば何でも許す。
-@Test
-def testCorsIsAllowed(): Unit \ Assert =
-    Assert.assertEq(expected = (true, false, true),
-        (Cors.isAllowed(adminOnly(), "https://admin.example.com"),
-         Cors.isAllowed(adminOnly(), "https://evil.example"),
-         Cors.isAllowed({ allowedOrigins = "*" :: Nil }, "https://anything.example")))
+    // ---- 許可判定 ----
 
-// ---- レスポンスヘッダ ----
+    /// 一覧にあるオリジンだけ許す。"*" があれば何でも許す。
+    @Test
+    def testCorsIsAllowed(): Unit \ Assert =
+        Assert.assertEq(expected = (true, false, true),
+            (Cors.isAllowed(adminOnly(), "https://admin.example.com"),
+             Cors.isAllowed(adminOnly(), "https://evil.example"),
+             Cors.isAllowed({ allowedOrigins = "*" :: Nil }, "https://anything.example")))
 
-/// 許したオリジンには Allow-Origin と Vary を返す。
-@Test
-def testCorsResponseHeadersAllowed(): Unit \ Assert =
-    Assert.assertEq(expected = ("Access-Control-Allow-Origin", "https://admin.example.com") :: ("Vary", "Origin") :: Nil,
-        Cors.responseHeaders(adminOnly(), requestFrom("https://admin.example.com")))
+    // ---- レスポンスヘッダ ----
 
-/// 許していないオリジンと、Origin 無し（curl や同一オリジン）にはヘッダを付けない。
-@Test
-def testCorsResponseHeadersDenied(): Unit \ Assert =
-    Assert.assertEq(expected = (Nil, Nil),
-        (Cors.responseHeaders(adminOnly(), requestFrom("https://evil.example")),
-         Cors.responseHeaders(adminOnly(), { method = "GET", path = "/graphql", headers = Nil, body = "" })))
+    /// 許したオリジンには Allow-Origin と Vary を返す。
+    @Test
+    def testCorsResponseHeadersAllowed(): Unit \ Assert =
+        Assert.assertEq(expected = ("Access-Control-Allow-Origin", "https://admin.example.com") :: ("Vary", "Origin") :: Nil,
+            Cors.responseHeaders(adminOnly(), requestFrom("https://admin.example.com")))
 
-/// "*" で許しても "*" ではなく届いたオリジンを返す。
-@Test
-def testCorsWildcardEchoesOrigin(): Unit \ Assert =
-    Assert.assertEq(expected = Some(("Access-Control-Allow-Origin", "https://x.example")),
-        Cors.responseHeaders({ allowedOrigins = "*" :: Nil }, requestFrom("https://x.example")) |> List.head)
+    /// 許していないオリジンと、Origin 無し（curl や同一オリジン）にはヘッダを付けない。
+    @Test
+    def testCorsResponseHeadersDenied(): Unit \ Assert =
+        Assert.assertEq(expected = (Nil, Nil),
+            (Cors.responseHeaders(adminOnly(), requestFrom("https://evil.example")),
+             Cors.responseHeaders(adminOnly(), { method = "GET", path = "/graphql", headers = Nil, body = "" })))
 
-/// withHeaders は元のヘッダの後ろに CORS ヘッダを足し、status と body は変えない。
-@Test
-def testCorsWithHeaders(): Unit \ Assert =
-    let response = Cors.withHeaders(adminOnly(), requestFrom("https://admin.example.com"), { status = 405, headers = ("Allow", "POST") :: Nil, body = "{}" });
-    Assert.assertEq(expected = (405, ("Allow", "POST") :: ("Access-Control-Allow-Origin", "https://admin.example.com") :: ("Vary", "Origin") :: Nil, "{}"),
-        (response#status, response#headers, response#body))
+    /// "*" で許しても "*" ではなく届いたオリジンを返す。
+    @Test
+    def testCorsWildcardEchoesOrigin(): Unit \ Assert =
+        Assert.assertEq(expected = Some(("Access-Control-Allow-Origin", "https://x.example")),
+            Cors.responseHeaders({ allowedOrigins = "*" :: Nil }, requestFrom("https://x.example")) |> List.head)
 
-// ---- preflight ----
+    /// withHeaders は元のヘッダの後ろに CORS ヘッダを足し、status と body は変えない。
+    @Test
+    def testCorsWithHeaders(): Unit \ Assert =
+        let response = Cors.withHeaders(adminOnly(), requestFrom("https://admin.example.com"), { status = 405, headers = ("Allow", "POST") :: Nil, body = "{}" });
+        Assert.assertEq(expected = (405, ("Allow", "POST") :: ("Access-Control-Allow-Origin", "https://admin.example.com") :: ("Vary", "Origin") :: Nil, "{}"),
+            (response#status, response#headers, response#body))
 
-/// 許したオリジンの preflight は 204 で、メソッド・ヘッダ・Max-Age だけを返す（Allow-Origin は withHeaders が足す）。
-@Test
-def testCorsPreflightAllowed(): Unit \ Assert =
-    let response = Cors.preflight(adminOnly(), requestFrom("https://admin.example.com"));
-    Assert.assertEq(expected = (204, "", ("Access-Control-Allow-Methods", "GET, POST, OPTIONS") :: ("Access-Control-Allow-Headers", "Content-Type, Authorization") :: ("Access-Control-Max-Age", "86400") :: Nil),
-        (response#status, response#body, response#headers))
+    // ---- preflight ----
 
-/// 許していないオリジンの preflight は 204 だがヘッダを一切付けない。
-@Test
-def testCorsPreflightDenied(): Unit \ Assert =
-    let response = Cors.preflight(adminOnly(), requestFrom("https://evil.example"));
-    Assert.assertEq(expected = (204, Nil, ""), (response#status, response#headers, response#body))
+    /// 許したオリジンの preflight は 204 で、メソッド・ヘッダ・Max-Age だけを返す（Allow-Origin は withHeaders が足す）。
+    @Test
+    def testCorsPreflightAllowed(): Unit \ Assert =
+        let response = Cors.preflight(adminOnly(), requestFrom("https://admin.example.com"));
+        Assert.assertEq(expected = (204, "", ("Access-Control-Allow-Methods", "GET, POST, OPTIONS") :: ("Access-Control-Allow-Headers", "Content-Type, Authorization") :: ("Access-Control-Max-Age", "86400") :: Nil),
+            (response#status, response#body, response#headers))
+
+    /// 許していないオリジンの preflight は 204 だがヘッダを一切付けない。
+    @Test
+    def testCorsPreflightDenied(): Unit \ Assert =
+        let response = Cors.preflight(adminOnly(), requestFrom("https://evil.example"));
+        Assert.assertEq(expected = (204, Nil, ""), (response#status, response#headers, response#body))
+
+}

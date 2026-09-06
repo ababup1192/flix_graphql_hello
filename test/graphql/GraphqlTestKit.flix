@@ -18,6 +18,12 @@ mod GraphqlTestKit {
             |> Result.map(engine -> Graphql.runWithEngine(engine, () -> Graphql.execute(request, Context.anonymous())))
 
     ///
+    /// variables 付きのリクエスト（operationName は無し）。
+    ///
+    pub def request(queryText: String, variables: Map[String, Value]): GraphqlRequest =
+        { queryText = queryText, variables = variables, operationName = None }
+
+    ///
     /// リクエストを 1 つ流し、(data, 先頭の errors[].message) にまとめる。
     ///
     pub def executeRequest(schema: Schema, request: GraphqlRequest): Result[String, (Value, Option[String])] \ IO =
@@ -38,7 +44,13 @@ mod GraphqlTestKit {
     ///
     /// executeQuery が Err（エンジンが組めない）なのはテストの前提が壊れているので止める。
     ///
-    pub def ask(schema: Schema, queryText: String): (Value, Option[String]) \ IO = match executeQuery(schema, queryText) {
+    pub def ask(schema: Schema, queryText: String): (Value, Option[String]) \ IO =
+        askRequest(schema, queryOnly(queryText))
+
+    ///
+    /// ask のリクエスト版。
+    ///
+    pub def askRequest(schema: Schema, given: GraphqlRequest): (Value, Option[String]) \ IO = match executeRequest(schema, given) {
         case Ok(found)    => found
         case Err(message) => bug!("graphql: ${message}")
     }
@@ -46,7 +58,7 @@ mod GraphqlTestKit {
     ///
     /// (data, 先頭の errors[].message)。
     ///
-    pub def summarize(response: GraphqlResponse): (Value, Option[String]) =
+    def summarize(response: GraphqlResponse): (Value, Option[String]) =
         (response#data, firstMessage(response))
 
     ///
