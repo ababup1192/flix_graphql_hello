@@ -70,6 +70,31 @@ def testPgEntryList(): Unit \ {IO, Assert} =
     }));
     Assert.assertEq(expected = Ok(Ok((3i64, List#{"first", "third"}, 2i64, 1))), result)
 
+/// search は値だけに当たり（キー名 "title" では当たらない）、% と _ はそのままの文字として当たる。
+@Test
+def testPgEntrySearchEscapes(): Unit \ {IO, Assert} =
+    let result = PgTestSupport.withDb(() -> withIds(List#{"s1", "s2"}, () -> {
+        let blogs = blogsWithFields();
+        discard ContentEntries.create(blogs, None, draftData(List#{("title", Json.JString("100% flix"))}));
+        discard ContentEntries.create(blogs, None, draftData(List#{("title", Json.JString("plain"))}));
+        let byKey = ContentEntries.list(blogs, { search = "title", first = 10, skip = 0 });
+        let byPercent = ContentEntries.list(blogs, { search = "100%", first = 10, skip = 0 });
+        let byBarePercent = ContentEntries.list(blogs, { search = "%", first = 10, skip = 0 });
+        (byKey#totalCount, byPercent#totalCount, byBarePercent#totalCount)
+    }));
+    Assert.assertEq(expected = Ok(Ok((0i64, 1i64, 1i64))), result)
+
+/// ゴミ箱の entry と同じ id では作れない（PK が残っているので、500 ではなく invalid で止める）。
+@Test
+def testPgEntryIdNotReusedFromTrash(): Unit \ {IO, Assert} =
+    let result = PgTestSupport.withDb(() -> withIds(List#{"t1"}, () -> {
+        let blogs = blogsWithFields();
+        let created = ContentEntries.create(blogs, None, draftData(Nil));
+        ContentEntries.delete(created#id);
+        CmsErr.runWithResult(() -> ContentEntries.create(blogs, Some(created#id), draftData(Nil))) |> Result.map(entry -> entry#version) |> Result.mapErr(CmsErr.toMessage)
+    }));
+    Assert.assertEq(expected = Ok(Ok(Err("id: 't1' は既にあります（ゴミ箱の物を含む）"))), result)
+
 /// 型に合わない中身は invalid で、entry が残っている型は消せない。
 @Test
 def testPgEntryGuards(): Unit \ {IO, Assert} =

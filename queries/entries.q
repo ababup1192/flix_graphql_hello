@@ -7,13 +7,13 @@ query findEntry(id: String) -> one {
     WHERE e.id = :id AND e.deleted_at IS NULL
 }
 
-// 一覧。search が空なら全件、そうでなければ下書きの中身の文字列に含む物
+// 一覧。search が空なら全件、そうでなければ下書きの値（キー名は見ない）に含む物。search は呼ぶ側で LIKE 用にエスケープ済み
 query listEntries(typeId: Int64, search: String, limit: Int64, offset: Int64) -> many {
     SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft'
     WHERE e.type_id = :typeId AND e.deleted_at IS NULL
-      AND (:search = '' OR c.data::text ILIKE '%' || :search || '%')
+      AND (:search = '' OR EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE '%' || :search || '%'))
     ORDER BY e.updated_at DESC, e.id
     LIMIT :limit OFFSET :offset
 }
@@ -23,7 +23,12 @@ query countEntries(typeId: Int64, search: String) -> one {
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft'
     WHERE e.type_id = :typeId AND e.deleted_at IS NULL
-      AND (:search = '' OR c.data::text ILIKE '%' || :search || '%')
+      AND (:search = '' OR EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE '%' || :search || '%'))
+}
+
+// ゴミ箱の物も含めて id があるか。createEntry の重複検査用（PK はゴミ箱の行とも衝突する）
+query entryExists(id: String) -> one {
+    SELECT id FROM entries WHERE id = :id
 }
 
 query countEntriesOfType(typeId: Int64) -> one {

@@ -12,9 +12,10 @@ mod ContentEntries {
     ///
     pub def list(typeId: TypeId, page: EntryQuery): EntryPage \ DbRead =
         let owner = TypeId.toInt64(typeId);
-        let entries = EntriesQueries.listEntries({ typeId = owner, search = page#search, limit = Int32.toInt64(page#first), offset = Int32.toInt64(page#skip) })
+        let needle = EntrySearch.escapeLike(page#search);
+        let entries = EntriesQueries.listEntries({ typeId = owner, search = needle, limit = Int32.toInt64(page#first), offset = Int32.toInt64(page#skip) })
             |> List.map(EntryRows.toEntry);
-        let total = EntriesQueries.countEntries({ typeId = owner, search = page#search }) |> Option.flatMap(row -> row#total) |> Option.getWithDefault(0i64);
+        let total = EntriesQueries.countEntries({ typeId = owner, search = needle }) |> Option.flatMap(row -> row#total) |> Option.getWithDefault(0i64);
         { entries = entries, totalCount = total }
 
     ///
@@ -39,12 +40,14 @@ mod ContentEntries {
 
     ///
     /// 下書きを作る。id を渡せば（移行用）それを使い、無ければ振る。中身が型に合わなければ invalid。
+    /// id はゴミ箱の物とも重ねられない（PK が残っている）。
     ///
     pub def create(typeId: TypeId, given: Option[EntryId], data: EntryData): Entry \ Db + CmsErr + IdGen =
         let owner = ContentTypes.get(typeId);
         CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data));
         let id = given |> Option.getWithDefault(IdGen.freshEntryId());
-        CmsErr.raiseIfAny(if (Option.isEmpty(find(id))) Nil else Violation.Violation("id", "'${id}' は既にあります") :: Nil);
+        let taken = EntriesQueries.entryExists(EntryId.text(id)) |> Option.nonEmpty;
+        CmsErr.raiseIfAny(if (taken) Violation.Violation("id", "'${id}' は既にあります（ゴミ箱の物を含む）") :: Nil else Nil);
         discard EntriesQueries.insertEntry({ id = EntryId.text(id), typeId = TypeId.toInt64(typeId) });
         discard EntriesQueries.upsertContent({ entryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft), data = EntryRows.dataToJson(data) });
         get(id)

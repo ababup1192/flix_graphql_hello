@@ -7,7 +7,7 @@ mod EntriesQueries {
     ///
     /// 生成元 entries.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 696272987
+    pub def sourceHash(): Int32 = -1549181074
 
     ///
     /// findEntry の 1 行。
@@ -52,10 +52,10 @@ mod EntriesQueries {
         ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data }
 
     ///
-    /// listEntries: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft' WHERE e.type_id = $1 AND e.deleted_at IS NULL AND ($2 = '' OR c.data::text ILIKE '%' || $2 || '%') ORDER BY e.updated_at DESC, e.id LIMIT $3 OFFSET $4
+    /// listEntries: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft' WHERE e.type_id = $1 AND e.deleted_at IS NULL AND ($2 = '' OR EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE '%' || $2 || '%')) ORDER BY e.updated_at DESC, e.id LIMIT $3 OFFSET $4
     ///
     pub def listEntries(args: { typeId = Int64, search = String, limit = Int64, offset = Int64 }): List[ListEntriesRow] \ DbRead =
-        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft'\n    WHERE e.type_id = $1 AND e.deleted_at IS NULL\n      AND ($2 = '' OR c.data::text ILIKE '%' || $2 || '%')\n    ORDER BY e.updated_at DESC, e.id\n    LIMIT $3 OFFSET $4";
+        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft'\n    WHERE e.type_id = $1 AND e.deleted_at IS NULL\n      AND ($2 = '' OR EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE '%' || $2 || '%'))\n    ORDER BY e.updated_at DESC, e.id\n    LIMIT $3 OFFSET $4";
         let params = List#{SqlValue.Int64(args#typeId), SqlValue.Str(args#search), SqlValue.Int64(args#limit), SqlValue.Int64(args#offset)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listEntriesDecoder(), sql, params))
 
@@ -70,12 +70,30 @@ mod EntriesQueries {
         ) yield { total = total }
 
     ///
-    /// countEntries: SELECT count(*)::bigint AS total FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft' WHERE e.type_id = $1 AND e.deleted_at IS NULL AND ($2 = '' OR c.data::text ILIKE '%' || $2 || '%')
+    /// countEntries: SELECT count(*)::bigint AS total FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft' WHERE e.type_id = $1 AND e.deleted_at IS NULL AND ($2 = '' OR EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE '%' || $2 || '%'))
     ///
     pub def countEntries(args: { typeId = Int64, search = String }): Option[CountEntriesRow] \ DbRead =
-        let sql = "SELECT count(*)::bigint AS total\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft'\n    WHERE e.type_id = $1 AND e.deleted_at IS NULL\n      AND ($2 = '' OR c.data::text ILIKE '%' || $2 || '%')";
+        let sql = "SELECT count(*)::bigint AS total\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft'\n    WHERE e.type_id = $1 AND e.deleted_at IS NULL\n      AND ($2 = '' OR EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE '%' || $2 || '%'))";
         let params = List#{SqlValue.Int64(args#typeId), SqlValue.Str(args#search)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(countEntriesDecoder(), sql, params))
+
+    ///
+    /// entryExists の 1 行。
+    ///
+    pub type alias EntryExistsRow = { id = String }
+
+    def entryExistsDecoder(): Decoder[EntryExistsRow] =
+        forA (
+            id <- Decoder.str("id")
+        ) yield { id = id }
+
+    ///
+    /// entryExists: SELECT id FROM entries WHERE id = $1
+    ///
+    pub def entryExists(id: String): Option[EntryExistsRow] \ DbRead =
+        let sql = "SELECT id FROM entries WHERE id = $1";
+        let params = List#{SqlValue.Str(id)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(entryExistsDecoder(), sql, params))
 
     ///
     /// countEntriesOfType の 1 行。
