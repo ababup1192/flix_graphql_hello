@@ -624,7 +624,10 @@ mod Schema {
             case TypeRef.Scalar(name)            => if (List.memberOf(name, builtinScalars())) Ok(state) else declare(name, TypeDecl.ScalarDecl(name), state, Ok)
             case TypeRef.ListOf(inner)           => visit(inner, state)
             case TypeRef.Nullable(inner)         => visit(inner, state)
-            case TypeRef.Enum(name, description, values) => declare(name, TypeDecl.EnumDecl(name, description, values), state, Ok)
+            case TypeRef.Enum(name, description, values) =>
+                let names = List.map(value -> value#name, values);
+                if (List.length(List.distinct(names)) != List.length(names)) Err("enum ${name} に同じ値の名前が 2 回あります: ${List.join(", ", names)}")
+                else declare(name, TypeDecl.EnumDecl(name, description, values), state, Ok)
             case TypeRef.InputObject(name, description, fields) =>
                 declare(name, TypeDecl.InputDecl(name, description, fields), state, declared ->
                     List.foldLeft((accumulated, field) -> Result.flatMap(visit(field#typeRef), accumulated), Ok(declared), fields))

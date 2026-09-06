@@ -171,4 +171,20 @@ mod TestServer {
         Assert.assertEq(expected = Nil,
             GraphqlFake.runWithEcho(() -> handle(fromAdmin("POST", "/graphql")))#headers)
 
+    /// エンジンが要るのは POST でそのパス宛の時だけ。preflight / GET / 他のパスは要らない。
+    @Test
+    def testServerNeedsGraphqlEngineOnlyForPost(): Unit \ Assert =
+        Assert.assertEq(expected = (true, true, false, false, false),
+            (Server.needsGraphqlEngine(adminConfig(), fromAdmin("POST", "/graphql")),
+             Server.needsGraphqlEngine(adminConfig(), fromAdmin("POST", "/graphql?x=1")),
+             Server.needsGraphqlEngine(adminConfig(), fromAdmin("OPTIONS", "/graphql")),
+             Server.needsGraphqlEngine(adminConfig(), fromAdmin("GET", "/graphql")),
+             Server.needsGraphqlEngine(adminConfig(), fromAdmin("POST", "/health"))))
+
+    /// OPTIONS は GraphQL のパスと /health だけ 204 で、無いパスは 404。
+    @Test
+    def testServerPreflightOnlyOnKnownPaths(): Unit \ Assert =
+        let statuses = List#{"/graphql", "/health", "/nope"} |> List.map(path ->
+            GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(adminConfig(), fromAdmin("OPTIONS", path))))#status);
+        Assert.assertEq(expected = List#{204, 204, 404}, statuses)
 }

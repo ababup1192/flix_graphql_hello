@@ -134,4 +134,10 @@ mod TestSchema {
         Assert.assertEq(expected = Ok(()),
             Fs.FileRead.read("admin.graphql") |> Result.mapErr(ToString.toString) |> Result.flatMap(sdl -> GeneratedCheck.check(GeneratedCheck.admin(), sdl)))
 
+    /// enum の値の名前が重なると Err（SDL に同じ値が 2 行出て graphql-java が落ちるのを、分かる文言で先に止める）。
+    @Test
+    def testSchemaDuplicateEnumValue(): Unit \ Assert =
+        let shade = GqlCodec.enumOf("Shade", text -> text, "DARK" :: "DARK" :: Nil);
+        let schema = Schema.make(objectType("Query", () -> field1("shade", arg("s", shade), Out.string(), (_context, _root, s) -> Ok(s)) :: Nil), None, Runner.io());
+        Assert.assertEq(expected = Err("enum Shade に同じ値の名前が 2 回あります: DARK, DARK"), Schema.collectTypes(schema) |> Result.map(List.length))
 }

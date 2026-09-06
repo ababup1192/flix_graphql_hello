@@ -3,11 +3,11 @@
 ///
 mod TestEntryPage {
 
-    /// first は省けば default、0 以下は 1、200 超は 200。skip は省けば 0、負は 0。
+    /// first は省けば default、0 は 0（件数だけ）、負は 0、200 超は 200。skip は省けば 0、負は 0。
     @Test
     def testEntryPageClamp(): Unit \ Assert =
-        Assert.assertEq(expected = ((20, 0), (1, 0), (200, 0), (20, 0), (7, 3)),
-            (EntryPage.clamp(20, None, None), EntryPage.clamp(20, Some(0), None), EntryPage.clamp(20, Some(1000), None),
+        Assert.assertEq(expected = ((20, 0), (0, 0), (0, 0), (200, 0), (20, 0), (7, 3)),
+            (EntryPage.clamp(20, None, None), EntryPage.clamp(20, Some(0), None), EntryPage.clamp(20, Some(-1), None), EntryPage.clamp(20, Some(1000), None),
              EntryPage.clamp(20, None, Some(-5)), EntryPage.clamp(20, Some(7), Some(3))))
 
     /// Int32 に載らない件数は上限に丸める。

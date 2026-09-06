@@ -20,11 +20,11 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
             let contentConfig = { cors = cors, graphqlPath = "/graphql" };
             let adminConfig = { cors = cors, graphqlPath = "/admin/graphql" };
             let engineCache = ContentEngine.create();
-            // WhyNot: コンテンツ API のパス以外（/health、404、preflight）でエンジンを組まないのは、型定義が壊れた時に
-            // 死活監視まで 503 になり、404 ごとに目印の SELECT が走るため。GraphQL を実行しない道なので管理 API のエンジンで受ける
+            // WhyNot: コンテンツ API を実行する時以外（/health、404、preflight、GET）でエンジンを組まないのは、型定義が壊れた時に
+            // 死活監視や preflight まで 503 になり、404 ごとに目印の SELECT が走るため。GraphQL を実行しない道なので管理 API のエンジンで受ける
             HttpServer.listen(8080, request ->
                 Health.runWithPool(pool, () ->
-                    if (Server.isGraphqlPath(contentConfig, request))
+                    if (Server.needsGraphqlEngine(contentConfig, request))
                         match ContentEngine.current(engineCache, pool) {
                             case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(contentConfig, request))
                             case Err(message) => Server.unavailable(message)

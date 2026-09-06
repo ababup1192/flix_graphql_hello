@@ -48,7 +48,7 @@ mod TestCors {
     /// 許していないオリジンと、Origin 無し（curl や同一オリジン）にはヘッダを付けない。
     @Test
     def testCorsResponseHeadersDenied(): Unit \ Assert =
-        Assert.assertEq(expected = (Nil, Nil),
+        Assert.assertEq(expected = (("Vary", "Origin") :: Nil, Nil),
             (Cors.responseHeaders(adminOnly(), requestFrom("https://evil.example")),
              Cors.responseHeaders(adminOnly(), { method = "GET", path = "/graphql", headers = Nil, body = "" })))
 

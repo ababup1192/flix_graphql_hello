@@ -24,12 +24,12 @@ mod AdminMapping {
     ///
     /// content type の id を GraphQL の ID にする。
     ///
-    pub def idOfType(id: TypeId): Id = Id.Id("${id}")
+    pub def idOfType(id: TypeId): Id = Id.Id(Int64.toString(TypeId.toInt64(id)))
 
     ///
     /// フィールドの id を GraphQL の ID にする。
     ///
-    pub def idOfField(id: FieldId): Id = Id.Id("${id}")
+    pub def idOfField(id: FieldId): Id = Id.Id(Int64.toString(FieldId.toInt64(id)))
 
     ///
     /// GraphQL の ID を entry の id に読む。規則に合わなければ invalid。
@@ -106,7 +106,7 @@ mod AdminMapping {
     pub def versionId(argument: String, id: Id): VersionId \ CmsErr =
         VersionId.VersionId(number(argument, id))
 
-    pub def idOfVersion(id: VersionId): Id = Id.Id("${id}")
+    pub def idOfVersion(id: VersionId): Id = Id.Id(Int64.toString(VersionId.toInt64(id)))
 
     ///
     /// 版に残す作者名。認証が入るまでは Context の userId か "anonymous"。

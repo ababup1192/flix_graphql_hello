@@ -157,10 +157,10 @@ mod JavaValue {
     }
 
     ///
-    /// BigDecimal（scalar JSON のリテラルの小数）を Float にする。表せなければ Null。
+    /// BigDecimal（scalar JSON のリテラルの小数）を Float にする。表せなければ Str にして桁を残す（JsonValue.fromNumber と同じ）。
     ///
     def fromBigDecimal(n: BigDecimal): Value =
-        BigDecimal.tryToFloat64(n) |> Option.map(Value.Float) |> Option.getWithDefault(Value.Null)
+        BigDecimal.tryToFloat64(n) |> Option.map(Value.Float) |> Option.getWithDefault(Value.Str(BigDecimal.toPlainString(n)))
 
     ///
     /// Int64 を Int32 に収まれば Int、収まらなければ Float にする。

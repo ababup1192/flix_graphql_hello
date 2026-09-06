@@ -31,3 +31,10 @@ def testJavaValueRoundTrip(): Unit \ {Assert, IO} =
         "l" => Value.List(Value.Int(1) :: Value.Obj(Map#{ "k" => Value.Str("v") }) :: Nil),
         "o" => Value.Obj(Map#{ "inner" => Value.List(Nil) }) });
     Assert.assertEq(expected = value, JavaValue.toObject(value) |> JavaValue.fromObject)
+
+/// BigDecimal は Float に、Float64 で表せない大きさ（1e400）は Str にして桁を残す（黙って Null にしない）。
+@Test
+def testJavaValueFromBigDecimal(): Unit \ {Assert, IO} =
+    let huge = BigDecimal.fromString("1e400") |> Option.getWithDefault(0.0ff);
+    Assert.assertEq(expected = (Value.Float(2.5), Value.Str(BigDecimal.toPlainString(huge))),
+        (JavaValue.fromObject(JavaValue.asObject(2.5ff)), JavaValue.fromObject(JavaValue.asObject(huge))))

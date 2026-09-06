@@ -39,6 +39,7 @@ mod Graphql {
     import graphql.ExecutionInput
     import graphql.scalars.ExtendedScalars
     import graphql.GraphQL
+import graphql.analysis.MaxQueryDepthInstrumentation
     import graphql.ErrorClassification
     import graphql.ErrorType
     import graphql.GraphQLError
@@ -86,7 +87,13 @@ mod Graphql {
         forM (
             types            <- Schema.collectTypes(schema);
             executableSchema <- makeExecutableSchema(Schema.renderSdl(schema, types), types)
-        ) yield Engine.Engine(GraphQL.newGraphQL(executableSchema).build())
+        ) yield Engine.Engine(GraphQL.newGraphQL(executableSchema).instrumentation(new MaxQueryDepthInstrumentation(maxQueryDepth())).build())
+
+    ///
+    /// クエリの入れ子の上限。コンテンツ API は参照を辿るたびに SQL を出すので、互いに参照する型で深く掘られると 1 リクエストで SELECT が爆発する。
+    /// 入れ子の型（blogs → nodes → sections → hero → link → ...）でも普段はこの半分で足りる。
+    ///
+    pub def maxQueryDepth(): Int32 = 15
 
     ///
     /// 組み立て済みのエンジンで `Graphql` effect を本物の実行に置き換えるハンドラ。

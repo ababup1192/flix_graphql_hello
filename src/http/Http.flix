@@ -68,9 +68,16 @@ mod Http {
     ///
     pub def parseHeaderLine(line: String): Option[(String, String)] =
         match String.splitOn(substr = ":", line) {
-            case name :: rest if not List.isEmpty(rest) => Some((String.toLowerCase(String.trim(name)), String.trim(List.join(":", rest))))
-            case _                                      => None
+            case name :: rest if not List.isEmpty(rest) and isToken(name) => Some((String.toLowerCase(name), String.trim(List.join(":", rest))))
+            case _                                                        => None
         }
+
+    ///
+    /// ヘッダ名として許す形（RFC 9110 の token）。先頭が空白の行（継続行）や空白入りの名前は弾く。
+    ///
+    /// WhyNot: trim して受けないのは、先頭が空白の行を独立したヘッダとして読むと、前段のプロキシと解釈が食い違うため。
+    ///
+    def isToken(name: String): Bool = String.isMatch(regex = "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$", name)
 
     ///
     /// ヘッダ行の一覧を解析する。解析できない行は捨てる。
@@ -86,11 +93,12 @@ mod Http {
     pub def contentLength(headers: List[(String, String)]): Result[HeaderError, Int32] =
         match headers |> List.filter(pair -> fst(pair) == "content-length") |> List.map(snd) |> List.distinct {
             case Nil          => Ok(0)
-            case value :: Nil => match Int32.fromString(value) {
-                case Some(length) if length < 0              => Err(HeaderError.Malformed(value))
-                case Some(length) if length > maxBodyBytes() => Err(HeaderError.TooLarge(length))
-                case Some(length)                            => Ok(length)
-                case None                                    => Err(HeaderError.Malformed(value))
+            // WhyNot: Int32 で読まないのは、桁あふれの値（Int32 超）が Malformed の 400 になり、上限超えの 413 と食い違うため
+            case value :: Nil => match Int64.fromString(value) {
+                case Some(length) if length < 0i64                            => Err(HeaderError.Malformed(value))
+                case Some(length) if length > Int32.toInt64(maxBodyBytes())   => Err(HeaderError.TooLarge(Int64.tryToInt32(length) |> Option.getWithDefault(Int32.maxValue())))
+                case Some(length)                                             => Ok(Int64.tryToInt32(length) |> Option.getWithDefault(maxBodyBytes()))
+                case None                                                     => Err(HeaderError.Malformed(value))
             }
             case values       => Err(HeaderError.Malformed(List.join(", ", values)))
         }
@@ -103,17 +111,18 @@ mod Http {
 
     ///
     /// レスポンスを HTTP/1.1 の文字列にする。1 リクエストで接続を閉じる。
-    /// ボディが空なら Content-Type は付けない。
+    /// ボディが空なら Content-Type は付けない。204 には Content-Length も付けない（RFC 9110）。
     /// response#headers は Content-Type / Content-Length / Connection の後ろに並べる。
     ///
     pub def render(response: HttpResponse): String =
         let contentType = if (response#body == "") "" else "Content-Type: application/json; charset=utf-8\r\n";
+        let contentLength = if (response#status == 204) "" else "Content-Length: ${utf8Length(response#body)}\r\n";
         // WhyNot: 値の CR / LF を落とすのは、Origin をそのまま返す CORS のヘッダで、行中の裸の CR がレスポンス分割になるのを防ぐため
         let extraHeaders = response#headers |> List.map(match (name, value) -> "${name}: ${headerValue(value)}\r\n") |> List.join("");
         let headers =
             "HTTP/1.1 ${response#status} ${reasonPhrase(response#status)}\r\n" +
             contentType +
-            "Content-Length: ${utf8Length(response#body)}\r\n" +
+            contentLength +
             "Connection: close\r\n" +
             extraHeaders + "\r\n";
         headers + response#body

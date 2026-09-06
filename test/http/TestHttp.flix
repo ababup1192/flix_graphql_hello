@@ -24,8 +24,9 @@ def testHttpParseRequestLineMissingVersion(): Unit \ Assert =
 /// ヘッダ行は名前を小文字に、値を trim して返す。値の中の ":" は残す。":" が無い行は None。
 @Test
 def testHttpParseHeaderLine(): Unit \ Assert =
-    Assert.assertEq(expected = (Some(("content-length", "42")), Some(("host", "localhost:8080")), None),
-        (Http.parseHeaderLine("Content-Length:  42 "), Http.parseHeaderLine("Host: localhost:8080"), Http.parseHeaderLine("garbage")))
+    Assert.assertEq(expected = (Some(("content-length", "42")), Some(("host", "localhost:8080")), None, None, None),
+        (Http.parseHeaderLine("Content-Length:  42 "), Http.parseHeaderLine("Host: localhost:8080"), Http.parseHeaderLine("garbage"),
+         Http.parseHeaderLine(" content-length: 5"), Http.parseHeaderLine("X Bad Name: v")))
 
 /// ヘッダ行の一覧を解析し、解析できない行は捨てる。
 @Test
@@ -52,8 +53,9 @@ def testHttpContentLengthNegative(): Unit \ Assert =
 /// 上限（1 MiB）ちょうどは Ok、1 バイト超えると TooLarge。
 @Test
 def testHttpContentLengthTooLarge(): Unit \ Assert =
-    Assert.assertEq(expected = (Ok(1048576), Err(Http.HeaderError.TooLarge(1048577))),
-        (Http.contentLength(("content-length", "1048576") :: Nil), Http.contentLength(("content-length", "1048577") :: Nil)))
+    Assert.assertEq(expected = (Ok(1048576), Err(Http.HeaderError.TooLarge(1048577)), Err(Http.HeaderError.TooLarge(Int32.maxValue()))),
+        (Http.contentLength(("content-length", "1048576") :: Nil), Http.contentLength(("content-length", "1048577") :: Nil),
+         Http.contentLength(("content-length", "99999999999") :: Nil)))
 
 /// 同じ値の Content-Length が 2 つ並ぶのは 1 つとして読み、値が食い違えば Malformed。
 @Test
@@ -87,7 +89,7 @@ def testHttpRenderExtraHeaders(): Unit \ Assert =
 @Test
 def testHttpRenderStripsLineBreaksInHeaderValue(): Unit \ Assert =
     Assert.assertEq(
-        expected = "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\nAccess-Control-Allow-Origin: http://aX: y\r\n\r\n",
+        expected = "HTTP/1.1 204 No Content\r\nConnection: close\r\nAccess-Control-Allow-Origin: http://aX: y\r\n\r\n",
         Http.render({ status = 204, headers = ("Access-Control-Allow-Origin", "http://a\rX: y\n") :: Nil, body = "" }))
 
 /// 日本語ボディの Content-Length は文字数（4）ではなく UTF-8 のバイト数（8）。
@@ -124,3 +126,10 @@ def testHttpRenderEmptyBodyExtraHeaders(): Unit \ Assert =
     Assert.assertEq(
         expected = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\nX-A: 1\r\n\r\n",
         Http.render({ status = 400, headers = ("X-A", "1") :: Nil, body = "" }))
+
+/// 204 には Content-Type も Content-Length も付けない。
+@Test
+def testHttpRenderNoContent(): Unit \ Assert =
+    Assert.assertEq(
+        expected = "HTTP/1.1 204 No Content\r\nConnection: close\r\nVary: Origin\r\n\r\n",
+        Http.render({ status = 204, headers = ("Vary", "Origin") :: Nil, body = "" }))

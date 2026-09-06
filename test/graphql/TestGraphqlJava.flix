@@ -231,4 +231,15 @@ mod TestGraphqlJava {
         Assert.assertEq(expected = Ok((Value.Obj(Map#{ "echo" => Value.Str("hi") }), None)),
             executeQuery(schema, "mutation { echo(text: \"hi\") }"))
 
+    // ---- 上限 ----
+
+    /// 入れ子が上限（maxQueryDepth）を超えるクエリは実行されずエラー。上限内なら通る。
+    @Test
+    def testGraphqlJavaDepthLimit(): Unit \ {Assert, IO} =
+        let nest = depth -> List.foldLeft((acc, _) -> "author { posts { ${acc} } }", "id", List.range(0, depth));
+        let tooDeep = executeQuery(appSchema(0), "{ post(id: \"1\") { ${nest(8)} } }");
+        let fine = executeQuery(appSchema(0), "{ post(id: \"1\") { ${nest(2)} } }");
+        Assert.assertEq(expected = (Ok(true), Ok(false)),
+            (tooDeep |> Result.map(match (_, message) -> message |> Option.exists(String.contains(substr = "depth"))),
+             fine |> Result.map(match (_, message) -> message |> Option.exists(String.contains(substr = "depth")))))
 }

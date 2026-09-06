@@ -39,13 +39,15 @@ mod Cors {
         List.memberOf("*", config#allowedOrigins) or List.memberOf(origin, config#allowedOrigins)
 
     ///
-    /// 許したオリジンからのリクエストに付けるヘッダ。許していない・Origin が無いなら空。
-    /// "*" で許した場合も "*" ではなく届いたオリジンをそのまま返す（Vary: Origin と組で、キャッシュが混ざらない）。
+    /// Origin 付きのリクエストに付けるヘッダ。許したオリジンなら Allow-Origin と Vary、許していなくても Vary は付ける
+    /// （応答が Origin で変わるので、共有キャッシュが許否の違う応答を混ぜないため）。Origin が無い・CORS を使わない設定なら空。
+    /// "*" で許した場合も "*" ではなく届いたオリジンをそのまま返す。
     ///
     pub def responseHeaders(config: CorsConfig, request: HttpRequest): List[(String, String)] =
         match originOf(request) {
-            case Some(origin) if isAllowed(config, origin) => ("Access-Control-Allow-Origin", origin) :: ("Vary", "Origin") :: Nil
-            case _                                         => Nil
+            case Some(origin) if isAllowed(config, origin)          => ("Access-Control-Allow-Origin", origin) :: ("Vary", "Origin") :: Nil
+            case Some(_) if not List.isEmpty(config#allowedOrigins) => ("Vary", "Origin") :: Nil
+            case _                                                  => Nil
         }
 
     ///

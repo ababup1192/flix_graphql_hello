@@ -25,3 +25,9 @@ def testJsonValueRoundTrip(): Unit \ Assert =
 @Test
 def testJsonValueParseBroken(): Unit \ Assert =
     Assert.assertTrue(JsonValue.parse("{") |> Result.isErr)
+
+/// 小数点付きの 10.0 は Float のまま往復し、10 は Int になる（scalar JSON は入れた物をそのまま返す）。
+@Test
+def testJsonValueKeepsFloatWithPoint(): Unit \ Assert =
+    Assert.assertEq(expected = (Ok(Value.Float(10.0)), Ok(Value.Int(10))),
+        (JsonValue.parse("10.0"), JsonValue.parse("10")))

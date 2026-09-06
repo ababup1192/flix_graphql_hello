@@ -35,16 +35,16 @@ mod ContentEngine {
     pub def current(cache: Cache, pool: Pool): Result[String, Graphql.Engine] \ IO =
         let Cache.Cache(slot) = cache;
         let stored: Option[(String, Graphql.Engine)] = unchecked_cast(slot.get() as Option[(String, Graphql.Engine)]);
-        forM (
-            fingerprint <- readFingerprint(pool);
-            engine <- match stored {
+        match readFingerprint(pool) {
+            case Err(message)     => stored |> Option.map(snd) |> Option.toOk(message)
+            case Ok(fingerprint) => match stored {
                 case Some((known, engine)) if known == fingerprint => Ok(engine)
                 case _ => match rebuild(pool) {
                     case Ok(engine)   => { slot.set(unchecked_cast(Some((fingerprint, engine)) as Object)); Ok(engine) }
                     case Err(message) => stored |> Option.map(snd) |> Option.toOk(message)
                 }
             }
-        ) yield engine
+        }
 
     ///
     /// 定義を読んで組み直す。
@@ -61,9 +61,9 @@ mod ContentEngine {
             })
 
     ///
-    /// プールから接続を借りて thunk を 1 つの遅延 Tx で走らせ、DbFailure を label 付きの文字列にする。
+    /// プールから接続を借りて thunk を 1 つの遅延 Tx で走らせ、DbFailure を label 付きの文字列にする。一時的な失敗は Runner と同じく再試行する。
     ///
     def read(pool: Pool, label: String, thunk: Unit -> a \ ef): Result[String, a] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr}) + IO =
-        DbError.runWithFailure(() -> Pool.withLazyTx(pool, thunk)) |> Result.mapErr(failure -> "${label}: ${failure}")
+        DbRunner.retrying(() -> Pool.withLazyTx(pool, thunk)) |> Result.mapErr(failure -> "${label}: ${failure}")
 
 }

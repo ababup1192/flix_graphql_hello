@@ -32,12 +32,14 @@ mod JsonValue {
     }
 
     ///
-    /// 小数点以下が無く Int32 に収まる数は Int、それ以外は Float にする。
+    /// 小数点の無い書き方（10）で Int32 に収まる数は Int、小数点付き（10.0）と収まらない数は Float にする。
     /// Float64 で表せない大きさの数（1e400 など）は Str にして、桁をそのまま残す。
+    ///
+    /// WhyNot: 10.0 を Int にしないのは、scalar JSON は入れた物をそのまま返すのが期待で、Float で入れた値が Int で戻ると往復が崩れるため。
     ///
     def fromNumber(n: BigDecimal): Value =
         match (BigDecimal.tryToInt32(n), BigDecimal.tryToFloat64(n)) {
-            case (Some(i), Some(x)) if Int32.toFloat64(i) == x => Value.Int(i)
+            case (Some(i), Some(x)) if Int32.toFloat64(i) == x and BigDecimal.scale(n) <= 0 => Value.Int(i)
             case (_, Some(x))                                  => Value.Float(x)
             case (_, None)                                     => Value.Str(BigDecimal.toPlainString(n))
         }

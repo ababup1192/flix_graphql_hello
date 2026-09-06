@@ -161,10 +161,10 @@ mod EntryPage {
     def maxFirst(): Int32 = 200
 
     ///
-    /// first（省けば default）を 1 〜 maxFirst に、skip（省けば 0）を 0 以上に丸める。
+    /// first（省けば default）を 0 〜 maxFirst に、skip（省けば 0）を 0 以上に丸める。0 は「件数だけ欲しい」用。
     ///
     pub def clamp(default: Int32, first: Option[Int32], skip: Option[Int32]): (Int32, Int32) =
-        (first |> Option.getWithDefault(default) |> Int32.max(1) |> Int32.min(maxFirst()),
+        (first |> Option.getWithDefault(default) |> Int32.max(0) |> Int32.min(maxFirst()),
          skip |> Option.getWithDefault(0) |> Int32.max(0))
 
     ///

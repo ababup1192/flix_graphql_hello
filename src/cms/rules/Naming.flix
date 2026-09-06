@@ -79,11 +79,11 @@ mod Naming {
         })
 
     ///
-    /// 型名（singular）が他の型の生やす型名と重ならない事。taken は他の型の schemaTypeNames。
+    /// 型（singular とそのフィールド）が生やす型名が、他の型の生やす型名と重ならない事。taken は他の型の schemaTypeNames。
+    /// singular を変える時は、既にあるフィールドから生える名前も新しい singular で生え直すので、fields も渡す。
     ///
-    pub def validateSchemaTypeNames(taken: List[String], singular: TypeName): List[Violation] =
-        let root = TypeName.text(singular);
-        (root :: List.map(suffix -> root + suffix, reservedSuffixes()))
+    pub def validateSchemaTypeNames(taken: List[String], singular: TypeName, fields: List[FieldDef]): List[Violation] =
+        schemaTypeNames(singular, fields)
             |> List.filter(name -> List.memberOf(name, taken))
             |> List.map(name -> Violation.Violation("singular", "'${name}' は他の型がコンテンツ API に生やす型名と重なります"))
 

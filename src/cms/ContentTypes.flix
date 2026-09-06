@@ -56,7 +56,7 @@ mod ContentTypes {
         };
         let derived = Option.isEmpty(draft#singular) and Option.isEmpty(draft#plural);
         let others = list();
-        CmsErr.raiseIfAny(typeNameViolations(others, names) |> List.map(violation -> if (derived) blameApiId(violation) else violation));
+        CmsErr.raiseIfAny(typeNameViolations(others, names, Nil) |> List.map(violation -> if (derived) blameApiId(violation) else violation));
         let inserted = ContentTypesQueries.insertContentType(ContentTypeRows.typeInsert(names, draft)) |> Rows.expectId;
         get(TypeId.TypeId(inserted))
 
@@ -79,7 +79,7 @@ mod ContentTypes {
             plural   = changes#plural |> Option.getWithDefault(existing#plural)
         };
         let others = list() |> List.filter(other -> other#id != id);
-        CmsErr.raiseIfAny(typeNameViolations(others, names));
+        CmsErr.raiseIfAny(typeNameViolations(others, names, existing#fields));
         discard ContentTypesQueries.updateContentType(TypeId.toInt64(id), ContentTypeRows.typeChanges(changes));
         get(id)
 
@@ -201,9 +201,9 @@ mod ContentTypes {
     ///
     /// 型の名前の検査。名前の規則（既存の型との衝突）に通ってから、生える型名との衝突を見る（apiId が重なっていれば型名も重なるので、同じ原因を二度言わない）。
     ///
-    def typeNameViolations(others: List[ContentType], names: Naming.TypeNames): List[Violation] =
+    def typeNameViolations(others: List[ContentType], names: Naming.TypeNames, fields: List[FieldDef]): List[Violation] =
         match Naming.validateType(List.map(namesOf, others), names) {
-            case Nil        => Naming.validateSchemaTypeNames(List.flatMap(schemaTypeNamesOf, others), names#singular)
+            case Nil        => Naming.validateSchemaTypeNames(List.flatMap(schemaTypeNamesOf, others), names#singular, fields)
             case violations => violations
         }
 

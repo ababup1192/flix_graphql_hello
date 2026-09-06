@@ -76,14 +76,15 @@ mod HttpServer {
                     case Err(status) => ("(bad request)", { status = status, headers = Nil, body = "" })
                 };
                 Channel.send("${label} -> ${response#status}", log);
-                write(writer, response, log);
-                socket.close()
+                write(writer, response, log)
             } catch {
                 case e: Exception =>
                     Channel.send("error: ${e.getMessage()}", log);
-                    write(writer, { status = 500, headers = Nil, body = "" }, log);
-                    socket.close()
-            }
+                    write(writer, { status = 500, headers = Nil, body = "" }, log)
+            };
+            // WhyNot: close を try の中に置かないのは、応答を書き終えた後の close の失敗で catch に入り、閉じかけの
+            // ソケットへ 500 をもう一度書いてしまうため
+            socket.close()
         } catch {
             case e: Exception =>
                 Channel.send("error: ${e.getMessage()}", log);

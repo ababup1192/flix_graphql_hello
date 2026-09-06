@@ -33,7 +33,7 @@ mod Server {
     ///
     def route(config: ServerConfig, request: HttpRequest): HttpResponse \ {Graphql, Health} =
         match (request#method, pathOf(request#path)) {
-            case ("OPTIONS", _)       => Cors.preflight(config#cors, request)
+            case ("OPTIONS", path) if path == config#graphqlPath or path == "/health" => Cors.preflight(config#cors, request)
             case ("POST", path) if path == config#graphqlPath => executeBody(request#body)
             case (_, path) if path == config#graphqlPath      => errorResponse(405, ("Allow", "POST") :: Nil, "POST only")
             case ("GET", "/health")   => health()
@@ -42,10 +42,11 @@ mod Server {
         }
 
     ///
-    /// このリクエストが config の GraphQL のパス宛か（クエリ文字列は無視）。どのエンジンで受けるかの振り分けに使う。
+    /// このリクエストが config の GraphQL を実行するか（POST でそのパス宛。クエリ文字列は無視）。
+    /// どのエンジンで受けるかの振り分けに使う。preflight や GET はエンジンを要らない（405 / 204 を返すだけ）。
     ///
-    pub def isGraphqlPath(config: ServerConfig, request: HttpRequest): Bool =
-        pathOf(request#path) == config#graphqlPath
+    pub def needsGraphqlEngine(config: ServerConfig, request: HttpRequest): Bool =
+        request#method == "POST" and pathOf(request#path) == config#graphqlPath
 
     ///
     /// 503。コンテンツ API のスキーマを組めなかった時など、サーバ側の一時的な失敗。
