@@ -46,6 +46,22 @@ mod AdminMutationResolvers {
     pub def deleteEntry(): GeneratedAdmin.MutationDeleteEntryResolver[AdminEff] =
         (_context, id) -> { ContentEntries.delete(AdminMapping.entryId("id", id)); Ok(id) }
 
+    /// Mutation.publishEntry
+    pub def publishEntry(): GeneratedAdmin.MutationPublishEntryResolver[AdminEff] =
+        (context, id) -> Ok(ContentEntries.publish(AdminMapping.entryId("id", id), AdminMapping.authorOf(context)))
+
+    /// Mutation.unpublishEntry
+    pub def unpublishEntry(): GeneratedAdmin.MutationUnpublishEntryResolver[AdminEff] =
+        (_context, id) -> Ok(ContentEntries.unpublish(AdminMapping.entryId("id", id)))
+
+    /// Mutation.saveVersion
+    pub def saveVersion(): GeneratedAdmin.MutationSaveVersionResolver[AdminEff] =
+        (context, id) -> Ok(ContentEntries.saveVersion(AdminMapping.entryId("id", id), AdminMapping.authorOf(context)))
+
+    /// Mutation.restoreVersion
+    pub def restoreVersion(): GeneratedAdmin.MutationRestoreVersionResolver[AdminEff] =
+        (_context, id, versionId, expectedVersion) -> Ok(ContentEntries.restoreVersion(AdminMapping.entryId("id", id), AdminMapping.versionId("versionId", versionId), expectedVersion))
+
     /// type Mutation のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.MutationResolvers[AdminEff] =
         {
@@ -58,7 +74,11 @@ mod AdminMutationResolvers {
             reorderFields     = reorderFields(),
             createEntry       = createEntry(),
             updateEntry       = updateEntry(),
-            deleteEntry       = deleteEntry()
+            deleteEntry       = deleteEntry(),
+            publishEntry      = publishEntry(),
+            unpublishEntry    = unpublishEntry(),
+            saveVersion       = saveVersion(),
+            restoreVersion    = restoreVersion()
         }
 
 }

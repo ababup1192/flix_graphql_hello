@@ -4,7 +4,7 @@
 mod GeneratedAdmin {
 
     /// 生成元の SDL 本文（改行は LF）。GeneratedCheck が SDL ファイルと照合する
-    pub def sdlText(): String = "\"\"\"任意の JSON 値。entry の中身（フィールドの apiId → 値）に使う\"\"\"\nscalar JSON\n\n\"\"\"管理 API。content type とフィールドの定義と、entry を読み書きする。形は固定で、コンテンツ API は定義から実行時に組む\"\"\"\ntype Query {\n  \"\"\"全 content type。apiId 順\"\"\"\n  contentTypes: [ContentType!]!\n  \"\"\"id か apiId で 1 つ。無ければ null\"\"\"\n  contentType(id: ID, apiId: String): ContentType\n  \"\"\"型の entry の一覧。更新が新しい順。search は下書きの中身に含む文字列\"\"\"\n  entries(typeId: ID!, search: String, first: Int = 50, skip: Int = 0): EntryPage!\n  \"\"\"entry 1 つ。無ければ null\"\"\"\n  entry(id: ID!): Entry\n}\n\ntype Mutation {\n  createContentType(input: ContentTypeInput!): ContentType!\n  updateContentType(id: ID!, input: ContentTypePatch!): ContentType!\n  \"\"\"フィールドごと消す\"\"\"\n  deleteContentType(id: ID!): ID!\n  \"\"\"末尾に足す\"\"\"\n  addField(typeId: ID!, input: FieldInput!): FieldDef!\n  updateField(id: ID!, input: FieldPatch!): FieldDef!\n  removeField(id: ID!): ID!\n  \"\"\"ids の順に並べ直す。型の全フィールドを過不足なく渡す\"\"\"\n  reorderFields(typeId: ID!, ids: [ID!]!): ContentType!\n\n  \"\"\"下書きを作る。id を渡せば（移行用）それを使い、無ければ振る。fields は apiId → 値\"\"\"\n  createEntry(typeId: ID!, fields: JSON!, id: ID): Entry!\n  \"\"\"下書きを直す。fields のキーだけ上書きし、null で消す。expectedVersion が今の version と違えば CONFLICT\"\"\"\n  updateEntry(id: ID!, fields: JSON!, expectedVersion: Int!): Entry!\n  \"\"\"ゴミ箱へ（soft delete）\"\"\"\n  deleteEntry(id: ID!): ID!\n}\n\n\"\"\"entry の状態\"\"\"\nenum EntryStage {\n  \"\"\"まだ公開していない\"\"\"\n  DRAFT\n  \"\"\"公開中\"\"\"\n  PUBLISHED\n}\n\n\"\"\"entry。fields は下書きの中身\"\"\"\ntype Entry {\n  id: ID!\n  typeId: ID!\n  \"\"\"楽観ロックの版。updateEntry に expectedVersion として渡す\"\"\"\n  version: Int!\n  stage: EntryStage!\n  fields: JSON!\n  publishedAt: String\n  createdAt: String!\n  updatedAt: String!\n}\n\n\"\"\"entry の一覧の 1 ページ\"\"\"\ntype EntryPage {\n  nodes: [Entry!]!\n  totalCount: Int!\n}\n\n\"\"\"content type の種別\"\"\"\nenum TypeKind {\n  \"\"\"entry を何件でも持つ\"\"\"\n  COLLECTION\n  \"\"\"entry を 1 件だけ持つ（サイト設定など）\"\"\"\n  SINGLETON\n}\n\n\"\"\"フィールドの種類\"\"\"\nenum FieldKind {\n  TEXT\n  TEXT_AREA\n  \"\"\"URL に使う識別子。sourceField から自動生成し、型の中で一意\"\"\"\n  SLUG\n  NUMBER\n  BOOLEAN\n}\n\n\"\"\"content type。apiId がコンテンツ API のクエリ名の元になる\"\"\"\ntype ContentType {\n  id: ID!\n  \"\"\"lowerCamel の識別子（\"blogs\"）\"\"\"\n  apiId: String!\n  kind: TypeKind!\n  \"\"\"管理画面に出す名前\"\"\"\n  name: String!\n  \"\"\"コンテンツ API の型名（\"Blog\"）\"\"\"\n  singular: String!\n  \"\"\"コンテンツ API の一覧クエリ名（\"blogs\"）\"\"\"\n  plural: String!\n  \"\"\"管理画面のプレビューが開く URL。{id} を entry の id に置き換える\"\"\"\n  previewUrl: String\n  \"\"\"position 順\"\"\"\n  fields: [FieldDef!]!\n  createdAt: String!\n  updatedAt: String!\n}\n\n\"\"\"フィールドの定義\"\"\"\ntype FieldDef {\n  id: ID!\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  \"\"\"配列か\"\"\"\n  many: Boolean!\n  \"\"\"公開時に値が要るか\"\"\"\n  required: Boolean!\n  \"\"\"型の中で値が一意か\"\"\"\n  unique: Boolean!\n  \"\"\"言語ごとに値を持つか\"\"\"\n  localized: Boolean!\n  config: FieldConfig!\n  position: Int!\n}\n\n\"\"\"kind ごとの設定。使わない項目は null\"\"\"\ntype FieldConfig {\n  \"\"\"TEXT / TEXT_AREA / SLUG の最大文字数\"\"\"\n  maxLength: Int\n  \"\"\"SLUG の元にするフィールドの apiId\"\"\"\n  sourceField: String\n  \"\"\"NUMBER の下限\"\"\"\n  min: Float\n  \"\"\"NUMBER の上限\"\"\"\n  max: Float\n  \"\"\"NUMBER を整数に限るか\"\"\"\n  integer: Boolean\n}\n\ninput ContentTypeInput {\n  apiId: String!\n  kind: TypeKind = COLLECTION\n  name: String!\n  \"\"\"省くと apiId から導く\"\"\"\n  singular: String\n  \"\"\"省くと apiId から導く\"\"\"\n  plural: String\n  previewUrl: String\n}\n\n\"\"\"触らない項目は省く\"\"\"\ninput ContentTypePatch {\n  name: String\n  singular: String\n  plural: String\n  previewUrl: String\n}\n\ninput FieldInput {\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  many: Boolean = false\n  required: Boolean = false\n  unique: Boolean = false\n  localized: Boolean = false\n  config: FieldConfigInput\n}\n\n\"\"\"触らない項目は省く。config は丸ごと置き換える\"\"\"\ninput FieldPatch {\n  name: String\n  required: Boolean\n  unique: Boolean\n  localized: Boolean\n  config: FieldConfigInput\n}\n\ninput FieldConfigInput {\n  maxLength: Int\n  sourceField: String\n  min: Float\n  max: Float\n  integer: Boolean\n}\n"
+    pub def sdlText(): String = "\"\"\"任意の JSON 値。entry の中身（フィールドの apiId → 値）に使う\"\"\"\nscalar JSON\n\n\"\"\"管理 API。content type とフィールドの定義と、entry を読み書きする。形は固定で、コンテンツ API は定義から実行時に組む\"\"\"\ntype Query {\n  \"\"\"全 content type。apiId 順\"\"\"\n  contentTypes: [ContentType!]!\n  \"\"\"id か apiId で 1 つ。無ければ null\"\"\"\n  contentType(id: ID, apiId: String): ContentType\n  \"\"\"型の entry の一覧。更新が新しい順。search は下書きの中身に含む文字列\"\"\"\n  entries(typeId: ID!, search: String, first: Int = 50, skip: Int = 0): EntryPage!\n  \"\"\"entry 1 つ。無ければ null\"\"\"\n  entry(id: ID!): Entry\n}\n\ntype Mutation {\n  createContentType(input: ContentTypeInput!): ContentType!\n  updateContentType(id: ID!, input: ContentTypePatch!): ContentType!\n  \"\"\"フィールドごと消す\"\"\"\n  deleteContentType(id: ID!): ID!\n  \"\"\"末尾に足す\"\"\"\n  addField(typeId: ID!, input: FieldInput!): FieldDef!\n  updateField(id: ID!, input: FieldPatch!): FieldDef!\n  removeField(id: ID!): ID!\n  \"\"\"ids の順に並べ直す。型の全フィールドを過不足なく渡す\"\"\"\n  reorderFields(typeId: ID!, ids: [ID!]!): ContentType!\n\n  \"\"\"下書きを作る。id を渡せば（移行用）それを使い、無ければ振る。fields は apiId → 値\"\"\"\n  createEntry(typeId: ID!, fields: JSON!, id: ID): Entry!\n  \"\"\"下書きを直す。fields のキーだけ上書きし、null で消す。expectedVersion が今の version と違えば CONFLICT\"\"\"\n  updateEntry(id: ID!, fields: JSON!, expectedVersion: Int!): Entry!\n  \"\"\"ゴミ箱へ（soft delete）。公開中なら公開も取り下げる\"\"\"\n  deleteEntry(id: ID!): ID!\n  \"\"\"下書きを公開する。required と unique はここで検査する。公開中なら公開側を下書きで上書きする\"\"\"\n  publishEntry(id: ID!): Entry!\n  \"\"\"公開を取り下げる。下書きは残る\"\"\"\n  unpublishEntry(id: ID!): Entry!\n  \"\"\"今の下書きを版として残す\"\"\"\n  saveVersion(id: ID!): EntryVersion!\n  \"\"\"版の中身を下書きに戻す。expectedVersion は updateEntry と同じ\"\"\"\n  restoreVersion(id: ID!, versionId: ID!, expectedVersion: Int!): Entry!\n}\n\n\"\"\"entry の状態\"\"\"\nenum EntryStage {\n  \"\"\"まだ公開していない\"\"\"\n  DRAFT\n  \"\"\"公開中で、下書きは公開した物と同じ\"\"\"\n  PUBLISHED\n  \"\"\"公開中で、公開後に下書きが進んでいる（再公開で反映）\"\"\"\n  CHANGED\n}\n\n\"\"\"entry。fields は下書きの中身\"\"\"\ntype Entry {\n  id: ID!\n  typeId: ID!\n  \"\"\"楽観ロックの版。updateEntry に expectedVersion として渡す\"\"\"\n  version: Int!\n  stage: EntryStage!\n  fields: JSON!\n  publishedAt: String\n  createdAt: String!\n  updatedAt: String!\n  \"\"\"版。新しい順。公開時と saveVersion で積む\"\"\"\n  versions: [EntryVersion!]!\n}\n\n\"\"\"版を積んだ理由\"\"\"\nenum VersionReason {\n  PUBLISH\n  SAVE\n}\n\n\"\"\"entry の版\"\"\"\ntype EntryVersion {\n  id: ID!\n  \"\"\"積んだ時点の entry の version\"\"\"\n  version: Int!\n  reason: VersionReason!\n  author: String!\n  fields: JSON!\n  createdAt: String!\n}\n\n\"\"\"entry の一覧の 1 ページ\"\"\"\ntype EntryPage {\n  nodes: [Entry!]!\n  totalCount: Int!\n}\n\n\"\"\"content type の種別\"\"\"\nenum TypeKind {\n  \"\"\"entry を何件でも持つ\"\"\"\n  COLLECTION\n  \"\"\"entry を 1 件だけ持つ（サイト設定など）\"\"\"\n  SINGLETON\n}\n\n\"\"\"フィールドの種類\"\"\"\nenum FieldKind {\n  TEXT\n  TEXT_AREA\n  \"\"\"URL に使う識別子。sourceField から自動生成し、型の中で一意\"\"\"\n  SLUG\n  NUMBER\n  BOOLEAN\n}\n\n\"\"\"content type。apiId がコンテンツ API のクエリ名の元になる\"\"\"\ntype ContentType {\n  id: ID!\n  \"\"\"lowerCamel の識別子（\"blogs\"）\"\"\"\n  apiId: String!\n  kind: TypeKind!\n  \"\"\"管理画面に出す名前\"\"\"\n  name: String!\n  \"\"\"コンテンツ API の型名（\"Blog\"）\"\"\"\n  singular: String!\n  \"\"\"コンテンツ API の一覧クエリ名（\"blogs\"）\"\"\"\n  plural: String!\n  \"\"\"管理画面のプレビューが開く URL。{id} を entry の id に置き換える\"\"\"\n  previewUrl: String\n  \"\"\"position 順\"\"\"\n  fields: [FieldDef!]!\n  createdAt: String!\n  updatedAt: String!\n}\n\n\"\"\"フィールドの定義\"\"\"\ntype FieldDef {\n  id: ID!\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  \"\"\"配列か\"\"\"\n  many: Boolean!\n  \"\"\"公開時に値が要るか\"\"\"\n  required: Boolean!\n  \"\"\"型の中で値が一意か\"\"\"\n  unique: Boolean!\n  \"\"\"言語ごとに値を持つか\"\"\"\n  localized: Boolean!\n  config: FieldConfig!\n  position: Int!\n}\n\n\"\"\"kind ごとの設定。使わない項目は null\"\"\"\ntype FieldConfig {\n  \"\"\"TEXT / TEXT_AREA / SLUG の最大文字数\"\"\"\n  maxLength: Int\n  \"\"\"SLUG の元にするフィールドの apiId\"\"\"\n  sourceField: String\n  \"\"\"NUMBER の下限\"\"\"\n  min: Float\n  \"\"\"NUMBER の上限\"\"\"\n  max: Float\n  \"\"\"NUMBER を整数に限るか\"\"\"\n  integer: Boolean\n}\n\ninput ContentTypeInput {\n  apiId: String!\n  kind: TypeKind = COLLECTION\n  name: String!\n  \"\"\"省くと apiId から導く\"\"\"\n  singular: String\n  \"\"\"省くと apiId から導く\"\"\"\n  plural: String\n  previewUrl: String\n}\n\n\"\"\"触らない項目は省く\"\"\"\ninput ContentTypePatch {\n  name: String\n  singular: String\n  plural: String\n  previewUrl: String\n}\n\ninput FieldInput {\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  many: Boolean = false\n  required: Boolean = false\n  unique: Boolean = false\n  localized: Boolean = false\n  config: FieldConfigInput\n}\n\n\"\"\"触らない項目は省く。config は丸ごと置き換える\"\"\"\ninput FieldPatch {\n  name: String\n  required: Boolean\n  unique: Boolean\n  localized: Boolean\n  config: FieldConfigInput\n}\n\ninput FieldConfigInput {\n  maxLength: Int\n  sourceField: String\n  min: Float\n  max: Float\n  integer: Boolean\n}\n"
 
     /// 生成した schemagen のバージョン
     pub def generatorVersion(): String = "6"
@@ -13,13 +13,27 @@ mod GeneratedAdmin {
     pub enum EntryStage with Eq, Order, ToString {
         /// まだ公開していない
         case Draft
-        /// 公開中
+        /// 公開中で、下書きは公開した物と同じ
         case Published
+        /// 公開中で、公開後に下書きが進んでいる（再公開で反映）
+        case Changed
     }
 
     /// EntryStage の Codec
     pub def entryStageCodec(): GqlCodec[EntryStage] =
-        GqlCodec.enumOf("EntryStage", value -> match value { case EntryStage.Draft => "DRAFT" case EntryStage.Published => "PUBLISHED" }, EntryStage.Draft :: EntryStage.Published :: Nil) |> GqlCodec.describe("entry の状態") |> GqlCodec.describeValue(EntryStage.Draft, "まだ公開していない") |> GqlCodec.describeValue(EntryStage.Published, "公開中")
+        GqlCodec.enumOf("EntryStage", value -> match value { case EntryStage.Draft => "DRAFT" case EntryStage.Published => "PUBLISHED" case EntryStage.Changed => "CHANGED" }, EntryStage.Draft :: EntryStage.Published :: EntryStage.Changed :: Nil) |> GqlCodec.describe("entry の状態") |> GqlCodec.describeValue(EntryStage.Draft, "まだ公開していない") |> GqlCodec.describeValue(EntryStage.Published, "公開中で、下書きは公開した物と同じ") |> GqlCodec.describeValue(EntryStage.Changed, "公開中で、公開後に下書きが進んでいる（再公開で反映）")
+
+    /// enum VersionReason。版を積んだ理由
+    pub enum VersionReason with Eq, Order, ToString {
+        /// PUBLISH
+        case Publish
+        /// SAVE
+        case Save
+    }
+
+    /// VersionReason の Codec
+    pub def versionReasonCodec(): GqlCodec[VersionReason] =
+        GqlCodec.enumOf("VersionReason", value -> match value { case VersionReason.Publish => "PUBLISH" case VersionReason.Save => "SAVE" }, VersionReason.Publish :: VersionReason.Save :: Nil) |> GqlCodec.describe("版を積んだ理由")
 
     /// enum TypeKind。content type の種別
     pub enum TypeKind with Eq, Order, ToString {
@@ -147,6 +161,14 @@ mod GeneratedAdmin {
     pub type alias MutationUpdateEntryResolver[ef: Eff] = Context -> Id -> Value -> Int32 -> Result[FieldError, Entry] \ ef
     /// Mutation.deleteEntry
     pub type alias MutationDeleteEntryResolver[ef: Eff] = Context -> Id -> Result[FieldError, Id] \ ef
+    /// Mutation.publishEntry
+    pub type alias MutationPublishEntryResolver[ef: Eff] = Context -> Id -> Result[FieldError, Entry] \ ef
+    /// Mutation.unpublishEntry
+    pub type alias MutationUnpublishEntryResolver[ef: Eff] = Context -> Id -> Result[FieldError, Entry] \ ef
+    /// Mutation.saveVersion
+    pub type alias MutationSaveVersionResolver[ef: Eff] = Context -> Id -> Result[FieldError, EntryVersion] \ ef
+    /// Mutation.restoreVersion
+    pub type alias MutationRestoreVersionResolver[ef: Eff] = Context -> Id -> Id -> Int32 -> Result[FieldError, Entry] \ ef
     /// Entry.id
     pub type alias EntryIdResolver[ef: Eff] = Context -> Entry -> Result[FieldError, Id] \ ef
     /// Entry.typeId
@@ -163,6 +185,20 @@ mod GeneratedAdmin {
     pub type alias EntryCreatedAtResolver[ef: Eff] = Context -> Entry -> Result[FieldError, String] \ ef
     /// Entry.updatedAt
     pub type alias EntryUpdatedAtResolver[ef: Eff] = Context -> Entry -> Result[FieldError, String] \ ef
+    /// Entry.versions
+    pub type alias EntryVersionsResolver[ef: Eff] = Context -> Entry -> Result[FieldError, List[EntryVersion]] \ ef
+    /// EntryVersion.id
+    pub type alias EntryVersionIdResolver[ef: Eff] = Context -> EntryVersion -> Result[FieldError, Id] \ ef
+    /// EntryVersion.version
+    pub type alias EntryVersionVersionResolver[ef: Eff] = Context -> EntryVersion -> Result[FieldError, Int32] \ ef
+    /// EntryVersion.reason
+    pub type alias EntryVersionReasonResolver[ef: Eff] = Context -> EntryVersion -> Result[FieldError, VersionReason] \ ef
+    /// EntryVersion.author
+    pub type alias EntryVersionAuthorResolver[ef: Eff] = Context -> EntryVersion -> Result[FieldError, String] \ ef
+    /// EntryVersion.fields
+    pub type alias EntryVersionFieldsResolver[ef: Eff] = Context -> EntryVersion -> Result[FieldError, Value] \ ef
+    /// EntryVersion.createdAt
+    pub type alias EntryVersionCreatedAtResolver[ef: Eff] = Context -> EntryVersion -> Result[FieldError, String] \ ef
     /// EntryPage.nodes
     pub type alias EntryPageNodesResolver[ef: Eff] = Context -> EntryPage -> Result[FieldError, List[Entry]] \ ef
     /// EntryPage.totalCount
@@ -237,7 +273,11 @@ mod GeneratedAdmin {
         reorderFields = MutationReorderFieldsResolver[ef],
         createEntry = MutationCreateEntryResolver[ef],
         updateEntry = MutationUpdateEntryResolver[ef],
-        deleteEntry = MutationDeleteEntryResolver[ef]
+        deleteEntry = MutationDeleteEntryResolver[ef],
+        publishEntry = MutationPublishEntryResolver[ef],
+        unpublishEntry = MutationUnpublishEntryResolver[ef],
+        saveVersion = MutationSaveVersionResolver[ef],
+        restoreVersion = MutationRestoreVersionResolver[ef]
     }
 
     /// type Entry のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
@@ -249,7 +289,18 @@ mod GeneratedAdmin {
         fields = EntryFieldsResolver[ef],
         publishedAt = EntryPublishedAtResolver[ef],
         createdAt = EntryCreatedAtResolver[ef],
-        updatedAt = EntryUpdatedAtResolver[ef]
+        updatedAt = EntryUpdatedAtResolver[ef],
+        versions = EntryVersionsResolver[ef]
+    }
+
+    /// type EntryVersion のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
+    pub type alias EntryVersionResolvers[ef: Eff] = {
+        id = EntryVersionIdResolver[ef],
+        version = EntryVersionVersionResolver[ef],
+        reason = EntryVersionReasonResolver[ef],
+        author = EntryVersionAuthorResolver[ef],
+        fields = EntryVersionFieldsResolver[ef],
+        createdAt = EntryVersionCreatedAtResolver[ef]
     }
 
     /// type EntryPage のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
@@ -295,7 +346,7 @@ mod GeneratedAdmin {
         integer = FieldConfigIntegerResolver[ef]
     }
 
-    /// type Entry の既定リゾルバ。source の同名ラベルをそのまま返す
+    /// type Entry の既定リゾルバ。source の同名ラベルをそのまま返す。versions は含まない（オブジェクト型を返すか、引数を持つ）
     pub def entryDefaults(): {
         id = Context -> { id = Id | r0 } -> Result[FieldError, Id] \ ef,
         typeId = Context -> { typeId = Id | r1 } -> Result[FieldError, Id] \ ef,
@@ -314,6 +365,23 @@ mod GeneratedAdmin {
         publishedAt = (_context, src) -> Ok(src#publishedAt),
         createdAt = (_context, src) -> Ok(src#createdAt),
         updatedAt = (_context, src) -> Ok(src#updatedAt)
+    }
+
+    /// type EntryVersion の既定リゾルバ。source の同名ラベルをそのまま返す
+    pub def entryVersionDefaults(): {
+        id = Context -> { id = Id | r0 } -> Result[FieldError, Id] \ ef,
+        version = Context -> { version = Int32 | r1 } -> Result[FieldError, Int32] \ ef,
+        reason = Context -> { reason = VersionReason | r2 } -> Result[FieldError, VersionReason] \ ef,
+        author = Context -> { author = String | r3 } -> Result[FieldError, String] \ ef,
+        fields = Context -> { fields = Value | r4 } -> Result[FieldError, Value] \ ef,
+        createdAt = Context -> { createdAt = String | r5 } -> Result[FieldError, String] \ ef
+    } = {
+        id = (_context, src) -> Ok(src#id),
+        version = (_context, src) -> Ok(src#version),
+        reason = (_context, src) -> Ok(src#reason),
+        author = (_context, src) -> Ok(src#author),
+        fields = (_context, src) -> Ok(src#fields),
+        createdAt = (_context, src) -> Ok(src#createdAt)
     }
 
     /// type EntryPage の既定リゾルバ。source の同名ラベルをそのまま返す。nodes は含まない（オブジェクト型を返すか、引数を持つ）
@@ -389,6 +457,7 @@ mod GeneratedAdmin {
         queryRoot = QueryResolvers[ef],
         mutationRoot = MutationResolvers[ef],
         entry = EntryResolvers[ef],
+        entryVersion = EntryVersionResolvers[ef],
         entryPage = EntryPageResolvers[ef],
         contentType = ContentTypeResolvers[ef],
         fieldDef = FieldDefResolvers[ef],
@@ -486,7 +555,29 @@ mod GeneratedAdmin {
             {
                 let arg0 = Schema.arg("id", GqlCodec.id());
                 Schema.fieldRaw("deleteEntry", Arg.info(arg0) :: Nil, Out.id(), (context, _src, args) ->
-                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#deleteEntry)(context, v0)) yield result) |> Field.withDescription("ゴミ箱へ（soft delete）")
+                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#deleteEntry)(context, v0)) yield result) |> Field.withDescription("ゴミ箱へ（soft delete）。公開中なら公開も取り下げる")
+            } ::
+            {
+                let arg0 = Schema.arg("id", GqlCodec.id());
+                Schema.fieldRaw("publishEntry", Arg.info(arg0) :: Nil, Out.obj(entryType(resolvers)), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#publishEntry)(context, v0)) yield result) |> Field.withDescription("下書きを公開する。required と unique はここで検査する。公開中なら公開側を下書きで上書きする")
+            } ::
+            {
+                let arg0 = Schema.arg("id", GqlCodec.id());
+                Schema.fieldRaw("unpublishEntry", Arg.info(arg0) :: Nil, Out.obj(entryType(resolvers)), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#unpublishEntry)(context, v0)) yield result) |> Field.withDescription("公開を取り下げる。下書きは残る")
+            } ::
+            {
+                let arg0 = Schema.arg("id", GqlCodec.id());
+                Schema.fieldRaw("saveVersion", Arg.info(arg0) :: Nil, Out.obj(entryVersionType(resolvers)), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#saveVersion)(context, v0)) yield result) |> Field.withDescription("今の下書きを版として残す")
+            } ::
+            {
+                let arg0 = Schema.arg("id", GqlCodec.id());
+                let arg1 = Schema.arg("versionId", GqlCodec.id());
+                let arg2 = Schema.arg("expectedVersion", GqlCodec.int32());
+                Schema.fieldRaw("restoreVersion", Arg.info(arg0) :: Arg.info(arg1) :: Arg.info(arg2) :: Nil, Out.obj(entryType(resolvers)), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); v1 <- Arg.decode(arg1, args); v2 <- Arg.decode(arg2, args); result <- (resolvers#mutationRoot#restoreVersion)(context, v0, v1, v2)) yield result) |> Field.withDescription("版の中身を下書きに戻す。expectedVersion は updateEntry と同じ")
             } ::
             Nil)
 
@@ -525,7 +616,40 @@ mod GeneratedAdmin {
                 Schema.fieldRaw("updatedAt", Nil, Out.string(), (context, src, _args) ->
                     (resolvers#entry#updatedAt)(context, src))
             } ::
+            {
+                Schema.fieldRaw("versions", Nil, Out.list(Out.obj(entryVersionType(resolvers))), (context, src, _args) ->
+                    (resolvers#entry#versions)(context, src)) |> Field.withDescription("版。新しい順。公開時と saveVersion で積む")
+            } ::
             Nil) |> ObjectType.withDescription("entry。fields は下書きの中身")
+
+    /// type EntryVersion
+    def entryVersionType(resolvers: Resolvers[ef]): ObjectType[EntryVersion, ef] =
+        Schema.objectType("EntryVersion", () ->
+            {
+                Schema.fieldRaw("id", Nil, Out.id(), (context, src, _args) ->
+                    (resolvers#entryVersion#id)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("version", Nil, Out.int32(), (context, src, _args) ->
+                    (resolvers#entryVersion#version)(context, src)) |> Field.withDescription("積んだ時点の entry の version")
+            } ::
+            {
+                Schema.fieldRaw("reason", Nil, Out.scalar(versionReasonCodec()), (context, src, _args) ->
+                    (resolvers#entryVersion#reason)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("author", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#entryVersion#author)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("fields", Nil, Out.json(), (context, src, _args) ->
+                    (resolvers#entryVersion#fields)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("createdAt", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#entryVersion#createdAt)(context, src))
+            } ::
+            Nil) |> ObjectType.withDescription("entry の版")
 
     /// type EntryPage
     def entryPageType(resolvers: Resolvers[ef]): ObjectType[EntryPage, ef] =

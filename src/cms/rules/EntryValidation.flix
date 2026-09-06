@@ -18,6 +18,23 @@ mod EntryValidation {
             })
 
     ///
+    /// 公開できるか。下書きの検査に加えて、required のフィールドに値がある事を見る（null・無い・空の配列は駄目）。
+    /// unique はここでは見ない（公開中の値との照合は DB が要る。ContentEntries.publish）。
+    ///
+    pub def publish(fields: List[FieldDef], data: EntryData): List[Violation] =
+        let missing = fields |> List.filter(field -> field#required) |> List.filter(field -> not hasValue(Map.get(field#apiId, data)))
+            |> List.map(field -> Violation.Violation("fields.${field#apiId}", "公開には値が要ります"));
+        draft(fields, data) ::: missing
+
+    def hasValue(value: Option[Json]): Bool = match value {
+        case None                    => false
+        case Some(Json.JNull)        => false
+        case Some(Json.JArray(items)) => not Vector.isEmpty(items)
+        case Some(Json.JString(s))   => s != ""
+        case Some(_)                 => true
+    }
+
+    ///
     /// 変更を重ねる。patch のキーだけ上書きし、null は消す。
     ///
     pub def merge(before: EntryData, patch: EntryData): EntryData =

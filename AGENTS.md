@@ -50,7 +50,7 @@ queries/*.q            SQL
 src/generated/graphql/ schemagen の生成物（触らない）。GeneratedSchema / GeneratedAdminSchema
 src/generated/sql/     sqlfx の生成物（触らない）。*Queries / Tables
 src/cms/model/         ドメインの型。Ids（TypeId / FieldId / ApiId / TypeName）、ContentType（enum・レコード・Draft / Changes・FieldConfig）、Entry（EntryId / Stage / EntryData / IdGen）
-src/cms/rules/         純粋な規則。Naming（予約名・衝突・kind と config）、EntryValidation（下書きの中身。緩い）
+src/cms/rules/         純粋な規則。Naming（予約名・衝突・kind と config）、EntryValidation（下書きは緩く、公開は required まで）
 src/cms/db/            行とドメインの値の変換と、絞り込みの SQL 化（EntryFilterSql）。列名と JSONB の式を知るのはここだけ
 src/cms/               ユースケース（ContentTypes / ContentEntries）と業務エラー（CmsErr）
 src/admin/             管理 API。AdminMapping（GraphQL の型 ↔ ドメイン）、リゾルバ、AdminRunner（最初の SQL で借りる Tx）

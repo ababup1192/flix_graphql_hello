@@ -63,13 +63,22 @@ curl -s -X POST localhost:8080/admin/graphql -d '{"query": "{ contentTypes { api
 
 名前の規則（lowerCamel の apiId、予約名、他の型との衝突）に合わない入力は `errors[].message` に理由が並ぶ。
 
+### 公開
+
+`publishEntry` は required と unique を検査して下書きを公開側へ写し、版を積む。公開後に下書きを直すと `stage` が `CHANGED` になり、再公開で反映する。
+`unpublishEntry` で取り下げ、`saveVersion` / `restoreVersion` で版を残して戻せる。
+
+```bash
+curl -s -X POST localhost:8080/admin/graphql -d '{"query": "mutation { publishEntry(id: \"b1\") { stage publishedAt versions { version reason } } }"}'
+```
+
 ### コンテンツ API の例
 
-型 `blogs`（title / views）と entry があれば、`/graphql` にこう投げられる。公開（ステップ 5）まではまだ `stage: DRAFT` で引く。
+型 `blogs`（title / views）と公開した entry があれば、`/graphql` にこう投げられる。`stage` を省けば公開中の物、下書きは `stage: DRAFT`。
 
 ```bash
 curl -s -X POST localhost:8080/graphql -H 'Content-Type: application/json' \
-  -d '{"query": "{ blogs(stage: DRAFT, where: { title_contains: \"flix\", OR: [{ views_gte: 10 }] }, orderBy: [views_DESC], first: 10) { totalCount nodes { id title views } } }"}'
+  -d '{"query": "{ blogs(where: { title_contains: \"flix\", OR: [{ views_gte: 10 }] }, orderBy: [views_DESC], first: 10) { totalCount nodes { id title views } } }"}'
 curl -s -X POST localhost:8080/graphql -d '{"query": "{ blog(id: \"b1\", stage: DRAFT) { title updatedAt } }"}'
 curl -s -X POST localhost:8080/graphql -d '{"query": "{ __type(name: \"BlogWhere\") { inputFields { name } } }"}'
 ```

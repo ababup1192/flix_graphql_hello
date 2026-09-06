@@ -101,7 +101,7 @@ mod ContentTypes {
     pub def addField(typeId: TypeId, draft: FieldDraft): FieldDef \ Db + CmsErr =
         let owner = get(typeId);
         let siblings = owner#fields |> List.map(field -> field#apiId);
-        CmsErr.raiseIfAny(Naming.validateFieldApiId(siblings, draft#apiId) ::: Naming.validateConfig(siblings, draft#kind, draft#config));
+        CmsErr.raiseIfAny(Naming.validateFieldApiId(siblings, draft#apiId) ::: Naming.validateFlags(draft#many, draft#unique) ::: Naming.validateConfig(siblings, draft#kind, draft#config));
         let position = ContentFieldsQueries.nextFieldPosition(TypeId.toInt64(typeId)) |> Option.flatMap(row -> row#next) |> Option.getWithDefault(0);
         let inserted = ContentFieldsQueries.insertField({
             typeId      = TypeId.toInt64(typeId),
@@ -125,7 +125,7 @@ mod ContentTypes {
         let existing = getField(id);
         let siblings = fieldsOf(existing#typeId) |> List.filter(field -> field#id != id) |> List.map(field -> field#apiId);
         let config = changes#config |> Option.getWithDefault(existing#config);
-        CmsErr.raiseIfAny(Naming.validateConfig(siblings, existing#kind, config));
+        CmsErr.raiseIfAny(Naming.validateFlags(existing#many, changes#unique |> Option.getWithDefault(existing#unique)) ::: Naming.validateConfig(siblings, existing#kind, config));
         let assignments = Fragment.noChange()
             |> Fragment.setIfSome(ContentFieldsTable.name(), changes#name)
             |> Fragment.setIfSome(ContentFieldsTable.isRequired(), changes#required)

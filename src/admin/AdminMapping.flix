@@ -81,10 +81,32 @@ mod AdminMapping {
         case FieldKind.Boolean  => GeneratedAdmin.FieldKind.Boolean
     }
 
-    pub def stageToGql(stage: Stage): GeneratedAdmin.EntryStage = match stage {
-        case Stage.Draft     => GeneratedAdmin.EntryStage.Draft
-        case Stage.Published => GeneratedAdmin.EntryStage.Published
+    ///
+    /// 管理 API の EntryStage。公開後に下書きが進んでいれば CHANGED。
+    ///
+    pub def entryStageToGql(entry: Entry): GeneratedAdmin.EntryStage = match (entry#stage, entry#changedSincePublish) {
+        case (Stage.Draft, _)         => GeneratedAdmin.EntryStage.Draft
+        case (Stage.Published, false) => GeneratedAdmin.EntryStage.Published
+        case (Stage.Published, true)  => GeneratedAdmin.EntryStage.Changed
     }
+
+    pub def reasonToGql(reason: VersionReason): GeneratedAdmin.VersionReason = match reason {
+        case VersionReason.Publish => GeneratedAdmin.VersionReason.Publish
+        case VersionReason.Save    => GeneratedAdmin.VersionReason.Save
+    }
+
+    ///
+    /// GraphQL の ID を版の id に読む。
+    ///
+    pub def versionId(argument: String, id: Id): VersionId \ CmsErr =
+        VersionId.VersionId(number(argument, id))
+
+    pub def idOfVersion(id: VersionId): Id = Id.Id("${id}")
+
+    ///
+    /// 版に残す作者名。認証が入るまでは Context の userId か "anonymous"。
+    ///
+    pub def authorOf(context: Context): String = context#userId |> Option.getWithDefault("anonymous")
 
     // ---- JSON ----
 

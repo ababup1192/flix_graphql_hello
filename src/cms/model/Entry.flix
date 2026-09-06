@@ -55,6 +55,7 @@ pub type alias EntryData = Map[ApiId, Util.Json.Json]
 /// - stage: 状態
 /// - data: 下書きの中身
 /// - publishedAt: 公開した時刻。未公開なら None
+/// - changedSincePublish: 公開中で、公開後に下書きが進んでいるか（管理画面の CHANGED バッジ）
 /// - createdAt / updatedAt: 作成と更新の時刻
 ///
 pub type alias Entry = {
@@ -64,8 +65,57 @@ pub type alias Entry = {
     stage = Stage,
     data = EntryData,
     publishedAt = Option[Timestamp.Timestamp],
+    changedSincePublish = Bool,
     createdAt = Timestamp.Timestamp,
     updatedAt = Timestamp.Timestamp
+}
+
+///
+/// 版の id。entry_versions.id を包む。
+///
+pub enum VersionId with Eq, Order {
+    case VersionId(Int64)
+}
+
+instance ToString[VersionId] {
+    pub def toString(id: VersionId): String = Int64.toString(VersionId.toInt64(id))
+}
+
+mod VersionId {
+    pub def toInt64(id: VersionId): Int64 =
+        let VersionId.VersionId(number) = id;
+        number
+}
+
+///
+/// 版を積んだ理由。
+///
+pub enum VersionReason with Eq, Order, ToString {
+    /// 公開した時の中身
+    case Publish
+    /// 明示的に保存した中身
+    case Save
+}
+
+///
+/// entry の版。公開時と明示的な保存だけ積む。
+///
+/// - id: entry_versions.id
+/// - entryId: どの entry か
+/// - version: 積んだ時点の entries.version
+/// - data: その時の中身
+/// - author: 誰が
+/// - reason: 理由
+/// - createdAt: 積んだ時刻
+///
+pub type alias EntryVersion = {
+    id = VersionId,
+    entryId = EntryId,
+    version = Int32,
+    data = EntryData,
+    author = String,
+    reason = VersionReason,
+    createdAt = Timestamp.Timestamp
 }
 
 ///

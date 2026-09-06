@@ -7,12 +7,12 @@ mod EntriesQueries {
     ///
     /// 生成元 entries.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -1843406565
+    pub def sourceHash(): Int32 = 446261280
 
     ///
     /// findEntry の 1 行。
     ///
-    pub type alias FindEntryRow = { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Util.Json.Json }
+    pub type alias FindEntryRow = { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Util.Json.Json, draftUpdatedAt = Timestamp.Timestamp, publishedUpdatedAt = Option[Timestamp.Timestamp] }
 
     def findEntryDecoder(): Decoder[FindEntryRow] =
         forA (
@@ -23,21 +23,23 @@ mod EntriesQueries {
             publishedAt <- Decoder.opt(Decoder.timestamp("published_at"));
             createdAt <- Decoder.timestamp("created_at");
             updatedAt <- Decoder.timestamp("updated_at");
-            data <- Decoder.json("data")
-        ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data }
+            data <- Decoder.json("data");
+            draftUpdatedAt <- Decoder.timestamp("draft_updated_at");
+            publishedUpdatedAt <- Decoder.opt(Decoder.timestamp("published_updated_at"))
+        ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data, draftUpdatedAt = draftUpdatedAt, publishedUpdatedAt = publishedUpdatedAt }
 
     ///
-    /// findEntry: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft' WHERE e.id = $1 AND e.deleted_at IS NULL
+    /// findEntry: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft' LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published' WHERE e.id = $1 AND e.deleted_at IS NULL
     ///
     pub def findEntry(id: String): Option[FindEntryRow] \ DbRead =
-        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft'\n    WHERE e.id = $1 AND e.deleted_at IS NULL";
+        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft'\n    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'\n    WHERE e.id = $1 AND e.deleted_at IS NULL";
         let params = List#{SqlValue.Str(id)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findEntryDecoder(), sql, params))
 
     ///
     /// listEntries の 1 行。
     ///
-    pub type alias ListEntriesRow = { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Util.Json.Json }
+    pub type alias ListEntriesRow = { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Util.Json.Json, draftUpdatedAt = Timestamp.Timestamp, publishedUpdatedAt = Option[Timestamp.Timestamp] }
 
     def listEntriesDecoder(): Decoder[ListEntriesRow] =
         forA (
@@ -48,14 +50,16 @@ mod EntriesQueries {
             publishedAt <- Decoder.opt(Decoder.timestamp("published_at"));
             createdAt <- Decoder.timestamp("created_at");
             updatedAt <- Decoder.timestamp("updated_at");
-            data <- Decoder.json("data")
-        ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data }
+            data <- Decoder.json("data");
+            draftUpdatedAt <- Decoder.timestamp("draft_updated_at");
+            publishedUpdatedAt <- Decoder.opt(Decoder.timestamp("published_updated_at"))
+        ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data, draftUpdatedAt = draftUpdatedAt, publishedUpdatedAt = publishedUpdatedAt }
 
     ///
-    /// listEntries: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft' WHERE e.type_id = $1 AND e.deleted_at IS NULL AND ($2 = '' OR EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE '%' || $2 || '%')) ORDER BY e.updated_at DESC, e.id LIMIT $3 OFFSET $4
+    /// listEntries: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft' LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published' WHERE e.type_id = $1 AND e.deleted_at IS NULL AND ($2 = '' OR EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE '%' || $2 || '%')) ORDER BY e.updated_at DESC, e.id LIMIT $3 OFFSET $4
     ///
     pub def listEntries(args: { typeId = Int64, search = String, limit = Int64, offset = Int64 }): List[ListEntriesRow] \ DbRead =
-        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft'\n    WHERE e.type_id = $1 AND e.deleted_at IS NULL\n      AND ($2 = '' OR EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE '%' || $2 || '%'))\n    ORDER BY e.updated_at DESC, e.id\n    LIMIT $3 OFFSET $4";
+        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft'\n    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'\n    WHERE e.type_id = $1 AND e.deleted_at IS NULL\n      AND ($2 = '' OR EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE '%' || $2 || '%'))\n    ORDER BY e.updated_at DESC, e.id\n    LIMIT $3 OFFSET $4";
         let params = List#{SqlValue.Int64(args#typeId), SqlValue.Str(args#search), SqlValue.Int64(args#limit), SqlValue.Int64(args#offset)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listEntriesDecoder(), sql, params))
 
@@ -148,7 +152,7 @@ mod EntriesQueries {
     ///
     /// findEntryByStage の 1 行。
     ///
-    pub type alias FindEntryByStageRow = { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Util.Json.Json }
+    pub type alias FindEntryByStageRow = { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Util.Json.Json, draftUpdatedAt = Timestamp.Timestamp, publishedUpdatedAt = Option[Timestamp.Timestamp] }
 
     def findEntryByStageDecoder(): Decoder[FindEntryByStageRow] =
         forA (
@@ -159,21 +163,23 @@ mod EntriesQueries {
             publishedAt <- Decoder.opt(Decoder.timestamp("published_at"));
             createdAt <- Decoder.timestamp("created_at");
             updatedAt <- Decoder.timestamp("updated_at");
-            data <- Decoder.json("data")
-        ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data }
+            data <- Decoder.json("data");
+            draftUpdatedAt <- Decoder.timestamp("draft_updated_at");
+            publishedUpdatedAt <- Decoder.opt(Decoder.timestamp("published_updated_at"))
+        ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data, draftUpdatedAt = draftUpdatedAt, publishedUpdatedAt = publishedUpdatedAt }
 
     ///
-    /// findEntryByStage: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 WHERE e.id = $2 AND e.deleted_at IS NULL
+    /// findEntryByStage: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published' WHERE e.id = $2 AND e.deleted_at IS NULL
     ///
     pub def findEntryByStage(args: { id = String, stage = String }): Option[FindEntryByStageRow] \ DbRead =
-        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    WHERE e.id = $2 AND e.deleted_at IS NULL";
+        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'\n    WHERE e.id = $2 AND e.deleted_at IS NULL";
         let params = List#{SqlValue.Str(args#stage), SqlValue.Str(args#id)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findEntryByStageDecoder(), sql, params))
 
     ///
     /// listEntriesByStage の 1 行。
     ///
-    pub type alias ListEntriesByStageRow = { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Util.Json.Json }
+    pub type alias ListEntriesByStageRow = { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Util.Json.Json, draftUpdatedAt = Timestamp.Timestamp, publishedUpdatedAt = Option[Timestamp.Timestamp] }
 
     def listEntriesByStageDecoder(): Decoder[ListEntriesByStageRow] =
         forA (
@@ -184,17 +190,19 @@ mod EntriesQueries {
             publishedAt <- Decoder.opt(Decoder.timestamp("published_at"));
             createdAt <- Decoder.timestamp("created_at");
             updatedAt <- Decoder.timestamp("updated_at");
-            data <- Decoder.json("data")
-        ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data }
+            data <- Decoder.json("data");
+            draftUpdatedAt <- Decoder.timestamp("draft_updated_at");
+            publishedUpdatedAt <- Decoder.opt(Decoder.timestamp("published_updated_at"))
+        ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data, draftUpdatedAt = draftUpdatedAt, publishedUpdatedAt = publishedUpdatedAt }
 
     ///
-    /// listEntriesByStage: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 WHERE e.type_id = $2 AND e.deleted_at IS NULL AND TRUE LIMIT $3 OFFSET $4
+    /// listEntriesByStage: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published' WHERE e.type_id = $2 AND e.deleted_at IS NULL AND TRUE LIMIT $3 OFFSET $4
     ///
     pub def listEntriesByStage(args: { typeId = Int64, stage = String, limit = Int64, offset = Int64 }, filter: Fragment.Pred[EntryContentsTable.EntryContentsTable], order: Fragment.Order[EntryContentsTable.EntryContentsTable]): List[ListEntriesByStageRow] \ DbRead =
         let params0 = List#{SqlValue.Str(args#stage), SqlValue.Int64(args#typeId), SqlValue.Int64(args#limit), SqlValue.Int64(args#offset)};
         let (filterSql, params1) = Fragment.appendPred(filter, params0);
         let orderSql = Fragment.renderOrder(order);
-        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    WHERE e.type_id = $2 AND e.deleted_at IS NULL AND " + filterSql + "\n    " + orderSql + "\n    LIMIT $3 OFFSET $4";
+        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'\n    WHERE e.type_id = $2 AND e.deleted_at IS NULL AND " + filterSql + "\n    " + orderSql + "\n    LIMIT $3 OFFSET $4";
         let params = params1;
         RawSql.runWithAllow(() -> Sql.fetchAs(listEntriesByStageDecoder(), sql, params))
 
@@ -217,5 +225,129 @@ mod EntriesQueries {
         let sql = "SELECT count(*)::bigint AS total\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    WHERE e.type_id = $2 AND e.deleted_at IS NULL AND " + filterSql;
         let params = params1;
         RawSql.runWithAllow(() -> Sql.fetchOneAs(countEntriesByStageDecoder(), sql, params))
+
+    ///
+    /// markPublished: UPDATE entries SET stage = 'published', published_at = now(), updated_at = now() WHERE id = $1 AND deleted_at IS NULL
+    ///
+    pub def markPublished(id: String): Int32 \ DbWrite =
+        let sql = "UPDATE entries SET stage = 'published', published_at = now(), updated_at = now() WHERE id = $1 AND deleted_at IS NULL";
+        let params = List#{SqlValue.Str(id)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// markUnpublished: UPDATE entries SET stage = 'draft', published_at = NULL, updated_at = now() WHERE id = $1 AND deleted_at IS NULL
+    ///
+    pub def markUnpublished(id: String): Int32 \ DbWrite =
+        let sql = "UPDATE entries SET stage = 'draft', published_at = NULL, updated_at = now() WHERE id = $1 AND deleted_at IS NULL";
+        let params = List#{SqlValue.Str(id)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// deleteContent: DELETE FROM entry_contents WHERE entry_id = $1 AND stage = $2
+    ///
+    pub def deleteContent(args: { entryId = String, stage = String }): Int32 \ DbWrite =
+        let sql = "DELETE FROM entry_contents WHERE entry_id = $1 AND stage = $2";
+        let params = List#{SqlValue.Str(args#entryId), SqlValue.Str(args#stage)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// findUniqueOwner の 1 行。
+    ///
+    pub type alias FindUniqueOwnerRow = { entryId = String }
+
+    def findUniqueOwnerDecoder(): Decoder[FindUniqueOwnerRow] =
+        forA (
+            entryId <- Decoder.str("entry_id")
+        ) yield { entryId = entryId }
+
+    ///
+    /// findUniqueOwner: SELECT entry_id FROM entry_unique_values WHERE type_id = $1 AND field_id = $2 AND value = $3
+    ///
+    pub def findUniqueOwner(args: { typeId = Int64, fieldId = Int64, value = String }): Option[FindUniqueOwnerRow] \ DbRead =
+        let sql = "SELECT entry_id FROM entry_unique_values WHERE type_id = $1 AND field_id = $2 AND value = $3";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#fieldId), SqlValue.Str(args#value)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(findUniqueOwnerDecoder(), sql, params))
+
+    ///
+    /// deleteUniquesOfEntry: DELETE FROM entry_unique_values WHERE entry_id = $1
+    ///
+    pub def deleteUniquesOfEntry(entryId: String): Int32 \ DbWrite =
+        let sql = "DELETE FROM entry_unique_values WHERE entry_id = $1";
+        let params = List#{SqlValue.Str(entryId)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// insertUnique: INSERT INTO entry_unique_values (type_id, field_id, value, entry_id) VALUES ($1, $2, $3, $4)
+    ///
+    pub def insertUnique(args: { typeId = Int64, fieldId = Int64, value = String, entryId = String }): Int32 \ DbWrite =
+        let sql = "INSERT INTO entry_unique_values (type_id, field_id, value, entry_id) VALUES ($1, $2, $3, $4)";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#fieldId), SqlValue.Str(args#value), SqlValue.Str(args#entryId)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// insertVersion の 1 行。
+    ///
+    pub type alias InsertVersionRow = { id = Int64 }
+
+    def insertVersionDecoder(): Decoder[InsertVersionRow] =
+        forA (
+            id <- Decoder.int64("id")
+        ) yield { id = id }
+
+    ///
+    /// insertVersion: INSERT INTO entry_versions (entry_id, version, data, author, reason) VALUES ($1, $2, $3, $4, $5) RETURNING id
+    ///
+    pub def insertVersion(args: { entryId = String, version = Int32, data = Util.Json.Json, author = String, reason = String }): Option[InsertVersionRow] \ DbWrite =
+        let sql = "INSERT INTO entry_versions (entry_id, version, data, author, reason) VALUES ($1, $2, $3, $4, $5)\n    RETURNING id";
+        let params = List#{SqlValue.Str(args#entryId), SqlValue.Int32(args#version), SqlValue.ofJson(args#data), SqlValue.Str(args#author), SqlValue.Str(args#reason)};
+        RawSql.runWithAllow(() -> Sql.executeReturningOneAs(insertVersionDecoder(), sql, params))
+
+    ///
+    /// listVersions の 1 行。
+    ///
+    pub type alias ListVersionsRow = { id = Int64, entryId = String, version = Int32, data = Util.Json.Json, author = String, reason = String, createdAt = Timestamp.Timestamp }
+
+    def listVersionsDecoder(): Decoder[ListVersionsRow] =
+        forA (
+            id <- Decoder.int64("id");
+            entryId <- Decoder.str("entry_id");
+            version <- Decoder.int32("version");
+            data <- Decoder.json("data");
+            author <- Decoder.str("author");
+            reason <- Decoder.str("reason");
+            createdAt <- Decoder.timestamp("created_at")
+        ) yield { id = id, entryId = entryId, version = version, data = data, author = author, reason = reason, createdAt = createdAt }
+
+    ///
+    /// listVersions: SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE entry_id = $1 ORDER BY id DESC
+    ///
+    pub def listVersions(entryId: String): List[ListVersionsRow] \ DbRead =
+        let sql = "SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE entry_id = $1 ORDER BY id DESC";
+        let params = List#{SqlValue.Str(entryId)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listVersionsDecoder(), sql, params))
+
+    ///
+    /// findVersion の 1 行。
+    ///
+    pub type alias FindVersionRow = { id = Int64, entryId = String, version = Int32, data = Util.Json.Json, author = String, reason = String, createdAt = Timestamp.Timestamp }
+
+    def findVersionDecoder(): Decoder[FindVersionRow] =
+        forA (
+            id <- Decoder.int64("id");
+            entryId <- Decoder.str("entry_id");
+            version <- Decoder.int32("version");
+            data <- Decoder.json("data");
+            author <- Decoder.str("author");
+            reason <- Decoder.str("reason");
+            createdAt <- Decoder.timestamp("created_at")
+        ) yield { id = id, entryId = entryId, version = version, data = data, author = author, reason = reason, createdAt = createdAt }
+
+    ///
+    /// findVersion: SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE id = $1
+    ///
+    pub def findVersion(id: Int64): Option[FindVersionRow] \ DbRead =
+        let sql = "SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE id = $1";
+        let params = List#{SqlValue.Int64(id)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(findVersionDecoder(), sql, params))
 
 }

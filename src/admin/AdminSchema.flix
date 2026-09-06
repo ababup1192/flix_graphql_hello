@@ -11,6 +11,7 @@ mod AdminSchema {
             queryRoot    = AdminQueryResolvers.resolvers(),
             mutationRoot = AdminMutationResolvers.resolvers(),
             entry        = EntryResolvers.resolvers(),
+            entryVersion = EntryVersionResolvers.resolvers(),
             entryPage    = EntryPageResolvers.resolvers(),
             contentType  = ContentTypeResolvers.resolvers(),
             fieldDef     = FieldDefResolvers.resolvers(),

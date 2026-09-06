@@ -29,16 +29,26 @@ type Mutation {
   createEntry(typeId: ID!, fields: JSON!, id: ID): Entry!
   """下書きを直す。fields のキーだけ上書きし、null で消す。expectedVersion が今の version と違えば CONFLICT"""
   updateEntry(id: ID!, fields: JSON!, expectedVersion: Int!): Entry!
-  """ゴミ箱へ（soft delete）"""
+  """ゴミ箱へ（soft delete）。公開中なら公開も取り下げる"""
   deleteEntry(id: ID!): ID!
+  """下書きを公開する。required と unique はここで検査する。公開中なら公開側を下書きで上書きする"""
+  publishEntry(id: ID!): Entry!
+  """公開を取り下げる。下書きは残る"""
+  unpublishEntry(id: ID!): Entry!
+  """今の下書きを版として残す"""
+  saveVersion(id: ID!): EntryVersion!
+  """版の中身を下書きに戻す。expectedVersion は updateEntry と同じ"""
+  restoreVersion(id: ID!, versionId: ID!, expectedVersion: Int!): Entry!
 }
 
 """entry の状態"""
 enum EntryStage {
   """まだ公開していない"""
   DRAFT
-  """公開中"""
+  """公開中で、下書きは公開した物と同じ"""
   PUBLISHED
+  """公開中で、公開後に下書きが進んでいる（再公開で反映）"""
+  CHANGED
 }
 
 """entry。fields は下書きの中身"""
@@ -52,6 +62,25 @@ type Entry {
   publishedAt: String
   createdAt: String!
   updatedAt: String!
+  """版。新しい順。公開時と saveVersion で積む"""
+  versions: [EntryVersion!]!
+}
+
+"""版を積んだ理由"""
+enum VersionReason {
+  PUBLISH
+  SAVE
+}
+
+"""entry の版"""
+type EntryVersion {
+  id: ID!
+  """積んだ時点の entry の version"""
+  version: Int!
+  reason: VersionReason!
+  author: String!
+  fields: JSON!
+  createdAt: String!
 }
 
 """entry の一覧の 1 ページ"""

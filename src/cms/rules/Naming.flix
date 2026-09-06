@@ -89,6 +89,12 @@ mod Naming {
         else Nil
 
     ///
+    /// フィールドの性質の組み合わせ。unique は配列に付けられない（値ごとの一意を DB で守れない）。
+    ///
+    pub def validateFlags(many: Bool, unique: Bool): List[Violation] =
+        if (many and unique) Violation.Violation("unique", "配列のフィールドには付けられません") :: Nil else Nil
+
+    ///
     /// kind と config の組み合わせを検査する。siblings は同じ型の既存のフィールドの apiId（slug の sourceField の検査用）。
     ///
     pub def validateConfig(siblings: List[ApiId], kind: FieldKind, config: FieldConfig): List[Violation] =

@@ -5,6 +5,7 @@ pub enum Entity with Eq, Order, ToString {
     case ContentType
     case Field
     case Entry
+    case Version
 }
 
 ///
@@ -87,6 +88,7 @@ mod CmsErr {
         case Entity.ContentType => "content type"
         case Entity.Field       => "field"
         case Entity.Entry       => "entry"
+        case Entity.Version     => "version"
     }
 
 }

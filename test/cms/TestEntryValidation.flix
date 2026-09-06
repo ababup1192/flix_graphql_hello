@@ -47,3 +47,12 @@ def testEntryValidationMerge(): Unit \ Assert =
     let patch = CmsTestKit.entryData(List#{("title", Json.JString("new")), ("views", Json.JNull)});
     Assert.assertEq(expected = CmsTestKit.entryData(List#{("title", Json.JString("new")), ("draft", Json.JBool(true))}),
         EntryValidation.merge(before, patch))
+
+/// 公開の検査は required に値が要る。null・無い・空文字・空の配列は駄目で、下書きの検査も一緒に返る。
+@Test
+def testEntryValidationPublish(): Unit \ Assert =
+    let base = { id = FieldId.FieldId(0i64), typeId = TypeId.TypeId(1i64), apiId = CmsTestKit.apiId("x"), name = "", kind = FieldKind.Text, many = false, required = true, unique = false, localized = false, config = FieldConfig.empty(), position = 0 };
+    let fields = { apiId = CmsTestKit.apiId("title") | base } :: { apiId = CmsTestKit.apiId("tags"), many = true | base } :: { apiId = CmsTestKit.apiId("views"), kind = FieldKind.Number | base } :: Nil;
+    Assert.assertEq(expected = (Nil, List#{"fields.tags", "fields.title", "fields.views"}),
+        (CmsTestKit.violationPaths(EntryValidation.publish(fields, CmsTestKit.entryData(List#{("title", Json.JString("ok")), ("tags", Json.JArray(Vector#{Json.JString("a")})), ("views", CmsTestKit.intJson(1))}))),
+         CmsTestKit.violationPaths(EntryValidation.publish(fields, CmsTestKit.entryData(List#{("title", Json.JString("")), ("tags", Json.JArray(Vector.empty()))}))) |> List.sort))
