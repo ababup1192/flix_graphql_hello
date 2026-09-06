@@ -23,7 +23,7 @@ def typesWithReferences(): (TypeId, TypeId, TypeId) \ Db + CmsErr =
 /// reference には型の存在と参照先が要り、select は選択肢の中だけ通る。
 @Test
 def testPgReferenceRules(): Unit \ {IO, Assert} =
-    let result = PgTestSupport.withDb(() -> IdGen.runWithFixed(CmsTestKit.entryIds(List#{"r1"}), () -> {
+    let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"r1"}, () -> {
         let (_, blogs, _) = typesWithReferences();
         let noTarget = CmsErr.runWithResult(() -> ContentTypes.addField(blogs, CmsTestKit.fieldDraft("author", FieldKind.Reference, FieldConfig.empty()))) |> Result.map(field -> field#position) |> Result.mapErr(CmsErr.toMessage);
         let missingType = CmsErr.runWithResult(() -> ContentTypes.addField(blogs, { target = Some(TypeId.TypeId(999i64)) | CmsTestKit.fieldDraft("author", FieldKind.Reference, FieldConfig.empty()) })) |> Result.map(field -> field#position) |> Result.mapErr(CmsErr.toMessage);
@@ -43,7 +43,7 @@ def testPgReferenceRules(): Unit \ {IO, Assert} =
 ///   publish(b1) ✗（p1, t1, t2 が未公開）→ publish(b1, withDependencies) ✓ → unpublish(p1) ✗ → unpublish(b1) ✓ → unpublish(p1) ✓
 @Test
 def testPgPublishDependencies(): Unit \ {IO, Assert} =
-    let result = PgTestSupport.withDb(() -> IdGen.runWithFixed(CmsTestKit.entryIds(List#{"p1", "t1", "t2", "b1"}), () -> {
+    let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"p1", "t1", "t2", "b1"}, () -> {
         let (profiles, blogs, tags) = typesWithReferences();
         let profile = ContentEntries.create(profiles, None, CmsTestKit.entryData(List#{("name", Json.JString("abab"))}));
         let tagA = ContentEntries.create(tags, None, CmsTestKit.entryData(List#{("label", Json.JString("flix"))}));
@@ -68,14 +68,14 @@ def testPgPublishDependencies(): Unit \ {IO, Assert} =
 @Test
 def testPgContentApiReferences(): Unit \ {IO, Assert} =
     let pool = Pool.open(Pool.defaultConfig(PgTestSupport.config()));
-    discard PgTestSupport.withDb(() -> IdGen.runWithFixed(CmsTestKit.entryIds(List#{"p1", "t1", "t2", "b1", "b2"}), () -> {
+    discard PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"p1", "t1", "t2", "b1", "b2"}, () -> {
         let (profiles, blogs, tags) = typesWithReferences();
         discard ContentEntries.create(profiles, None, CmsTestKit.entryData(List#{("name", Json.JString("abab"))}));
         discard ContentEntries.create(tags, None, CmsTestKit.entryData(List#{("label", Json.JString("flix"))}));
         discard ContentEntries.create(tags, None, CmsTestKit.entryData(List#{("label", Json.JString("graphql"))}));
         discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("One")), ("category", Json.JString("KNOWLEDGE")), ("profile", Json.JString("p1")), ("tags", Json.JArray(Vector#{Json.JString("t1"), Json.JString("t2")}))}));
         discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("Two")), ("category", Json.JString("NEWS")), ("tags", Json.JArray(Vector#{Json.JString("t2")}))}));
-        discard ContentEntries.publish(EntryId.parse("b1") |> Option.getWithDefault(EntryId.EntryId("b1")), "tester", true)
+        discard ContentEntries.publish(CmsTestKit.entryId("b1"), "tester", true)
     }));
     let cache = ContentEngine.create();
     let ask = queryText -> match ContentEngine.current(cache, pool) {

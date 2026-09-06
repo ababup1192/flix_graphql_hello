@@ -273,7 +273,7 @@ mod ContentSchemaBuilder {
     /// 型の全フィールドの葉の条件。id は _eq / _in、フィールドは kind ごと。配列のフィールドは _isNull だけ。
     ///
     def leafArgs(owner: ContentType): List[LeafArg] =
-        leafArg("id_eq", GqlCodec.id(), id -> { let Id.Id(text) = id; EntryId.parse(text) |> Option.map(Condition.IdEq) |> Option.toList }) ::
+        leafArg("id_eq", GqlCodec.id(), id -> { let Id.Id(text) = id; EntryId.parse(text) |> Option.map(Condition.IdEq) |> Option.getWithDefault(Condition.Never) :: Nil }) ::
         leafArg("id_in", GqlCodec.list(GqlCodec.id()), ids -> Condition.IdIn(ids |> List.filterMap(id -> { let Id.Id(text) = id; EntryId.parse(text) })) :: Nil) ::
         List.flatMap(fieldLeafArgs, owner#fields)
 
@@ -296,7 +296,7 @@ mod ContentSchemaBuilder {
                 leafArg("${name}_in", GqlCodec.list(GqlCodec.string()), texts -> Condition.TextIn(apiId, texts) :: Nil) :: Nil
             case (FieldKind.Reference, false) =>
                 isNull ::
-                leafArg("${name}_id_eq", GqlCodec.id(), id -> { let Id.Id(text) = id; Condition.TextEq(apiId, text) :: Nil }) ::
+                leafArg("${name}_id_eq", GqlCodec.id(), id -> { let Id.Id(text) = id; EntryId.parse(text) |> Option.map(found -> Condition.TextEq(apiId, EntryId.text(found))) |> Option.getWithDefault(Condition.Never) :: Nil }) ::
                 leafArg("${name}_id_in", GqlCodec.list(GqlCodec.id()), ids -> Condition.TextIn(apiId, ids |> List.map(id -> { let Id.Id(text) = id; text })) :: Nil) :: Nil
             case (FieldKind.Number, false) =>
                 isNull ::

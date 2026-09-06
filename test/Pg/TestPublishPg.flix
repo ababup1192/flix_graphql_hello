@@ -23,7 +23,7 @@ def titled(title: String, slug: String): EntryData =
 ///   create(title 無し) → publish ✗ → update(title) → publish ✓ v2 → update(views) → CHANGED → publish ✓ → unpublish → DRAFT
 @Test
 def testPgPublishLifecycle(): Unit \ {IO, Assert} =
-    let result = PgTestSupport.withDb(() -> IdGen.runWithFixed(List.filterMap(EntryId.parse, List#{"p1"}), () -> {
+    let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"p1"}, () -> {
         let blogs = blogsForPublish();
         let created = ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("slug", Json.JString("hello"))}));
         let missing = CmsErr.runWithResult(() -> ContentEntries.publish(created#id, "tester", false)) |> Result.map(entry -> entry#version) |> Result.mapErr(CmsErr.toMessage);
@@ -51,7 +51,7 @@ def testPgPublishLifecycle(): Unit \ {IO, Assert} =
 /// unique は公開中の値と照らす。同じ slug の 2 件目は invalid、取り下げれば通る。自分の再公開は通る。
 @Test
 def testPgPublishUnique(): Unit \ {IO, Assert} =
-    let result = PgTestSupport.withDb(() -> IdGen.runWithFixed(List.filterMap(EntryId.parse, List#{"u1", "u2"}), () -> {
+    let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"u1", "u2"}, () -> {
         let blogs = blogsForPublish();
         let first = ContentEntries.create(blogs, None, titled("One", "same"));
         let second = ContentEntries.create(blogs, None, titled("Two", "same"));
@@ -67,7 +67,7 @@ def testPgPublishUnique(): Unit \ {IO, Assert} =
 /// 版は saveVersion で積め、restoreVersion で下書きに戻る。他の entry の版は notFound。
 @Test
 def testPgVersions(): Unit \ {IO, Assert} =
-    let result = PgTestSupport.withDb(() -> IdGen.runWithFixed(List.filterMap(EntryId.parse, List#{"v1", "v2"}), () -> {
+    let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"v1", "v2"}, () -> {
         let blogs = blogsForPublish();
         let created = ContentEntries.create(blogs, None, titled("Old", "old"));
         let other = ContentEntries.create(blogs, None, titled("Other", "other"));
@@ -83,7 +83,7 @@ def testPgVersions(): Unit \ {IO, Assert} =
 @Test
 def testPgPublishedVisibleInContentApi(): Unit \ {IO, Assert} =
     let pool = Pool.open(Pool.defaultConfig(PgTestSupport.config()));
-    discard PgTestSupport.withDb(() -> IdGen.runWithFixed(List.filterMap(EntryId.parse, List#{"c1"}), () -> {
+    discard PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"c1"}, () -> {
         let blogs = blogsForPublish();
         let created = ContentEntries.create(blogs, None, titled("Public", "public"));
         discard ContentEntries.publish(created#id, "tester", false);
@@ -96,7 +96,7 @@ def testPgPublishedVisibleInContentApi(): Unit \ {IO, Assert} =
     };
     let published = ask("{ blog(id: \"c1\") { title stage } blogs { totalCount } }");
     let draft = ask("{ blog(id: \"c1\", stage: DRAFT) { title } }");
-    discard DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Pool.withLazyTx(pool, () -> ContentEntries.delete(EntryId.parse("c1") |> Option.getWithDefault(EntryId.EntryId("c1"))))));
+    discard DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Pool.withLazyTx(pool, () -> ContentEntries.delete(CmsTestKit.entryId("c1")))));
     let afterDelete = ask("{ blogs { totalCount } }");
     Pool.close(pool);
     Assert.assertEq(

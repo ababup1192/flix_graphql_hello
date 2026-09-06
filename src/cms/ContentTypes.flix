@@ -160,13 +160,13 @@ mod ContentTypes {
         touch(existing#typeId)
 
     ///
-    /// ids の順に並べ直す。型の全フィールドを過不足なく渡さなければ invalid。
+    /// ids の順に並べ直す。最上位のフィールドを過不足なく渡さなければ invalid。object / blocks の子は対象外。
     ///
     pub def reorderFields(typeId: TypeId, ids: List[FieldId]): ContentType \ Db + CmsErr =
         let owner = get(typeId);
-        let current = owner#fields |> List.map(field -> field#id);
-        let sameSet = List.length(ids) == List.length(current) and List.forAll(id -> List.memberOf(id, current), ids) and List.length(List.distinct(ids)) == List.length(ids);
-        CmsErr.raiseIfAny(if (sameSet) Nil else Violation.Violation("ids", "型の全フィールドの id を過不足なく、重複なく渡してください") :: Nil);
+        let current = owner#fields |> List.map(field -> field#id) |> List.toSet;
+        let sameSet = List.length(ids) == Set.size(current) and List.toSet(ids) == current;
+        CmsErr.raiseIfAny(if (sameSet) Nil else Violation.Violation("ids", "最上位のフィールドの id を過不足なく、重複なく渡してください") :: Nil);
         List.forEachWithIndex((index, id) -> discard ContentFieldsQueries.setFieldPosition({ id = FieldId.toInt64(id), position = index }), ids);
         touch(typeId);
         get(typeId)

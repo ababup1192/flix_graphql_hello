@@ -65,8 +65,11 @@ mod EntryFilterSql {
         case Condition.IsNull(apiId, true)       => Pred.IsNull(textExpr(apiId))
         case Condition.IsNull(apiId, false)      => Pred.IsNotNull(textExpr(apiId))
         case Condition.ArrayContains(apiId, text) =>
-            Fragment.rawPredWith("EXISTS (SELECT 1 FROM jsonb_array_elements_text(c.data->'${ApiId.text(apiId)}') AS elem WHERE elem = ?)", SqlValue.Str(text) :: Nil)
+            // WhyNot: jsonb_typeof の前置きを省かないのは、値が配列でないと jsonb_array_elements_text が PG の例外で落ちるため
+            Fragment.rawPredWith("(jsonb_typeof(c.data->'${ApiId.text(apiId)}') = 'array' AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(c.data->'${ApiId.text(apiId)}') AS elem WHERE elem = ?))", SqlValue.Str(text) :: Nil)
         case Condition.AnyOf(groups)             => Fragment.any(List.map(pred, groups))
+        // WhyNot: Fragment.any(Nil) は「絞り込み無し（TRUE）」なので使えない。空の IN が FALSE になるのを借りる
+        case Condition.Never                     => Pred.In("e.id", Nil)
     }
 
     ///

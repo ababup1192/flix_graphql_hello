@@ -28,14 +28,15 @@ def testEntryFilterSqlContainsAndOr(): Unit \ Assert =
     Assert.assertEq(expected = ("((lower((c.data->>'title')) LIKE $1) OR ((c.data->>'views') IS NULL))", List#{SqlValue.Str("%100\\%%")}),
         run { Fragment.renderPred(EntryFilterSql.pred(conditions), 1) } with RawSql.runWithAllow)
 
-/// id_in は IN、空なら FALSE。
+/// id_in は IN、空なら FALSE。Never も FALSE（規則外の id で全件返さない）。
 @Test
 def testEntryFilterSqlIdIn(): Unit \ Assert =
-    let ids = List#{"a", "b"} |> List.filterMap(EntryId.parse);
-    Assert.assertEq(expected = ("(e.id IN ($1, $2))", "FALSE"),
+    let ids = CmsTestKit.entryIds(List#{"a", "b"});
+    Assert.assertEq(expected = ("(e.id IN ($1, $2))", "FALSE", "FALSE"),
         run {
             (fst(Fragment.renderPred(EntryFilterSql.pred(Condition.IdIn(ids) :: Nil), 1)),
-             fst(Fragment.renderPred(EntryFilterSql.pred(Condition.IdIn(Nil) :: Nil), 1)))
+             fst(Fragment.renderPred(EntryFilterSql.pred(Condition.IdIn(Nil) :: Nil), 1)),
+             fst(Fragment.renderPred(EntryFilterSql.pred(Condition.Never :: Nil), 1)))
         } with RawSql.runWithAllow)
 
 /// 並び順は kind で式が変わり、末尾に e.id を足す。空なら更新が新しい順。
@@ -45,10 +46,10 @@ def testEntryFilterSqlOrder(): Unit \ Assert =
         (Fragment.renderOrder(EntryFilterSql.order(filterFields(), (SortKey.ByField(CmsTestKit.apiId("views")), Direction.Desc) :: (SortKey.ByField(CmsTestKit.apiId("title")), Direction.Asc) :: Nil)),
          Fragment.renderOrder(EntryFilterSql.order(filterFields(), Nil))))
 
-/// 配列の「含む」は jsonb_array_elements_text の副問い合わせで、値はプレースホルダ。RawSql が付く。
+/// 配列の「含む」は jsonb_array_elements_text の副問い合わせで、値はプレースホルダ。配列でない値は落とさず偽にする。RawSql が付く。
 @Test
 def testEntryFilterSqlArrayContains(): Unit \ Assert =
     let rendered = run {
         Fragment.renderPred(EntryFilterSql.pred(Condition.ArrayContains(CmsTestKit.apiId("tags"), "t1") :: Nil), 1)
     } with RawSql.runWithAllow;
-    Assert.assertEq(expected = ("(EXISTS (SELECT 1 FROM jsonb_array_elements_text(c.data->'tags') AS elem WHERE elem = $1))", List#{SqlValue.Str("t1")}), rendered)
+    Assert.assertEq(expected = ("((jsonb_typeof(c.data->'tags') = 'array' AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(c.data->'tags') AS elem WHERE elem = $1)))", List#{SqlValue.Str("t1")}), rendered)

@@ -55,9 +55,25 @@ mod CmsTestKit {
         Float64.tryToBigDecimal(x) |> Option.map(Util.Json.Json.JNumber) |> Option.getWithDefault(Util.Json.Json.JNull)
 
     ///
-    /// entry の id の並び。規則に合う綴りだけ渡す。
+    /// 規則に合う綴りだけ渡す。合わなければテストの誤りなので止める。
     ///
-    pub def entryIds(texts: List[String]): List[EntryId] = List.filterMap(EntryId.parse, texts)
+    /// WhyNot: filterMap で黙って落とさないのは、IdGen に渡す並びが 1 つずれると以降の id が全部ずれ、原因の分からない失敗になるため。
+    ///
+    pub def entryId(text: String): EntryId = match EntryId.parse(text) {
+        case Some(found) => found
+        case None        => bug!("'${text}' は EntryId の規則に合わない（テストの誤り）")
+    }
+
+    ///
+    /// entry の id の並び。
+    ///
+    pub def entryIds(texts: List[String]): List[EntryId] = List.map(entryId, texts)
+
+    ///
+    /// 決めた id を順に振る。
+    ///
+    pub def withIds(texts: List[String], body: Unit -> a \ ef): a \ ef - IdGen =
+        IdGen.runWithFixed(entryIds(texts), body)
 
     ///
     /// 誤りのパスだけ取り出す（メッセージの文言はテストしない）。

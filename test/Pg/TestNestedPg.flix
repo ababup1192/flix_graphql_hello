@@ -43,7 +43,7 @@ def testPgNestedDefinition(): Unit \ {IO, Assert} =
 @Test
 def testPgNestedContentApi(): Unit \ {IO, Assert} =
     let pool = Pool.open(Pool.defaultConfig(PgTestSupport.config()));
-    discard PgTestSupport.withDb(() -> IdGen.runWithFixed(CmsTestKit.entryIds(List#{"g1", "g2"}), () -> {
+    discard PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"g1", "g2"}, () -> {
         let pages = pagesWithNested();
         discard ContentEntries.create(pages, None, CmsTestKit.entryData(List#{("title", Json.JString("Other"))}));
         discard ContentEntries.create(pages, None, CmsTestKit.entryData(List#{

@@ -5,8 +5,6 @@ use CmsErr.CmsFailure
 /// ContentEntries を実 PostgreSQL で通しで動かす。
 ///
 
-def entryId(text: String): EntryId = EntryId.parse(text) |> Option.getWithDefault(EntryId.EntryId("invalid"))
-
 ///
 /// blogs 型（title / views）を作って id を返す。
 ///
@@ -16,18 +14,12 @@ def blogsWithFields(): TypeId \ Db + CmsErr =
     discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("views", FieldKind.Number, FieldConfig.empty()));
     blogs#id
 
-///
-/// 決めた id を振る。
-///
-def withIds(ids: List[String], body: Unit -> a \ ef): a \ ef - IdGen =
-    IdGen.runWithFixed(List.map(entryId, ids), body)
-
 /// 作る・読む・直す・消す。version は保存のたびに進み、JSONB を往復して中身が戻る。
 ///
 ///   create(a1) v1 → update(title) v2 → update(views: null で消す) v3 → delete → find = None
 @Test
 def testPgEntryLifecycle(): Unit \ {IO, Assert} =
-    let result = PgTestSupport.withDb(() -> withIds(List#{"a1"}, () -> {
+    let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"a1"}, () -> {
         let blogs = blogsWithFields();
         let created = ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("hello")), ("views", Json.JNumber(Int32.toBigDecimal(3)))}));
         let renamed = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("hi"))}), created#version);
@@ -43,7 +35,7 @@ def testPgEntryLifecycle(): Unit \ {IO, Assert} =
 /// 古い version で保存すると conflict になり、中身は変わらない。
 @Test
 def testPgEntryConflict(): Unit \ {IO, Assert} =
-    let result = PgTestSupport.withDb(() -> withIds(List#{"c1"}, () -> {
+    let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"c1"}, () -> {
         let blogs = blogsWithFields();
         let created = ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("v1"))}));
         discard ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("v2"))}), 1);
@@ -55,11 +47,11 @@ def testPgEntryConflict(): Unit \ {IO, Assert} =
 /// 一覧は更新が新しい順、search で絞れ、totalCount は絞った後の件数。渡した id はそのまま使われる。
 @Test
 def testPgEntryList(): Unit \ {IO, Assert} =
-    let result = PgTestSupport.withDb(() -> withIds(List#{"unused"}, () -> {
+    let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"unused"}, () -> {
         let blogs = blogsWithFields();
-        discard ContentEntries.create(blogs, Some(entryId("first")), CmsTestKit.entryData(List#{("title", Json.JString("apple"))}));
-        discard ContentEntries.create(blogs, Some(entryId("second")), CmsTestKit.entryData(List#{("title", Json.JString("banana"))}));
-        discard ContentEntries.create(blogs, Some(entryId("third")), CmsTestKit.entryData(List#{("title", Json.JString("apricot"))}));
+        discard ContentEntries.create(blogs, Some(CmsTestKit.entryId("first")), CmsTestKit.entryData(List#{("title", Json.JString("apple"))}));
+        discard ContentEntries.create(blogs, Some(CmsTestKit.entryId("second")), CmsTestKit.entryData(List#{("title", Json.JString("banana"))}));
+        discard ContentEntries.create(blogs, Some(CmsTestKit.entryId("third")), CmsTestKit.entryData(List#{("title", Json.JString("apricot"))}));
         let all = ContentEntries.list(blogs, { search = "", first = 10, skip = 0 });
         let searched = ContentEntries.list(blogs, { search = "ap", first = 10, skip = 0 });
         let paged = ContentEntries.list(blogs, { search = "", first = 1, skip = 1 });
@@ -70,7 +62,7 @@ def testPgEntryList(): Unit \ {IO, Assert} =
 /// search は値だけに当たり（キー名 "title" では当たらない）、% と _ はそのままの文字として当たる。
 @Test
 def testPgEntrySearchEscapes(): Unit \ {IO, Assert} =
-    let result = PgTestSupport.withDb(() -> withIds(List#{"s1", "s2"}, () -> {
+    let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"s1", "s2"}, () -> {
         let blogs = blogsWithFields();
         discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("100% flix"))}));
         discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("plain"))}));
@@ -84,7 +76,7 @@ def testPgEntrySearchEscapes(): Unit \ {IO, Assert} =
 /// ゴミ箱の entry と同じ id では作れない（PK が残っているので、500 ではなく invalid で止める）。
 @Test
 def testPgEntryIdNotReusedFromTrash(): Unit \ {IO, Assert} =
-    let result = PgTestSupport.withDb(() -> withIds(List#{"t1"}, () -> {
+    let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"t1"}, () -> {
         let blogs = blogsWithFields();
         let created = ContentEntries.create(blogs, None, CmsTestKit.entryData(Nil));
         ContentEntries.delete(created#id);
@@ -95,7 +87,7 @@ def testPgEntryIdNotReusedFromTrash(): Unit \ {IO, Assert} =
 /// 型に合わない中身は invalid で、entry が残っている型は消せない。
 @Test
 def testPgEntryGuards(): Unit \ {IO, Assert} =
-    let result = PgTestSupport.withDb(() -> withIds(List#{"g1"}, () -> {
+    let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"g1"}, () -> {
         let blogs = blogsWithFields();
         let invalid = CmsErr.runWithResult(() -> ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("0123456789ab"))})));
         discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("ok"))}));
