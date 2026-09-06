@@ -18,16 +18,54 @@ mod GraphqlTestKit {
             |> Result.map(engine -> Graphql.runWithEngine(engine, () -> Graphql.execute(request, Context.anonymous())))
 
     ///
+    /// リクエストを 1 つ流し、(data, 先頭の errors[].message) にまとめる。
+    ///
+    pub def executeRequest(schema: Schema, request: GraphqlRequest): Result[String, (Value, Option[String])] \ IO =
+        executeOnce(schema, request) |> Result.map(summarize)
+
+    ///
     /// クエリ文字列だけで実行し、(data, 先頭の errors[].message) にまとめる。
     ///
     pub def executeQuery(schema: Schema, queryText: String): Result[String, (Value, Option[String])] \ IO =
-        executeOnce(schema, queryOnly(queryText)) |> Result.map(response -> (response#data, firstMessage(response)))
+        executeRequest(schema, queryOnly(queryText))
+
+    ///
+    /// 組み立て済みのエンジンにクエリを 1 つ流し、(data, 先頭の errors[].message) にまとめる。
+    ///
+    pub def askEngine(engine: Graphql.Engine, queryText: String): (Value, Option[String]) \ IO =
+        Graphql.runWithEngine(engine, () -> Graphql.execute(queryOnly(queryText), Context.anonymous())) |> summarize
+
+    ///
+    /// executeQuery が Err（エンジンが組めない）なのはテストの前提が壊れているので止める。
+    ///
+    pub def ask(schema: Schema, queryText: String): (Value, Option[String]) \ IO = match executeQuery(schema, queryText) {
+        case Ok(found)    => found
+        case Err(message) => bug!("graphql: ${message}")
+    }
+
+    ///
+    /// (data, 先頭の errors[].message)。
+    ///
+    pub def summarize(response: GraphqlResponse): (Value, Option[String]) =
+        (response#data, firstMessage(response))
 
     ///
     /// errors の先頭の "message" を文字列で取り出す。errors が空か message が文字列でなければ None。
     ///
     pub def firstMessage(response: GraphqlResponse): Option[String] =
-        List.head(response#errors) |> Option.map(Value.field("message")) |> Option.flatMap(Value.asStr)
+        firstErrorField("message", response) |> Value.asStr
+
+    ///
+    /// errors の先頭の名前付きフィールド（path / locations など）。無ければ Null。
+    ///
+    pub def firstErrorField(name: String, response: GraphqlResponse): Value =
+        List.head(response#errors) |> Option.map(Value.field(name)) |> Option.getWithDefault(Value.Null)
+
+    ///
+    /// graphql-java の検証で落ちたか（message が "Validation error" で始まる）。
+    ///
+    pub def isValidationError(message: Option[String]): Bool =
+        message |> Option.map(String.startsWith(prefix = "Validation error")) |> Option.getWithDefault(false)
 
     ///
     /// アプリのスキーマ（AppSchema）を、メモリ上のカウンタ（初期値 initial）で組み立てる。

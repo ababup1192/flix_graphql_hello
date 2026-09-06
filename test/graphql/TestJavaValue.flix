@@ -6,23 +6,18 @@ import java.util.UUID
 /// JavaValue: Java のオブジェクトと Value の相互変換。graphql-java との境界。
 ///
 
-///
-/// Java の参照を Object として見る。
-///
-def asObject(x: t): Object = unchecked_cast(x as Object)
-
 /// Long は Int32 に収まれば Int、収まらなければ Float になる。
 @Test
 def testJavaValueFromLong(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = (Value.Int(7), Value.Float(4294967296.0)),
-        (JavaValue.fromObject(asObject(Long.valueOf(7i64))), JavaValue.fromObject(asObject(Long.valueOf(4294967296i64)))))
+        (JavaValue.fromObject(JavaValue.asObject(Long.valueOf(7i64))), JavaValue.fromObject(JavaValue.asObject(Long.valueOf(4294967296i64)))))
 
 /// 知らない型（UUID、素の Object）は toString した Str になる。
 @Test
 def testJavaValueFromUnknownTypeIsStr(): Unit \ {Assert, IO} =
     let plain = new Object();
     Assert.assertEq(expected = (Value.Str("123e4567-e89b-12d3-a456-426614174000"), Value.Str(plain.toString())),
-        (JavaValue.fromObject(asObject(UUID.fromString("123e4567-e89b-12d3-a456-426614174000"))), JavaValue.fromObject(plain)))
+        (JavaValue.fromObject(JavaValue.asObject(UUID.fromString("123e4567-e89b-12d3-a456-426614174000"))), JavaValue.fromObject(plain)))
 
 /// 入れ子の Obj / List を Java の Map / List にしてから読み戻すと元の Value に戻る。
 @Test

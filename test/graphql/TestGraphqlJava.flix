@@ -1,5 +1,5 @@
 use Schema.{arg, field0, field1, field2, objectType}
-use GraphqlTestKit.{appSchema, executeOnce, executeQuery, queryOnly, queryOnlySchema}
+use GraphqlTestKit.{appSchema, executeOnce, executeQuery, executeRequest, queryOnly, queryOnlySchema}
 
 ///
 /// Graphql（graphql-java 込み）: Schema の値からエンジンを組み立て、runWithEngine で本当にクエリを流す。
@@ -28,15 +28,13 @@ def testGraphqlJavaExecutesQuery(): Unit \ {Assert, IO} =
 @Test
 def testGraphqlJavaVariables(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok((Value.Obj(Map#{ "add" => Value.Int(3) }), None)),
-        executeOnce(testSchema(), { queryText = "query($a: Int!) { add(a: $a, b: 2) }", variables = Map#{ "a" => Value.Int(1) }, operationName = None })
-            |> Result.map(response -> (response#data, GraphqlTestKit.firstMessage(response))))
+        executeRequest(testSchema(), { queryText = "query($a: Int!) { add(a: $a, b: 2) }", variables = Map#{ "a" => Value.Int(1) }, operationName = None }))
 
 /// 名前付きの操作が 2 つあるクエリでは、operationName で選んだ方だけが実行される。
 @Test
 def testGraphqlJavaOperationName(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok((Value.Obj(Map#{ "fibonacci" => Value.Int(55) }), None)),
-        executeOnce(testSchema(), { queryText = "query First { add(a: 1, b: 2) } query Second { fibonacci(n: 10) }", variables = Map.empty(), operationName = Some("Second") })
-            |> Result.map(response -> (response#data, GraphqlTestKit.firstMessage(response))))
+        executeRequest(testSchema(), { queryText = "query First { add(a: 1, b: 2) } query Second { fibonacci(n: 10) }", variables = Map.empty(), operationName = Some("Second") }))
 
 // ---- ネストしたオブジェクト型（source が型付きで子へ届く） ----
 
@@ -113,14 +111,14 @@ def testGraphqlJavaResolverErrIsReported(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok((Value.Obj(Map#{ "fail" => Value.Null }), 1, Some("boom"), Value.List(Value.Str("fail") :: Nil))),
         executeOnce(failSchema(), queryOnly("{ fail }"))
             |> Result.map(response -> (response#data, List.length(response#errors), GraphqlTestKit.firstMessage(response),
-                                       List.head(response#errors) |> Option.map(Value.field("path")) |> Option.getWithDefault(Value.Null))))
+                                       GraphqlTestKit.firstErrorField("path", response))))
 
 /// 引数の型が合わないクエリは graphql-java の検証で落ち、リゾルバまで届かない。
 @Test
 def testGraphqlJavaBadArgumentIsValidationError(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok((Value.Null, true)),
         executeQuery(testSchema(), "{ add(a: \"x\", b: 2) }")
-            |> Result.map(match (data, message) -> (data, message |> Option.map(String.startsWith(prefix = "Validation error")) |> Option.getWithDefault(false))))
+            |> Result.map(match (data, message) -> (data, GraphqlTestKit.isValidationError(message))))
 
 // ---- union / interface ----
 
@@ -196,7 +194,7 @@ def testGraphqlJavaInputObject(): Unit \ {Assert, IO} =
 def testGraphqlJavaInputObjectBadFieldIsValidationError(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok((Value.Null, true)),
         executeQuery(testSchema(), "mutation { createPost(input: { title: 1, authorId: \"a1\" }) { title } }")
-            |> Result.map(match (data, message) -> (data, message |> Option.map(String.startsWith(prefix = "Validation error")) |> Option.getWithDefault(false))))
+            |> Result.map(match (data, message) -> (data, GraphqlTestKit.isValidationError(message))))
 
 // ---- リゾルバの効果 ----
 

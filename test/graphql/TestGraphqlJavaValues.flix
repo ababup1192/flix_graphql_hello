@@ -1,5 +1,5 @@
 use Schema.{arg, field0, field1, field2, objectType}
-use GraphqlTestKit.{executeOnce, executeQuery, queryOnly, queryOnlySchema}
+use GraphqlTestKit.{executeOnce, executeQuery, executeRequest, queryOnly, queryOnlySchema}
 
 ///
 /// Graphql（graphql-java 込み）: 引数と戻り値の値の変換。既定値、Float、リスト、null 混じり、enum。
@@ -44,8 +44,7 @@ def testGraphqlJavaDefaultArgument(): Unit \ {Assert, IO} =
 def testGraphqlJavaFloatArgumentAcceptsInt(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = (Ok((Value.Obj(Map#{ "half" => Value.Float(1.5) }), None)), Ok((Value.Obj(Map#{ "half" => Value.Float(1.5) }), None))),
         (executeQuery(queryOnlySchema(valueFields()), "{ half(x: 3) }"),
-         executeOnce(queryOnlySchema(valueFields()), { queryText = "query($x: Float!) { half(x: $x) }", variables = Map#{ "x" => Value.Int(3) }, operationName = None })
-            |> Result.map(response -> (response#data, GraphqlTestKit.firstMessage(response)))))
+         executeRequest(queryOnlySchema(valueFields()), { queryText = "query($x: Float!) { half(x: $x) }", variables = Map#{ "x" => Value.Int(3) }, operationName = None })))
 
 /// リストの引数は要素ごとにデコードされ、null 混じりの [Int] も Option で届いてそのまま返せる。
 @Test
@@ -75,7 +74,7 @@ def testGraphqlJavaEnum(): Unit \ {Assert, IO} =
 def testGraphqlJavaIntOverflowIsValidationError(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok((Value.Null, true)),
         executeQuery(GraphqlTestKit.appSchema(0), "{ add(a: 2147483648, b: 1) }")
-            |> Result.map(match (data, message) -> (data, message |> Option.map(String.startsWith(prefix = "Validation error")) |> Option.getWithDefault(false))))
+            |> Result.map(match (data, message) -> (data, GraphqlTestKit.isValidationError(message))))
 
 /// description に " や """ が入っても SDL ではエスケープされ、エンジンが組み立てられる。
 @Test
@@ -96,7 +95,7 @@ def testGraphqlJavaNonNullErrBubbles(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok((Value.Null, 1, Some("boom"), Value.List(Value.Obj(Map#{ "line" => Value.Int(1), "column" => Value.Int(3) }) :: Nil))),
         executeOnce(schema, queryOnly("{ strict }"))
             |> Result.map(response -> (response#data, List.length(response#errors), GraphqlTestKit.firstMessage(response),
-                                       List.head(response#errors) |> Option.map(Value.field("locations")) |> Option.getWithDefault(Value.Null))))
+                                       GraphqlTestKit.firstErrorField("locations", response))))
 
 /// リストの要素の子フィールドが Err を返すと、path に要素の添字が入り、他の要素はそのまま返る。
 @Test
@@ -108,4 +107,4 @@ def testGraphqlJavaListChildErrPath(): Unit \ {Assert, IO} =
                 Value.Obj(Map#{ "v" => Value.Int(1) }) :: Value.Obj(Map#{ "v" => Value.Null }) :: Value.Obj(Map#{ "v" => Value.Int(3) }) :: Nil) }),
             Value.List(Value.Str("items") :: Value.Int(1) :: Value.Str("v") :: Nil))),
         executeOnce(schema, queryOnly("{ items { v } }"))
-            |> Result.map(response -> (response#data, List.head(response#errors) |> Option.map(Value.field("path")) |> Option.getWithDefault(Value.Null))))
+            |> Result.map(response -> (response#data, GraphqlTestKit.firstErrorField("path", response))))

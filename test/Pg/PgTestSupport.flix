@@ -41,4 +41,46 @@ mod PgTestSupport {
             CmsErr.runWithResult(body)
         })))
 
+    ///
+    /// プールを開いて body に渡し、必ず閉じる。
+    ///
+    pub def withPool(body: Pool -> a \ ef): a \ ef + IO =
+        let pool = Pool.open(Pool.defaultConfig(config()));
+        let result = body(pool);
+        Pool.close(pool);
+        result
+
+    ///
+    /// テーブルを作り直して seed を当て、その結果と管理 API の Schema を body に渡す。seed が失敗するのはテストの前提が壊れている。
+    ///
+    pub def withAdminApi(seed: Unit -> b \ ef2, body: (Schema, b) -> a \ ef): a \ (ef2 - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr}) + ef + IO =
+        withPool(pool -> {
+            let seeded = withDb(seed) |> seededOrBug;
+            body(AdminSchema.make(AdminRunner.make(pool)), seeded)
+        })
+
+    ///
+    /// テーブルを作り直して seed を当て、コンテンツ API に問い合わせる ask を body に渡す。エンジンは定義から組み直す（目印を毎回見る）。
+    ///
+    pub def withContentApi(seed: Unit -> b \ ef2, body: (String -> (Value, Option[String]) \ IO) -> a \ ef): a \ (ef2 - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr}) + ef + IO =
+        withPool(pool -> {
+            discard withDb(seed) |> seededOrBug;
+            let cache = ContentEngine.create();
+            body(queryText -> GraphqlTestKit.askEngine(engineOrBug(cache, pool), queryText))
+        })
+
+    ///
+    /// 今の定義のエンジン。組めないのはテストの前提が壊れている。
+    ///
+    pub def engineOrBug(cache: ContentEngine.Cache, pool: Pool): Graphql.Engine \ IO = match ContentEngine.current(cache, pool) {
+        case Ok(engine)   => engine
+        case Err(message) => bug!("engine: ${message}")
+    }
+
+    def seededOrBug(result: Result[DbFailure, Result[CmsErr.CmsFailure, b]]): b = match result {
+        case Ok(Ok(seeded))  => seeded
+        case Ok(Err(failure)) => bug!("seed: ${CmsErr.toMessage(failure)}")
+        case Err(failure)    => bug!("seed: ${failure}")
+    }
+
 }

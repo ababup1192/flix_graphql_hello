@@ -104,7 +104,7 @@ mod JavaValue {
     /// WhyNot: checked_cast にしないのは、型変数 t が Object のサブタイプだと
     /// コンパイラに示せないため。渡すのは Java のオブジェクトだけなので実行時に失敗しない。
     ///
-    def asObject(x: t): Object = unchecked_cast(x as Object)
+    pub def asObject(x: t): Object = unchecked_cast(x as Object)
 
     ///
     /// リゾルバに渡された引数 Map を Args へ変換する。

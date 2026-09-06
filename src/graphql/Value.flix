@@ -30,6 +30,12 @@ mod Value {
     }
 
     ///
+    /// 入れ子のフィールドを名前の並びで辿る。途中で無ければ Null。
+    ///
+    pub def path(names: List[String], value: Value): Value =
+        List.foldLeft((found, name) -> field(name, found), value, names)
+
+    ///
     /// Int として取り出す。Int でなければ None。
     ///
     pub def asInt(value: Value): Option[Int32] = match value {
