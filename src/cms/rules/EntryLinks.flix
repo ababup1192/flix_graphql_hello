@@ -23,14 +23,14 @@ mod EntryLinks {
                     case _                    => None
                 })
             case (FieldKind.Object, Some(Json.JObject(inner))) =>
-                extract(Children.toList(field#children), EntryValidation.objectData(inner))
+                extract(Children.toList(field#children), EntryValue.objectData(inner))
             case (FieldKind.Object, Some(Json.JArray(items))) =>
                 items |> Vector.toList |> List.flatMap(item -> match item {
-                    case Json.JObject(inner) => extract(Children.toList(field#children), EntryValidation.objectData(inner))
+                    case Json.JObject(inner) => extract(Children.toList(field#children), EntryValue.objectData(inner))
                     case _                   => Nil
                 })
             case (FieldKind.Blocks, Some(Json.JArray(items))) =>
-                items |> Vector.toList |> List.flatMap(item -> match EntryValidation.readBlock(Children.toList(field#children), item) {
+                items |> Vector.toList |> List.flatMap(item -> match EntryValue.readBlock(Children.toList(field#children), item) {
                     case Some((variant, inner)) => extract(Children.toList(variant#children), inner)
                     case None                   => Nil
                 })

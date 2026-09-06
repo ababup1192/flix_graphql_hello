@@ -24,25 +24,7 @@ mod EntryValidation {
             })
 
     ///
-    /// Blocks の値の 1 つを (variant, 中身) に読む。blockType が variant の apiId でなければ None。
-    ///
-    pub def readBlock(variants: List[FieldDef], value: Json): Option[(FieldDef, EntryData)] = match value {
-        case Json.JObject(fields) =>
-            Map.get("blockType", fields) |> Option.flatMap(kind -> match kind {
-                case Json.JString(text) => variants |> List.find(variant -> ApiId.text(variant#apiId) == text)
-                case _                  => None
-            }) |> Option.map(variant -> (variant, objectData(Map.remove("blockType", fields))))
-        case _ => None
-    }
-
-    ///
-    /// Object の値（JSON のオブジェクト）を中身に。規則外のキーは検査で「この型にありません」になるよう、読めないキーは捨てずに残す事はしない。
-    ///
-    pub def objectData(fields: Map[String, Json]): EntryData =
-        fields |> Map.toList |> List.filterMap(match (key, value) -> ApiId.parse(key) |> Option.map(apiId -> (apiId, value))) |> List.toMap
-
-    ///
-    /// 公開できるか。下書きの検査に加えて、required のフィールドに値がある事を見る（null・無い・空の配列は駄目）。
+    /// 公開できるか。下書きの検査に加えて、required のフィールドに値がある事を見る（null・無い・空文字・空の配列は駄目）。
     /// unique はここでは見ない（公開中の値との照合は DB が要る。ContentEntries.publish）。
     ///
     pub def publish(fields: List[FieldDef], data: EntryData): List[Violation] =
@@ -77,13 +59,13 @@ mod EntryValidation {
 
     def checkScalar(path: String, field: FieldDef, value: Json): List[Violation] =
         match (field#kind, value) {
-            case (FieldKind.Object, Json.JObject(fields)) => draftAt(path, Children.toList(field#children), objectData(fields))
+            case (FieldKind.Object, Json.JObject(fields)) => draftAt(path, Children.toList(field#children), EntryValue.objectData(fields))
             case (FieldKind.Object, _)                    => Violation.Violation(path, "オブジェクトにしてください") :: Nil
-            case (FieldKind.Blocks, Json.JObject(fields)) => match readBlock(Children.toList(field#children), value) {
+            case (FieldKind.Blocks, Json.JObject(_))      => match EntryValue.readBlock(Children.toList(field#children), value) {
                 case Some((variant, inner)) => draftAt(path, Children.toList(variant#children), inner)
-                case None                   => Violation.Violation(path, "blockType は ${Children.toList(field#children) |> List.map(variant -> ApiId.text(variant#apiId)) |> List.join(" / ")} のどれかにしてください") :: Nil
-            } |> (violations -> { let _ = fields; violations })
-            case (FieldKind.Blocks, _)                    => Violation.Violation(path, "オブジェクト（blockType 付き）にしてください") :: Nil
+                case None                   => Violation.Violation(path, "${EntryValue.blockTypeKey()} は ${Children.toList(field#children) |> List.map(variant -> ApiId.text(variant#apiId)) |> List.join(" / ")} のどれかにしてください") :: Nil
+            }
+            case (FieldKind.Blocks, _)                    => Violation.Violation(path, "オブジェクト（${EntryValue.blockTypeKey()} 付き）にしてください") :: Nil
             case (FieldKind.Text, Json.JString(text))     => checkLength(path, field#config, text)
             case (FieldKind.TextArea, Json.JString(text)) => checkLength(path, field#config, text)
             case (FieldKind.Slug, Json.JString(text))     => checkLength(path, field#config, text)

@@ -20,6 +20,12 @@ mod EntryFilterSql {
         Fragment.all(List.map(condition, conditions))
 
     ///
+    /// 生 SQL を許した述語。生成されたクエリに渡す形。RawSql を許す判断はここ（SQL の文面を組む層）に置く。
+    ///
+    pub def predAllowingRaw(conditions: Where): Pred[EntryContentsTable.EntryContentsTable] =
+        RawSql.runWithAllow(() -> pred(conditions))
+
+    ///
     /// 並び順にする。空なら更新が新しい順。末尾に id を足して順序を安定させる。
     /// フィールドの kind で式が変わるので fields を受ける。
     ///

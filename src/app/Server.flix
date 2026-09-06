@@ -42,6 +42,12 @@ mod Server {
         }
 
     ///
+    /// このリクエストが config の GraphQL のパス宛か（クエリ文字列は無視）。どのエンジンで受けるかの振り分けに使う。
+    ///
+    pub def isGraphqlPath(config: ServerConfig, request: HttpRequest): Bool =
+        pathOf(request#path) == config#graphqlPath
+
+    ///
     /// 503。コンテンツ API のスキーマを組めなかった時など、サーバ側の一時的な失敗。
     ///
     pub def unavailable(message: String): HttpResponse =
@@ -50,7 +56,7 @@ mod Server {
     ///
     /// パスからクエリ文字列を落とす（"/health?probe=1" → "/health"）。
     ///
-    pub def pathOf(path: String): String =
+    def pathOf(path: String): String =
         String.splitOn(substr = "?", path) |> List.head |> Option.getWithDefault(path)
 
     ///

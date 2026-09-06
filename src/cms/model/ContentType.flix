@@ -175,37 +175,13 @@ mod FieldConfig {
             case _                 => Map.empty()
         };
         {
-            maxLength   = Map.get("maxLength", fields) |> Option.flatMap(asInt32),
-            sourceField = Map.get("sourceField", fields) |> Option.flatMap(asString) |> Option.flatMap(ApiId.parse),
-            min         = Map.get("min", fields) |> Option.flatMap(asFloat64),
-            max         = Map.get("max", fields) |> Option.flatMap(asFloat64),
-            integer     = Map.get("integer", fields) |> Option.flatMap(asBool),
-            options     = Map.get("options", fields) |> Option.map(asStrings) |> Option.getWithDefault(Nil)
+            maxLength   = Map.get("maxLength", fields) |> Option.flatMap(EntryValue.asInt32),
+            sourceField = Map.get("sourceField", fields) |> Option.flatMap(EntryValue.asString) |> Option.flatMap(ApiId.parse),
+            min         = Map.get("min", fields) |> Option.flatMap(EntryValue.asFloat64),
+            max         = Map.get("max", fields) |> Option.flatMap(EntryValue.asFloat64),
+            integer     = Map.get("integer", fields) |> Option.flatMap(EntryValue.asBool),
+            options     = Map.get("options", fields) |> Option.map(EntryValue.asStrings) |> Option.getWithDefault(Nil)
         }
 
-    def asInt32(json: Json): Option[Int32] = match json {
-        case Json.JNumber(n) => BigDecimal.tryToInt32(n)
-        case _               => None
-    }
-
-    def asFloat64(json: Json): Option[Float64] = match json {
-        case Json.JNumber(n) => BigDecimal.tryToFloat64(n)
-        case _               => None
-    }
-
-    def asString(json: Json): Option[String] = match json {
-        case Json.JString(s) => Some(s)
-        case _               => None
-    }
-
-    def asStrings(json: Json): List[String] = match json {
-        case Json.JArray(items) => items |> Vector.toList |> List.filterMap(asString)
-        case _                  => Nil
-    }
-
-    def asBool(json: Json): Option[Bool] = match json {
-        case Json.JBool(b) => Some(b)
-        case _             => None
-    }
 
 }

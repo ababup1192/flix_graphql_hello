@@ -7,34 +7,7 @@ mod EntriesQueries {
     ///
     /// 生成元 entries.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 75330814
-
-    ///
-    /// findEntry の 1 行。
-    ///
-    pub type alias FindEntryRow = { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Util.Json.Json, draftUpdatedAt = Timestamp.Timestamp, publishedUpdatedAt = Option[Timestamp.Timestamp] }
-
-    def findEntryDecoder(): Decoder[FindEntryRow] =
-        forA (
-            id <- Decoder.str("id");
-            typeId <- Decoder.int64("type_id");
-            version <- Decoder.int32("version");
-            stage <- Decoder.str("stage");
-            publishedAt <- Decoder.opt(Decoder.timestamp("published_at"));
-            createdAt <- Decoder.timestamp("created_at");
-            updatedAt <- Decoder.timestamp("updated_at");
-            data <- Decoder.json("data");
-            draftUpdatedAt <- Decoder.timestamp("draft_updated_at");
-            publishedUpdatedAt <- Decoder.opt(Decoder.timestamp("published_updated_at"))
-        ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data, draftUpdatedAt = draftUpdatedAt, publishedUpdatedAt = publishedUpdatedAt }
-
-    ///
-    /// findEntry: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft' LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published' WHERE e.id = $1 AND e.deleted_at IS NULL
-    ///
-    pub def findEntry(id: String): Option[FindEntryRow] \ DbRead =
-        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft'\n    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'\n    WHERE e.id = $1 AND e.deleted_at IS NULL";
-        let params = List#{SqlValue.Str(id)};
-        RawSql.runWithAllow(() -> Sql.fetchOneAs(findEntryDecoder(), sql, params))
+    pub def sourceHash(): Int32 = 1396840623
 
     ///
     /// listEntries の 1 行。

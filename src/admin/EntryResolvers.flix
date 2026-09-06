@@ -46,7 +46,7 @@ mod EntryPageResolvers {
     pub def resolvers(): GeneratedAdmin.EntryPageResolvers[AdminEff] =
         {
             nodes      = (_context, source) -> Ok(source#entries),
-            totalCount = (_context, source) -> Ok(Int64.clampToInt32(min = 0, max = Int32.maxValue(), source#totalCount))
+            totalCount = (_context, source) -> Ok(EntryPage.totalCountInt32(source))
         }
 
 }

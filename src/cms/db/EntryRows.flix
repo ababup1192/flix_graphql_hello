@@ -48,9 +48,9 @@ mod EntryRows {
     /// 管理 API は draft の行を読むので下書きが進んだかが分かり、コンテンツ API が published の行を読めば常に false。
     ///
     pub def toEntry(contentStage: Stage, row: { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Json, draftUpdatedAt = Timestamp.Timestamp, publishedUpdatedAt = Option[Timestamp.Timestamp] | r }): Entry \ DbErr =
-        let stage = stageFromDb(row#stage) |> orRaise("entries.stage", row#stage);
+        let stage = stageFromDb(row#stage) |> Rows.orRaise("entries.stage", row#stage);
         {
-            id          = EntryId.parse(row#id) |> orRaise("entries.id", row#id),
+            id          = EntryId.parse(row#id) |> Rows.orRaise("entries.id", row#id),
             typeId      = TypeId.TypeId(row#typeId),
             version     = row#version,
             stage       = stage,
@@ -78,16 +78,22 @@ mod EntryRows {
     }
 
     ///
+    /// insertVersion の引数。今の下書きをそのまま積む。
+    ///
+    pub def versionInsert(entry: Entry, author: String, reason: VersionReason): { entryId = String, version = Int32, data = Json, author = String, reason = String } =
+        { entryId = EntryId.text(entry#id), version = entry#version, data = dataToJson(entry#data), author = author, reason = reasonToDb(reason) }
+
+    ///
     /// entry_versions の行から EntryVersion を組む。
     ///
     pub def toVersion(row: { id = Int64, entryId = String, version = Int32, data = Json, author = String, reason = String, createdAt = Timestamp.Timestamp | r }): EntryVersion \ DbErr =
         {
             id        = VersionId.VersionId(row#id),
-            entryId   = EntryId.parse(row#entryId) |> orRaise("entry_versions.entry_id", row#entryId),
+            entryId   = EntryId.parse(row#entryId) |> Rows.orRaise("entry_versions.entry_id", row#entryId),
             version   = row#version,
             data      = dataFromJson(row#data),
             author    = row#author,
-            reason    = reasonFromDb(row#reason) |> orRaise("entry_versions.reason", row#reason),
+            reason    = reasonFromDb(row#reason) |> Rows.orRaise("entry_versions.reason", row#reason),
             createdAt = row#createdAt
         }
 
@@ -99,11 +105,6 @@ mod EntryRows {
         case Json.JNumber(n) => Some("${n}")
         case Json.JBool(b)   => Some(if (b) "true" else "false")
         case _               => None
-    }
-
-    def orRaise(column: String, text: String, value: Option[a]): a \ DbErr = match value {
-        case Some(found) => found
-        case None        => DbErr.other("${column} の値が読めません: ${text}")
     }
 
 }

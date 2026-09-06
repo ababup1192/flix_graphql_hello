@@ -1,6 +1,6 @@
 ///
-/// content_types / content_fields の行と、ドメインの値のあいだの変換。kind の文字列と id の包み直し。
-/// 行の形は生成された ContentTypesQueries / ContentFieldsQueries の物で、ここだけが列名を知る。
+/// content_types / content_fields の行と、ドメインの値のあいだの変換。kind の文字列、id の包み直し、
+/// INSERT の引数と UPDATE の Changes。行の形は生成された ContentTypesQueries / ContentFieldsQueries の物で、ここだけが列名を知る。
 ///
 mod ContentTypeRows {
 
@@ -54,26 +54,38 @@ mod ContentTypeRows {
         case _          => None
     }
 
+    // ---- 行 → 値 ----
+
     ///
-    /// content_types の行とそのフィールドから ContentType を組む。
+    /// content_types の行とそのフィールド（木）から ContentType を組む。
     /// kind や apiId が規則に合わない行（DDL と管理 API が守るので起きない）は DbErr にする。
     ///
     pub def toContentType(row: { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp | r }, fields: List[FieldDef]): ContentType \ DbErr =
         {
             id         = TypeId.TypeId(row#id),
             apiId      = apiIdOrRaise("content_types.api_id", row#apiId),
-            kind       = typeKindFromDb(row#kind) |> orRaise("content_types.kind", row#kind),
+            kind       = typeKindFromDb(row#kind) |> Rows.orRaise("content_types.kind", row#kind),
             name       = row#name,
-            singular   = TypeName.parse(row#singular) |> orRaise("content_types.singular", row#singular),
+            singular   = TypeName.parse(row#singular) |> Rows.orRaise("content_types.singular", row#singular),
             plural     = apiIdOrRaise("content_types.plural", row#plural),
-            previewUrl = if (row#previewUrl == "") None else Some(row#previewUrl),
-            fields     = fields |> List.sortBy(field -> field#position),
+            previewUrl = previewUrlFromDb(row#previewUrl),
+            fields     = fields,
             createdAt  = row#createdAt,
             updatedAt  = row#updatedAt
         }
 
     ///
-    /// content_fields の行から FieldDef を組む。
+    /// content_types の行から名前だけ（衝突の検査用。フィールドは要らない）。
+    ///
+    pub def toTypeNames(row: { apiId = String, singular = String, plural = String | r }): Naming.TypeNames \ DbErr =
+        {
+            apiId    = apiIdOrRaise("content_types.api_id", row#apiId),
+            singular = TypeName.parse(row#singular) |> Rows.orRaise("content_types.singular", row#singular),
+            plural   = apiIdOrRaise("content_types.plural", row#plural)
+        }
+
+    ///
+    /// content_fields の行から FieldDef を組む。children は空（木にするのは FieldTree.build）。
     ///
     pub def toFieldDef(row: { id = Int64, typeId = Int64, parentFieldId = Option[Int64], apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, targetTypeId = Option[Int64], config = Json, position = Int32 | r }): FieldDef \ DbErr =
         {
@@ -81,7 +93,7 @@ mod ContentTypeRows {
             typeId    = TypeId.TypeId(row#typeId),
             apiId     = apiIdOrRaise("content_fields.api_id", row#apiId),
             name      = row#name,
-            kind      = fieldKindFromDb(row#kind) |> orRaise("content_fields.kind", row#kind),
+            kind      = fieldKindFromDb(row#kind) |> Rows.orRaise("content_fields.kind", row#kind),
             many      = row#isMany,
             required  = row#isRequired,
             unique    = row#isUnique,
@@ -93,38 +105,67 @@ mod ContentTypeRows {
             position  = row#position
         }
 
-    ///
-    /// 平らな行の並びを木にする。最上位（parent 無し）を position 順に並べ、子は再帰で付ける。
-    ///
-    pub def toTree(flat: List[FieldDef]): List[FieldDef] =
-        childrenOf(flat, None)
-
-    def childrenOf(flat: List[FieldDef], parent: Option[FieldId]): List[FieldDef] =
-        flat |> List.filter(field -> field#parent == parent)
-            |> List.sortBy(field -> field#position)
-            |> List.map(field -> { children = Children.Children(childrenOf(flat, Some(field#id))) | field })
+    // ---- 値 → 行 ----
 
     ///
-    /// 木の中から id で探す（深さ問わず）。
+    /// insertContentType の引数。
     ///
-    pub def findInTree(id: FieldId, tree: List[FieldDef]): Option[FieldDef] =
-        tree |> List.findMap(field -> if (field#id == id) Some(field) else findInTree(id, Children.toList(field#children)))
+    pub def typeInsert(names: Naming.TypeNames, draft: ContentTypeDraft): { apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String } =
+        {
+            apiId      = ApiId.text(names#apiId),
+            kind       = typeKindToDb(draft#kind),
+            name       = draft#name,
+            singular   = TypeName.text(names#singular),
+            plural     = ApiId.text(names#plural),
+            previewUrl = previewUrlToDb(draft#previewUrl)
+        }
 
     ///
-    /// 木を平らにする（深さ優先）。
+    /// updateContentType の Changes。None の項目は SET に出ない。
     ///
-    pub def flatten(tree: List[FieldDef]): List[FieldDef] =
-        tree |> List.flatMap(field -> field :: flatten(Children.toList(field#children)))
+    pub def typeChanges(changes: ContentTypeChanges): Fragment.Changes[ContentTypesTable.ContentTypesTable] =
+        Fragment.noChange()
+            |> Fragment.setIfSome(ContentTypesTable.name(), changes#name)
+            |> Fragment.setIfSome(ContentTypesTable.singular(), changes#singular |> Option.map(TypeName.text))
+            |> Fragment.setIfSome(ContentTypesTable.plural(), changes#plural |> Option.map(ApiId.text))
+            |> Fragment.setIfSome(ContentTypesTable.previewUrl(), changes#previewUrl)
+
+    ///
+    /// insertField の引数。target と parent は後追いの UPDATE（setFieldTarget / setFieldParent）で入れる。
+    ///
+    pub def fieldInsert(typeId: TypeId, position: Int32, draft: FieldDraft): { typeId = Int64, apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, config = Json, position = Int32 } =
+        {
+            typeId      = TypeId.toInt64(typeId),
+            apiId       = ApiId.text(draft#apiId),
+            name        = draft#name,
+            kind        = fieldKindToDb(draft#kind),
+            isMany      = draft#many,
+            isRequired  = draft#required,
+            isUnique    = draft#unique,
+            isLocalized = draft#localized,
+            config      = FieldConfig.toJson(draft#config),
+            position    = position
+        }
+
+    ///
+    /// updateField の Changes。config は丸ごと置き換える。
+    ///
+    pub def fieldChanges(changes: FieldChanges): Fragment.Changes[ContentFieldsTable.ContentFieldsTable] =
+        Fragment.noChange()
+            |> Fragment.setIfSome(ContentFieldsTable.name(), changes#name)
+            |> Fragment.setIfSome(ContentFieldsTable.isRequired(), changes#required)
+            |> Fragment.setIfSome(ContentFieldsTable.isUnique(), changes#unique)
+            |> Fragment.setIfSome(ContentFieldsTable.isLocalized(), changes#localized)
+            |> Fragment.setIfSome(ContentFieldsTable.config(), changes#config |> Option.map(FieldConfig.toJson))
+
+    ///
+    /// content_types.preview_url は NOT NULL で、無しは空文字。読みと書きで対にする。
+    ///
+    def previewUrlToDb(url: Option[String]): String = url |> Option.getWithDefault("")
+
+    def previewUrlFromDb(text: String): Option[String] = if (text == "") None else Some(text)
 
     def apiIdOrRaise(column: String, text: String): ApiId \ DbErr =
-        ApiId.parse(text) |> orRaise(column, text)
-
-    ///
-    /// 行の値が読めない。DB に規則外の値が入っている事なので DbErr。
-    ///
-    def orRaise(column: String, text: String, value: Option[a]): a \ DbErr = match value {
-        case Some(found) => found
-        case None        => DbErr.other("${column} の値が読めません: ${text}")
-    }
+        ApiId.parse(text) |> Rows.orRaise(column, text)
 
 }

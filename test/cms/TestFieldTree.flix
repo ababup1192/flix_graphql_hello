@@ -1,5 +1,5 @@
 ///
-/// ContentTypeRows.toTree: 平らな行を親子の木にする。
+/// FieldTree.build: 平らな行を親子の木にする。
 ///
 
 def flatField(id: Int64, api: String, parent: Option[Int64], kind: FieldKind, position: Int32): FieldDef =
@@ -20,10 +20,10 @@ def testFieldTree(): Unit \ Assert =
         flatField(3i64, "hero", Some(2i64), FieldKind.Object, 0),
         flatField(6i64, "headline", Some(3i64), FieldKind.Text, 0)
     };
-    let tree = ContentTypeRows.toTree(flat);
+    let tree = FieldTree.build(flat);
     let names = fields -> fields |> List.map(field -> ApiId.text(field#apiId));
     Assert.assertEq(expected = (List#{"title", "sections"}, List#{"hero", "list"}, Some(List#{"headline"}), List#{"title", "sections", "hero", "headline", "list", "items"}),
         (names(tree),
          tree |> List.find(field -> ApiId.text(field#apiId) == "sections") |> Option.map(field -> names(Children.toList(field#children))) |> Option.getWithDefault(Nil),
-         ContentTypeRows.findInTree(FieldId.FieldId(3i64), tree) |> Option.map(field -> names(Children.toList(field#children))),
-         names(ContentTypeRows.flatten(tree))))
+         FieldTree.find(FieldId.FieldId(3i64), tree) |> Option.map(field -> names(Children.toList(field#children))),
+         names(FieldTree.flatten(tree))))

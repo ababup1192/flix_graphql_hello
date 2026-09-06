@@ -1,13 +1,6 @@
 // entries.q: entry の身元と中身
 
-query findEntry(id: String) -> one {
-    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at
-    FROM entries AS e
-    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft'
-    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'
-    WHERE e.id = :id AND e.deleted_at IS NULL
-}
-
+// 列を足す時は listEntries / findEntryByStage / listEntriesByStage / findEntriesByStage の 4 か所（EntryRows.toEntry が受ける形）
 // 一覧。search が空なら全件、そうでなければ下書きの値（キー名は見ない）に含む物。search は呼ぶ側で LIKE 用にエスケープ済み
 query listEntries(typeId: Int64, search: String, limit: Int64, offset: Int64) -> many {
     SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at

@@ -62,12 +62,15 @@ mod ContentSchemaBuilder {
                 first   <- Arg.decode(firstArg, args);
                 skip    <- Arg.decode(skipArg, args);
                 atStage <- Arg.decode(stage, args)
-            ) yield ContentEntries.listByStage(owner, stageOrDefault(atStage), {
-                filter  = filter |> Option.getWithDefault(Nil),
-                orderBy = orderBy |> Option.getWithDefault(Nil),
-                first   = first |> Option.getWithDefault(20) |> Int32.max(1) |> Int32.min(200),
-                skip    = skip |> Option.getWithDefault(0) |> Int32.max(0)
-            }))
+            ) yield {
+                let (limit, offset) = EntryPage.clamp(20, first, skip);
+                ContentEntries.listByStage(owner, stageOrDefault(atStage), {
+                    filter  = filter |> Option.getWithDefault(Nil),
+                    orderBy = orderBy |> Option.getWithDefault(Nil),
+                    first   = limit,
+                    skip    = offset
+                })
+            })
             |> Field.withDescription("${TypeName.text(owner#singular)} の一覧")
 
     ///
@@ -100,25 +103,25 @@ mod ContentSchemaBuilder {
         let name = ApiId.text(field#apiId);
         let described = fieldDescription(field);
         match (field#kind, field#many) {
-            case (FieldKind.Object, false)  => Schema.field0(name, Out.option(Out.obj(nestedType(all, prefix, field))), (_context, entry) -> Ok(EntryValues.object(field#apiId, entry) |> Option.map(nestedEntry(entry)))) |> described
-            case (FieldKind.Object, true)   => Schema.field0(name, Out.list(Out.obj(nestedType(all, prefix, field))), (_context, entry) -> Ok(EntryValues.objects(field#apiId, entry) |> List.map(nestedEntry(entry)))) |> described
-            case (FieldKind.Blocks, _)      => Schema.field0(name, Out.list(blocksUnion(all, prefix, field)), (_context, entry) -> Ok(EntryValues.blocks(field, entry) |> List.map(match (variant, inner) -> (variant, nestedEntry(entry, inner))))) |> described
-            case (FieldKind.Number, false)  => Schema.field0(name, Out.option(Out.float64()), (_context, entry) -> Ok(EntryValues.number(field#apiId, entry#data))) |> described
-            case (FieldKind.Number, true)   => Schema.field0(name, Out.list(Out.float64()), (_context, entry) -> Ok(EntryValues.numbers(field#apiId, entry#data))) |> described
-            case (FieldKind.Boolean, false) => Schema.field0(name, Out.option(Out.bool()), (_context, entry) -> Ok(EntryValues.bool(field#apiId, entry#data))) |> described
-            case (FieldKind.Boolean, true)  => Schema.field0(name, Out.list(Out.bool()), (_context, entry) -> Ok(EntryValues.bools(field#apiId, entry#data))) |> described
-            case (FieldKind.Select, false)  => Schema.field0(name, Out.option(Out.scalar(selectCodec(prefix, field))), (_context, entry) -> Ok(EntryValues.text(field#apiId, entry#data) |> Option.filter(text -> List.memberOf(text, field#config#options)))) |> described
-            case (FieldKind.Select, true)   => Schema.field0(name, Out.list(Out.scalar(selectCodec(prefix, field))), (_context, entry) -> Ok(EntryValues.texts(field#apiId, entry#data) |> List.filter(text -> List.memberOf(text, field#config#options)))) |> described
+            case (FieldKind.Object, false)  => Schema.field0(name, Out.option(Out.obj(nestedType(all, prefix, field))), (_context, entry) -> Ok(EntryValue.object(field#apiId, entry#data) |> Option.map(nestedEntry(entry)))) |> described
+            case (FieldKind.Object, true)   => Schema.field0(name, Out.list(Out.obj(nestedType(all, prefix, field))), (_context, entry) -> Ok(EntryValue.objects(field#apiId, entry#data) |> List.map(nestedEntry(entry)))) |> described
+            case (FieldKind.Blocks, _)      => Schema.field0(name, Out.list(blocksUnion(all, prefix, field)), (_context, entry) -> Ok(EntryValue.blocks(field, entry#data) |> List.map(match (variant, inner) -> (variant, nestedEntry(entry, inner))))) |> described
+            case (FieldKind.Number, false)  => Schema.field0(name, Out.option(Out.float64()), (_context, entry) -> Ok(EntryValue.number(field#apiId, entry#data))) |> described
+            case (FieldKind.Number, true)   => Schema.field0(name, Out.list(Out.float64()), (_context, entry) -> Ok(EntryValue.numbers(field#apiId, entry#data))) |> described
+            case (FieldKind.Boolean, false) => Schema.field0(name, Out.option(Out.bool()), (_context, entry) -> Ok(EntryValue.bool(field#apiId, entry#data))) |> described
+            case (FieldKind.Boolean, true)  => Schema.field0(name, Out.list(Out.bool()), (_context, entry) -> Ok(EntryValue.bools(field#apiId, entry#data))) |> described
+            case (FieldKind.Select, false)  => Schema.field0(name, Out.option(Out.scalar(selectCodec(prefix, field))), (_context, entry) -> Ok(EntryValue.text(field#apiId, entry#data) |> Option.filter(text -> List.memberOf(text, field#config#options)))) |> described
+            case (FieldKind.Select, true)   => Schema.field0(name, Out.list(Out.scalar(selectCodec(prefix, field))), (_context, entry) -> Ok(EntryValue.texts(field#apiId, entry#data) |> List.filter(text -> List.memberOf(text, field#config#options)))) |> described
             case (FieldKind.Reference, false) => match targetOf(all, field) {
-                case Some(target) => Schema.field0(name, Out.option(Out.obj(entryType(all, target))), (_context, entry) -> Ok(EntryValues.text(field#apiId, entry#data) |> Option.flatMap(EntryId.parse) |> Option.flatMap(resolveLink(target, entry)))) |> described
-                case None         => Schema.field0(name, Out.option(Out.id()), (_context, entry) -> Ok(EntryValues.text(field#apiId, entry#data) |> Option.map(Id.Id))) |> described
+                case Some(target) => Schema.field0(name, Out.option(Out.obj(entryType(all, target))), (_context, entry) -> Ok(EntryValue.text(field#apiId, entry#data) |> Option.flatMap(EntryId.parse) |> Option.flatMap(resolveLink(target, entry)))) |> described
+                case None         => Schema.field0(name, Out.option(Out.id()), (_context, entry) -> Ok(EntryValue.text(field#apiId, entry#data) |> Option.map(Id.Id))) |> described
             }
             case (FieldKind.Reference, true) => match targetOf(all, field) {
-                case Some(target) => Schema.field0(name, Out.list(Out.obj(entryType(all, target))), (_context, entry) -> Ok(EntryValues.texts(field#apiId, entry#data) |> List.filterMap(EntryId.parse) |> List.filterMap(resolveLink(target, entry)))) |> described
-                case None         => Schema.field0(name, Out.list(Out.id()), (_context, entry) -> Ok(EntryValues.texts(field#apiId, entry#data) |> List.map(Id.Id))) |> described
+                case Some(target) => Schema.field0(name, Out.list(Out.obj(entryType(all, target))), (_context, entry) -> Ok(EntryValue.texts(field#apiId, entry#data) |> List.filterMap(EntryId.parse) |> List.filterMap(resolveLink(target, entry)))) |> described
+                case None         => Schema.field0(name, Out.list(Out.id()), (_context, entry) -> Ok(EntryValue.texts(field#apiId, entry#data) |> List.map(Id.Id))) |> described
             }
-            case (_, false)                 => Schema.field0(name, Out.option(Out.string()), (_context, entry) -> Ok(EntryValues.text(field#apiId, entry#data))) |> described
-            case (_, true)                  => Schema.field0(name, Out.list(Out.string()), (_context, entry) -> Ok(EntryValues.texts(field#apiId, entry#data))) |> described
+            case (_, false)                 => Schema.field0(name, Out.option(Out.string()), (_context, entry) -> Ok(EntryValue.text(field#apiId, entry#data))) |> described
+            case (_, true)                  => Schema.field0(name, Out.list(Out.string()), (_context, entry) -> Ok(EntryValue.texts(field#apiId, entry#data))) |> described
         }
 
     ///
@@ -183,7 +186,7 @@ mod ContentSchemaBuilder {
     def connectionType(all: List[ContentType], owner: ContentType): ObjectType[EntryPage, ContentEff] =
         Schema.objectType("${TypeName.text(owner#singular)}Connection", () ->
             Schema.field0("nodes", Out.list(Out.obj(entryType(all, owner))), (_context, page) -> Ok(page#entries)) ::
-            Schema.field0("totalCount", Out.int32(), (_context, page) -> Ok(Int64.clampToInt32(min = 0, max = Int32.maxValue(), page#totalCount))) :: Nil)
+            Schema.field0("totalCount", Out.int32(), (_context, page) -> Ok(EntryPage.totalCountInt32(page))) :: Nil)
 
     // ---- 引数 ----
 
@@ -317,74 +320,3 @@ mod ContentSchemaBuilder {
 
 }
 
-///
-/// entry の中身（JSON）から kind ごとの値を取り出す。形が違う値は無い物として扱う（下書きの検証が守るので普段は起きない）。
-///
-mod EntryValues {
-
-    use Util.Json.Json
-
-    pub def text(apiId: ApiId, data: EntryData): Option[String] =
-        Map.get(apiId, data) |> Option.flatMap(asText)
-
-    pub def texts(apiId: ApiId, data: EntryData): List[String] =
-        Map.get(apiId, data) |> Option.map(items(asText)) |> Option.getWithDefault(Nil)
-
-    pub def number(apiId: ApiId, data: EntryData): Option[Float64] =
-        Map.get(apiId, data) |> Option.flatMap(asNumber)
-
-    pub def numbers(apiId: ApiId, data: EntryData): List[Float64] =
-        Map.get(apiId, data) |> Option.map(items(asNumber)) |> Option.getWithDefault(Nil)
-
-    pub def bool(apiId: ApiId, data: EntryData): Option[Bool] =
-        Map.get(apiId, data) |> Option.flatMap(asBool)
-
-    pub def bools(apiId: ApiId, data: EntryData): List[Bool] =
-        Map.get(apiId, data) |> Option.map(items(asBool)) |> Option.getWithDefault(Nil)
-
-    ///
-    /// Object の値（1 つ）。オブジェクトでなければ None。
-    ///
-    pub def object(apiId: ApiId, entry: Entry): Option[EntryData] =
-        Map.get(apiId, entry#data) |> Option.flatMap(asObject)
-
-    ///
-    /// Object の値（配列）。オブジェクトでない要素は捨てる。
-    ///
-    pub def objects(apiId: ApiId, entry: Entry): List[EntryData] =
-        Map.get(apiId, entry#data) |> Option.map(items(asObject)) |> Option.getWithDefault(Nil)
-
-    ///
-    /// Blocks の値。(variant, 中身) の並び。blockType が variant に無い要素は捨てる。
-    ///
-    pub def blocks(field: FieldDef, entry: Entry): List[(FieldDef, EntryData)] =
-        Map.get(field#apiId, entry#data)
-            |> Option.map(items(item -> EntryValidation.readBlock(Children.toList(field#children), item)))
-            |> Option.getWithDefault(Nil)
-
-    def asObject(json: Json): Option[EntryData] = match json {
-        case Json.JObject(fields) => Some(EntryValidation.objectData(fields))
-        case _                    => None
-    }
-
-    def items(pick: Json -> Option[a], json: Json): List[a] = match json {
-        case Json.JArray(values) => values |> Vector.toList |> List.filterMap(pick)
-        case _                   => Nil
-    }
-
-    def asText(json: Json): Option[String] = match json {
-        case Json.JString(s) => Some(s)
-        case _               => None
-    }
-
-    def asNumber(json: Json): Option[Float64] = match json {
-        case Json.JNumber(n) => BigDecimal.tryToFloat64(n)
-        case _               => None
-    }
-
-    def asBool(json: Json): Option[Bool] = match json {
-        case Json.JBool(b) => Some(b)
-        case _             => None
-    }
-
-}

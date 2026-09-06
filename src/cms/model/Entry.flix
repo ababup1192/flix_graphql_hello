@@ -86,6 +86,12 @@ pub enum Linked {
 mod Linked {
     pub def empty(): Linked = Linked.Linked(Map.empty())
 
+    ///
+    /// 先読みした entry から。id で引けるようにする。
+    ///
+    pub def of(entries: List[Entry]): Linked =
+        Linked.Linked(entries |> List.map(entry -> (entry#id, entry)) |> List.toMap)
+
     pub def get(id: EntryId, linked: Linked): Option[Entry] =
         let Linked.Linked(map) = linked;
         Map.get(id, map)
@@ -146,6 +152,28 @@ pub type alias EntryVersion = {
 /// - totalCount: 条件に合う全件数
 ///
 pub type alias EntryPage = { entries = List[Entry], totalCount = Int64 }
+
+mod EntryPage {
+
+    ///
+    /// 1 ページの上限。どちらの API も同じ。
+    ///
+    pub def maxFirst(): Int32 = 200
+
+    ///
+    /// first（省けば default）を 1 〜 maxFirst に、skip（省けば 0）を 0 以上に丸める。
+    ///
+    pub def clamp(default: Int32, first: Option[Int32], skip: Option[Int32]): (Int32, Int32) =
+        (first |> Option.getWithDefault(default) |> Int32.max(1) |> Int32.min(maxFirst()),
+         skip |> Option.getWithDefault(0) |> Int32.max(0))
+
+    ///
+    /// GraphQL の Int に載る件数。Int32 を超える分は上限に丸める。
+    ///
+    pub def totalCountInt32(page: EntryPage): Int32 =
+        Int64.clampToInt32(min = 0, max = Int32.maxValue(), page#totalCount)
+
+}
 
 ///
 /// 一覧の条件。

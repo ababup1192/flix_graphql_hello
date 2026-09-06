@@ -17,11 +17,10 @@ mod AdminQueryResolvers {
 
     /// Query.entries。first は 1 〜 200 に丸める
     pub def entries(): GeneratedAdmin.QueryEntriesResolver[AdminEff] =
-        (_context, typeId, search, first, skip) -> Ok(ContentEntries.list(AdminMapping.typeId("typeId", typeId), {
-            search = search |> Option.getWithDefault(""),
-            first  = first |> Option.getWithDefault(50) |> Int32.max(1) |> Int32.min(200),
-            skip   = skip |> Option.getWithDefault(0) |> Int32.max(0)
-        }))
+        (_context, typeId, search, first, skip) -> {
+            let (limit, offset) = EntryPage.clamp(50, first, skip);
+            Ok(ContentEntries.list(AdminMapping.typeId("typeId", typeId), { search = search |> Option.getWithDefault(""), first = limit, skip = offset }))
+        }
 
     /// Query.entry
     pub def entry(): GeneratedAdmin.QueryEntryResolver[AdminEff] =

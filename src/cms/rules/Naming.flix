@@ -9,7 +9,7 @@ mod Naming {
     /// Entry interface が持つので、フィールドの apiId に使えない名前。
     ///
     pub def reservedFieldApiIds(): List[String] =
-        "id" :: "stage" :: "publishedAt" :: "updatedAt" :: "createdAt" :: "version" :: "blockType" :: Nil
+        "id" :: "stage" :: "publishedAt" :: "updatedAt" :: "createdAt" :: "version" :: EntryValue.blockTypeKey() :: Nil
 
     ///
     /// コンテンツ API が自分で持つので、singular に使えない型名。

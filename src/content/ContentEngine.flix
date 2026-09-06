@@ -62,17 +62,20 @@ mod ContentEngine {
     /// 定義を読んで組み直す。
     ///
     def rebuild(pool: Pool): Result[String, Graphql.Engine] \ IO =
-        DbError.runWithFailure(() -> Pool.withLazyTx(pool, () -> ContentTypes.list()))
-            |> Result.mapErr(failure -> "content type の定義を読めません: ${failure}")
+        read(pool, "content type の定義を読めません", () -> ContentTypes.list())
             |> Result.flatMap(types -> Graphql.buildEngine(ContentSchemaBuilder.build(types, ContentRunner.make(pool))))
 
     def readFingerprint(pool: Pool): Result[String, String] \ IO =
-        DbError.runWithFailure(() -> Pool.withLazyTx(pool, () -> ContentTypesQueries.schemaFingerprint()))
-            |> Result.mapErr(failure -> "content type の目印を読めません: ${failure}")
+        read(pool, "content type の目印を読めません", () -> ContentTypesQueries.schemaFingerprint())
             |> Result.map(row -> match row {
                 case Some(found) => "${found#types |> Option.getWithDefault(0i64)}/${found#latest |> Option.map(Timestamp.toIso8601) |> Option.getWithDefault("-")}"
                 case None        => "0/-"
             })
 
+    ///
+    /// プールで 1 本読む。DbFailure は label 付きの文字列にする。
+    ///
+    def read(pool: Pool, label: String, thunk: Unit -> a \ ef): Result[String, a] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr}) + IO =
+        DbError.runWithFailure(() -> Pool.withLazyTx(pool, thunk)) |> Result.mapErr(failure -> "${label}: ${failure}")
 
 }

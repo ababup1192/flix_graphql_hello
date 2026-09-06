@@ -19,12 +19,12 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
             let cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins };
             let contentConfig = { cors = cors, graphqlPath = "/graphql" };
             let adminConfig = { cors = cors, graphqlPath = "/admin/graphql" };
-            let contentEngines = ContentEngine.create();
+            let engineCache = ContentEngine.create();
             HttpServer.listen(8080, request ->
                 Health.runWithPool(pool, () ->
-                    if (Server.pathOf(request#path) == adminConfig#graphqlPath)
+                    if (Server.isGraphqlPath(adminConfig, request))
                         Graphql.runWithEngine(adminEngine, () -> Server.handle(adminConfig, request))
-                    else match ContentEngine.current(contentEngines, pool) {
+                    else match ContentEngine.current(engineCache, pool) {
                         case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(contentConfig, request))
                         case Err(message) => Server.unavailable(message)
                     }))
