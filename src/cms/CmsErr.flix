@@ -1,5 +1,13 @@
 ///
-/// 入力の 1 つの誤り。(パス, 理由)。パスは "apiId" や "fields[2].apiId" のように GraphQL の入力に対応させる。
+/// notFound の対象。
+///
+pub enum Entity with Eq, Order, ToString {
+    case ContentType
+    case Field
+}
+
+///
+/// 入力の 1 つの誤り。(パス, 理由)。パスは "apiId" や "config.maxLength" のように GraphQL の入力に対応させる。
 ///
 pub enum Violation with Eq, Order, ToString {
     case Violation(String, String)
@@ -10,9 +18,9 @@ pub enum Violation with Eq, Order, ToString {
 ///
 pub eff CmsErr {
     ///
-    /// 指した物が無い。what は "content type" のような種類、id は指した値。
+    /// 指した物が無い。id は指した値。
     ///
-    def notFound(what: String, id: String): Void
+    def notFound(entity: Entity, id: Int64): Void
 
     ///
     /// 入力が規則に合わない。1 つ以上の Violation。
@@ -26,7 +34,7 @@ mod CmsErr {
     /// CmsErr を 1 層の値にした形。境界で使う。
     ///
     pub enum CmsFailure with Eq, Order, ToString {
-        case NotFound(String, String)
+        case NotFound(Entity, Int64)
         case Invalid(List[Violation])
     }
 
@@ -37,7 +45,7 @@ mod CmsErr {
         run {
             Ok(thunk())
         } with handler CmsErr {
-            def notFound(what, id, _resume) = Err(CmsFailure.NotFound(what, id))
+            def notFound(entity, id, _resume) = Err(CmsFailure.NotFound(entity, id))
             def invalid(violations, _resume) = Err(CmsFailure.Invalid(violations))
         }
 
@@ -45,7 +53,7 @@ mod CmsErr {
     /// 人が読むメッセージ。GraphQL の errors[].message に出す。
     ///
     pub def toMessage(failure: CmsFailure): String = match failure {
-        case CmsFailure.NotFound(what, id) => "${what} '${id}' が見つかりません"
+        case CmsFailure.NotFound(entity, id) => "${describe(entity)} '${id}' が見つかりません"
         case CmsFailure.Invalid(violations) =>
             violations |> List.map(violation -> { let Violation.Violation(path, message) = violation; "${path}: ${message}" }) |> List.join("; ")
     }
@@ -56,6 +64,19 @@ mod CmsErr {
     pub def raiseIfAny(violations: List[Violation]): Unit \ CmsErr = match violations {
         case Nil => ()
         case _   => CmsErr.invalid(violations)
+    }
+
+    ///
+    /// Option が None なら notFound。
+    ///
+    pub def orNotFound(entity: Entity, id: Int64, value: Option[a]): a \ CmsErr = match value {
+        case Some(found) => found
+        case None        => CmsErr.notFound(entity, id)
+    }
+
+    def describe(entity: Entity): String = match entity {
+        case Entity.ContentType => "content type"
+        case Entity.Field       => "field"
     }
 
 }

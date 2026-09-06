@@ -47,13 +47,13 @@ generate:
 # ---- sqlfx（生成器と migrate は flix_db 側の main で動かす。.fpkg には入っていない）----
 FLIX_DB = $(HOME)/Desktop/flix_db
 
-# migrations/ と queries/*.q から src/Gen/ を作り直す
+# migrations/ と queries/*.q から src/generated/sql/ を作り直す
 gen:
-	cd $(FLIX_DB) && bin/flix run -- gen $(CURDIR)/migrations $(CURDIR)/queries $(CURDIR)/src/Gen
+	cd $(FLIX_DB) && bin/flix run -- gen $(CURDIR)/migrations $(CURDIR)/queries $(CURDIR)/src/generated/sql
 
 # 生成物が最新か（書かない。CI 用）
 gen-check:
-	cd $(FLIX_DB) && bin/flix run -- gen --check $(CURDIR)/migrations $(CURDIR)/queries $(CURDIR)/src/Gen
+	cd $(FLIX_DB) && bin/flix run -- gen --check $(CURDIR)/migrations $(CURDIR)/queries $(CURDIR)/src/generated/sql
 
 # migrations/ を PG に当てる（db-up の後で。make run の前に 1 回）
 MIGRATE_ENV = SQLFX_DSN=jdbc:postgresql://127.0.0.1:5432/cms SQLFX_USER=cms SQLFX_PASSWORD=cms

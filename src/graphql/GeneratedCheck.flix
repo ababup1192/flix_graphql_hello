@@ -6,7 +6,7 @@ mod GeneratedCheck {
     ///
     /// 照合する生成物。生成されたモジュールの sdlText / generatorVersion と、メッセージに出す名前。
     ///
-    /// - label: 生成物のファイル名（"src/generated/GeneratedSchema.flix"）
+    /// - label: 生成物のファイル名（"src/generated/graphql/GeneratedSchema.flix"）
     /// - sdlPath: 生成元の SDL ファイル名（"schema.graphql"）
     /// - sdlText: 生成物に埋まった SDL 本文
     /// - generatorVersion: 生成物に埋まった生成器の版
@@ -22,16 +22,16 @@ mod GeneratedCheck {
     pub def expectedGeneratorVersion(): String = "6"
 
     ///
-    /// schema.graphql と src/generated/GeneratedSchema.flix（mod Generated）の組。
+    /// schema.graphql と src/generated/graphql/GeneratedSchema.flix（mod Generated）の組。
     ///
     pub def schema(): Generated =
-        { label = "src/generated/GeneratedSchema.flix", sdlPath = "schema.graphql", sdlText = Generated.sdlText(), generatorVersion = Generated.generatorVersion() }
+        { label = "src/generated/graphql/GeneratedSchema.flix", sdlPath = "schema.graphql", sdlText = Generated.sdlText(), generatorVersion = Generated.generatorVersion() }
 
     ///
-    /// admin.graphql と src/generated/GeneratedAdmin.flix（mod GeneratedAdmin）の組。
+    /// admin.graphql と src/generated/graphql/GeneratedAdminSchema.flix（mod GeneratedAdmin）の組。
     ///
     pub def admin(): Generated =
-        { label = "src/generated/GeneratedAdminSchema.flix", sdlPath = "admin.graphql", sdlText = GeneratedAdmin.sdlText(), generatorVersion = GeneratedAdmin.generatorVersion() }
+        { label = "src/generated/graphql/GeneratedAdminSchema.flix", sdlPath = "admin.graphql", sdlText = GeneratedAdmin.sdlText(), generatorVersion = GeneratedAdmin.generatorVersion() }
 
     ///
     /// 生成物に埋まった SDL 本文と生成器バージョンを、SDL ファイルの本文と期待する版に照らす。

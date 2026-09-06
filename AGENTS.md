@@ -34,8 +34,8 @@ make test-pg   # 実 PostgreSQL 込み（コンテナの起動と停止まで）
 make db-up     # PostgreSQL を起動
 make migrate   # migrations/ を当てる
 make run       # サーバ起動（CMS_DSN 等は Makefile が渡す）
-make generate  # schema.graphql / admin.graphql → src/generated/（schemagen）
-make gen       # migrations/ + queries/*.q → src/Gen/（sqlfx の生成器。flix_db 側で動く）
+make generate  # schema.graphql / admin.graphql → src/generated/graphql/（schemagen）
+make gen       # migrations/ + queries/*.q → src/generated/sql/（sqlfx の生成器。flix_db 側で動く）
 ```
 
 実 PG が要るテストは `test/Pg/` に置く。`make test` はそれを除いた写しを `build/unit/` に作って回す。
@@ -43,15 +43,26 @@ make gen       # migrations/ + queries/*.q → src/Gen/（sqlfx の生成器。f
 ## ディレクトリ
 
 ```
-admin.graphql        管理 API の SDL（正）。src/generated/GeneratedAdminSchema.flix を生やす
-schema.graphql       見本の SDL。src/generated/GeneratedSchema.flix を生やす
-migrations/          DDL。sqlfx の机上スキーマの元で、make migrate が当てる
-queries/*.q          SQL。src/Gen/ を生やす
-src/generated/       schemagen の生成物（触らない）
-src/Gen/             sqlfx の生成物（触らない）
-src/cms/             ユースケース。ContentModel（型と変換）/ Naming（名前の規則。純粋）/ ContentTypes / CmsErr
-src/admin/           管理 API のリゾルバと Runner（1 フィールド = 接続 1 本 = Tx 1 つ）
-src/app/             見本の /graphql、Server（ルーティング・CORS・/health）、DbConfig、Health
-src/http/            手書き HTTP/1.1 と Cors
-src/graphql/         graphql-java の境界と Schema の DSL
+admin.graphql          管理 API の SDL（正）
+schema.graphql         見本の SDL
+migrations/            DDL。sqlfx の机上スキーマの元で、make migrate が当てる
+queries/*.q            SQL
+src/generated/graphql/ schemagen の生成物（触らない）。GeneratedSchema / GeneratedAdminSchema
+src/generated/sql/     sqlfx の生成物（触らない）。*Queries / Tables
+src/cms/model/         ドメインの型。Ids（TypeId / FieldId / ApiId / TypeName）、ContentType（enum・レコード・Draft / Changes・FieldConfig）
+src/cms/rules/         純粋な規則。Naming（予約名・衝突・kind と config）
+src/cms/db/            行とドメインの値の変換。列名を知るのはここだけ
+src/cms/               ユースケース（ContentTypes）と業務エラー（CmsErr）
+src/admin/             管理 API。AdminMapping（GraphQL の型 ↔ ドメイン）、リゾルバ、AdminRunner（最初の SQL で借りる Tx）
+src/app/               Server（ルーティング・CORS・/health）、DbConfig、Health
+src/http/              手書き HTTP/1.1 と Cors
+src/graphql/           graphql-java の境界と Schema の DSL
+src/sample/            graphql-java を試した見本（add / fibonacci / Post / SQLite のカウンタ）。コンテンツ API ができたら消す
+test/                  src と同じ構成。test/Pg/ だけ実 PG
 ```
+
+## 型の決まり
+
+- id はプリミティブで持ち回らない。`TypeId` / `FieldId`（Int64 を包む）で、GraphQL の `Id` との写しは admin 層だけ
+- 識別子は `ApiId`（lowerCamel）と `TypeName`（UpperCamel）で、`parse` を通した物しか作らない。規則外の文字列は境界で invalid になる
+- ドメイン（src/cms）は GeneratedAdmin を知らない。enum と入力レコードはドメインが自分で持ち、写しは `AdminMapping`

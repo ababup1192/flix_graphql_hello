@@ -1,12 +1,10 @@
 use SqlValue.SqlValue
 use Row.Row
 use CmsErr.CmsFailure
-use GeneratedAdmin.FieldKind
 
 ///
 /// ContentTypes: ユースケースを DB 無しで確かめる。決めた行を返す偽ハンドラで、検証と発行 SQL を見る。
 ///
-
 
 ///
 /// content_types の行。blogs / Blog と tags / Tag の 2 型。
@@ -38,11 +36,15 @@ def rowsFor(sql: String): Option[List[Row]] =
     else Some(typeRows())
 
 ///
-/// 偽ハンドラで thunk を走らせ、(結果, 発行した SQL の先頭語の並び) を返す。
+/// 偽ハンドラで thunk を走らせ、(結果, 発行した SQL の先頭語の並び) を返す。DB の失敗は起きない前提で剥がす。
 ///
-def record(thunk: Unit -> a \ ef): (Result[CmsFailure, a], List[String]) \ ef - {SqlRead, SqlWrite, CmsErr} =
-    let (result, statements) = DbTest.runRecordingWith(rowsFor, 1, () -> CmsErr.runWithResult(thunk));
-    (result, statements |> List.map(statement -> statement#sql |> String.splitOn(substr = " ") |> List.head |> Option.getWithDefault("")))
+def record(thunk: Unit -> a \ ef): (Result[CmsFailure, a], List[String]) \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, CmsErr}) + IO =
+    let (result, statements) = DbTest.runRecordingWith(rowsFor, 1, () -> DbError.runWithFailure(() -> CmsErr.runWithResult(thunk)));
+    let flattened = match result {
+        case Ok(inner)    => inner
+        case Err(failure) => bug!("unexpected DbFailure: ${failure}")
+    };
+    (flattened, statements |> List.map(statement -> statement#sql |> String.splitOn(substr = " ") |> List.head |> Option.getWithDefault("")))
 
 ///
 /// 誤りのパスだけ。
@@ -57,44 +59,32 @@ def failurePaths(result: Result[CmsFailure, a]): List[String] = match result {
 /// list は 2 本の SELECT で、型ごとにフィールドを付けて返す。
 @Test
 def testContentTypesList(): Unit \ {Assert, IO} =
-    let (result, sqls) = DbError.runWithFailure(() -> record(() -> ContentTypes.list()))
-        |> Result.getWithDefault((Err(CmsFailure.NotFound("", "")), Nil));
+    let (result, sqls) = record(() -> ContentTypes.list());
     Assert.assertEq(expected = (Ok(List#{("blogs", List#{"title", "body"}), ("tags", Nil)}), List#{"SELECT", "SELECT"}),
-        (result |> Result.map(List.map(contentType -> (contentType#apiId, contentType#fields |> List.map(field -> field#apiId)))), sqls))
+        (result |> Result.map(List.map(contentType -> (ApiId.text(contentType#apiId), contentType#fields |> List.map(field -> ApiId.text(field#apiId))))), sqls))
 
-/// 行の config は FieldConfig に読まれ、kind は enum になる。
+/// 行の config は FieldConfig に読まれ、kind と id はドメインの型になる。
 @Test
 def testContentTypesFieldShape(): Unit \ {Assert, IO} =
-    let field = DbError.runWithFailure(() -> record(() -> ContentTypes.get(1i64)))
-        |> Result.map(fst) |> Result.map(Result.map(contentType -> List.head(contentType#fields)));
-    Assert.assertEq(expected = Ok(Ok(Some((FieldKind.Text, Some(120), true)))),
-        field |> Result.map(Result.map(Option.map(found -> (found#kind, found#config#maxLength, found#required)))))
+    let (result, _) = record(() -> ContentTypes.get(TypeId.TypeId(1i64)));
+    Assert.assertEq(expected = Ok(Some((FieldId.FieldId(10i64), FieldKind.Text, Some(120), true))),
+        result |> Result.map(contentType -> List.head(contentType#fields) |> Option.map(found -> (found#id, found#kind, found#config#maxLength, found#required))))
 
 // ---- 作る ----
 
-/// 規則に合わない apiId は invalid で、INSERT は発行されない。
+/// 既にある apiId は invalid で、INSERT は発行されない。
 @Test
-def testContentTypesCreateInvalidWritesNothing(): Unit \ {Assert, IO} =
-    let (result, sqls) = DbError.runWithFailure(() -> record(() ->
-        ContentTypes.create({ apiId = "Blog Posts", kind = None, name = "記事", singular = None, plural = None, previewUrl = None })))
-        |> Result.getWithDefault((Err(CmsFailure.NotFound("", "")), Nil));
+def testContentTypesCreateDuplicateWritesNothing(): Unit \ {Assert, IO} =
+    let (result, sqls) = record(() -> ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事")));
     Assert.assertEq(expected = (List#{"apiId"}, false), (failurePaths(result), List.memberOf("INSERT", sqls)))
-
-/// 既にある apiId も invalid。
-@Test
-def testContentTypesCreateDuplicate(): Unit \ {Assert, IO} =
-    let (result, _) = DbError.runWithFailure(() -> record(() ->
-        ContentTypes.create({ apiId = "blogs", kind = None, name = "記事", singular = None, plural = None, previewUrl = None })))
-        |> Result.getWithDefault((Err(CmsFailure.NotFound("", "")), Nil));
-    Assert.assertEq(expected = List#{"apiId"}, failurePaths(result))
 
 /// 通れば INSERT が発行され、singular / plural は apiId から導かれる。
 @Test
 def testContentTypesCreateDerivesNames(): Unit \ {Assert, IO} =
     let (_, statements) = DbTest.runRecordingWith(rowsFor, 1, () -> DbError.runWithFailure(() -> CmsErr.runWithResult(() ->
-        ContentTypes.create({ apiId = "profiles", kind = None, name = "書き手", singular = None, plural = None, previewUrl = None }))));
+        ContentTypes.create(CmsTestKit.typeDraft("profiles", "記事")))));
     let insert = statements |> List.find(statement -> String.startsWith(prefix = "INSERT", statement#sql));
-    Assert.assertEq(expected = Some(List#{SqlValue.Str("profiles"), SqlValue.Str("collection"), SqlValue.Str("書き手"), SqlValue.Str("Profile"), SqlValue.Str("profiles"), SqlValue.Str("")}),
+    Assert.assertEq(expected = Some(List#{SqlValue.Str("profiles"), SqlValue.Str("collection"), SqlValue.Str("記事"), SqlValue.Str("Profile"), SqlValue.Str("profiles"), SqlValue.Str("")}),
         insert |> Option.map(statement -> statement#params))
 
 // ---- フィールド ----
@@ -102,16 +92,15 @@ def testContentTypesCreateDerivesNames(): Unit \ {Assert, IO} =
 /// 同じ型に既にある apiId は invalid。
 @Test
 def testContentTypesAddFieldDuplicate(): Unit \ {Assert, IO} =
-    let (result, _) = DbError.runWithFailure(() -> record(() ->
-        ContentTypes.addField(1i64, { apiId = "title", name = "題名", kind = FieldKind.Text, many = None, required = None, unique = None, localized = None, config = None })))
-        |> Result.getWithDefault((Err(CmsFailure.NotFound("", "")), Nil));
+    let (result, _) = record(() -> ContentTypes.addField(TypeId.TypeId(1i64), CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty())));
     Assert.assertEq(expected = List#{"apiId"}, failurePaths(result))
 
 /// 通れば末尾の位置（既存の max + 1）で INSERT され、型の updated_at を触る。
 @Test
 def testContentTypesAddFieldAppends(): Unit \ {Assert, IO} =
+    let slugConfig = { sourceField = Some(CmsTestKit.apiId("title")) | FieldConfig.empty() };
     let (_, statements) = DbTest.runRecordingWith(rowsFor, 1, () -> DbError.runWithFailure(() -> CmsErr.runWithResult(() ->
-        ContentTypes.addField(1i64, { apiId = "slug", name = "スラッグ", kind = FieldKind.Slug, many = None, required = Some(true), unique = Some(true), localized = None, config = Some({ maxLength = None, sourceField = Some("title"), min = None, max = None, integer = None }) }))));
+        ContentTypes.addField(TypeId.TypeId(1i64), CmsTestKit.fieldDraft("slug", FieldKind.Slug, slugConfig)))));
     let insert = statements |> List.find(statement -> String.startsWith(prefix = "INSERT", statement#sql));
     Assert.assertEq(expected = (Some(SqlValue.Int32(2)), true),
         (insert |> Option.flatMap(statement -> List.last(statement#params)),
@@ -121,12 +110,11 @@ def testContentTypesAddFieldAppends(): Unit \ {Assert, IO} =
 @Test
 def testContentTypesAddFieldToMissingType(): Unit \ {Assert, IO} =
     let (result, _) = DbTest.runRecordingWith(_ -> Some(Nil), 0, () -> DbError.runWithFailure(() -> CmsErr.runWithResult(() ->
-        ContentTypes.addField(7i64, { apiId = "x", name = "x", kind = FieldKind.Text, many = None, required = None, unique = None, localized = None, config = None }))));
-    Assert.assertEq(expected = Ok(Err(CmsFailure.NotFound("content type", "7"))), result |> Result.map(Result.map(field -> field#apiId)))
+        ContentTypes.addField(TypeId.TypeId(7i64), CmsTestKit.fieldDraft("x", FieldKind.Text, FieldConfig.empty())))));
+    Assert.assertEq(expected = Ok(Err(CmsFailure.NotFound(Entity.ContentType, 7i64))), result |> Result.map(Result.map(field -> field#position)))
 
 /// reorderFields は全 id を過不足なく渡さないと invalid。
 @Test
 def testContentTypesReorderNeedsAllIds(): Unit \ {Assert, IO} =
-    let (result, _) = DbError.runWithFailure(() -> record(() -> ContentTypes.reorderFields(1i64, List#{10i64})))
-        |> Result.getWithDefault((Err(CmsFailure.NotFound("", "")), Nil));
+    let (result, _) = record(() -> ContentTypes.reorderFields(TypeId.TypeId(1i64), List#{FieldId.FieldId(10i64)}));
     Assert.assertEq(expected = List#{"ids"}, failurePaths(result))

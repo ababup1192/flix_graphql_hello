@@ -1,38 +1,35 @@
 ///
-/// 管理 API の type Mutation のリゾルバ。ID を DB の id に読んでユースケースを呼ぶだけ。
+/// 管理 API の type Mutation のリゾルバ。入力をドメインの型に写してユースケースを呼ぶだけ。
 ///
 mod AdminMutationResolvers {
 
     /// Mutation.createContentType
     pub def createContentType(): GeneratedAdmin.MutationCreateContentTypeResolver[AdminEff] =
-        (_context, input) -> Ok(ContentTypes.create(input))
+        (_context, input) -> Ok(ContentTypes.create(AdminMapping.typeDraft(input)))
 
     /// Mutation.updateContentType
     pub def updateContentType(): GeneratedAdmin.MutationUpdateContentTypeResolver[AdminEff] =
-        (_context, id, patch) -> AdminIds.parse("id", id) |> Result.map(number -> ContentTypes.update(number, patch))
+        (_context, id, patch) -> Ok(ContentTypes.update(AdminMapping.typeId("id", id), AdminMapping.typeChanges(patch)))
 
     /// Mutation.deleteContentType。消した id を返す
     pub def deleteContentType(): GeneratedAdmin.MutationDeleteContentTypeResolver[AdminEff] =
-        (_context, id) -> AdminIds.parse("id", id) |> Result.map(number -> { ContentTypes.delete(number); id })
+        (_context, id) -> { ContentTypes.delete(AdminMapping.typeId("id", id)); Ok(id) }
 
     /// Mutation.addField
     pub def addField(): GeneratedAdmin.MutationAddFieldResolver[AdminEff] =
-        (_context, typeId, input) -> AdminIds.parse("typeId", typeId) |> Result.map(number -> ContentTypes.addField(number, input))
+        (_context, typeId, input) -> Ok(ContentTypes.addField(AdminMapping.typeId("typeId", typeId), AdminMapping.fieldDraft(input)))
 
     /// Mutation.updateField
     pub def updateField(): GeneratedAdmin.MutationUpdateFieldResolver[AdminEff] =
-        (_context, id, patch) -> AdminIds.parse("id", id) |> Result.map(number -> ContentTypes.updateField(number, patch))
+        (_context, id, patch) -> Ok(ContentTypes.updateField(AdminMapping.fieldId("id", id), AdminMapping.fieldChanges(patch)))
 
     /// Mutation.removeField。消した id を返す
     pub def removeField(): GeneratedAdmin.MutationRemoveFieldResolver[AdminEff] =
-        (_context, id) -> AdminIds.parse("id", id) |> Result.map(number -> { ContentTypes.removeField(number); id })
+        (_context, id) -> { ContentTypes.removeField(AdminMapping.fieldId("id", id)); Ok(id) }
 
     /// Mutation.reorderFields
     pub def reorderFields(): GeneratedAdmin.MutationReorderFieldsResolver[AdminEff] =
-        (_context, typeId, ids) -> forM (
-            owner   <- AdminIds.parse("typeId", typeId);
-            numbers <- Result.traverse(AdminIds.parse("ids"), ids)
-        ) yield ContentTypes.reorderFields(owner, numbers)
+        (_context, typeId, ids) -> Ok(ContentTypes.reorderFields(AdminMapping.typeId("typeId", typeId), ids |> List.map(AdminMapping.fieldId("ids"))))
 
     /// type Mutation のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.MutationResolvers[AdminEff] =
@@ -45,18 +42,5 @@ mod AdminMutationResolvers {
             removeField       = removeField(),
             reorderFields     = reorderFields()
         }
-
-}
-
-///
-/// GraphQL の ID と DB の id の橋渡し。
-///
-mod AdminIds {
-
-    ///
-    /// ID を DB の id に読む。数字でなければ引数名付きのエラー。
-    ///
-    pub def parse(argument: String, id: Id): Result[FieldError, Int64] =
-        ContentModel.parseId(id) |> Option.toOk("${argument} '${id}' は数字の ID ではありません")
 
 }

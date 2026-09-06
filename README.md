@@ -25,7 +25,7 @@ make migrate   # migrations/ を当てる（初回と、migration を足した�
 make run       # サーバ起動（CMS_DSN 等は Makefile が渡す。初回は Maven 依存の取得で時間がかかる）
 make query     # 起動中のサーバへ /health とサンプルのクエリと mutation を投げる
 make generate  # schema.graphql / admin.graphql から src/generated/ を作り直す
-make gen       # migrations/ と queries/*.q から src/Gen/ を作り直す（sqlfx の生成器。flix_db 側で動く）
+make gen       # migrations/ と queries/*.q から src/generated/sql/ を作り直す（sqlfx の生成器。flix_db 側で動く）
 make check     # 型検査
 make test      # DB 無しのテスト（test/Pg を除く）
 make test-pg   # コンテナを立てて実 PostgreSQL 込みで全部回し、止める
@@ -143,7 +143,7 @@ Query / Mutation から届かない型、大文字始まりのフィールド名
 
 ### 2. `make generate` で生成する
 
-`src/generated/GeneratedSchema.flix` ができる。中身は型ごとのリゾルバのレコード型と、それを graphql-java に
+`src/generated/graphql/GeneratedSchema.flix` ができる。中身は型ごとのリゾルバのレコード型と、それを graphql-java に
 配線するコードで、人は読まない。
 
 ```flix
@@ -166,12 +166,12 @@ pub def postDefaults(): { id = Context -> { id = Id | r0 } -> Result[FieldError,
 ### 3. `make scaffold` で雛形を作り、リゾルバを書く
 
 ```bash
-make scaffold                 # 全型。src/resolvers/XResolvers.flix を書く（既にあるファイルは触らない）
+make scaffold                 # 全型。src/sample/resolvers/XResolvers.flix を書く（既にあるファイルは触らない）
 make scaffold TYPE=Post       # 1 型だけ
 make scaffold DEFAULTS=no     # 既定リゾルバを使わず全フィールドを吐く（source が enum の型向け）
 ```
 
-`src/resolvers/PostResolvers.flix` は人が所有するファイルで、gqlgen の resolver.go に当たる。
+`src/sample/resolvers/PostResolvers.flix` は人が所有するファイルで、gqlgen の resolver.go に当たる。
 フィールドごとの関数と、それを既定リゾルバに足すレコードが入っている。
 
 ```flix
@@ -229,7 +229,7 @@ SDL の `type Post` に対応する Flix の型 `Post` は人が定義する（�
 ## アーキテクチャ
 
 ```
-schema.graphql ──(make generate / schemagen)──▶ src/generated/GeneratedSchema.flix ──▶ Schema（Field / ObjectType / Out）
+schema.graphql ──(make generate / schemagen)──▶ src/generated/graphql/GeneratedSchema.flix ──▶ Schema（Field / ObjectType / Out）
                                                           ▲                                       │
                                         AppSchema（リゾルバのレコード）                   Graphql.buildEngine ──▶ graphql-java
 
@@ -327,7 +327,7 @@ Flix は Maven の jar を独自のクラスローダで読むため `DriverMana
 
 1. `schema.graphql` にフィールドを足す
 2. `make generate`
-3. `make check` が落ちる場所（`XResolvers` のラベル不足）に、`src/resolvers/XResolvers.flix` のフィールド関数を足す。
+3. `make check` が落ちる場所（`XResolvers` のラベル不足）に、`src/sample/resolvers/XResolvers.flix` のフィールド関数を足す。
    素通しのフィールドなら既定リゾルバが拾うので何も書かない。新しい型なら `make scaffold TYPE=X` で雛形を作る。
    外部に触るなら `CounterStore` のように effect を宣言して `AppEff` に足し、ハンドラを `main` の `runApp` に重ねる
 
@@ -353,7 +353,7 @@ src/
     HttpServer.flix      ソケット、接続ごとのスレッド、ログ
   app/                   HTTP と GraphQL をつなぐ層
     Server.flix          HttpRequest -> GraphqlRequest -> レスポンス JSON
-    AppSchema.flix       Generated.Resolvers に src/resolvers/ の型ごとのリゾルバを当てはめる
+    AppSchema.flix       Generated.Resolvers に src/sample/resolvers/ の型ごとのリゾルバを当てはめる
     AppEff.flix          リゾルバが使う効果の和（Runner を渡す単位）
   resolvers/             型ごとのリゾルバ（make scaffold の雛形に実装を書いた物。人が所有する）
     QueryResolvers.flix / MutationResolvers.flix / PostResolvers.flix / AuthorResolvers.flix

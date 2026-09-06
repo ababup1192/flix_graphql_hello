@@ -56,7 +56,7 @@ type Mutation {
 /// リゾルバが使う効果の和（利用側の規約。Resolvers[ef] の ef はレコード全体で 1 つ）
 pub type alias AppEff = CounterStore
 
-/// src/resolvers/PostResolvers.flix。make scaffold が作り、人が所有する
+/// src/sample/resolvers/PostResolvers.flix。make scaffold が作り、人が所有する
 mod PostResolvers {
     /// Post.author
     pub def author(): Generated.PostAuthorResolver[AppEff] =
@@ -354,7 +354,7 @@ typed-schema の `testSchemaFileIsUpToDate`（DSL → SDL の向き）は役目�
   利用側がフィールドごとの関数に注釈すると、型違いのエラーがその関数の行に出る。名前の末尾に `Resolver` を
   付けるのは `Post.status` → `PostStatus` が enum と衝突するため。型名が生成する別名と衝突する SDL と、
   別名が重複する SDL（`Post.authorName` と `PostAuthor.name`）は生成器が Err にする
-- **雛形** `make scaffold [TYPE=X] [DEFAULTS=no]`。`src/resolvers/XResolvers.flix` に、素通しでないフィールドの
+- **雛形** `make scaffold [TYPE=X] [DEFAULTS=no]`。`src/sample/resolvers/XResolvers.flix` に、素通しでないフィールドの
   空の関数と `{ +author = author() | Generated.postDefaults() }` の `resolvers()` を書く。既にあるファイルは
   触らない（人が所有する）。`DEFAULTS=no` は source が enum の型向けで、全フィールドを空の関数にする。
   `flix run` はプログラム引数を受け取れないので、モードと型名は環境変数で渡す

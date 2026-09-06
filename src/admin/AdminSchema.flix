@@ -12,7 +12,7 @@ mod AdminSchema {
             mutationRoot = AdminMutationResolvers.resolvers(),
             contentType  = ContentTypeResolvers.resolvers(),
             fieldDef     = FieldDefResolvers.resolvers(),
-            fieldConfig  = GeneratedAdmin.fieldConfigDefaults()
+            fieldConfig  = FieldConfigResolvers.resolvers()
         }, runner)
 
 }
