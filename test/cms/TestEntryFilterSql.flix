@@ -54,4 +54,13 @@ mod TestEntryFilterSql {
         } with RawSql.runWithAllow;
         Assert.assertEq(expected = ("((jsonb_typeof(c.data->'tags') = 'array' AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(c.data->'tags') AS elem WHERE elem = $1)))", List#{SqlValue.Str("t1")}), rendered)
 
+    /// OR の空のグループは「どれにも合わない」。OR: [{}] で絞り込みが全件に広がらず、OR: [] も FALSE。
+    @Test
+    def testEntryFilterSqlEmptyOr(): Unit \ Assert =
+        let title = Condition.TextEq(CmsTestKit.apiId("title"), "x") :: Nil;
+        Assert.assertEq(expected = ("FALSE", "(FALSE OR ((c.data->>'title') = $1))"),
+            run {
+                (fst(Fragment.renderPred(EntryFilterSql.pred(Condition.AnyOf(Nil) :: Nil), 1)),
+                 fst(Fragment.renderPred(EntryFilterSql.pred(Condition.AnyOf(Nil :: title :: Nil) :: Nil), 1)))
+            } with RawSql.runWithAllow)
 }

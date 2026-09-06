@@ -71,7 +71,7 @@ mod ContentEntries {
     ///
     pub def create(typeId: TypeId, given: Option[EntryId], data: EntryData): Entry \ Db + CmsErr + IdGen =
         let owner = ContentTypes.get(typeId);
-        CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data));
+        CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data) ::: singletonViolations(owner));
         let id = given |> Option.getWithDefault(IdGen.freshEntryId());
         let taken = EntriesQueries.entryExists(EntryId.text(id)) |> Option.nonEmpty;
         CmsErr.raiseIfAny(if (taken) Violation.Violation("id", "'${id}' は既にあります（ゴミ箱の物を含む）") :: Nil else Nil);
@@ -84,7 +84,8 @@ mod ContentEntries {
     ///
     pub def update(id: EntryId, patch: EntryData, expectedVersion: Int32): Entry \ Db + CmsErr =
         let existing = get(id);
-        writeDraft(existing, EntryValidation.merge(existing#data, patch), expectedVersion)
+        let owner = ContentTypes.get(existing#typeId);
+        writeDraft(owner, existing, EntryValidation.merge(EntryValidation.prune(owner#fields, existing#data), patch), expectedVersion)
 
     ///
     /// ゴミ箱へ。無ければ notFound。公開中なら公開も取り下げる（公開側から消え、一意の値も空く）。
@@ -109,7 +110,10 @@ mod ContentEntries {
         let key = EntryId.text(id);
         let existing = get(id);
         let owner = ContentTypes.get(existing#typeId);
-        CmsErr.raiseIfAny(EntryValidation.publish(owner#fields, existing#data) ::: uniqueViolations(owner, existing));
+        let data = EntryValidation.prune(owner#fields, existing#data);
+        let missing = EntriesQueries.missingTargets(key) |> List.filterMap(EntryRows.toTargetId);
+        CmsErr.raiseIfAny(EntryValidation.publish(owner#fields, data) ::: uniqueViolations(owner, existing)
+            ::: (missing |> List.map(target -> Violation.Violation("references", "参照先 '${target}' はありません（消されています）。参照を外してください"))));
         let pending = EntriesQueries.unpublishedTargets(key) |> List.filterMap(EntryRows.toTargetId);
         if (withDependencies)
             List.forEach(dependency -> if (List.memberOf(dependency, id :: visited)) () else discard publishWithin(id :: visited, dependency, author, true), pending)
@@ -117,7 +121,7 @@ mod ContentEntries {
             CmsErr.raiseIfAny(pending |> List.map(dependency -> Violation.Violation("references", "参照先 '${dependency}' が未公開です（withDependencies: true で一緒に公開できます）")));
         discard EntriesQueries.deleteUniquesOfEntry(key);
         List.forEach(match (field, value) -> discard EntriesQueries.insertUnique({ typeId = TypeId.toInt64(owner#id), fieldId = FieldId.toInt64(field#id), value = value, entryId = key }), uniqueValues(owner, existing));
-        writeContent(id, Stage.Published, owner, existing#data);
+        writeContent(id, Stage.Published, owner, data);
         discard EntriesQueries.insertVersion(EntryRows.versionInsert(existing, author, VersionReason.Publish));
         discard EntriesQueries.markPublished(key);
         get(id)
@@ -161,22 +165,33 @@ mod ContentEntries {
             |> Option.filter(version -> version#entryId == id)
             |> CmsErr.orNotFound(Entity.Version, "${versionId}");
         let existing = get(id);
-        writeDraft(existing, found#data, expectedVersion)
+        let owner = ContentTypes.get(existing#typeId);
+        writeDraft(owner, existing, EntryValidation.prune(owner#fields, found#data), expectedVersion)
 
     // ---- 部品 ----
 
     ///
     /// 下書きの中身を置き換えて版を 1 進める。expectedVersion が今の版と違えば conflict（読んでから書くまでの間に進んだ時も）。
     ///
-    def writeDraft(existing: Entry, data: EntryData, expectedVersion: Int32): Entry \ Db + CmsErr =
+    def writeDraft(owner: ContentType, existing: Entry, data: EntryData, expectedVersion: Int32): Entry \ Db + CmsErr =
         let id = existing#id;
         if (existing#version != expectedVersion) CmsErr.conflict(Entity.Entry, EntryId.text(id), existing#version) else ();
-        let owner = ContentTypes.get(existing#typeId);
         CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data));
         writeContent(id, Stage.Draft, owner, data);
         let advanced = EntriesQueries.bumpEntryVersion({ id = EntryId.text(id), expected = expectedVersion });
-        if (advanced == 0) CmsErr.conflict(Entity.Entry, EntryId.text(id), existing#version + 1) else ();
+        // 0 行なら読んでから書くまでに誰かが進めた（またはゴミ箱に入った）。今の版は読み直して報告する
+        if (advanced == 0) CmsErr.conflict(Entity.Entry, EntryId.text(id), get(id)#version) else ();
         get(id)
+
+    ///
+    /// singleton には entry を 1 件しか作れない（コンテンツ API が 1 件しか返さないので、2 件目は見えない物になる）。
+    ///
+    def singletonViolations(owner: ContentType): List[Violation] \ DbRead = match owner#kind {
+        case TypeKind.Collection => Nil
+        case TypeKind.Singleton  =>
+            let count = EntriesQueries.countEntriesOfType(TypeId.toInt64(owner#id)) |> Rows.total;
+            if (count == 0i64) Nil else Violation.Violation("typeId", "SINGLETON の型には entry を 1 件しか作れません") :: Nil
+    }
 
     ///
     /// stage の中身を入れ、entry_links をその stage の分だけ入れ直す。

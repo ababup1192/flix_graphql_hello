@@ -28,4 +28,19 @@ mod TestFieldTree {
              FieldTree.find(FieldId.FieldId(3i64), tree) |> Option.map(field -> names(Children.toList(field#children))),
              names(FieldTree.flatten(tree))))
 
+    /// ancestors は根から親まで（自分は含まない）。最上位は空、無い id は None。
+    ///
+    ///   sections(2: blocks) ── hero(3: object) ── headline(6)
+    @Test
+    def testFieldTreeAncestors(): Unit \ Assert =
+        let tree = FieldTree.build(List#{
+            flatField(2i64, "sections", None, FieldKind.Blocks, 0),
+            flatField(3i64, "hero", Some(2i64), FieldKind.Object, 0),
+            flatField(6i64, "headline", Some(3i64), FieldKind.Text, 0)
+        });
+        let names = fields -> fields |> List.map(field -> ApiId.text(field#apiId));
+        Assert.assertEq(expected = (Some(List#{"sections", "hero"}), Some(Nil), None),
+            (FieldTree.ancestors(FieldId.FieldId(6i64), tree) |> Option.map(names),
+             FieldTree.ancestors(FieldId.FieldId(2i64), tree) |> Option.map(names),
+             FieldTree.ancestors(FieldId.FieldId(99i64), tree) |> Option.map(names)))
 }

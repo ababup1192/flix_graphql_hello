@@ -70,12 +70,15 @@ mod EntryFilterSql {
         case Condition.ArrayContains(apiId, text) =>
             // WhyNot: jsonb_typeof の前置きを省かないのは、値が配列でないと jsonb_array_elements_text が PG の例外で落ちるため
             Fragment.rawPredWith("(jsonb_typeof(c.data->'${ApiId.text(apiId)}') = 'array' AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(c.data->'${ApiId.text(apiId)}') AS elem WHERE elem = ?))", SqlValue.Str(text) :: Nil)
-        case Condition.AnyOf(groups)             => Fragment.any(List.map(pred, groups))
+        // WhyNot: 空のグループを pred(Nil)（TRUE）のまま OR に入れないのは、OR: [{}] で絞り込みが全件に広がるため。空は「どれにも合わない」
+        case Condition.AnyOf(groups)             => if (List.isEmpty(groups)) never() else Fragment.any(groups |> List.map(group -> if (List.isEmpty(group)) never() else pred(group)))
         case Condition.AnyValueContains(text)    =>
             Fragment.rawPredWith("EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE ?)", SqlValue.Str("%" + EntrySearch.escapeLike(text) + "%") :: Nil)
         // WhyNot: Fragment.any(Nil) は「絞り込み無し（TRUE）」なので使えない。空の IN が FALSE になるのを借りる
-        case Condition.Never                     => Pred.In("e.id", Nil)
+        case Condition.Never                     => never()
     }
+
+    def never(): Pred[EntryContentsTable.EntryContentsTable] = Pred.In("e.id", Nil)
 
     ///
     /// 値を文字列として取り出す式。無いキーと JSON の null は SQL の NULL になる。

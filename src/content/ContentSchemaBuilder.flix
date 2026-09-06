@@ -153,17 +153,17 @@ mod ContentSchemaBuilder {
     /// 参照先 1 つ。先読みした linked にあればそれ、無ければ同じ stage で引く（2 段目以降）。
     ///
     def resolveLink(target: ContentType, entry: Entry, id: EntryId): Option[Entry] \ ContentEff =
-        match Linked.get(id, entry#linked) {
+        (match Linked.get(id, entry#linked) {
             case Some(found) => Some(found)
             case None        => ContentEntries.findByStage(target, id, entry#contentStage)
-        }
+        }) |> Option.filter(found -> found#typeId == target#id)
 
     ///
     /// Object の入れ子の型。`<prefix><Field>`（Blog + related → BlogRelated）。子の型名はさらに続く（BlogRelatedLink）。
     /// source は中身を子の分に差し替えた Entry（linked と contentStage を引き継ぐので、中の参照も同じ stage で引ける）。
     ///
     def nestedType(all: List[ContentType], prefix: String, field: FieldDef): ObjectType[Entry, ContentEff] =
-        let name = "${prefix}${Naming.upperFirst(ApiId.text(field#apiId))}";
+        let name = Naming.nestedTypeName(prefix, field#apiId);
         Schema.objectType(name, () -> List.map(customField(all, name), Children.toList(field#children)))
             |> ObjectType.withDescription(field#name)
 
@@ -171,7 +171,7 @@ mod ContentSchemaBuilder {
     /// Blocks の union。`<prefix><Field>` = variant ごとの `<prefix><Field><Variant>`。値は (variant, 中身の Entry)。
     ///
     def blocksUnion(all: List[ContentType], prefix: String, field: FieldDef): Out[(FieldDef, Entry), ContentEff] =
-        let name = "${prefix}${Naming.upperFirst(ApiId.text(field#apiId))}";
+        let name = Naming.nestedTypeName(prefix, field#apiId);
         let variants = Children.toList(field#children) |> List.map(variant -> (variant#apiId, nestedType(all, name, variant)));
         Out.union(name, variants |> List.map(match (_, objectType) -> Out.member(objectType)), (context, block) -> {
             let (variant, inner) = block;
@@ -191,7 +191,7 @@ mod ContentSchemaBuilder {
     /// Select の enum。`<prefix><Field>`（Blog + category → BlogCategory）。値は config.options。
     ///
     def selectCodec(prefix: String, field: FieldDef): GqlCodec[String] =
-        GqlCodec.enumOf("${prefix}${Naming.upperFirst(ApiId.text(field#apiId))}", option -> option, field#config#options)
+        GqlCodec.enumOf(Naming.nestedTypeName(prefix, field#apiId), option -> option, field#config#options)
 
     def fieldDescription(field: FieldDef): Field[Entry, ContentEff] -> Field[Entry, ContentEff] =
         if (field#name == "") (built -> built) else Field.withDescription(field#name)

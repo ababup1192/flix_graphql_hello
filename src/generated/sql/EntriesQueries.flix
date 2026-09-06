@@ -7,7 +7,7 @@ mod EntriesQueries {
     ///
     /// 生成元 entries.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -1314056734
+    pub def sourceHash(): Int32 = -1239908240
 
     ///
     /// entryExists の 1 行。
@@ -171,10 +171,10 @@ mod EntriesQueries {
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
-    /// markUnpublished: UPDATE entries SET stage = 'draft', published_at = NULL, updated_at = now() WHERE id = $1 AND deleted_at IS NULL
+    /// markUnpublished: UPDATE entries SET stage = 'draft', published_at = NULL, updated_at = now() WHERE id = $1 AND stage = 'published' AND deleted_at IS NULL
     ///
     pub def markUnpublished(id: String): Int32 \ DbWrite =
-        let sql = "UPDATE entries SET stage = 'draft', published_at = NULL, updated_at = now() WHERE id = $1 AND deleted_at IS NULL";
+        let sql = "UPDATE entries SET stage = 'draft', published_at = NULL, updated_at = now() WHERE id = $1 AND stage = 'published' AND deleted_at IS NULL";
         let params = List#{SqlValue.Str(id)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
@@ -211,6 +211,33 @@ mod EntriesQueries {
         let sql = "DELETE FROM entry_unique_values WHERE entry_id = $1";
         let params = List#{SqlValue.Str(entryId)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// deleteUniquesOfField: DELETE FROM entry_unique_values WHERE field_id = $1
+    ///
+    pub def deleteUniquesOfField(fieldId: Int64): Int32 \ DbWrite =
+        let sql = "DELETE FROM entry_unique_values WHERE field_id = $1";
+        let params = List#{SqlValue.Int64(fieldId)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// publishedContentsOfType の 1 行。
+    ///
+    pub type alias PublishedContentsOfTypeRow = { entryId = String, data = Util.Json.Json }
+
+    def publishedContentsOfTypeDecoder(): Decoder[PublishedContentsOfTypeRow] =
+        forA (
+            entryId <- Decoder.str("entry_id");
+            data <- Decoder.json("data")
+        ) yield { entryId = entryId, data = data }
+
+    ///
+    /// publishedContentsOfType: SELECT e.id AS entry_id, c.data FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'published' WHERE e.type_id = $1 AND e.deleted_at IS NULL
+    ///
+    pub def publishedContentsOfType(typeId: Int64): List[PublishedContentsOfTypeRow] \ DbRead =
+        let sql = "SELECT e.id AS entry_id, c.data\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'published'\n    WHERE e.type_id = $1 AND e.deleted_at IS NULL";
+        let params = List#{SqlValue.Int64(typeId)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(publishedContentsOfTypeDecoder(), sql, params))
 
     ///
     /// insertUnique: INSERT INTO entry_unique_values (type_id, field_id, value, entry_id) VALUES ($1, $2, $3, $4)
@@ -346,6 +373,24 @@ mod EntriesQueries {
         let sql = "SELECT DISTINCT l.to_entry_id\n    FROM entry_links AS l\n    LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL AND e.stage = 'published'\n    WHERE l.from_entry_id = $1 AND l.stage = 'draft' AND e.id IS NULL";
         let params = List#{SqlValue.Str(fromEntryId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(unpublishedTargetsDecoder(), sql, params))
+
+    ///
+    /// missingTargets の 1 行。
+    ///
+    pub type alias MissingTargetsRow = { toEntryId = String }
+
+    def missingTargetsDecoder(): Decoder[MissingTargetsRow] =
+        forA (
+            toEntryId <- Decoder.str("to_entry_id")
+        ) yield { toEntryId = toEntryId }
+
+    ///
+    /// missingTargets: SELECT DISTINCT l.to_entry_id FROM entry_links AS l LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL WHERE l.from_entry_id = $1 AND l.stage = 'draft' AND e.id IS NULL
+    ///
+    pub def missingTargets(fromEntryId: String): List[MissingTargetsRow] \ DbRead =
+        let sql = "SELECT DISTINCT l.to_entry_id\n    FROM entry_links AS l\n    LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL\n    WHERE l.from_entry_id = $1 AND l.stage = 'draft' AND e.id IS NULL";
+        let params = List#{SqlValue.Str(fromEntryId)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(missingTargetsDecoder(), sql, params))
 
     ///
     /// publishedReferrers の 1 行。

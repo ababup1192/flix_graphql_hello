@@ -52,6 +52,50 @@ mod Naming {
     pub type alias TypeNames = { apiId = ApiId, singular = TypeName, plural = ApiId }
 
     ///
+    /// 入れ子・union・enum の型名。`<prefix><Field>`（Blog + related → BlogRelated）。コンテンツ API はこの規則で生やす。
+    ///
+    pub def nestedTypeName(prefix: String, apiId: ApiId): String = prefix + upperFirst(ApiId.text(apiId))
+
+    ///
+    /// 型がコンテンツ API に生やす型名の全部。singular と接尾辞付き、フィールドから生える入れ子・union・enum の名前。
+    /// 型を作る・フィールドを足す時に、他の型（と自分）の物と重ねない事を守る（重なると graphql-java がスキーマを組めない）。
+    ///
+    pub def schemaTypeNames(singular: TypeName, fields: List[FieldDef]): List[String] =
+        let root = TypeName.text(singular);
+        root :: List.map(suffix -> root + suffix, reservedSuffixes()) ::: fieldTypeNames(root, fields)
+
+    ///
+    /// フィールド（木）から生える型名。Object と Blocks は入れ子の分も、Select は enum。
+    ///
+    pub def fieldTypeNames(prefix: String, fields: List[FieldDef]): List[String] =
+        fields |> List.flatMap(field -> {
+            let name = nestedTypeName(prefix, field#apiId);
+            match field#kind {
+                case FieldKind.Object => name :: fieldTypeNames(name, Children.toList(field#children))
+                case FieldKind.Blocks => name :: fieldTypeNames(name, Children.toList(field#children))
+                case FieldKind.Select => name :: Nil
+                case _                => Nil
+            }
+        })
+
+    ///
+    /// 型名（singular）が他の型の生やす型名と重ならない事。taken は他の型の schemaTypeNames。
+    ///
+    pub def validateSchemaTypeNames(taken: List[String], singular: TypeName): List[Violation] =
+        let root = TypeName.text(singular);
+        (root :: List.map(suffix -> root + suffix, reservedSuffixes()))
+            |> List.filter(name -> List.memberOf(name, taken))
+            |> List.map(name -> Violation.Violation("singular", "'${name}' は他の型がコンテンツ API に生やす型名と重なります"))
+
+    ///
+    /// フィールドが生やす型名が既にある物と重ならない事。taken は全型（自分を含む）の schemaTypeNames。
+    ///
+    pub def validateFieldTypeNames(taken: List[String], prefix: String, field: FieldDef): List[Violation] =
+        fieldTypeNames(prefix, field :: Nil)
+            |> List.filter(name -> List.memberOf(name, taken))
+            |> List.map(name -> Violation.Violation("apiId", "'${name}' はコンテンツ API に既にある型名と重なります"))
+
+    ///
     /// 型の名前を検査する。others は自分以外の既存の型。
     /// apiId が既にあればそれだけ返す（singular / plural は apiId から導くので、続けて見ても同じ原因の誤りが並ぶだけ）。
     ///

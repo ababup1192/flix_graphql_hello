@@ -90,4 +90,30 @@ mod TestEntryValidation {
             (CmsTestKit.violationPaths(EntryValidation.draft(fields, ok)),
              CmsTestKit.violationPaths(EntryValidation.draft(fields, bad)) |> List.sort))
 
+    /// maxLength は文字で数える。絵文字（サロゲートペア）10 個は 10 文字で通り、11 文字目で落ちる。
+    @Test
+    def testEntryValidationMaxLengthCountsCodePoints(): Unit \ Assert =
+        let emoji10 = "😀😀😀😀😀😀😀😀😀😀";
+        Assert.assertEq(expected = (Nil, List#{"fields.title"}),
+            (CmsTestKit.violationPaths(EntryValidation.draft(validationFields(), CmsTestKit.entryData(List#{("title", Json.JString(emoji10))}))),
+             CmsTestKit.violationPaths(EntryValidation.draft(validationFields(), CmsTestKit.entryData(List#{("title", Json.JString(emoji10 + "a"))})))))
+
+    /// 入れ子の規則外のキーは黙って落とさず違反にする（Object の中も、Blocks の variant の中も）。
+    @Test
+    def testEntryValidationNestedBadKeys(): Unit \ Assert =
+        let hero = { children = Children.Children(CmsTestKit.fieldDef("headline", FieldKind.Text) :: Nil) | CmsTestKit.fieldDef("hero", FieldKind.Object) };
+        let fields = { children = Children.Children(CmsTestKit.fieldDef("label", FieldKind.Text) :: Nil) | CmsTestKit.fieldDef("related", FieldKind.Object) } ::
+                     { many = true, children = Children.Children(hero :: Nil) | CmsTestKit.fieldDef("sections", FieldKind.Blocks) } :: Nil;
+        let data = CmsTestKit.entryData(List#{
+            ("related", Json.JObject(Map#{ "label" => Json.JString("a"), "Bad Key" => Json.JString("x") })),
+            ("sections", Json.JArray(Vector#{Json.JObject(Map#{ "blockType" => Json.JString("hero"), "bad-key" => Json.JString("x") })}))});
+        Assert.assertEq(expected = List#{"fields.related.Bad Key", "fields.sections[0].bad-key"},
+            CmsTestKit.violationPaths(EntryValidation.draft(fields, data)) |> List.sort)
+
+    /// 型に無いキーを落とす（フィールドを消した後の古い値）。型にあるキーはそのまま。
+    @Test
+    def testEntryValidationPrune(): Unit \ Assert =
+        let data = CmsTestKit.entryData(List#{("title", Json.JString("a")), ("gone", Json.JString("b"))});
+        Assert.assertEq(expected = List#{"title"},
+            EntryValidation.prune(validationFields(), data) |> Map.keysOf |> Set.toList |> List.map(ApiId.text))
 }

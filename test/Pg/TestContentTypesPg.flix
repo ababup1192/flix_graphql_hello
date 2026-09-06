@@ -87,4 +87,54 @@ mod TestContentTypesPg {
                 Some("id: 'abc' は数字の ID ではありません")),
             (created, added, listed, invalid, badId))
 
+    // ---- 名前と kind の守り ----
+
+    /// SINGLETON には entry を 1 件しか作れない（コンテンツ API が 1 件しか返さないので、2 件目は見えない物になる）。
+    @Test
+    def testPgSingletonSingleEntry(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"s1", "s2"}, () -> {
+            let settings = ContentTypes.create({ kind = TypeKind.Singleton | CmsTestKit.typeDraft("settings", "サイト設定") });
+            discard ContentTypes.addField(settings#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+            discard ContentEntries.create(settings#id, None, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("a"))}));
+            CmsTestKit.failureMessage(() -> ContentEntries.create(settings#id, None, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("b"))})))
+        }));
+        Assert.assertEq(expected = Ok(Ok(Err("typeId: SINGLETON の型には entry を 1 件しか作れません"))), result)
+
+    /// apiId だけ渡して singular と plural が同じになる（status → Status / status）時、怒られるのは渡していない plural ではなく apiId。
+    @Test
+    def testPgDerivedNamesBlameApiId(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.failureMessage(() -> ContentTypes.create(CmsTestKit.typeDraft("status", "状態"))));
+        Assert.assertEq(expected = Ok(Ok(Err("apiId: apiId から導いた plural が使えません（singular と同じ名前は使えません（コンテンツ API の 1 件と一覧のクエリ名が衝突します））。singular か plural を指定してください"))), result)
+
+    /// 他の型が生やす型名（BlogCategory）と同じ singular の型は作れず、既にある型名と重なる名前のフィールド（where → BlogWhere）も足せない。
+    /// 作れてしまうと graphql-java がスキーマを組めず、コンテンツ API 全体が止まる。
+    @Test
+    def testPgSchemaTypeNameCollisions(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> {
+            let blogs = ContentTypes.create(blogsDraft());
+            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("category", FieldKind.Select, { options = List#{"NEWS"} | FieldConfig.empty() }));
+            let typeClash = CmsTestKit.failureMessage(() -> ContentTypes.create({ singular = Some(CmsTestKit.typeName("BlogCategory")) | CmsTestKit.typeDraft("categories", "分類") }));
+            let fieldClash = CmsTestKit.failureMessage(() -> ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("where", FieldKind.Object, FieldConfig.empty())));
+            let plainField = CmsTestKit.messageOr(field -> ApiId.text(field#apiId), () -> ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("where", FieldKind.Text, FieldConfig.empty())));
+            (typeClash, fieldClash, plainField)
+        });
+        Assert.assertEq(expected = Ok(Ok((
+            Err("singular: 'BlogCategory' は他の型がコンテンツ API に生やす型名と重なります"),
+            Err("apiId: 'BlogWhere' はコンテンツ API に既にある型名と重なります"),
+            Ok("where")))), result)
+
+    /// フィールドを消した後も、古い値が残った entry は更新も公開もできる。消えたフィールドの値は次の保存で落ちる。
+    @Test
+    def testPgRemovedFieldDoesNotBlockEntries(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
+            let blogs = ContentTypes.create(blogsDraft());
+            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+            let body = ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("body", FieldKind.TextArea, FieldConfig.empty()));
+            let created = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("a")), ("body", Util.Json.Json.JString("b"))}));
+            ContentTypes.removeField(body#id);
+            let updated = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("c"))}), created#version);
+            let published = ContentEntries.publish(updated#id, "tester", false);
+            (Map.keysOf(updated#data) |> Set.toList |> List.map(ApiId.text), published#stage)
+        }));
+        Assert.assertEq(expected = Ok(Ok((List#{"title"}, Stage.Published))), result)
 }

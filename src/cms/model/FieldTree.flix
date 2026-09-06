@@ -33,6 +33,14 @@ mod FieldTree {
         tree |> List.findMap(field -> if (field#id == id) Some(field) else find(id, Children.toList(field#children)))
 
     ///
+    /// 木の根から id までの祖先（根が先、自分は含まない）。無ければ None。
+    ///
+    pub def ancestors(id: FieldId, tree: List[FieldDef]): Option[List[FieldDef]] =
+        tree |> List.findMap(field ->
+            if (field#id == id) Some(Nil)
+            else ancestors(id, Children.toList(field#children)) |> Option.map(rest -> field :: rest))
+
+    ///
     /// 木を平らにする（深さ優先）。
     ///
     pub def flatten(tree: List[FieldDef]): List[FieldDef] =

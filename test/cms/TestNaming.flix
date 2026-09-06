@@ -104,4 +104,32 @@ mod TestNaming {
              CmsTestKit.violationPaths(Naming.validateConfig(Nil, FieldKind.Text, { integer = Some(true) | base })),
              CmsTestKit.violationPaths(Naming.validateConfig(Nil, FieldKind.Number, { min = Some(0.0), max = Some(100.0), integer = Some(true) | base }))))
 
+    // ---- 生える型名 ----
+
+    ///
+    /// blogs（title / category: select / sections: blocks[hero{headline}]）。
+    ///
+    def blogFields(): List[FieldDef] =
+        let hero = { children = Children.Children(CmsTestKit.fieldDef("headline", FieldKind.Text) :: Nil) | CmsTestKit.fieldDef("hero", FieldKind.Object) };
+        CmsTestKit.fieldDef("title", FieldKind.Text) ::
+        CmsTestKit.fieldDef("category", FieldKind.Select) ::
+        { many = true, children = Children.Children(hero :: Nil) | CmsTestKit.fieldDef("sections", FieldKind.Blocks) } :: Nil
+
+    def blogSingular(): TypeName = CmsTestKit.names("blogs", "Blog", "blogs")#singular
+
+    /// 型が生やす型名は、singular と接尾辞付き、Select の enum、Blocks の union と variant（入れ子は名前が続く）。Text からは生えない。
+    @Test
+    def testNamingSchemaTypeNames(): Unit \ Assert =
+        Assert.assertEq(expected = List#{"Blog", "BlogWhere", "BlogWhereLeaf", "BlogOrderBy", "BlogConnection", "BlogCategory", "BlogSections", "BlogSectionsHero"},
+            Naming.schemaTypeNames(blogSingular(), blogFields()))
+
+    /// 他の型が生やす名前（BlogCategory）と同じ singular は invalid。重ならなければ通る。既にある型名と重なる名前のフィールド（where → BlogWhere）も invalid。
+    @Test
+    def testNamingValidateSchemaTypeNames(): Unit \ Assert =
+        let taken = Naming.schemaTypeNames(blogSingular(), blogFields());
+        Assert.assertEq(expected = (List#{"singular"}, Nil, List#{"apiId"}, Nil),
+            (CmsTestKit.violationPaths(Naming.validateSchemaTypeNames(taken, CmsTestKit.names("categories", "BlogCategory", "categories")#singular)),
+             CmsTestKit.violationPaths(Naming.validateSchemaTypeNames(taken, CmsTestKit.names("tags", "Tag", "tags")#singular)),
+             CmsTestKit.violationPaths(Naming.validateFieldTypeNames(taken, "Blog", CmsTestKit.fieldDef("where", FieldKind.Object))),
+             CmsTestKit.violationPaths(Naming.validateFieldTypeNames(taken, "Blog", CmsTestKit.fieldDef("where", FieldKind.Text)))))
 }

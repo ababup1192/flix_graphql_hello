@@ -25,6 +25,13 @@ mod EntryValidation {
             })
 
     ///
+    /// 型に無いキーを落とす。フィールドを消した後に残った古い値を、保存や公開のたびに「この型にありません」と言わないため。
+    ///
+    pub def prune(fields: List[FieldDef], data: EntryData): EntryData =
+        let known = fields |> List.map(field -> field#apiId) |> List.toSet;
+        data |> Map.filterWithKey((apiId, _) -> Set.memberOf(apiId, known))
+
+    ///
     /// 公開できるか。下書きの検査に加えて、required のフィールドに値がある事を見る（null・無い・空文字・空の配列は駄目）。
     /// unique はここでは見ない（公開中の値との照合は DB が要る。ContentEntries.publish）。
     ///
@@ -60,10 +67,10 @@ mod EntryValidation {
 
     def checkScalar(path: String, field: FieldDef, value: Json): List[Violation] =
         match (field#kind, value) {
-            case (FieldKind.Object, Json.JObject(fields)) => draftAt(path, Children.toList(field#children), EntryValue.objectData(fields))
+            case (FieldKind.Object, Json.JObject(fields)) => badKeys(path, fields) ::: draftAt(path, Children.toList(field#children), EntryValue.objectData(fields))
             case (FieldKind.Object, _)                    => Violation.Violation(path, "オブジェクトにしてください") :: Nil
-            case (FieldKind.Blocks, Json.JObject(_))      => match EntryValue.readBlock(Children.toList(field#children), value) {
-                case Some((variant, inner)) => draftAt(path, Children.toList(variant#children), inner)
+            case (FieldKind.Blocks, Json.JObject(fields)) => match EntryValue.readBlock(Children.toList(field#children), value) {
+                case Some((variant, inner)) => badKeys(path, Map.remove(EntryValue.blockTypeKey(), fields)) ::: draftAt(path, Children.toList(variant#children), inner)
                 case None                   => Violation.Violation(path, "${EntryValue.blockTypeKey()} は ${Children.toList(field#children) |> List.map(variant -> ApiId.text(variant#apiId)) |> List.join(" / ")} のどれかにしてください") :: Nil
             }
             case (FieldKind.Blocks, _)                    => Violation.Violation(path, "オブジェクト（${EntryValue.blockTypeKey()} 付き）にしてください") :: Nil
@@ -83,11 +90,27 @@ mod EntryValidation {
             case (FieldKind.Boolean, _)                   => Violation.Violation(path, "真偽値にしてください") :: Nil
         }
 
+    ///
+    /// 入れ子のキーの形。objectData は規則外のキーを黙って落とすので、検証ではそれを違反として言う（保存されて API から見えないゴミを残さない）。
+    ///
+    def badKeys(path: String, fields: Map[String, Json]): List[Violation] =
+        fields |> Map.keysOf |> Set.toList |> List.filter(key -> Option.isEmpty(ApiId.parse(key)))
+            |> List.map(key -> Violation.Violation("${path}.${key}", "フィールド名は ${ApiId.rule()} にしてください"))
+
+    ///
+    /// maxLength は文字（コードポイント）で数える。
+    ///
+    /// WhyNot: String.length で数えないのは、UTF-16 の単位なので絵文字が 2 文字に数えられるため。
+    ///
     def checkLength(path: String, config: FieldConfig, text: String): List[Violation] =
         match config#maxLength {
-            case Some(limit) if String.length(text) > limit => Violation.Violation(path, "${limit} 文字以内にしてください") :: Nil
-            case _                                          => Nil
+            case Some(limit) if codePointCount(text) > limit => Violation.Violation(path, "${limit} 文字以内にしてください") :: Nil
+            case _                                           => Nil
         }
+
+    def codePointCount(text: String): Int32 =
+        let surrogates = String.toList(text) |> List.count(Char.isSurrogate);
+        String.length(text) - surrogates / 2
 
     def checkNumber(path: String, config: FieldConfig, number: BigDecimal): List[Violation] =
         let asFloat = BigDecimal.tryToFloat64(number);

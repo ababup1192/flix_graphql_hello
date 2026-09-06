@@ -80,16 +80,6 @@ mod ContentTypeRows {
     pub def typeIdOf(row: { id = Int64 | r }): TypeId = TypeId.TypeId(row#id)
 
     ///
-    /// content_types の行から名前だけ（衝突の検査用。フィールドは要らない）。
-    ///
-    pub def toTypeNames(row: { apiId = String, singular = String, plural = String | r }): Naming.TypeNames \ DbErr =
-        {
-            apiId    = apiIdOrRaise("content_types.api_id", row#apiId),
-            singular = TypeName.parse(row#singular) |> Rows.orRaise("content_types.singular", row#singular),
-            plural   = apiIdOrRaise("content_types.plural", row#plural)
-        }
-
-    ///
     /// content_fields の行から FieldDef を組む。children は空（木にするのは FieldTree.build）。
     ///
     pub def toFieldDef(row: { id = Int64, typeId = Int64, parentFieldId = Option[Int64], apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, targetTypeId = Option[Int64], config = Json, position = Int32 | r }): FieldDef \ DbErr =

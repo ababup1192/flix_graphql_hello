@@ -54,9 +54,19 @@ mod ContentTypes {
             singular = draft#singular |> Option.getWithDefault(Naming.deriveSingular(draft#apiId)),
             plural   = draft#plural |> Option.getWithDefault(Naming.derivePlural(draft#apiId))
         };
-        CmsErr.raiseIfAny(Naming.validateType(allNames(), names));
+        let derived = Option.isEmpty(draft#singular) and Option.isEmpty(draft#plural);
+        let others = list();
+        CmsErr.raiseIfAny(typeNameViolations(others, names) |> List.map(violation -> if (derived) blameApiId(violation) else violation));
         let inserted = ContentTypesQueries.insertContentType(ContentTypeRows.typeInsert(names, draft)) |> Rows.expectId;
         get(TypeId.TypeId(inserted))
+
+    ///
+    /// singular / plural を導いた時の違反は apiId のせいなので、そこへ付け替える（渡していない項目を怒られても直せない）。
+    ///
+    def blameApiId(violation: Violation): Violation =
+        let Violation.Violation(path, message) = violation;
+        if (path == "apiId") violation
+        else Violation.Violation("apiId", "apiId から導いた ${path} が使えません（${message}）。singular か plural を指定してください")
 
     ///
     /// content type を直す。触った項目だけ UPDATE に出る。名前を変えるなら規則を検査する。
@@ -68,7 +78,8 @@ mod ContentTypes {
             singular = changes#singular |> Option.getWithDefault(existing#singular),
             plural   = changes#plural |> Option.getWithDefault(existing#plural)
         };
-        CmsErr.raiseIfAny(Naming.validateType(allNames() |> List.filter(other -> other#apiId != existing#apiId), names));
+        let others = list() |> List.filter(other -> other#id != id);
+        CmsErr.raiseIfAny(typeNameViolations(others, names));
         discard ContentTypesQueries.updateContentType(TypeId.toInt64(id), ContentTypeRows.typeChanges(changes));
         get(id)
 
@@ -94,7 +105,7 @@ mod ContentTypes {
     pub def addField(typeId: TypeId, draft: FieldDraft): FieldDef \ Db + CmsErr =
         let owner = get(typeId);
         let parent = draft#parent |> Option.map(parentId -> FieldTree.find(parentId, owner#fields) |> CmsErr.orNotFound(Entity.Field, "${parentId}"));
-        CmsErr.raiseIfAny(validateDraft(takenApiIds(owner#fields, None), parent, draft) ::: targetTypeExists(draft#target));
+        CmsErr.raiseIfAny(validateDraft(takenApiIds(owner#fields, None), parent, draft) ::: targetTypeExists(draft#target) ::: fieldTypeNameViolations(owner, draft));
         let position = match draft#parent {
             case Some(parentId) => ContentFieldsQueries.nextChildPosition(FieldId.toInt64(parentId)) |> Rows.nextPosition
             case None           => ContentFieldsQueries.nextFieldPosition(TypeId.toInt64(typeId)) |> Rows.nextPosition
@@ -115,9 +126,27 @@ mod ContentTypes {
         let unique = changes#unique |> Option.getWithDefault(existing#unique);
         let required = changes#required |> Option.getWithDefault(existing#required);
         CmsErr.raiseIfAny(Naming.validateFlags(existing#kind, existing#many, unique) ::: Naming.validateChildFlags(Option.nonEmpty(existing#parent), required, unique) ::: Naming.validateConfig(taken, existing#kind, config));
+        match (changes#unique, existing#unique) {
+            case (Some(true), false) => enableUnique(existing)
+            case (Some(false), true) => discard EntriesQueries.deleteUniquesOfField(FieldId.toInt64(id))
+            case _                   => ()
+        };
         discard ContentFieldsQueries.updateField(FieldId.toInt64(id), ContentTypeRows.fieldChanges(changes));
         touch(existing#typeId);
         getField(id)
+
+    ///
+    /// unique を後から付ける。公開中の値に重複があれば invalid、無ければ写し（entry_unique_values）を埋める。
+    /// 埋めないと、後で再公開した 1 件だけが写しに入り、既に公開中の他の entry が再公開できなくなる。
+    ///
+    def enableUnique(field: FieldDef): Unit \ Db + CmsErr =
+        let values = EntriesQueries.publishedContentsOfType(TypeId.toInt64(field#typeId)) |> List.filterMap(row ->
+            Map.get(field#apiId, EntryRows.dataFromJson(row#data)) |> Option.flatMap(EntryRows.uniqueValueText) |> Option.map(value -> (value, row#entryId)));
+        let byValue = values |> List.foldLeft((acc, pair) -> { let (value, entryId) = pair; Map.insertWith((_, older) -> entryId :: older, value, entryId :: Nil, acc) }, Map.empty());
+        CmsErr.raiseIfAny(byValue |> Map.toList |> List.filter(match (_, holders) -> List.length(holders) > 1) |> List.map(match (value, holders) ->
+            Violation.Violation("unique", "'${value}' を公開中の entry ${holders |> List.reverse |> List.map(id -> "'${id}'") |> List.join(", ")} が持っています。先に値を分けてください")));
+        discard EntriesQueries.deleteUniquesOfField(FieldId.toInt64(field#id));
+        List.forEach(match (value, entryId) -> discard EntriesQueries.insertUnique({ typeId = TypeId.toInt64(field#typeId), fieldId = FieldId.toInt64(field#id), value = value, entryId = entryId }), values)
 
     ///
     /// フィールドを消す。無ければ notFound。
@@ -161,16 +190,34 @@ mod ContentTypes {
     }
 
     ///
+    /// 足すフィールドが生やす型名が、全型（自分を含む）の生やす型名と重ならない事。prefix は親の入れ子の型名まで。
+    ///
+    def fieldTypeNameViolations(owner: ContentType, draft: FieldDraft): List[Violation] \ DbRead =
+        let ancestors = draft#parent |> Option.flatMap(parentId -> FieldTree.ancestors(parentId, owner#fields)) |> Option.getWithDefault(Nil);
+        let prefix = ancestors |> List.foldLeft((acc, ancestor) -> Naming.nestedTypeName(acc, ancestor#apiId), TypeName.text(owner#singular));
+        let asField = { id = FieldId.FieldId(0i64), typeId = owner#id, apiId = draft#apiId, name = draft#name, kind = draft#kind, many = draft#many, required = draft#required, unique = draft#unique, localized = draft#localized, target = draft#target, parent = draft#parent, children = Children.none(), config = draft#config, position = 0 };
+        Naming.validateFieldTypeNames(List.flatMap(schemaTypeNamesOf, list()), prefix, asField)
+
+    ///
+    /// 型の名前の検査。名前の規則（既存の型との衝突）に通ってから、生える型名との衝突を見る（apiId が重なっていれば型名も重なるので、同じ原因を二度言わない）。
+    ///
+    def typeNameViolations(others: List[ContentType], names: Naming.TypeNames): List[Violation] =
+        match Naming.validateType(List.map(namesOf, others), names) {
+            case Nil        => Naming.validateSchemaTypeNames(List.flatMap(schemaTypeNamesOf, others), names#singular)
+            case violations => violations
+        }
+
+    def namesOf(contentType: ContentType): Naming.TypeNames =
+        { apiId = contentType#apiId, singular = contentType#singular, plural = contentType#plural }
+
+    def schemaTypeNamesOf(contentType: ContentType): List[String] =
+        Naming.schemaTypeNames(contentType#singular, contentType#fields)
+
+    ///
     /// 型の中で既に使われている apiId（深さ問わず。子の名前も型の中で重ねない）。excluded は自分（直す時）。
     ///
     def takenApiIds(tree: List[FieldDef], excluded: Option[FieldId]): List[ApiId] =
         FieldTree.flatten(tree) |> List.filter(field -> Some(field#id) != excluded) |> List.map(field -> field#apiId)
-
-    ///
-    /// 全 content type の名前だけ（衝突の検査用）。SQL は 1 本。
-    ///
-    def allNames(): List[Naming.TypeNames] \ DbRead =
-        ContentTypesQueries.listContentTypes() |> List.map(ContentTypeRows.toTypeNames)
 
     ///
     /// 型のフィールドの木。

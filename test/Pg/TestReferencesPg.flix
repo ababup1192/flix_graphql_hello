@@ -104,4 +104,28 @@ mod TestReferencesPg {
                 (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "nodes" => Value.List(Nil) }) }), None)),
             (expanded, byTag, byCategory, sdl, byBadRef))
 
+    /// 別の型の entry の id を REFERENCE に入れても、コンテンツ API では null（型が違う物を参照先として描画しない）。
+    @Test
+    def testPgReferenceWrongTypeIsNull(): Unit \ {IO, Assert} =
+        let seed = () -> CmsTestKit.withIds(List#{"t1", "b1"}, () -> {
+            let (_, blogs, tags) = typesWithReferences();
+            discard ContentEntries.create(tags, None, CmsTestKit.entryData(List#{("label", Json.JString("flix"))}));
+            discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("wrong type")), ("profile", Json.JString("t1"))}))
+        });
+        let answer = PgTestSupport.withContentApi(seed, ask -> ask("{ blog(id: \"b1\", stage: DRAFT) { title profile { name } } }"));
+        Assert.assertEq(expected = (Value.Obj(Map#{ "blog" => Value.Obj(Map#{ "title" => Value.Str("wrong type"), "profile" => Value.Null }) }), None), answer)
+
+    /// 参照先をゴミ箱に入れた後の publish は「未公開」ではなく「ありません」で止まり、withDependencies でも notFound にならない。
+    @Test
+    def testPgPublishWithDeletedTarget(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"p1", "b1"}, () -> {
+            let (profiles, blogs, _) = typesWithReferences();
+            discard ContentEntries.create(profiles, None, CmsTestKit.entryData(List#{("name", Json.JString("abab"))}));
+            discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("gone")), ("profile", Json.JString("p1"))}));
+            ContentEntries.delete(CmsTestKit.entryId("p1"));
+            (CmsTestKit.failureMessage(() -> ContentEntries.publish(CmsTestKit.entryId("b1"), "tester", false)),
+             CmsTestKit.failureMessage(() -> ContentEntries.publish(CmsTestKit.entryId("b1"), "tester", true)))
+        }));
+        let message = "references: 参照先 'p1' はありません（消されています）。参照を外してください";
+        Assert.assertEq(expected = Ok(Ok((Err(message), Err(message)))), result)
 }

@@ -37,6 +37,8 @@ mod ContentFieldsTable {
         case TargetTypeIdFkey
         /// content_fields_parent_field_id_fkey (foreign key)
         case ParentFieldIdFkey
+        /// content_fields_kind_check (check)
+        case KindCheck
     }
 
     ///
@@ -55,6 +57,7 @@ mod ContentFieldsTable {
         case Constraint.ApiIdKey => DbErr.uniqueViolation("content_fields_api_id_key")
         case Constraint.TargetTypeIdFkey => DbErr.foreignKeyViolation("content_fields_target_type_id_fkey")
         case Constraint.ParentFieldIdFkey => DbErr.foreignKeyViolation("content_fields_parent_field_id_fkey")
+        case Constraint.KindCheck => DbErr.checkViolation("content_fields_kind_check")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
@@ -62,6 +65,7 @@ mod ContentFieldsTable {
         case "content_fields_api_id_key" => Some(Constraint.ApiIdKey)
         case "content_fields_target_type_id_fkey" => Some(Constraint.TargetTypeIdFkey)
         case "content_fields_parent_field_id_fkey" => Some(Constraint.ParentFieldIdFkey)
+        case "content_fields_kind_check" => Some(Constraint.KindCheck)
         case _ => None
     }
 

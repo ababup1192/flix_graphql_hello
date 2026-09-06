@@ -116,7 +116,8 @@ mod EntryRows {
     ///
     pub def uniqueValueText(json: Json): Option[String] = match json {
         case Json.JString(s) => Some(s)
-        case Json.JNumber(n) => Some("${n}")
+        // WhyNot: "${n}" にしないのは、1 と 1.0 が別の文字列になって一意が効かないため
+        case Json.JNumber(n) => Some(unsafe IO { n.stripTrailingZeros().toPlainString() })
         case Json.JBool(b)   => Some(if (b) "true" else "false")
         case _               => None
     }

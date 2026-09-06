@@ -43,11 +43,12 @@ mod TestContentApiPg {
     @Test
     def testPgContentApiEmptyFiltersMatchNothing(): Unit \ {IO, Assert} =
         let none = (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }) }), None);
-        let (byBadId, byBadIdIn, byEmptyOr) = PgTestSupport.withContentApi(seed, ask ->
+        let (byBadId, byBadIdIn, byEmptyOr, byEmptyGroup) = PgTestSupport.withContentApi(seed, ask ->
             (ask("{ blogs(stage: DRAFT, where: { id_eq: \"not an id!\" }) { totalCount } }"),
              ask("{ blogs(stage: DRAFT, where: { id_in: [\"not an id!\"] }) { totalCount } }"),
-             ask("{ blogs(stage: DRAFT, where: { OR: [] }) { totalCount } }")));
-        Assert.assertEq(expected = (none, none, none), (byBadId, byBadIdIn, byEmptyOr))
+             ask("{ blogs(stage: DRAFT, where: { OR: [] }) { totalCount } }"),
+             ask("{ blogs(stage: DRAFT, where: { OR: [{}] }) { totalCount } }")));
+        Assert.assertEq(expected = (none, none, none, none), (byBadId, byBadIdIn, byEmptyOr, byEmptyGroup))
 
     /// 検証をすり抜けた古い値（配列のはずの tags が文字列、数値のはずの views が文字列）があっても、絞り込みと並び替えは落ちずにその entry を外す。
     @Test

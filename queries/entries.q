@@ -69,8 +69,9 @@ query markPublished(id: String) -> exec {
     UPDATE entries SET stage = 'published', published_at = now(), updated_at = now() WHERE id = :id AND deleted_at IS NULL
 }
 
+// 公開中の行だけ触る（未公開の entry に取り下げを送っても updated_at を動かさない）
 query markUnpublished(id: String) -> exec {
-    UPDATE entries SET stage = 'draft', published_at = NULL, updated_at = now() WHERE id = :id AND deleted_at IS NULL
+    UPDATE entries SET stage = 'draft', published_at = NULL, updated_at = now() WHERE id = :id AND stage = 'published' AND deleted_at IS NULL
 }
 
 query deleteContent(entryId: String, stage: String) -> exec {
@@ -85,6 +86,19 @@ query findUniqueOwner(typeId: Int64, fieldId: Int64, value: String) -> one {
 
 query deleteUniquesOfEntry(entryId: String) -> exec {
     DELETE FROM entry_unique_values WHERE entry_id = :entryId
+}
+
+// unique を外した時に写しを消す
+query deleteUniquesOfField(fieldId: Int64) -> exec {
+    DELETE FROM entry_unique_values WHERE field_id = :fieldId
+}
+
+// unique を後から付けた時に公開中の値を写す用。型の公開中の中身
+query publishedContentsOfType(typeId: Int64) -> many {
+    SELECT e.id AS entry_id, c.data
+    FROM entries AS e
+    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'published'
+    WHERE e.type_id = :typeId AND e.deleted_at IS NULL
 }
 
 query insertUnique(typeId: Int64, fieldId: Int64, value: String, entryId: String) -> exec {
@@ -129,6 +143,14 @@ query unpublishedTargets(fromEntryId: String) -> many {
     SELECT DISTINCT l.to_entry_id
     FROM entry_links AS l
     LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL AND e.stage = 'published'
+    WHERE l.from_entry_id = :fromEntryId AND l.stage = 'draft' AND e.id IS NULL
+}
+
+// 下書きが参照している entry のうち、無い物（ゴミ箱の物と、消えた物）
+query missingTargets(fromEntryId: String) -> many {
+    SELECT DISTINCT l.to_entry_id
+    FROM entry_links AS l
+    LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL
     WHERE l.from_entry_id = :fromEntryId AND l.stage = 'draft' AND e.id IS NULL
 }
 
