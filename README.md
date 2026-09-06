@@ -11,22 +11,33 @@ Mutation の例として SQLite に置いたカウンタを持つ。
 ## 使い方
 
 Flix コンパイラは flix_game_engine の devbox が持つ jar を借りる（`bin/flix` が解決する）。
-JDK が PATH に要る。
+JDK と Docker が要る。DB 層は [sqlfx](https://github.com/ababup1192/sqlfx) で、`flix.toml` の `[dependencies]` から GitHub の release を取る。
 
 ```bash
-make run       # サーバ起動（初回は Maven 依存の取得で時間がかかる）
-make query     # 起動中のサーバへサンプルのクエリと mutation を投げる
+make db-up     # PostgreSQL 16 を docker compose で起動
+make run       # サーバ起動（CMS_DSN 等は Makefile が渡す。初回は Maven 依存の取得で時間がかかる）
+make query     # 起動中のサーバへ /health とサンプルのクエリと mutation を投げる
 make generate  # schema.graphql から src/generated/GeneratedSchema.flix を作り直す
 make check     # 型検査
-make test      # テスト（graphql-java も SQLite も使うが、HTTP サーバは起動しない）
+make test      # DB 無しのテスト（test/Pg を除く）
+make test-pg   # コンテナを立てて実 PostgreSQL 込みで全部回し、止める
+make db-down   # PostgreSQL を止めてデータを消す
 ```
 
 `bin/flix` は `--Xsubeffecting=lambdas` を付けて呼ぶ（純粋なリゾルバのラムダをそのまま `\ AppEff` の関数型に置くため）。
 VS Code の Flix 拡張にも同じフラグが要り、`.vscode/settings.json` の `flix.extraFlixArgs` で渡している。
 フラグが効く前の診断が残っていたら「Developer: Reload Window」で読み直す。
 
-起動すると `http://localhost:8080/graphql` で待ち受ける。カウンタはカレントディレクトリの
-`counter.db` に保存され、再起動しても値が残る。リポジトリのルートで起動する。
+### 環境変数
+
+| 変数 | 意味 |
+|---|---|
+| `CMS_DSN` | `jdbc:postgresql://host:port/db`。必須。起動時に SELECT 1 が通らなければ終了コード 1 |
+| `CMS_DB_USER` / `CMS_DB_PASSWORD` | 省略時は `cms` |
+| `CMS_CORS_ORIGINS` | 許すオリジンのカンマ区切り（`https://admin.example.com`）。`*` で全部。省略時は CORS ヘッダを付けない |
+
+起動すると `http://localhost:8080/graphql` で待ち受け、`GET /health` が DB に届けば `{"status":"ok"}`、届かなければ 503 を返す。
+カウンタはカレントディレクトリの `counter.db`（SQLite）に保存され、再起動しても値が残る。リポジトリのルートで起動する。
 
 ### リクエストの形
 

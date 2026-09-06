@@ -1,19 +1,58 @@
 ///
-/// HTTP リクエストを GraphQL の実行に橋渡しするルーティング。
-/// ソケットも graphql-java も触らず、`Graphql` effect だけに依存する。
+/// サーバの設定。
+///
+/// - cors: 許すオリジン
+///
+pub type alias ServerConfig = { cors = CorsConfig }
+
+///
+/// HTTP リクエストを GraphQL の実行と死活監視に橋渡しするルーティング。
+/// ソケットも graphql-java も JDBC も触らず、`Graphql` と `Health` の effect だけに依存する。
 ///
 mod Server {
 
     ///
-    /// リクエストを 1 つ処理する。
-    /// POST /graphql にボディ {"query": "...", "variables": {...}, "operationName": "..."} を受け取り、
-    /// {"data": ..., "errors": [...]} を返す。リクエストヘッダは今は見ない。
+    /// CORS 無しの設定。テストと、同一オリジンだけで使うとき。
     ///
-    pub def handle(request: HttpRequest): HttpResponse \ Graphql =
-        match (request#method, request#path) {
+    pub def defaultConfig(): ServerConfig = { cors = Cors.none() }
+
+    ///
+    /// リクエストを 1 つ処理する。
+    /// - POST /graphql: ボディ {"query": "...", "variables": {...}, "operationName": "..."} を実行して {"data": ..., "errors": [...]} を返す
+    /// - GET /health: DB に届けば 200、届かなければ 503
+    /// - OPTIONS: CORS の preflight
+    /// パスのクエリ文字列は無視する。許したオリジンからのリクエストには CORS ヘッダを足す。
+    /// リクエストヘッダは Origin 以外まだ見ない。
+    ///
+    pub def handle(config: ServerConfig, request: HttpRequest): HttpResponse \ {Graphql, Health} =
+        route(config, request) |> Cors.withHeaders(config#cors, request)
+
+    ///
+    /// メソッドとパスで振り分ける。
+    ///
+    def route(config: ServerConfig, request: HttpRequest): HttpResponse \ {Graphql, Health} =
+        match (request#method, pathOf(request#path)) {
+            case ("OPTIONS", _)       => Cors.preflight(config#cors, request)
             case ("POST", "/graphql") => executeBody(request#body)
             case (_, "/graphql")      => errorResponse(405, ("Allow", "POST") :: Nil, "POST only")
+            case ("GET", "/health")   => health()
+            case (_, "/health")       => errorResponse(405, ("Allow", "GET") :: Nil, "GET only")
             case _                    => errorResponse(404, Nil, "not found")
+        }
+
+    ///
+    /// パスからクエリ文字列を落とす（"/health?probe=1" → "/health"）。
+    ///
+    pub def pathOf(path: String): String =
+        String.splitOn(substr = "?", path) |> List.head |> Option.getWithDefault(path)
+
+    ///
+    /// GET /health。DB に届けば {"status": "ok"}、届かなければ 503 で理由を付ける。
+    ///
+    def health(): HttpResponse \ Health =
+        match Health.checkDb() {
+            case Ok(())       => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("ok") })) }
+            case Err(message) => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("error"), "db" => Value.Str(message) })) }
         }
 
     ///

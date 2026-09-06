@@ -25,9 +25,14 @@ Flix から graphql-java（Java の GraphQL ライブラリ）を Java interop �
 ## ビルドと実行
 
 Flix コンパイラは flix_game_engine の devbox が持つ jar を借りる（`bin/flix` が解決する）。
+DB 層は sqlfx（github:ababup1192/sqlfx）を `flix.toml` の `[dependencies]` で取る。PostgreSQL は docker compose。
 
 ```bash
-bin/flix check   # 型検査
-bin/flix run     # 実行（初回は Maven 依存の取得で時間がかかる）
-bin/flix test    # テスト
+make check     # 型検査
+make test      # DB 無しのテスト（test/Pg を除く）
+make test-pg   # 実 PostgreSQL 込み（コンテナの起動と停止まで）
+make db-up     # PostgreSQL を起動
+make run       # サーバ起動（CMS_DSN 等は Makefile が渡す）
 ```
+
+実 PG が要るテストは `test/Pg/` に置く。`make test` はそれを除いた写しを `build/unit/` に作って回す。

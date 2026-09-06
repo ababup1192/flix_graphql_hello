@@ -1,0 +1,15 @@
+# 開発と test-pg 用の PostgreSQL。`make db-up` で起動し、`make run` / `make test-pg` が接続する。
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: cms
+      POSTGRES_USER: cms
+      POSTGRES_PASSWORD: cms
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cms -d cms"]
+      interval: 2s
+      timeout: 2s
+      retries: 15

@@ -116,12 +116,14 @@ mod Http {
     ///
     def reasonPhrase(status: Int32): String = match status {
         case 200 => "OK"
+        case 204 => "No Content"
         case 400 => "Bad Request"
         case 404 => "Not Found"
         case 405 => "Method Not Allowed"
         case 413 => "Payload Too Large"
         case 431 => "Request Header Fields Too Large"
         case 500 => "Internal Server Error"
+        case 503 => "Service Unavailable"
         case _   => "Unknown"
     }
 
