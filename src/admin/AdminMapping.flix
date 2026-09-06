@@ -163,11 +163,12 @@ mod AdminMapping {
     /// FieldInput を Draft に。
     ///
     pub def fieldDraft(input: GeneratedAdmin.FieldInput): FieldDraft \ CmsErr =
+        let kind = fieldKindOf(input#kind);
         {
             apiId     = apiId("apiId", input#apiId),
             name      = input#name,
-            kind      = fieldKindOf(input#kind),
-            many      = input#many |> Option.getWithDefault(false) or input#kind == GeneratedAdmin.FieldKind.Blocks,
+            kind      = kind,
+            many      = input#many |> Option.getWithDefault(false) or kind == FieldKind.Blocks,
             required  = input#required |> Option.getWithDefault(false),
             unique    = input#unique |> Option.getWithDefault(false),
             localized = input#localized |> Option.getWithDefault(false),

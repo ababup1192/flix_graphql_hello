@@ -41,13 +41,12 @@ mod EntryRows {
         Json.JObject(data |> Map.toList |> List.map(match (apiId, value) -> (ApiId.text(apiId), value)) |> List.toMap)
 
     ///
-    /// entries と entry_contents（draft）を JOIN した行から Entry を組む。
+    /// entries と entry_contents（stage の行）を JOIN した行から Entry を組む。
     ///
-    ///
-    /// changedSincePublish は「読んだ stage の行の updated_at」と「published の行の updated_at」の比較。
+    /// changedSincePublish は「読んだ stage の行の updated_at（content_updated_at）」と「published の行の updated_at」の比較。
     /// 管理 API は draft の行を読むので下書きが進んだかが分かり、コンテンツ API が published の行を読めば常に false。
     ///
-    pub def toEntry(contentStage: Stage, row: { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Json, draftUpdatedAt = Timestamp.Timestamp, publishedUpdatedAt = Option[Timestamp.Timestamp] | r }): Entry \ DbErr =
+    pub def toEntry(contentStage: Stage, row: { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Json, contentUpdatedAt = Timestamp.Timestamp, publishedUpdatedAt = Option[Timestamp.Timestamp] | r }): Entry \ DbErr =
         let stage = stageFromDb(row#stage) |> Rows.orRaise("entries.stage", row#stage);
         {
             id          = EntryId.parse(row#id) |> Rows.orRaise("entries.id", row#id),
@@ -56,7 +55,7 @@ mod EntryRows {
             stage       = stage,
             data        = dataFromJson(row#data),
             publishedAt = row#publishedAt,
-            changedSincePublish = stage == Stage.Published and (row#publishedUpdatedAt |> Option.map(published -> Timestamp.toEpochMicros(row#draftUpdatedAt) > Timestamp.toEpochMicros(published)) |> Option.getWithDefault(false)),
+            changedSincePublish = stage == Stage.Published and (row#publishedUpdatedAt |> Option.map(published -> Timestamp.toEpochMicros(row#contentUpdatedAt) > Timestamp.toEpochMicros(published)) |> Option.getWithDefault(false)),
             contentStage = contentStage,
             linked      = Linked.empty(),
             createdAt   = row#createdAt,
@@ -96,6 +95,21 @@ mod EntryRows {
             reason    = reasonFromDb(row#reason) |> Rows.orRaise("entry_versions.reason", row#reason),
             createdAt = row#createdAt
         }
+
+    ///
+    /// entry_links の参照先（to_entry_id）。規則外の id は無い物にする。
+    ///
+    pub def toTargetId(row: { toEntryId = String | r }): Option[EntryId] = EntryId.parse(row#toEntryId)
+
+    ///
+    /// entry_links の参照元（from_entry_id）の文字列。
+    ///
+    pub def referrerText(row: { fromEntryId = String | r }): String = row#fromEntryId
+
+    ///
+    /// entry_unique_values の持ち主（entry_id）の文字列。
+    ///
+    pub def uniqueOwnerText(row: { entryId = String | r }): String = row#entryId
 
     ///
     /// unique なフィールドの値を entry_unique_values.value の文字列にする。配列や null は None（一意の対象にしない）。

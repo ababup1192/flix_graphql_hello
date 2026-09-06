@@ -1,26 +1,6 @@
 // entries.q: entry の身元と中身
 
 // 列を足す時は listEntries / findEntryByStage / listEntriesByStage / findEntriesByStage の 4 か所（EntryRows.toEntry が受ける形）
-// 一覧。search が空なら全件、そうでなければ下書きの値（キー名は見ない）に含む物。search は呼ぶ側で LIKE 用にエスケープ済み
-query listEntries(typeId: Int64, search: String, limit: Int64, offset: Int64) -> many {
-    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at
-    FROM entries AS e
-    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft'
-    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'
-    WHERE e.type_id = :typeId AND e.deleted_at IS NULL
-      AND (:search = '' OR EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE '%' || :search || '%'))
-    ORDER BY e.updated_at DESC, e.id
-    LIMIT :limit OFFSET :offset
-}
-
-query countEntries(typeId: Int64, search: String) -> one {
-    SELECT count(*)::bigint AS total
-    FROM entries AS e
-    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'draft'
-    WHERE e.type_id = :typeId AND e.deleted_at IS NULL
-      AND (:search = '' OR EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE '%' || :search || '%'))
-}
-
 // ゴミ箱の物も含めて id があるか。createEntry の重複検査用（PK はゴミ箱の行とも衝突する）
 query entryExists(id: String) -> one {
     SELECT id FROM entries WHERE id = :id
@@ -57,7 +37,7 @@ query upsertContent(entryId: String, stage: String, data: Json) -> exec {
 // stage の行を読む。where は断片 DSL のスロットで、JSONB の式（c.data->>'title'）を EntryFilterSql が組む
 
 query findEntryByStage(id: String, stage: String) -> one {
-    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at
+    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = :stage
     LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'
@@ -67,7 +47,7 @@ query findEntryByStage(id: String, stage: String) -> one {
 query listEntriesByStage(typeId: Int64, stage: String, limit: Int64, offset: Int64) -> many
     with filter: Pred[entry_contents], order: Order[entry_contents]
 {
-    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at
+    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = :stage
     LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'
@@ -129,7 +109,7 @@ query findVersion(id: Int64) -> one {
 // ---- 参照 ----
 
 query findEntriesByStage(ids: List[String], stage: String) -> many {
-    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS draft_updated_at, p.updated_at AS published_updated_at
+    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = :stage
     LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'

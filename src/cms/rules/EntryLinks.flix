@@ -3,37 +3,27 @@
 ///
 mod EntryLinks {
 
-    use Util.Json.Json
-
     ///
     /// 参照 1 つ。(フィールド, 参照先の id, 配列の中の位置)。
     ///
     pub type alias Link = { field = FieldDef, target = EntryId, position = Int32 }
 
     ///
-    /// 中身の中の全参照。規則に合わない id は捨てる（下書きの検証が先に止める）。
+    /// 中身の中の全参照。規則に合わない id は捨てる（下書きの検証が先に止める）。Object と Blocks の中も辿る。
     ///
     pub def extract(fields: List[FieldDef], data: EntryData): List[Link] =
-        fields |> List.flatMap(field -> match (field#kind, Map.get(field#apiId, data)) {
-            case (FieldKind.Reference, Some(Json.JString(text))) =>
-                EntryId.parse(text) |> Option.map(target -> { field = field, target = target, position = 0 }) |> Option.toList
-            case (FieldKind.Reference, Some(Json.JArray(items))) =>
-                items |> Vector.toList |> List.zipWithIndex |> List.filterMap(match (index, item) -> match item {
-                    case Json.JString(idText) => EntryId.parse(idText) |> Option.map(target -> { field = field, target = target, position = index })
-                    case _                    => None
-                })
-            case (FieldKind.Object, Some(Json.JObject(inner))) =>
-                extract(Children.toList(field#children), EntryValue.objectData(inner))
-            case (FieldKind.Object, Some(Json.JArray(items))) =>
-                items |> Vector.toList |> List.flatMap(item -> match item {
-                    case Json.JObject(inner) => extract(Children.toList(field#children), EntryValue.objectData(inner))
-                    case _                   => Nil
-                })
-            case (FieldKind.Blocks, Some(Json.JArray(items))) =>
-                items |> Vector.toList |> List.flatMap(item -> match EntryValue.readBlock(Children.toList(field#children), item) {
-                    case Some((variant, inner)) => extract(Children.toList(variant#children), inner)
-                    case None                   => Nil
-                })
+        fields |> List.flatMap(field -> match (field#kind, field#many) {
+            case (FieldKind.Reference, false) =>
+                EntryValue.text(field#apiId, data) |> Option.flatMap(EntryId.parse) |> Option.map(target -> { field = field, target = target, position = 0 }) |> Option.toList
+            case (FieldKind.Reference, true) =>
+                Map.get(field#apiId, data) |> Option.map(EntryValue.itemsWithIndex(item -> EntryValue.asString(item) |> Option.flatMap(EntryId.parse))) |> Option.getWithDefault(Nil)
+                    |> List.map(match (index, target) -> { field = field, target = target, position = index })
+            case (FieldKind.Object, false) =>
+                EntryValue.object(field#apiId, data) |> Option.map(extract(Children.toList(field#children))) |> Option.getWithDefault(Nil)
+            case (FieldKind.Object, true) =>
+                EntryValue.objects(field#apiId, data) |> List.flatMap(extract(Children.toList(field#children)))
+            case (FieldKind.Blocks, _) =>
+                EntryValue.blocks(field, data) |> List.flatMap(match (variant, inner) -> extract(Children.toList(variant#children), inner))
             case _ => Nil
         })
 

@@ -51,6 +51,8 @@ pub enum Condition with Eq, Order, ToString {
     case ArrayContains(ApiId, String)
     /// どれかの組（それぞれは AND）に合う物。Where の OR
     case AnyOf(List[List[Condition]])
+    /// 管理画面の検索。どれかの値（キー名は見ない）に大文字小文字を区別せず含む
+    case AnyValueContains(String)
     /// 何にも合わない。規則外の id で絞り込んだ時に、条件を落として全件返さないための物
     case Never
 }

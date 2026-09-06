@@ -30,12 +30,9 @@ mod EntryFilterSql {
     /// フィールドの kind で式が変わるので fields を受ける。
     ///
     pub def order(fields: List[FieldDef], orderBy: OrderBy): Order[EntryContentsTable.EntryContentsTable] =
-        let terms = match orderBy {
-            case Nil  => (SortKey.ByUpdatedAt, Direction.Desc) :: Nil
-            case keys => keys
-        };
-        List.foldLeft((acc, term) -> Order.Then(acc, orderTerm(fields, term)), orderTerm(fields, List.head(terms) |> Option.getWithDefault((SortKey.ByUpdatedAt, Direction.Desc))), List.drop(1, terms))
-            |> (built -> Order.Then(built, Order.Asc("e.id")))
+        let requested = if (List.isEmpty(orderBy)) (SortKey.ByUpdatedAt, Direction.Desc) :: Nil else orderBy;
+        let terms = requested ::: (SortKey.ById, Direction.Asc) :: Nil;
+        List.foldLeft((acc, term) -> Order.Then(acc, orderTerm(fields, term)), Order.Unordered, terms)
 
     def orderTerm(fields: List[FieldDef], term: (SortKey, Direction)): Order[EntryContentsTable.EntryContentsTable] =
         let (key, direction) = term;
@@ -74,6 +71,8 @@ mod EntryFilterSql {
             // WhyNot: jsonb_typeof の前置きを省かないのは、値が配列でないと jsonb_array_elements_text が PG の例外で落ちるため
             Fragment.rawPredWith("(jsonb_typeof(c.data->'${ApiId.text(apiId)}') = 'array' AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(c.data->'${ApiId.text(apiId)}') AS elem WHERE elem = ?))", SqlValue.Str(text) :: Nil)
         case Condition.AnyOf(groups)             => Fragment.any(List.map(pred, groups))
+        case Condition.AnyValueContains(text)    =>
+            Fragment.rawPredWith("EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE ?)", SqlValue.Str("%" + EntrySearch.escapeLike(text) + "%") :: Nil)
         // WhyNot: Fragment.any(Nil) は「絞り込み無し（TRUE）」なので使えない。空の IN が FALSE になるのを借りる
         case Condition.Never                     => Pred.In("e.id", Nil)
     }

@@ -7,14 +7,11 @@ mod ContentEntries {
     // ---- 読む ----
 
     ///
-    /// 型の entry の一覧。更新が新しい順。search が空なら全件。SQL は 2 本（一覧と件数）。
+    /// 型の entry の一覧（管理 API）。更新が新しい順。search が空なら全件、あればどれかの値に含む物。SQL は 2 本（一覧と件数）。
     ///
-    pub def list(typeId: TypeId, page: EntryQuery): EntryPage \ DbRead =
-        let owner = TypeId.toInt64(typeId);
-        let needle = EntrySearch.escapeLike(page#search);
-        let entries = EntriesQueries.listEntries({ typeId = owner, search = needle, limit = Int32.toInt64(page#first), offset = Int32.toInt64(page#skip) })
-            |> List.map(EntryRows.toEntry(Stage.Draft));
-        { entries = entries, totalCount = EntriesQueries.countEntries({ typeId = owner, search = needle }) |> Rows.total }
+    pub def list(typeId: TypeId, entryQuery: EntryQuery): EntryPage \ DbRead =
+        let filter = if (entryQuery#search == "") Nil else Condition.AnyValueContains(entryQuery#search) :: Nil;
+        page(typeId, Nil, Stage.Draft, { filter = filter, orderBy = Nil, first = entryQuery#first, skip = entryQuery#skip })
 
     ///
     /// id で 1 つ（下書きの中身）。無ければ（ゴミ箱の物も）None。
@@ -36,26 +33,35 @@ mod ContentEntries {
     pub def findByStage(owner: ContentType, id: EntryId, stage: Stage): Option[Entry] \ DbRead =
         EntriesQueries.findEntryByStage({ id = EntryId.text(id), stage = EntryRows.stageToDb(stage) })
             |> Option.map(EntryRows.toEntry(stage))
-            |> Option.map(entry -> attachLinked(owner, stage, entry :: Nil))
-            |> Option.flatMap(List.head)
+            |> Option.flatMap(entry -> attachLinked(owner, stage, entry :: Nil) |> List.head)
 
     ///
     /// stage の行の一覧。絞り込みと並び順は EntryFilterSql が SQL にする。SQL は 2 本（一覧と件数）。
     ///
     pub def listByStage(owner: ContentType, stage: Stage, listQuery: ListQuery): EntryPage \ DbRead =
-        let typeId = TypeId.toInt64(owner#id);
-        let stageText = EntryRows.stageToDb(stage);
-        let filter = EntryFilterSql.predAllowingRaw(listQuery#filter);
-        let entries = EntriesQueries.listEntriesByStage(
-            { typeId = typeId, stage = stageText, limit = Int32.toInt64(listQuery#first), offset = Int32.toInt64(listQuery#skip) },
-            filter, EntryFilterSql.order(owner#fields, listQuery#orderBy)) |> List.map(EntryRows.toEntry(stage)) |> attachLinked(owner, stage);
-        { entries = entries, totalCount = EntriesQueries.countEntriesByStage({ typeId = typeId, stage = stageText }, filter) |> Rows.total }
+        let found = page(owner#id, owner#fields, stage, listQuery);
+        { entries = attachLinked(owner, stage, found#entries) | found }
 
     ///
-    /// singleton 用。stage の行を 1 つだけ（更新が新しい物）。
+    /// singleton 用。stage の行を 1 つだけ（更新が新しい物）。件数は数えない。
     ///
     pub def firstByStage(owner: ContentType, stage: Stage): Option[Entry] \ DbRead =
-        listByStage(owner, stage, { filter = Nil, orderBy = Nil, first = 1, skip = 0 }) |> (page -> List.head(page#entries))
+        rows(owner#id, owner#fields, stage, { filter = Nil, orderBy = Nil, first = 1, skip = 0 }) |> attachLinked(owner, stage) |> List.head
+
+    ///
+    /// stage の行の 1 ページと件数。参照の先読みはしない。
+    ///
+    def page(typeId: TypeId, fields: List[FieldDef], stage: Stage, listQuery: ListQuery): EntryPage \ DbRead =
+        { entries = rows(typeId, fields, stage, listQuery),
+          totalCount = EntriesQueries.countEntriesByStage({ typeId = TypeId.toInt64(typeId), stage = EntryRows.stageToDb(stage) }, EntryFilterSql.predAllowingRaw(listQuery#filter)) |> Rows.total }
+
+    ///
+    /// stage の行。絞り込みと並び順は EntryFilterSql が SQL にする。
+    ///
+    def rows(typeId: TypeId, fields: List[FieldDef], stage: Stage, listQuery: ListQuery): List[Entry] \ DbRead =
+        EntriesQueries.listEntriesByStage(
+            { typeId = TypeId.toInt64(typeId), stage = EntryRows.stageToDb(stage), limit = Int32.toInt64(listQuery#first), offset = Int32.toInt64(listQuery#skip) },
+            EntryFilterSql.predAllowingRaw(listQuery#filter), EntryFilterSql.order(fields, listQuery#orderBy)) |> List.map(EntryRows.toEntry(stage))
 
     // ---- 書く ----
 
@@ -104,7 +110,7 @@ mod ContentEntries {
         let existing = get(id);
         let owner = ContentTypes.get(existing#typeId);
         CmsErr.raiseIfAny(EntryValidation.publish(owner#fields, existing#data) ::: uniqueViolations(owner, existing));
-        let pending = EntriesQueries.unpublishedTargets(key) |> List.filterMap(row -> EntryId.parse(row#toEntryId));
+        let pending = EntriesQueries.unpublishedTargets(key) |> List.filterMap(EntryRows.toTargetId);
         if (withDependencies)
             List.forEach(dependency -> if (List.memberOf(dependency, id :: visited)) () else discard publishWithin(id :: visited, dependency, author, true), pending)
         else
@@ -123,7 +129,7 @@ mod ContentEntries {
         let key = EntryId.text(id);
         let published = EntryRows.stageToDb(Stage.Published);
         discard get(id);
-        let referrers = EntriesQueries.publishedReferrers(key) |> List.map(row -> row#fromEntryId) |> List.filter(referrer -> referrer != key);
+        let referrers = EntriesQueries.publishedReferrers(key) |> List.map(EntryRows.referrerText) |> List.filter(referrer -> referrer != key);
         CmsErr.raiseIfAny(referrers |> List.map(referrer -> Violation.Violation("references", "公開中の entry '${referrer}' が参照しています。先にそちらを取り下げるか、参照を外してください")));
         discard EntriesQueries.deleteLinks({ fromEntryId = key, stage = published });
         discard EntriesQueries.deleteContent({ entryId = key, stage = published });
@@ -208,7 +214,7 @@ mod ContentEntries {
     def uniqueViolations(owner: ContentType, entry: Entry): List[Violation] \ DbRead =
         uniqueValues(owner, entry) |> List.filterMap(match (field, value) ->
             EntriesQueries.findUniqueOwner({ typeId = TypeId.toInt64(owner#id), fieldId = FieldId.toInt64(field#id), value = value })
-                |> Option.map(row -> row#entryId)
+                |> Option.map(EntryRows.uniqueOwnerText)
                 |> Option.filter(holder -> holder != EntryId.text(entry#id))
                 |> Option.map(holder -> Violation.Violation("fields.${field#apiId}", "'${value}' は公開中の entry '${holder}' が使っています")))
 

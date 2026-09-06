@@ -148,7 +148,7 @@ pub type alias EntryVersion = {
 ///
 /// 一覧の 1 ページ。
 ///
-/// - entries: 更新が新しい順
+/// - entries: 指定した並び順（既定は更新が新しい順）
 /// - totalCount: 条件に合う全件数
 ///
 pub type alias EntryPage = { entries = List[Entry], totalCount = Int64 }
@@ -158,7 +158,7 @@ mod EntryPage {
     ///
     /// 1 ページの上限。どちらの API も同じ。
     ///
-    pub def maxFirst(): Int32 = 200
+    def maxFirst(): Int32 = 200
 
     ///
     /// first（省けば default）を 1 〜 maxFirst に、skip（省けば 0）を 0 以上に丸める。
@@ -168,7 +168,7 @@ mod EntryPage {
          skip |> Option.getWithDefault(0) |> Int32.max(0))
 
     ///
-    /// GraphQL の Int に載る件数。Int32 を超える分は上限に丸める。
+    /// Int32 に載る件数（32 bit の Int しか持てない API へ渡す用）。超える分は上限に丸める。
     ///
     pub def totalCountInt32(page: EntryPage): Int32 =
         Int64.clampToInt32(min = 0, max = Int32.maxValue(), page#totalCount)

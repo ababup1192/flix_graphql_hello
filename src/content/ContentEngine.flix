@@ -1,24 +1,4 @@
 ///
-/// コンテンツ API の Runner。読むだけなので Tx は要らないが、フィールド単位で接続を借り直さないよう
-/// withLazyTx で「最初の SQL で借りて最後に返す」にする。DbFailure を GraphQL のエラーに写す。
-///
-mod ContentRunner {
-
-    ///
-    /// プールから Runner を作る。
-    ///
-    pub def make(pool: Pool): Runner[ContentEff] =
-        f -> runOne(pool, f)
-
-    def runOne(pool: Pool, f: Unit -> Result[FieldError, JavaValue.Boxed] \ ContentEff + IO): Result[FieldError, JavaValue.Boxed] \ IO =
-        match DbError.runWithFailure(() -> Retry.withRetry(3, () -> Pool.withLazyTx(pool, f))) {
-            case Err(failure) => Err("database error: ${failure}")
-            case Ok(result)   => result
-        }
-
-}
-
-///
 /// コンテンツ API のエンジンの置き場。型の定義が変わったら組み直す。
 /// 判断は content_types の件数と最新の updated_at（schemaFingerprint）で、リクエストごとに 1 本の SELECT を出す。
 ///
@@ -81,7 +61,7 @@ mod ContentEngine {
             })
 
     ///
-    /// プールで 1 本読む。DbFailure は label 付きの文字列にする。
+    /// プールから接続を借りて thunk を 1 つの遅延 Tx で走らせ、DbFailure を label 付きの文字列にする。
     ///
     def read(pool: Pool, label: String, thunk: Unit -> a \ ef): Result[String, a] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr}) + IO =
         DbError.runWithFailure(() -> Pool.withLazyTx(pool, thunk)) |> Result.mapErr(failure -> "${label}: ${failure}")

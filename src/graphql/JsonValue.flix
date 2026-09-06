@@ -1,5 +1,5 @@
 ///
-/// Value と標準ライブラリの Util.Json.Json の相互変換。HTTP のボディで使う。
+/// Value と標準ライブラリの Util.Json.Json の相互変換。HTTP のボディ、SDL の文字列リテラル、`scalar JSON` の値（管理 API の entry の中身）で使う。
 ///
 mod JsonValue {
     use Util.Json.Json

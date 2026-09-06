@@ -1,6 +1,6 @@
 ///
 /// entry の中身の検証。全部純粋。
-/// 下書きは緩く（値の形と長さ・範囲だけ）、必須・一意・参照先の存在は公開時に見る（公開はステップ 5）。
+/// 下書きは緩く（値の形と長さ・範囲だけ）、必須は公開時に見る。一意と参照先の公開は DB が要るので ContentEntries.publish が見る。
 ///
 mod EntryValidation {
 
@@ -17,8 +17,9 @@ mod EntryValidation {
     /// prefix 付きの検査。入れ子（Object / Blocks）は "fields.related.label" / "fields.sections[0].headline" のようにパスが伸びる。
     ///
     def draftAt(prefix: String, fields: List[FieldDef], data: EntryData): List[Violation] =
+        let byApiId = fields |> List.map(field -> (field#apiId, field)) |> List.toMap;
         data |> Map.toList |> List.flatMap(match (apiId, value) ->
-            match List.find(field -> field#apiId == apiId, fields) {
+            match Map.get(apiId, byApiId) {
                 case None        => Violation.Violation("${prefix}.${apiId}", "この型にありません") :: Nil
                 case Some(field) => checkField("${prefix}.${apiId}", field, value)
             })

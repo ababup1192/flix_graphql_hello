@@ -1,9 +1,4 @@
 ///
-/// コンテンツ API のリゾルバが使う効果の和。読むだけ。書く関数を呼べばコンパイルで落ちる。
-///
-pub type alias ContentEff = {SqlRead, TransientDbErr, DbErr}
-
-///
 /// content type の定義からコンテンツ API の Schema を組む。型ごとに
 /// `<singular>(id, stage)`、`<plural>(where, orderBy, first, skip, stage)`（singleton は `<singular>(stage)` だけ）と、
 /// `<Singular>` / `<Singular>Where` / `<Singular>WhereLeaf` / `<Singular>OrderBy` / `<Singular>Connection` が生える。
@@ -14,13 +9,13 @@ pub type alias ContentEff = {SqlRead, TransientDbErr, DbErr}
 mod ContentSchemaBuilder {
 
     ///
-    /// 型の定義から Schema を組む。定義が無ければ Query は `_types: Int!`（型の数）だけ（graphql-java は空の Query を許さない）。
+    /// 型の定義から Schema を組む。`_types: Int!`（型の数）は常に生やす（graphql-java は空の Query を許さないので、型が無くても組める）。
     ///
     pub def build(types: List[ContentType], runner: Runner[ContentEff]): Schema =
         let buildable = types |> List.map(owner -> { fields = withShape(owner#fields) | owner });
         let rootFields = buildable |> List.flatMap(rootFieldsOf(buildable));
-        let fallback = Schema.field0("_types", Out.int32(), (_context, _root) -> Ok(List.length(types))) |> Field.withDescription("content type の数。型を作るとここに Query が生える");
-        Schema.make(Schema.objectType("Query", () -> fallback :: rootFields), None, runner)
+        let typeCount = Schema.field0("_types", Out.int32(), (_context, _root) -> Ok(List.length(types))) |> Field.withDescription("content type の数。型を作るとここに Query が生える");
+        Schema.make(Schema.objectType("Query", () -> typeCount :: rootFields), None, runner)
 
     ///
     /// 型を生やせるフィールドだけ残す。子の無い OBJECT と、子（variant）の無い BLOCKS は落とす。
@@ -119,27 +114,36 @@ mod ContentSchemaBuilder {
     def customField(all: List[ContentType], prefix: String, field: FieldDef): Field[Entry, ContentEff] =
         let name = ApiId.text(field#apiId);
         let described = fieldDescription(field);
-        match (field#kind, field#many) {
-            case (FieldKind.Object, false)  => Schema.field0(name, Out.option(Out.obj(nestedType(all, prefix, field))), (_context, entry) -> Ok(EntryValue.object(field#apiId, entry#data) |> Option.map(nestedEntry(entry)))) |> described
-            case (FieldKind.Object, true)   => Schema.field0(name, Out.list(Out.obj(nestedType(all, prefix, field))), (_context, entry) -> Ok(EntryValue.objects(field#apiId, entry#data) |> List.map(nestedEntry(entry)))) |> described
-            case (FieldKind.Blocks, _)      => Schema.field0(name, Out.list(blocksUnion(all, prefix, field)), (_context, entry) -> Ok(EntryValue.blocks(field, entry#data) |> List.map(match (variant, inner) -> (variant, nestedEntry(entry, inner))))) |> described
-            case (FieldKind.Number, false)  => Schema.field0(name, Out.option(Out.float64()), (_context, entry) -> Ok(EntryValue.number(field#apiId, entry#data))) |> described
-            case (FieldKind.Number, true)   => Schema.field0(name, Out.list(Out.float64()), (_context, entry) -> Ok(EntryValue.numbers(field#apiId, entry#data))) |> described
-            case (FieldKind.Boolean, false) => Schema.field0(name, Out.option(Out.bool()), (_context, entry) -> Ok(EntryValue.bool(field#apiId, entry#data))) |> described
-            case (FieldKind.Boolean, true)  => Schema.field0(name, Out.list(Out.bool()), (_context, entry) -> Ok(EntryValue.bools(field#apiId, entry#data))) |> described
-            case (FieldKind.Select, false)  => Schema.field0(name, Out.option(Out.scalar(selectCodec(prefix, field))), (_context, entry) -> Ok(EntryValue.text(field#apiId, entry#data) |> Option.filter(text -> List.memberOf(text, field#config#options)))) |> described
-            case (FieldKind.Select, true)   => Schema.field0(name, Out.list(Out.scalar(selectCodec(prefix, field))), (_context, entry) -> Ok(EntryValue.texts(field#apiId, entry#data) |> List.filter(text -> List.memberOf(text, field#config#options)))) |> described
-            case (FieldKind.Reference, false) => match targetOf(all, field) {
-                case Some(target) => Schema.field0(name, Out.option(Out.obj(entryType(all, target))), (_context, entry) -> Ok(EntryValue.text(field#apiId, entry#data) |> Option.flatMap(EntryId.parse) |> Option.flatMap(resolveLink(target, entry)))) |> described
-                case None         => Schema.field0(name, Out.option(Out.id()), (_context, entry) -> Ok(EntryValue.text(field#apiId, entry#data) |> Option.map(Id.Id))) |> described
+        let apiId = field#apiId;
+        match field#kind {
+            case FieldKind.Object  => valueField(name, field#many, Out.obj(nestedType(all, prefix, field)),
+                entry -> EntryValue.object(apiId, entry#data) |> Option.map(nestedEntry(entry)),
+                entry -> EntryValue.objects(apiId, entry#data) |> List.map(nestedEntry(entry))) |> described
+            case FieldKind.Blocks  => Schema.field0(name, Out.list(blocksUnion(all, prefix, field)), (_context, entry) -> Ok(EntryValue.blocks(field, entry#data) |> List.map(match (variant, inner) -> (variant, nestedEntry(entry, inner))))) |> described
+            case FieldKind.Number  => valueField(name, field#many, Out.float64(), entry -> EntryValue.number(apiId, entry#data), entry -> EntryValue.numbers(apiId, entry#data)) |> described
+            case FieldKind.Boolean => valueField(name, field#many, Out.bool(), entry -> EntryValue.bool(apiId, entry#data), entry -> EntryValue.bools(apiId, entry#data)) |> described
+            case FieldKind.Select  =>
+                let known = text -> List.memberOf(text, field#config#options);
+                valueField(name, field#many, Out.scalar(selectCodec(prefix, field)),
+                    entry -> EntryValue.text(apiId, entry#data) |> Option.filter(known),
+                    entry -> EntryValue.texts(apiId, entry#data) |> List.filter(known)) |> described
+            case FieldKind.Reference => match targetOf(all, field) {
+                case Some(target) => valueField(name, field#many, Out.obj(entryType(all, target)),
+                    entry -> EntryValue.text(apiId, entry#data) |> Option.flatMap(EntryId.parse) |> Option.flatMap(resolveLink(target, entry)),
+                    entry -> EntryValue.texts(apiId, entry#data) |> List.filterMap(EntryId.parse) |> List.filterMap(resolveLink(target, entry))) |> described
+                case None         => valueField(name, field#many, Out.id(),
+                    entry -> EntryValue.text(apiId, entry#data) |> Option.map(Id.Id),
+                    entry -> EntryValue.texts(apiId, entry#data) |> List.map(Id.Id)) |> described
             }
-            case (FieldKind.Reference, true) => match targetOf(all, field) {
-                case Some(target) => Schema.field0(name, Out.list(Out.obj(entryType(all, target))), (_context, entry) -> Ok(EntryValue.texts(field#apiId, entry#data) |> List.filterMap(EntryId.parse) |> List.filterMap(resolveLink(target, entry)))) |> described
-                case None         => Schema.field0(name, Out.list(Out.id()), (_context, entry) -> Ok(EntryValue.texts(field#apiId, entry#data) |> List.map(Id.Id))) |> described
-            }
-            case (_, false)                 => Schema.field0(name, Out.option(Out.string()), (_context, entry) -> Ok(EntryValue.text(field#apiId, entry#data))) |> described
-            case (_, true)                  => Schema.field0(name, Out.list(Out.string()), (_context, entry) -> Ok(EntryValue.texts(field#apiId, entry#data))) |> described
+            case _ => valueField(name, field#many, Out.string(), entry -> EntryValue.text(apiId, entry#data), entry -> EntryValue.texts(apiId, entry#data)) |> described
         }
+
+    ///
+    /// 値を返すフィールド。単数なら `T`（無ければ null）、配列なら `[T!]!`。取り出し方だけ kind ごとに渡す。
+    ///
+    def valueField(name: String, many: Bool, out: Out[a, ContentEff], one: Entry -> Option[a] \ ContentEff, all: Entry -> List[a] \ ContentEff): Field[Entry, ContentEff] =
+        if (many) Schema.field0(name, Out.list(out), (_context, entry) -> Ok(all(entry)))
+        else Schema.field0(name, Out.option(out), (_context, entry) -> Ok(one(entry)))
 
     ///
     /// 参照先の型。定義に無ければ None（型が消えた直後など。その時は id だけ返す）。
@@ -246,10 +250,10 @@ mod ContentSchemaBuilder {
     /// `<Singular>Where`。葉の条件と、OR / AND（それぞれ WhereLeaf のリスト）。
     ///
     def whereCodec(owner: ContentType): GqlCodec[Where] =
-        let leaf = leafCodec(owner);
+        let leaves = leafArgs(owner);
+        let leaf = leafCodec(owner, leaves);
         let orArg = Schema.arg("OR", GqlCodec.option(GqlCodec.list(leaf)));
         let andArg = Schema.arg("AND", GqlCodec.option(GqlCodec.list(leaf)));
-        let leaves = leafArgs(owner);
         let infos = List.map(leafInfo, leaves) ::: Arg.info(andArg) :: Arg.info(orArg) :: Nil;
         GqlCodec.inputObject("${TypeName.text(owner#singular)}Where", infos, fields ->
             forM (
@@ -268,10 +272,9 @@ mod ContentSchemaBuilder {
             })
 
     ///
-    /// `<Singular>WhereLeaf`。葉の条件だけ（OR / AND を持たない）。
+    /// `<Singular>WhereLeaf`。葉の条件だけ（OR / AND を持たない）。葉は Where と同じ物を受け取る（同一である事を構造で保つ）。
     ///
-    def leafCodec(owner: ContentType): GqlCodec[Where] =
-        let leaves = leafArgs(owner);
+    def leafCodec(owner: ContentType, leaves: List[LeafArg]): GqlCodec[Where] =
         GqlCodec.inputObject("${TypeName.text(owner#singular)}WhereLeaf", List.map(leafInfo, leaves), fields -> decodeLeaves(leaves, fields))
 
     ///
@@ -292,14 +295,15 @@ mod ContentSchemaBuilder {
         { info = Arg.info(arg), decode = fields -> Arg.decodeField(arg, fields) |> Result.map(found -> found |> Option.map(toConditions) |> Option.getWithDefault(Nil)) }
 
     ///
-    /// 型の全フィールドの葉の条件。id は _eq / _in、フィールドは kind ごと。配列のフィールドは _isNull だけ。
+    /// 型の全フィールドの葉の条件。id は _eq / _in、フィールドは kind ごと。
+    /// 配列は _isNull と（文字列・SELECT・REFERENCE なら）_contains。OBJECT / BLOCKS は _isNull だけ。
     ///
     def leafArgs(owner: ContentType): List[LeafArg] =
         leafArg("id_eq", GqlCodec.id(), id -> { let Id.Id(text) = id; EntryId.parse(text) |> Option.map(Condition.IdEq) |> Option.getWithDefault(Condition.Never) :: Nil }) ::
         leafArg("id_in", GqlCodec.list(GqlCodec.id()), ids -> Condition.IdIn(ids |> List.filterMap(id -> { let Id.Id(text) = id; EntryId.parse(text) })) :: Nil) ::
-        List.flatMap(fieldLeafArgs, owner#fields)
+        List.flatMap(fieldLeafArgs(TypeName.text(owner#singular)), owner#fields)
 
-    def fieldLeafArgs(field: FieldDef): List[LeafArg] =
+    def fieldLeafArgs(prefix: String, field: FieldDef): List[LeafArg] =
         let apiId = field#apiId;
         let name = ApiId.text(apiId);
         let isNull = leafArg("${name}_isNull", GqlCodec.bool(), flag -> Condition.IsNull(apiId, flag) :: Nil);
@@ -308,18 +312,21 @@ mod ContentSchemaBuilder {
             case (FieldKind.Blocks, _)     => isNull :: Nil
             case (FieldKind.Number, true)  => isNull :: Nil
             case (FieldKind.Boolean, true) => isNull :: Nil
+            // 規則外の id は Never（何にも合わない）に倒す。_id_in は全部規則外なら Never、混ざっていれば合う物だけ
             case (FieldKind.Reference, true) =>
-                isNull :: leafArg("${name}_contains", GqlCodec.id(), id -> { let Id.Id(text) = id; Condition.ArrayContains(apiId, text) :: Nil }) :: Nil
+                isNull :: leafArg("${name}_contains", GqlCodec.id(), id -> { let Id.Id(text) = id; EntryId.parse(text) |> Option.map(found -> Condition.ArrayContains(apiId, EntryId.text(found))) |> Option.getWithDefault(Condition.Never) :: Nil }) :: Nil
+            case (FieldKind.Select, true) =>
+                isNull :: leafArg("${name}_contains", selectCodec(prefix, field), text -> Condition.ArrayContains(apiId, text) :: Nil) :: Nil
             case (_, true) =>
                 isNull :: leafArg("${name}_contains", GqlCodec.string(), text -> Condition.ArrayContains(apiId, text) :: Nil) :: Nil
             case (FieldKind.Select, false) =>
                 isNull ::
-                leafArg("${name}_eq", GqlCodec.string(), text -> Condition.TextEq(apiId, text) :: Nil) ::
-                leafArg("${name}_in", GqlCodec.list(GqlCodec.string()), texts -> Condition.TextIn(apiId, texts) :: Nil) :: Nil
+                leafArg("${name}_eq", selectCodec(prefix, field), text -> Condition.TextEq(apiId, text) :: Nil) ::
+                leafArg("${name}_in", GqlCodec.list(selectCodec(prefix, field)), texts -> Condition.TextIn(apiId, texts) :: Nil) :: Nil
             case (FieldKind.Reference, false) =>
                 isNull ::
                 leafArg("${name}_id_eq", GqlCodec.id(), id -> { let Id.Id(text) = id; EntryId.parse(text) |> Option.map(found -> Condition.TextEq(apiId, EntryId.text(found))) |> Option.getWithDefault(Condition.Never) :: Nil }) ::
-                leafArg("${name}_id_in", GqlCodec.list(GqlCodec.id()), ids -> Condition.TextIn(apiId, ids |> List.map(id -> { let Id.Id(text) = id; text })) :: Nil) :: Nil
+                leafArg("${name}_id_in", GqlCodec.list(GqlCodec.id()), ids -> Condition.TextIn(apiId, ids |> List.filterMap(id -> { let Id.Id(text) = id; EntryId.parse(text) |> Option.map(EntryId.text) })) :: Nil) :: Nil
             case (FieldKind.Number, false) =>
                 isNull ::
                 leafArg("${name}_eq", GqlCodec.float64(), x -> Condition.NumberEq(apiId, x) :: Nil) ::

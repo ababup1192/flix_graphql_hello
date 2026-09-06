@@ -14,10 +14,9 @@ mod ContentTypes {
     /// 全 content type。apiId 順、フィールド付き。SQL は 2 本。
     ///
     pub def list(): List[ContentType] \ DbRead =
-        let fieldsByType = ContentFieldsQueries.listAllFields() |> List.map(ContentTypeRows.toFieldDef)
-            |> List.foldLeft((acc, field) -> Map.insertWith((newer, older) -> older ::: newer, field#typeId, field :: Nil, acc), Map.empty());
+        let fieldsByType = ContentFieldsQueries.listAllFields() |> List.map(ContentTypeRows.toFieldDef) |> FieldTree.byType;
         ContentTypesQueries.listContentTypes()
-            |> List.map(row -> ContentTypeRows.toContentType(row, Map.getWithDefault(TypeId.TypeId(row#id), Nil, fieldsByType) |> FieldTree.build))
+            |> List.map(row -> ContentTypeRows.toContentType(row, Map.getWithDefault(ContentTypeRows.typeIdOf(row), Nil, fieldsByType) |> FieldTree.build))
 
     ///
     /// id で 1 つ。無ければ None。
@@ -29,7 +28,7 @@ mod ContentTypes {
     /// apiId で 1 つ。無ければ None。
     ///
     pub def findByApiId(apiId: ApiId): Option[ContentType] \ DbRead =
-        ContentTypesQueries.findContentTypeByApiId(ApiId.text(apiId)) |> Option.map(row -> ContentTypeRows.toContentType(row, fieldsOf(TypeId.TypeId(row#id))))
+        ContentTypesQueries.findContentTypeByApiId(ApiId.text(apiId)) |> Option.map(row -> ContentTypeRows.toContentType(row, fieldsOf(ContentTypeRows.typeIdOf(row))))
 
     ///
     /// id で 1 つ。無ければ notFound。
@@ -97,8 +96,8 @@ mod ContentTypes {
         let parent = draft#parent |> Option.map(parentId -> FieldTree.find(parentId, owner#fields) |> CmsErr.orNotFound(Entity.Field, "${parentId}"));
         CmsErr.raiseIfAny(validateDraft(takenApiIds(owner#fields, None), parent, draft) ::: validateTarget(draft#target));
         let position = match draft#parent {
-            case Some(parentId) => ContentFieldsQueries.nextChildPosition(FieldId.toInt64(parentId)) |> Rows.next
-            case None           => ContentFieldsQueries.nextFieldPosition(TypeId.toInt64(typeId)) |> Rows.next
+            case Some(parentId) => ContentFieldsQueries.nextChildPosition(FieldId.toInt64(parentId)) |> Rows.nextPosition
+            case None           => ContentFieldsQueries.nextFieldPosition(TypeId.toInt64(typeId)) |> Rows.nextPosition
         };
         let inserted = ContentFieldsQueries.insertField(ContentTypeRows.fieldInsert(typeId, position, draft)) |> Rows.expectId;
         Option.forEach(target -> discard ContentFieldsQueries.setFieldTarget({ id = inserted, targetTypeId = TypeId.toInt64(target) }), draft#target);

@@ -513,20 +513,8 @@ mod Schema {
             ) yield x)
 
     ///
-    /// 引数 3 つのフィールド。4 つ以上は input 型にまとめる。
-    ///
-    pub def field3(name: String, a: Arg[a], b: Arg[b], c: Arg[c], out: Out[r, ef], f: Context -> source -> a -> b -> c -> Result[FieldError, r] \ ef): Field[source, ef] =
-        makeField(name, Arg.info(a) :: Arg.info(b) :: Arg.info(c) :: Nil, out, (context, src, args) ->
-            forM (
-                av <- Arg.decode(a, args);
-                bv <- Arg.decode(b, args);
-                cv <- Arg.decode(c, args);
-                x  <- f(context, src, av, bv, cv)
-            ) yield x)
-
-    ///
     /// 引数を Args のまま受けるフィールド。引数の個数に上限が無い。
-    /// 生成器（schemagen）が使う。人が書くときは field0..3 の方が引数の型が決まって安全。
+    /// 生成器（schemagen）が使う。人が書くときは field0..2 の方が引数の型が決まって安全で、引数が 3 つ以上なら input 型にまとめる。
     ///
     pub def fieldRaw(name: String, args: List[ArgInfo], out: Out[r, ef], f: Context -> source -> Args -> Result[FieldError, r] \ ef): Field[source, ef] =
         makeField(name, args, out, f)

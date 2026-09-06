@@ -75,6 +75,11 @@ mod ContentTypeRows {
         }
 
     ///
+    /// content_types の行の id。
+    ///
+    pub def typeIdOf(row: { id = Int64 | r }): TypeId = TypeId.TypeId(row#id)
+
+    ///
     /// content_types の行から名前だけ（衝突の検査用。フィールドは要らない）。
     ///
     pub def toTypeNames(row: { apiId = String, singular = String, plural = String | r }): Naming.TypeNames \ DbErr =
@@ -159,7 +164,7 @@ mod ContentTypeRows {
             |> Fragment.setIfSome(ContentFieldsTable.config(), changes#config |> Option.map(FieldConfig.toJson))
 
     ///
-    /// content_types.preview_url は NOT NULL で、無しは空文字。読みと書きで対にする。
+    /// content_types.preview_url は NOT NULL で、無しは空文字。INSERT と読みで対にする（UPDATE は渡された文字列をそのまま置く。消すなら ""）。
     ///
     def previewUrlToDb(url: Option[String]): String = url |> Option.getWithDefault("")
 

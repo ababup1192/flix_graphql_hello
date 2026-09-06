@@ -17,7 +17,7 @@ mod EntryValue {
         Map.get(apiId, data) |> Option.flatMap(asString)
 
     pub def texts(apiId: ApiId, data: EntryData): List[String] =
-        Map.get(apiId, data) |> Option.map(items(asString)) |> Option.getWithDefault(Nil)
+        Map.get(apiId, data) |> Option.map(asStrings) |> Option.getWithDefault(Nil)
 
     pub def number(apiId: ApiId, data: EntryData): Option[Float64] =
         Map.get(apiId, data) |> Option.flatMap(asFloat64)
@@ -82,6 +82,14 @@ mod EntryValue {
     ///
     pub def items(pick: Json -> Option[a], json: Json): List[a] = match json {
         case Json.JArray(values) => values |> Vector.toList |> List.filterMap(pick)
+        case _                   => Nil
+    }
+
+    ///
+    /// 配列の要素を位置付きで読む。位置は配列の中の元の番号（読めない要素を飛ばしても詰めない）。
+    ///
+    pub def itemsWithIndex(pick: Json -> Option[a], json: Json): List[(Int32, a)] = match json {
+        case Json.JArray(values) => values |> Vector.toList |> List.zipWithIndex |> List.filterMap(match (index, item) -> pick(item) |> Option.map(found -> (index, found)))
         case _                   => Nil
     }
 

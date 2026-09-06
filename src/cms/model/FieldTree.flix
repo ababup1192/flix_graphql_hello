@@ -7,8 +7,19 @@ mod FieldTree {
     /// 平らな並びを木にする。最上位（parent 無し）を position 順に並べ、子は再帰で付ける。
     ///
     pub def build(flat: List[FieldDef]): List[FieldDef] =
-        let byParent = List.foldLeft((acc, field) -> Map.insertWith((newer, older) -> older ::: newer, field#parent, field :: Nil, acc), Map.empty(), flat);
-        childrenOf(byParent, None)
+        childrenOf(groupBy(field -> field#parent, flat), None)
+
+    ///
+    /// 型ごとに分ける。全型のフィールドを 1 本で読んだ後に配る用。並びは build が position で直すので保たない。
+    ///
+    pub def byType(flat: List[FieldDef]): Map[TypeId, List[FieldDef]] =
+        groupBy(field -> field#typeId, flat)
+
+    ///
+    /// key ごとにまとめる。1 挿入 O(1)（先頭に足す）なので、まとめた中の並びは入力の逆になる。
+    ///
+    def groupBy(key: FieldDef -> k, fields: List[FieldDef]): Map[k, List[FieldDef]] with Order[k] =
+        List.foldLeft((acc, field) -> Map.insertWith((newer, older) -> newer ::: older, key(field), field :: Nil, acc), Map.empty(), fields)
 
     def childrenOf(byParent: Map[Option[FieldId], List[FieldDef]], parent: Option[FieldId]): List[FieldDef] =
         Map.getWithDefault(parent, Nil, byParent)

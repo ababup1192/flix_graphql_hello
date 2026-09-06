@@ -77,7 +77,7 @@ mod TestReferencesPg {
             Err("references: 公開中の entry 'b1' が参照しています。先にそちらを取り下げるか、参照を外してください"),
             Stage.Draft))), result)
 
-    /// コンテンツ API で参照が展開され、select は enum、配列の参照は _contains で絞れる。参照の展開は同じ stage で行う。
+    /// コンテンツ API で参照が展開され、select は出力も絞り込みも enum、配列の参照は _contains で絞れる。参照の展開は同じ stage で行う。
     @Test
     def testPgContentApiReferences(): Unit \ {IO, Assert} =
         let seed = () -> CmsTestKit.withIds(List#{"p1", "t1", "t2", "b1", "b2"}, () -> {
@@ -92,7 +92,7 @@ mod TestReferencesPg {
         let (expanded, byTag, byCategory, sdl) = PgTestSupport.withContentApi(seed, ask ->
             (ask("{ blog(id: \"b1\") { title category profile { name } tags { label } } }"),
              ask("{ blogs(stage: DRAFT, where: { tags_contains: \"t1\" }) { nodes { id } } }"),
-             ask("{ blogs(stage: DRAFT, where: { category_eq: \"NEWS\" }) { nodes { id } } }"),
+             ask("{ blogs(stage: DRAFT, where: { category_eq: NEWS }) { nodes { id } } }"),
              ask("{ __type(name: \"BlogCategory\") { enumValues { name } } }")));
         Assert.assertEq(
             expected = (

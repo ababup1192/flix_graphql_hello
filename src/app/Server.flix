@@ -81,7 +81,7 @@ mod Server {
     /// ボディの Value を GraphqlRequest に組み立てる。
     /// query は必須の文字列。variables は省略可能なオブジェクト（省略時は空）。operationName は省略可能な文字列。
     ///
-    pub def toRequest(body: Value): Result[String, GraphqlRequest] =
+    def toRequest(body: Value): Result[String, GraphqlRequest] =
         forM (
             queryText <- Value.field("query", body) |> Value.asStr |> Option.toOk("body must be {\"query\": \"...\"}");
             variables <- toVariables(Value.field("variables", body))
@@ -101,7 +101,7 @@ mod Server {
     /// errors の各要素は graphql-java のエラーオブジェクトをそのまま出す。
     /// errors が無いときはキー自体を出さない。
     ///
-    pub def toValue(response: GraphqlResponse): Value =
+    def toValue(response: GraphqlResponse): Value =
         let fields = Map#{ "data" => response#data };
         Value.Obj(if (List.isEmpty(response#errors)) fields else Map.insert("errors", Value.List(response#errors), fields))
 

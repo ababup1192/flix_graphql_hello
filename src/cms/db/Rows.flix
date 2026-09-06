@@ -8,7 +8,7 @@ mod Rows {
     ///
     pub def expectId(row: Option[{ id = Int64 | r }]): Int64 \ DbErr = match row {
         case Some(found) => found#id
-        case None        => DbErr.other("INSERT ... RETURNING returned no row")
+        case None        => DbErr.other("INSERT ... RETURNING が行を返しませんでした")
     }
 
     ///
@@ -20,7 +20,7 @@ mod Rows {
     ///
     /// 次の position の行。無ければ 0。
     ///
-    pub def next(row: Option[{ next = Option[Int32] | r }]): Int32 =
+    pub def nextPosition(row: Option[{ next = Option[Int32] | r }]): Int32 =
         row |> Option.flatMap(found -> found#next) |> Option.getWithDefault(0)
 
     ///
