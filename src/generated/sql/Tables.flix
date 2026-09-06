@@ -23,6 +23,7 @@ mod ContentFieldsTable {
     pub def config(): Fragment.Col[ContentFieldsTable, Util.Json.Json, Fragment.NotNull] = Fragment.Col.Col("config", SqlValue.ofJson)
     pub def position(): Fragment.Col[ContentFieldsTable, Int32, Fragment.NotNull] = Fragment.Col.Col("position", SqlValue.Int32)
     pub def targetTypeId(): Fragment.Col[ContentFieldsTable, Int64, Fragment.Nullable] = Fragment.Col.Col("target_type_id", SqlValue.Int64)
+    pub def parentFieldId(): Fragment.Col[ContentFieldsTable, Int64, Fragment.Nullable] = Fragment.Col.Col("parent_field_id", SqlValue.Int64)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
@@ -34,6 +35,8 @@ mod ContentFieldsTable {
         case ApiIdKey
         /// content_fields_target_type_id_fkey (foreign key)
         case TargetTypeIdFkey
+        /// content_fields_parent_field_id_fkey (foreign key)
+        case ParentFieldIdFkey
     }
 
     ///
@@ -51,12 +54,14 @@ mod ContentFieldsTable {
         case Constraint.TypeIdFkey => DbErr.foreignKeyViolation("content_fields_type_id_fkey")
         case Constraint.ApiIdKey => DbErr.uniqueViolation("content_fields_api_id_key")
         case Constraint.TargetTypeIdFkey => DbErr.foreignKeyViolation("content_fields_target_type_id_fkey")
+        case Constraint.ParentFieldIdFkey => DbErr.foreignKeyViolation("content_fields_parent_field_id_fkey")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
         case "content_fields_type_id_fkey" => Some(Constraint.TypeIdFkey)
         case "content_fields_api_id_key" => Some(Constraint.ApiIdKey)
         case "content_fields_target_type_id_fkey" => Some(Constraint.TargetTypeIdFkey)
+        case "content_fields_parent_field_id_fkey" => Some(Constraint.ParentFieldIdFkey)
         case _ => None
     }
 

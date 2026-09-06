@@ -8,7 +8,7 @@ use SqlValue.SqlValue
 /// blogs 型のフィールド。title(text) / views(number) / flag(boolean) / tags(text, many)
 ///
 def filterFields(): List[FieldDef] =
-    let base = { id = FieldId.FieldId(0i64), typeId = TypeId.TypeId(1i64), apiId = CmsTestKit.apiId("x"), name = "", kind = FieldKind.Text, many = false, required = false, unique = false, localized = false, target = None, config = FieldConfig.empty(), position = 0 };
+    let base = { id = FieldId.FieldId(0i64), typeId = TypeId.TypeId(1i64), apiId = CmsTestKit.apiId("x"), name = "", kind = FieldKind.Text, many = false, required = false, unique = false, localized = false, target = None, parent = None, children = Children.none(), config = FieldConfig.empty(), position = 0 };
     { apiId = CmsTestKit.apiId("title") | base } ::
     { apiId = CmsTestKit.apiId("views"), kind = FieldKind.Number | base } ::
     { apiId = CmsTestKit.apiId("flag"), kind = FieldKind.Boolean | base } ::

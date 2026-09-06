@@ -16,7 +16,7 @@ mod ContentTypes {
     pub def list(): List[ContentType] \ DbRead =
         let fields = ContentFieldsQueries.listAllFields() |> List.map(ContentTypeRows.toFieldDef);
         ContentTypesQueries.listContentTypes()
-            |> List.map(row -> ContentTypeRows.toContentType(row, fields |> List.filter(field -> field#typeId == TypeId.TypeId(row#id))))
+            |> List.map(row -> ContentTypeRows.toContentType(row, fields |> List.filter(field -> field#typeId == TypeId.TypeId(row#id)) |> ContentTypeRows.toTree))
 
     ///
     /// id で 1 つ。無ければ None。
@@ -40,7 +40,8 @@ mod ContentTypes {
     /// フィールド 1 つ。無ければ notFound。
     ///
     pub def getField(id: FieldId): FieldDef \ DbRead + CmsErr =
-        ContentFieldsQueries.findField(FieldId.toInt64(id)) |> Option.map(ContentTypeRows.toFieldDef) |> CmsErr.orNotFound(Entity.Field, "${id}")
+        let flat = ContentFieldsQueries.findField(FieldId.toInt64(id)) |> Option.map(ContentTypeRows.toFieldDef) |> CmsErr.orNotFound(Entity.Field, "${id}");
+        ContentTypeRows.findInTree(id, fieldsOf(flat#typeId)) |> Option.getWithDefault(flat)
 
     // ---- content type ----
 
@@ -100,14 +101,19 @@ mod ContentTypes {
     ///
     pub def addField(typeId: TypeId, draft: FieldDraft): FieldDef \ Db + CmsErr =
         let owner = get(typeId);
-        let siblings = owner#fields |> List.map(field -> field#apiId);
-        CmsErr.raiseIfAny(Naming.validateFieldApiId(siblings, draft#apiId) ::: Naming.validateFlags(draft#many, draft#unique) ::: Naming.validateTarget(draft#kind, draft#target) ::: Naming.validateConfig(siblings, draft#kind, draft#config));
+        let everyField = ContentTypeRows.flatten(owner#fields);
+        let parent = draft#parent |> Option.map(parentId -> ContentTypeRows.findInTree(parentId, owner#fields) |> CmsErr.orNotFound(Entity.Field, "${parentId}"));
+        let siblings = everyField |> List.map(field -> field#apiId);
+        CmsErr.raiseIfAny(Naming.validateFieldApiId(siblings, draft#apiId) ::: Naming.validateFlags(draft#kind, draft#many, draft#unique) ::: Naming.validateTarget(draft#kind, draft#target) ::: Naming.validateParent(parent |> Option.map(found -> found#kind), draft#kind) ::: Naming.validateConfig(siblings, draft#kind, draft#config));
         let targetMissing = match draft#target {
             case Some(target) => Option.isEmpty(find(target))
             case None         => false
         };
         CmsErr.raiseIfAny(if (targetMissing) Violation.Violation("targetTypeId", "型 '${draft#target |> Option.map(target -> "${target}") |> Option.getWithDefault("")}' がありません") :: Nil else Nil);
-        let position = ContentFieldsQueries.nextFieldPosition(TypeId.toInt64(typeId)) |> Option.flatMap(row -> row#next) |> Option.getWithDefault(0);
+        let position = match draft#parent {
+            case Some(parentId) => ContentFieldsQueries.nextChildPosition(FieldId.toInt64(parentId)) |> Option.flatMap(row -> row#next) |> Option.getWithDefault(0)
+            case None           => ContentFieldsQueries.nextFieldPosition(TypeId.toInt64(typeId)) |> Option.flatMap(row -> row#next) |> Option.getWithDefault(0)
+        };
         let inserted = ContentFieldsQueries.insertField({
             typeId      = TypeId.toInt64(typeId),
             apiId       = ApiId.text(draft#apiId),
@@ -121,6 +127,7 @@ mod ContentTypes {
             position    = position
         }) |> expectRow;
         Option.forEach(target -> discard ContentFieldsQueries.setFieldTarget({ id = inserted, targetTypeId = TypeId.toInt64(target) }), draft#target);
+        Option.forEach(parentId -> discard ContentFieldsQueries.setFieldParent({ id = inserted, parentFieldId = FieldId.toInt64(parentId) }), draft#parent);
         touch(typeId);
         getField(FieldId.FieldId(inserted))
 
@@ -129,9 +136,9 @@ mod ContentTypes {
     ///
     pub def updateField(id: FieldId, changes: FieldChanges): FieldDef \ Db + CmsErr =
         let existing = getField(id);
-        let siblings = fieldsOf(existing#typeId) |> List.filter(field -> field#id != id) |> List.map(field -> field#apiId);
+        let siblings = ContentTypeRows.flatten(fieldsOf(existing#typeId)) |> List.filter(field -> field#id != id) |> List.map(field -> field#apiId);
         let config = changes#config |> Option.getWithDefault(existing#config);
-        CmsErr.raiseIfAny(Naming.validateFlags(existing#many, changes#unique |> Option.getWithDefault(existing#unique)) ::: Naming.validateConfig(siblings, existing#kind, config));
+        CmsErr.raiseIfAny(Naming.validateFlags(existing#kind, existing#many, changes#unique |> Option.getWithDefault(existing#unique)) ::: Naming.validateConfig(siblings, existing#kind, config));
         let assignments = Fragment.noChange()
             |> Fragment.setIfSome(ContentFieldsTable.name(), changes#name)
             |> Fragment.setIfSome(ContentFieldsTable.isRequired(), changes#required)
@@ -168,7 +175,7 @@ mod ContentTypes {
     /// 型のフィールドを position 順で。
     ///
     def fieldsOf(typeId: TypeId): List[FieldDef] \ DbRead =
-        ContentFieldsQueries.listFieldsOfType(TypeId.toInt64(typeId)) |> List.map(ContentTypeRows.toFieldDef)
+        ContentFieldsQueries.listFieldsOfType(TypeId.toInt64(typeId)) |> List.map(ContentTypeRows.toFieldDef) |> ContentTypeRows.toTree
 
     ///
     /// 型の updated_at を今にする。フィールドを触った時も型が変わった事にする。

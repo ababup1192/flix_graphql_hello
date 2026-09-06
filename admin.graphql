@@ -110,6 +110,10 @@ enum FieldKind {
   SELECT
   """他の entry への参照。targetTypeId が参照先の型"""
   REFERENCE
+  """子フィールドを持つ入れ子。値は子の apiId → 値のオブジェクト"""
+  OBJECT
+  """複数の OBJECT（variant）から選んで並べる。常に配列。値は { blockType: <variant の apiId>, ... } の並び"""
+  BLOCKS
 }
 
 """content type。apiId がコンテンツ API のクエリ名の元になる"""
@@ -126,7 +130,7 @@ type ContentType {
   plural: String!
   """管理画面のプレビューが開く URL。{id} を entry の id に置き換える"""
   previewUrl: String
-  """position 順"""
+  """最上位のフィールド。position 順。子は children"""
   fields: [FieldDef!]!
   createdAt: String!
   updatedAt: String!
@@ -148,7 +152,12 @@ type FieldDef {
   localized: Boolean!
   """REFERENCE の参照先の型"""
   targetTypeId: ID
+  """OBJECT / BLOCKS の子なら親のフィールド"""
+  parentFieldId: ID
+  """OBJECT の子フィールド、BLOCKS の variant。position 順"""
+  children: [FieldDef!]!
   config: FieldConfig!
+  """兄弟の中の並び順"""
   position: Int!
 }
 
@@ -197,6 +206,8 @@ input FieldInput {
   localized: Boolean = false
   """REFERENCE の参照先の型"""
   targetTypeId: ID
+  """OBJECT / BLOCKS の子として足すなら親のフィールド"""
+  parentFieldId: ID
   config: FieldConfigInput
 }
 

@@ -26,6 +26,10 @@ pub enum FieldKind with Eq, Order, ToString {
     case Select
     /// 他の entry への参照。target が参照先の型
     case Reference
+    /// 子フィールドを持つ入れ子（カスタムフィールド）。値は子の apiId → 値のオブジェクト
+    case Object
+    /// 複数の Object（variant）から選んで並べる。値は { blockType: <variant の apiId>, ... } の配列
+    case Blocks
 }
 
 ///
@@ -52,8 +56,10 @@ pub type alias FieldConfig = { maxLength = Option[Int32], sourceField = Option[A
 /// - unique: 型の中で値が一意か
 /// - localized: 言語ごとに値を持つか
 /// - target: Reference の参照先の型。それ以外は None
+/// - parent: Object / Blocks の子なら親のフィールド。最上位なら None
+/// - children: Object の子フィールド、Blocks の variant（Object）。position 順
 /// - config: kind ごとの設定
-/// - position: 並び順（0 始まり）
+/// - position: 兄弟の中の並び順（0 始まり）
 ///
 pub type alias FieldDef = {
     id = FieldId,
@@ -66,8 +72,27 @@ pub type alias FieldDef = {
     unique = Bool,
     localized = Bool,
     target = Option[TypeId],
+    parent = Option[FieldId],
+    children = Children,
     config = FieldConfig,
     position = Int32
+}
+
+///
+/// 子フィールド。
+///
+/// WhyNot: FieldDef に List[FieldDef] を直に置かないのは、型の別名が自分を参照できないため。enum で切る。
+///
+pub enum Children {
+    case Children(List[FieldDef])
+}
+
+mod Children {
+    pub def none(): Children = Children.Children(Nil)
+
+    pub def toList(children: Children): List[FieldDef] =
+        let Children.Children(fields) = children;
+        fields
 }
 
 ///
@@ -109,7 +134,7 @@ pub type alias ContentTypeChanges = { name = Option[String], singular = Option[T
 ///
 /// 足すフィールド。
 ///
-pub type alias FieldDraft = { apiId = ApiId, name = String, kind = FieldKind, many = Bool, required = Bool, unique = Bool, localized = Bool, target = Option[TypeId], config = FieldConfig }
+pub type alias FieldDraft = { apiId = ApiId, name = String, kind = FieldKind, many = Bool, required = Bool, unique = Bool, localized = Bool, target = Option[TypeId], parent = Option[FieldId], config = FieldConfig }
 
 ///
 /// フィールドの変更。None は「触らない」。config は丸ごと置き換える。

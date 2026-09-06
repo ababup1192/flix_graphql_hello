@@ -14,16 +14,28 @@ mod EntryLinks {
     /// 中身の中の全参照。規則に合わない id は捨てる（下書きの検証が先に止める）。
     ///
     pub def extract(fields: List[FieldDef], data: EntryData): List[Link] =
-        fields |> List.filter(field -> field#kind == FieldKind.Reference) |> List.flatMap(field ->
-            match Map.get(field#apiId, data) {
-                case Some(Json.JString(text))  => EntryId.parse(text) |> Option.map(target -> { field = field, target = target, position = 0 }) |> Option.toList
-                case Some(Json.JArray(items)) =>
-                    items |> Vector.toList |> List.zipWithIndex |> List.filterMap(match (index, item) -> match item {
-                        case Json.JString(text) => EntryId.parse(text) |> Option.map(target -> { field = field, target = target, position = index })
-                        case _                  => None
-                    })
-                case _ => Nil
-            })
+        fields |> List.flatMap(field -> match (field#kind, Map.get(field#apiId, data)) {
+            case (FieldKind.Reference, Some(Json.JString(text))) =>
+                EntryId.parse(text) |> Option.map(target -> { field = field, target = target, position = 0 }) |> Option.toList
+            case (FieldKind.Reference, Some(Json.JArray(items))) =>
+                items |> Vector.toList |> List.zipWithIndex |> List.filterMap(match (index, item) -> match item {
+                    case Json.JString(idText) => EntryId.parse(idText) |> Option.map(target -> { field = field, target = target, position = index })
+                    case _                    => None
+                })
+            case (FieldKind.Object, Some(Json.JObject(inner))) =>
+                extract(Children.toList(field#children), EntryValidation.objectData(inner))
+            case (FieldKind.Object, Some(Json.JArray(items))) =>
+                items |> Vector.toList |> List.flatMap(item -> match item {
+                    case Json.JObject(inner) => extract(Children.toList(field#children), EntryValidation.objectData(inner))
+                    case _                   => Nil
+                })
+            case (FieldKind.Blocks, Some(Json.JArray(items))) =>
+                items |> Vector.toList |> List.flatMap(item -> match EntryValidation.readBlock(Children.toList(field#children), item) {
+                    case Some((variant, inner)) => extract(Children.toList(variant#children), inner)
+                    case None                   => Nil
+                })
+            case _ => Nil
+        })
 
     ///
     /// 参照先の id だけ。重複を除く。

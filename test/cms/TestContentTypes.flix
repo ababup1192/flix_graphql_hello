@@ -20,10 +20,10 @@ def typeRows(): List[Row] =
 /// content_fields の行。blogs に title と body。
 ///
 def fieldRows(): List[Row] =
-    Row.makeRows(List#{"id", "type_id", "api_id", "name", "kind", "is_many", "is_required", "is_unique", "is_localized", "target_type_id", "config", "position"},
+    Row.makeRows(List#{"id", "type_id", "api_id", "name", "kind", "is_many", "is_required", "is_unique", "is_localized", "target_type_id", "parent_field_id", "config", "position"},
         List#{
-            List#{SqlValue.Int64(10i64), SqlValue.Int64(1i64), SqlValue.Str("title"), SqlValue.Str("題名"), SqlValue.Str("text"), SqlValue.Bool(false), SqlValue.Bool(true), SqlValue.Bool(false), SqlValue.Bool(false), SqlValue.Null, SqlValue.Json("{\"maxLength\": 120}"), SqlValue.Int32(0)},
-            List#{SqlValue.Int64(11i64), SqlValue.Int64(1i64), SqlValue.Str("body"), SqlValue.Str("本文"), SqlValue.Str("textArea"), SqlValue.Bool(false), SqlValue.Bool(false), SqlValue.Bool(false), SqlValue.Bool(false), SqlValue.Null, SqlValue.Json("{}"), SqlValue.Int32(1)}
+            List#{SqlValue.Int64(10i64), SqlValue.Int64(1i64), SqlValue.Str("title"), SqlValue.Str("題名"), SqlValue.Str("text"), SqlValue.Bool(false), SqlValue.Bool(true), SqlValue.Bool(false), SqlValue.Bool(false), SqlValue.Null, SqlValue.Null, SqlValue.Json("{\"maxLength\": 120}"), SqlValue.Int32(0)},
+            List#{SqlValue.Int64(11i64), SqlValue.Int64(1i64), SqlValue.Str("body"), SqlValue.Str("本文"), SqlValue.Str("textArea"), SqlValue.Bool(false), SqlValue.Bool(false), SqlValue.Bool(false), SqlValue.Bool(false), SqlValue.Null, SqlValue.Null, SqlValue.Json("{}"), SqlValue.Int32(1)}
         })
 
 ///

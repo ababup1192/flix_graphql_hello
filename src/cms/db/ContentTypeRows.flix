@@ -25,6 +25,8 @@ mod ContentTypeRows {
         case FieldKind.Boolean  => "boolean"
         case FieldKind.Select   => "select"
         case FieldKind.Reference => "reference"
+        case FieldKind.Object   => "object"
+        case FieldKind.Blocks   => "blocks"
     }
 
     ///
@@ -47,6 +49,8 @@ mod ContentTypeRows {
         case "boolean"  => Some(FieldKind.Boolean)
         case "select"   => Some(FieldKind.Select)
         case "reference" => Some(FieldKind.Reference)
+        case "object"   => Some(FieldKind.Object)
+        case "blocks"   => Some(FieldKind.Blocks)
         case _          => None
     }
 
@@ -71,7 +75,7 @@ mod ContentTypeRows {
     ///
     /// content_fields の行から FieldDef を組む。
     ///
-    pub def toFieldDef(row: { id = Int64, typeId = Int64, apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, targetTypeId = Option[Int64], config = Json, position = Int32 | r }): FieldDef \ DbErr =
+    pub def toFieldDef(row: { id = Int64, typeId = Int64, parentFieldId = Option[Int64], apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, targetTypeId = Option[Int64], config = Json, position = Int32 | r }): FieldDef \ DbErr =
         {
             id        = FieldId.FieldId(row#id),
             typeId    = TypeId.TypeId(row#typeId),
@@ -83,9 +87,34 @@ mod ContentTypeRows {
             unique    = row#isUnique,
             localized = row#isLocalized,
             target    = row#targetTypeId |> Option.map(TypeId.TypeId),
+            parent    = row#parentFieldId |> Option.map(FieldId.FieldId),
+            children  = Children.none(),
             config    = FieldConfig.fromJson(row#config),
             position  = row#position
         }
+
+    ///
+    /// 平らな行の並びを木にする。最上位（parent 無し）を position 順に並べ、子は再帰で付ける。
+    ///
+    pub def toTree(flat: List[FieldDef]): List[FieldDef] =
+        childrenOf(flat, None)
+
+    def childrenOf(flat: List[FieldDef], parent: Option[FieldId]): List[FieldDef] =
+        flat |> List.filter(field -> field#parent == parent)
+            |> List.sortBy(field -> field#position)
+            |> List.map(field -> { children = Children.Children(childrenOf(flat, Some(field#id))) | field })
+
+    ///
+    /// 木の中から id で探す（深さ問わず）。
+    ///
+    pub def findInTree(id: FieldId, tree: List[FieldDef]): Option[FieldDef] =
+        tree |> List.findMap(field -> if (field#id == id) Some(field) else findInTree(id, Children.toList(field#children)))
+
+    ///
+    /// 木を平らにする（深さ優先）。
+    ///
+    pub def flatten(tree: List[FieldDef]): List[FieldDef] =
+        tree |> List.flatMap(field -> field :: flatten(Children.toList(field#children)))
 
     def apiIdOrRaise(column: String, text: String): ApiId \ DbErr =
         ApiId.parse(text) |> orRaise(column, text)

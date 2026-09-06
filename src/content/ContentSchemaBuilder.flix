@@ -89,23 +89,26 @@ mod ContentSchemaBuilder {
             Schema.field0("publishedAt", Out.option(Out.string()), (_context, entry) -> Ok(entry#publishedAt |> Option.map(Timestamp.toIso8601))) ::
             Schema.field0("createdAt", Out.string(), (_context, entry) -> Ok(Timestamp.toIso8601(entry#createdAt))) ::
             Schema.field0("updatedAt", Out.string(), (_context, entry) -> Ok(Timestamp.toIso8601(entry#updatedAt))) ::
-            List.map(customField(all, owner), owner#fields))
+            List.map(customField(all, TypeName.text(owner#singular)), owner#fields))
             |> ObjectType.withDescription(owner#name)
 
     ///
     /// 定義されたフィールド 1 つ。kind と many で GraphQL の型が決まり、値は中身の JSON から取り出す。
     /// Select は型ごとの enum、Reference は参照先の型（先読みした linked に無ければ同じ stage で引く）。
     ///
-    def customField(all: List[ContentType], owner: ContentType, field: FieldDef): Field[Entry, ContentEff] =
+    def customField(all: List[ContentType], prefix: String, field: FieldDef): Field[Entry, ContentEff] =
         let name = ApiId.text(field#apiId);
         let described = fieldDescription(field);
         match (field#kind, field#many) {
+            case (FieldKind.Object, false)  => Schema.field0(name, Out.option(Out.obj(nestedType(all, prefix, field))), (_context, entry) -> Ok(EntryValues.object(field#apiId, entry) |> Option.map(nestedEntry(entry)))) |> described
+            case (FieldKind.Object, true)   => Schema.field0(name, Out.list(Out.obj(nestedType(all, prefix, field))), (_context, entry) -> Ok(EntryValues.objects(field#apiId, entry) |> List.map(nestedEntry(entry)))) |> described
+            case (FieldKind.Blocks, _)      => Schema.field0(name, Out.list(blocksUnion(all, prefix, field)), (_context, entry) -> Ok(EntryValues.blocks(field, entry) |> List.map(match (variant, inner) -> (variant, nestedEntry(entry, inner))))) |> described
             case (FieldKind.Number, false)  => Schema.field0(name, Out.option(Out.float64()), (_context, entry) -> Ok(EntryValues.number(field#apiId, entry#data))) |> described
             case (FieldKind.Number, true)   => Schema.field0(name, Out.list(Out.float64()), (_context, entry) -> Ok(EntryValues.numbers(field#apiId, entry#data))) |> described
             case (FieldKind.Boolean, false) => Schema.field0(name, Out.option(Out.bool()), (_context, entry) -> Ok(EntryValues.bool(field#apiId, entry#data))) |> described
             case (FieldKind.Boolean, true)  => Schema.field0(name, Out.list(Out.bool()), (_context, entry) -> Ok(EntryValues.bools(field#apiId, entry#data))) |> described
-            case (FieldKind.Select, false)  => Schema.field0(name, Out.option(Out.scalar(selectCodec(owner, field))), (_context, entry) -> Ok(EntryValues.text(field#apiId, entry#data) |> Option.filter(text -> List.memberOf(text, field#config#options)))) |> described
-            case (FieldKind.Select, true)   => Schema.field0(name, Out.list(Out.scalar(selectCodec(owner, field))), (_context, entry) -> Ok(EntryValues.texts(field#apiId, entry#data) |> List.filter(text -> List.memberOf(text, field#config#options)))) |> described
+            case (FieldKind.Select, false)  => Schema.field0(name, Out.option(Out.scalar(selectCodec(prefix, field))), (_context, entry) -> Ok(EntryValues.text(field#apiId, entry#data) |> Option.filter(text -> List.memberOf(text, field#config#options)))) |> described
+            case (FieldKind.Select, true)   => Schema.field0(name, Out.list(Out.scalar(selectCodec(prefix, field))), (_context, entry) -> Ok(EntryValues.texts(field#apiId, entry#data) |> List.filter(text -> List.memberOf(text, field#config#options)))) |> described
             case (FieldKind.Reference, false) => match targetOf(all, field) {
                 case Some(target) => Schema.field0(name, Out.option(Out.obj(entryType(all, target))), (_context, entry) -> Ok(EntryValues.text(field#apiId, entry#data) |> Option.flatMap(EntryId.parse) |> Option.flatMap(resolveLink(target, entry)))) |> described
                 case None         => Schema.field0(name, Out.option(Out.id()), (_context, entry) -> Ok(EntryValues.text(field#apiId, entry#data) |> Option.map(Id.Id))) |> described
@@ -134,10 +137,39 @@ mod ContentSchemaBuilder {
         }
 
     ///
-    /// Select の enum。`<Singular><Field>`（Blog + category → BlogCategory）。値は config.options。
+    /// Object の入れ子の型。`<prefix><Field>`（Blog + related → BlogRelated）。子の型名はさらに続く（BlogRelatedLink）。
+    /// source は中身を子の分に差し替えた Entry（linked と contentStage を引き継ぐので、中の参照も同じ stage で引ける）。
     ///
-    def selectCodec(owner: ContentType, field: FieldDef): GqlCodec[String] =
-        GqlCodec.enumOf("${TypeName.text(owner#singular)}${upperFirst(ApiId.text(field#apiId))}", option -> option, field#config#options)
+    def nestedType(all: List[ContentType], prefix: String, field: FieldDef): ObjectType[Entry, ContentEff] =
+        let name = "${prefix}${upperFirst(ApiId.text(field#apiId))}";
+        Schema.objectType(name, () -> List.map(customField(all, name), Children.toList(field#children)))
+            |> ObjectType.withDescription(field#name)
+
+    ///
+    /// Blocks の union。`<prefix><Field>` = variant ごとの `<prefix><Field><Variant>`。値は (variant, 中身の Entry)。
+    ///
+    def blocksUnion(all: List[ContentType], prefix: String, field: FieldDef): Out[(FieldDef, Entry), ContentEff] =
+        let name = "${prefix}${upperFirst(ApiId.text(field#apiId))}";
+        let variants = Children.toList(field#children) |> List.map(variant -> (variant#apiId, nestedType(all, name, variant)));
+        Out.union(name, variants |> List.map(match (_, objectType) -> Out.member(objectType)), (context, block) -> {
+            let (variant, inner) = block;
+            match List.find(match (apiId, _) -> apiId == variant#apiId, variants) {
+                case Some((_, objectType)) => Out.taggedObj(objectType, context, inner)
+                case None                  => JavaValue.boxedNull()
+            }
+        })
+
+    ///
+    /// 入れ子の source。中身だけ差し替える。
+    ///
+    def nestedEntry(entry: Entry, inner: EntryData): Entry =
+        { data = inner | entry }
+
+    ///
+    /// Select の enum。`<prefix><Field>`（Blog + category → BlogCategory）。値は config.options。
+    ///
+    def selectCodec(prefix: String, field: FieldDef): GqlCodec[String] =
+        GqlCodec.enumOf("${prefix}${upperFirst(ApiId.text(field#apiId))}", option -> option, field#config#options)
 
     def upperFirst(text: String): String =
         String.toUpperCase(String.takeLeft(1, text)) + String.dropLeft(1, text)
@@ -172,7 +204,7 @@ mod ContentSchemaBuilder {
     ///
     def orderByCodec(owner: ContentType): GqlCodec[(SortKey, Direction)] =
         let keys = SortKey.ById :: SortKey.ByPublishedAt :: SortKey.ByUpdatedAt :: SortKey.ByCreatedAt ::
-            (owner#fields |> List.filter(field -> not field#many and field#kind != FieldKind.Reference) |> List.map(field -> SortKey.ByField(field#apiId)));
+            (owner#fields |> List.filter(field -> not field#many and not List.memberOf(field#kind, FieldKind.Reference :: FieldKind.Object :: FieldKind.Blocks :: Nil)) |> List.map(field -> SortKey.ByField(field#apiId)));
         let values = keys |> List.flatMap(key -> (key, Direction.Asc) :: (key, Direction.Desc) :: Nil);
         GqlCodec.enumOf("${TypeName.text(owner#singular)}OrderBy", orderByName, values)
 
@@ -250,6 +282,8 @@ mod ContentSchemaBuilder {
         let name = ApiId.text(apiId);
         let isNull = leafArg("${name}_isNull", GqlCodec.bool(), flag -> Condition.IsNull(apiId, flag) :: Nil);
         match (field#kind, field#many) {
+            case (FieldKind.Object, _)     => isNull :: Nil
+            case (FieldKind.Blocks, _)     => isNull :: Nil
             case (FieldKind.Number, true)  => isNull :: Nil
             case (FieldKind.Boolean, true) => isNull :: Nil
             case (FieldKind.Reference, true) =>
@@ -307,6 +341,31 @@ mod EntryValues {
 
     pub def bools(apiId: ApiId, data: EntryData): List[Bool] =
         Map.get(apiId, data) |> Option.map(items(asBool)) |> Option.getWithDefault(Nil)
+
+    ///
+    /// Object の値（1 つ）。オブジェクトでなければ None。
+    ///
+    pub def object(apiId: ApiId, entry: Entry): Option[EntryData] =
+        Map.get(apiId, entry#data) |> Option.flatMap(asObject)
+
+    ///
+    /// Object の値（配列）。オブジェクトでない要素は捨てる。
+    ///
+    pub def objects(apiId: ApiId, entry: Entry): List[EntryData] =
+        Map.get(apiId, entry#data) |> Option.map(items(asObject)) |> Option.getWithDefault(Nil)
+
+    ///
+    /// Blocks の値。(variant, 中身) の並び。blockType が variant に無い要素は捨てる。
+    ///
+    pub def blocks(field: FieldDef, entry: Entry): List[(FieldDef, EntryData)] =
+        Map.get(field#apiId, entry#data)
+            |> Option.map(items(item -> EntryValidation.readBlock(Children.toList(field#children), item)))
+            |> Option.getWithDefault(Nil)
+
+    def asObject(json: Json): Option[EntryData] = match json {
+        case Json.JObject(fields) => Some(EntryValidation.objectData(fields))
+        case _                    => None
+    }
 
     def items(pick: Json -> Option[a], json: Json): List[a] = match json {
         case Json.JArray(values) => values |> Vector.toList |> List.filterMap(pick)

@@ -11,11 +11,35 @@ mod EntryValidation {
     /// 無いフィールドは構わない。null は「値を消す」なのでどの kind でも通る。
     ///
     pub def draft(fields: List[FieldDef], data: EntryData): List[Violation] =
+        draftAt("fields", fields, data)
+
+    ///
+    /// prefix 付きの検査。入れ子（Object / Blocks）は "fields.related.label" / "fields.sections[0].headline" のようにパスが伸びる。
+    ///
+    def draftAt(prefix: String, fields: List[FieldDef], data: EntryData): List[Violation] =
         data |> Map.toList |> List.flatMap(match (apiId, value) ->
             match List.find(field -> field#apiId == apiId, fields) {
-                case None        => Violation.Violation("fields.${apiId}", "この型にありません") :: Nil
-                case Some(field) => checkField(field, value)
+                case None        => Violation.Violation("${prefix}.${apiId}", "この型にありません") :: Nil
+                case Some(field) => checkField("${prefix}.${apiId}", field, value)
             })
+
+    ///
+    /// Blocks の値の 1 つを (variant, 中身) に読む。blockType が variant の apiId でなければ None。
+    ///
+    pub def readBlock(variants: List[FieldDef], value: Json): Option[(FieldDef, EntryData)] = match value {
+        case Json.JObject(fields) =>
+            Map.get("blockType", fields) |> Option.flatMap(kind -> match kind {
+                case Json.JString(text) => variants |> List.find(variant -> ApiId.text(variant#apiId) == text)
+                case _                  => None
+            }) |> Option.map(variant -> (variant, objectData(Map.remove("blockType", fields))))
+        case _ => None
+    }
+
+    ///
+    /// Object の値（JSON のオブジェクト）を中身に。規則外のキーは検査で「この型にありません」になるよう、読めないキーは捨てずに残す事はしない。
+    ///
+    pub def objectData(fields: Map[String, Json]): EntryData =
+        fields |> Map.toList |> List.filterMap(match (key, value) -> ApiId.parse(key) |> Option.map(apiId -> (apiId, value))) |> List.toMap
 
     ///
     /// 公開できるか。下書きの検査に加えて、required のフィールドに値がある事を見る（null・無い・空の配列は駄目）。
@@ -43,17 +67,23 @@ mod EntryValidation {
             case _          => Map.insert(apiId, value, acc)
         }, before, patch)
 
-    def checkField(field: FieldDef, value: Json): List[Violation] =
-        let path = "fields.${field#apiId}";
+    def checkField(path: String, field: FieldDef, value: Json): List[Violation] =
         match (field#many, value) {
             case (_, Json.JNull)          => Nil
-            case (true, Json.JArray(items)) => items |> Vector.toList |> List.flatMap(item -> checkScalar(path, field, item))
+            case (true, Json.JArray(items)) => items |> Vector.toList |> List.zipWithIndex |> List.flatMap(match (index, item) -> checkScalar("${path}[${index}]", field, item))
             case (true, _)                => Violation.Violation(path, "配列にしてください") :: Nil
             case (false, _)               => checkScalar(path, field, value)
         }
 
     def checkScalar(path: String, field: FieldDef, value: Json): List[Violation] =
         match (field#kind, value) {
+            case (FieldKind.Object, Json.JObject(fields)) => draftAt(path, Children.toList(field#children), objectData(fields))
+            case (FieldKind.Object, _)                    => Violation.Violation(path, "オブジェクトにしてください") :: Nil
+            case (FieldKind.Blocks, Json.JObject(fields)) => match readBlock(Children.toList(field#children), value) {
+                case Some((variant, inner)) => draftAt(path, Children.toList(variant#children), inner)
+                case None                   => Violation.Violation(path, "blockType は ${Children.toList(field#children) |> List.map(variant -> ApiId.text(variant#apiId)) |> List.join(" / ")} のどれかにしてください") :: Nil
+            } |> (violations -> { let _ = fields; violations })
+            case (FieldKind.Blocks, _)                    => Violation.Violation(path, "オブジェクト（blockType 付き）にしてください") :: Nil
             case (FieldKind.Text, Json.JString(text))     => checkLength(path, field#config, text)
             case (FieldKind.TextArea, Json.JString(text)) => checkLength(path, field#config, text)
             case (FieldKind.Slug, Json.JString(text))     => checkLength(path, field#config, text)

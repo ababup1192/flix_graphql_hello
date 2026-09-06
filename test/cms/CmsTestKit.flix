@@ -35,7 +35,7 @@ mod CmsTestKit {
     /// フィールドの入力。many / required / unique / localized は全部 false。
     ///
     pub def fieldDraft(api: String, kind: FieldKind, config: FieldConfig): FieldDraft =
-        { apiId = apiId(api), name = api, kind = kind, many = false, required = false, unique = false, localized = false, target = None, config = config }
+        { apiId = apiId(api), name = api, kind = kind, many = false, required = false, unique = false, localized = false, target = None, parent = None, config = config }
 
     ///
     /// entry の中身。(apiId, 値) の並びから。
@@ -53,6 +53,11 @@ mod CmsTestKit {
     ///
     pub def floatJson(x: Float64): Util.Json.Json =
         Float64.tryToBigDecimal(x) |> Option.map(Util.Json.Json.JNumber) |> Option.getWithDefault(Util.Json.Json.JNull)
+
+    ///
+    /// entry の id の並び。規則に合う綴りだけ渡す。
+    ///
+    pub def entryIds(texts: List[String]): List[EntryId] = List.filterMap(EntryId.parse, texts)
 
     ///
     /// 誤りのパスだけ取り出す（メッセージの文言はテストしない）。

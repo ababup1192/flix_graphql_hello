@@ -40,6 +40,8 @@ mod FieldDefResolvers {
             unique    = (_context, source) -> Ok(source#unique),
             localized = (_context, source) -> Ok(source#localized),
             targetTypeId = (_context, source) -> Ok(source#target |> Option.map(AdminMapping.idOfType)),
+            parentFieldId = (_context, source) -> Ok(source#parent |> Option.map(AdminMapping.idOfField)),
+            children  = (_context, source) -> Ok(Children.toList(source#children)),
             config    = (_context, source) -> Ok(source#config),
             position  = (_context, source) -> Ok(source#position)
         }

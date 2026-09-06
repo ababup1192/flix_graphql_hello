@@ -73,6 +73,8 @@ mod AdminMapping {
         case GeneratedAdmin.FieldKind.Boolean  => FieldKind.Boolean
         case GeneratedAdmin.FieldKind.Select   => FieldKind.Select
         case GeneratedAdmin.FieldKind.Reference => FieldKind.Reference
+        case GeneratedAdmin.FieldKind.Object   => FieldKind.Object
+        case GeneratedAdmin.FieldKind.Blocks   => FieldKind.Blocks
     }
 
     pub def fieldKindToGql(kind: FieldKind): GeneratedAdmin.FieldKind = match kind {
@@ -83,6 +85,8 @@ mod AdminMapping {
         case FieldKind.Boolean  => GeneratedAdmin.FieldKind.Boolean
         case FieldKind.Select   => GeneratedAdmin.FieldKind.Select
         case FieldKind.Reference => GeneratedAdmin.FieldKind.Reference
+        case FieldKind.Object   => GeneratedAdmin.FieldKind.Object
+        case FieldKind.Blocks   => GeneratedAdmin.FieldKind.Blocks
     }
 
     ///
@@ -198,11 +202,12 @@ mod AdminMapping {
             apiId     = apiId("apiId", input#apiId),
             name      = input#name,
             kind      = fieldKindOf(input#kind),
-            many      = input#many |> Option.getWithDefault(false),
+            many      = input#many |> Option.getWithDefault(false) or input#kind == GeneratedAdmin.FieldKind.Blocks,
             required  = input#required |> Option.getWithDefault(false),
             unique    = input#unique |> Option.getWithDefault(false),
             localized = input#localized |> Option.getWithDefault(false),
             target    = input#targetTypeId |> Option.map(typeId("targetTypeId")),
+            parent    = input#parentFieldId |> Option.map(fieldId("parentFieldId")),
             config    = input#config |> Option.map(config) |> Option.getWithDefault(FieldConfig.empty())
         }
 

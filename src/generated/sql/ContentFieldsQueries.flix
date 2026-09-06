@@ -7,17 +7,18 @@ mod ContentFieldsQueries {
     ///
     /// 生成元 content_fields.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -2107793191
+    pub def sourceHash(): Int32 = -541611684
 
     ///
     /// listAllFields の 1 行。
     ///
-    pub type alias ListAllFieldsRow = { id = Int64, typeId = Int64, apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, targetTypeId = Option[Int64], config = Util.Json.Json, position = Int32 }
+    pub type alias ListAllFieldsRow = { id = Int64, typeId = Int64, parentFieldId = Option[Int64], apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, targetTypeId = Option[Int64], config = Util.Json.Json, position = Int32 }
 
     def listAllFieldsDecoder(): Decoder[ListAllFieldsRow] =
         forA (
             id <- Decoder.int64("id");
             typeId <- Decoder.int64("type_id");
+            parentFieldId <- Decoder.opt(Decoder.int64("parent_field_id"));
             apiId <- Decoder.str("api_id");
             name <- Decoder.str("name");
             kind <- Decoder.str("kind");
@@ -28,25 +29,26 @@ mod ContentFieldsQueries {
             targetTypeId <- Decoder.opt(Decoder.int64("target_type_id"));
             config <- Decoder.json("config");
             position <- Decoder.int32("position")
-        ) yield { id = id, typeId = typeId, apiId = apiId, name = name, kind = kind, isMany = isMany, isRequired = isRequired, isUnique = isUnique, isLocalized = isLocalized, targetTypeId = targetTypeId, config = config, position = position }
+        ) yield { id = id, typeId = typeId, parentFieldId = parentFieldId, apiId = apiId, name = name, kind = kind, isMany = isMany, isRequired = isRequired, isUnique = isUnique, isLocalized = isLocalized, targetTypeId = targetTypeId, config = config, position = position }
 
     ///
-    /// listAllFields: SELECT id, type_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position FROM content_fields ORDER BY type_id, position, id
+    /// listAllFields: SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position FROM content_fields ORDER BY type_id, position, id
     ///
     pub def listAllFields(): List[ListAllFieldsRow] \ DbRead =
-        let sql = "SELECT id, type_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position\n    FROM content_fields ORDER BY type_id, position, id";
+        let sql = "SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position\n    FROM content_fields ORDER BY type_id, position, id";
         let params = Nil;
         RawSql.runWithAllow(() -> Sql.fetchAs(listAllFieldsDecoder(), sql, params))
 
     ///
     /// listFieldsOfType の 1 行。
     ///
-    pub type alias ListFieldsOfTypeRow = { id = Int64, typeId = Int64, apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, targetTypeId = Option[Int64], config = Util.Json.Json, position = Int32 }
+    pub type alias ListFieldsOfTypeRow = { id = Int64, typeId = Int64, parentFieldId = Option[Int64], apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, targetTypeId = Option[Int64], config = Util.Json.Json, position = Int32 }
 
     def listFieldsOfTypeDecoder(): Decoder[ListFieldsOfTypeRow] =
         forA (
             id <- Decoder.int64("id");
             typeId <- Decoder.int64("type_id");
+            parentFieldId <- Decoder.opt(Decoder.int64("parent_field_id"));
             apiId <- Decoder.str("api_id");
             name <- Decoder.str("name");
             kind <- Decoder.str("kind");
@@ -57,25 +59,26 @@ mod ContentFieldsQueries {
             targetTypeId <- Decoder.opt(Decoder.int64("target_type_id"));
             config <- Decoder.json("config");
             position <- Decoder.int32("position")
-        ) yield { id = id, typeId = typeId, apiId = apiId, name = name, kind = kind, isMany = isMany, isRequired = isRequired, isUnique = isUnique, isLocalized = isLocalized, targetTypeId = targetTypeId, config = config, position = position }
+        ) yield { id = id, typeId = typeId, parentFieldId = parentFieldId, apiId = apiId, name = name, kind = kind, isMany = isMany, isRequired = isRequired, isUnique = isUnique, isLocalized = isLocalized, targetTypeId = targetTypeId, config = config, position = position }
 
     ///
-    /// listFieldsOfType: SELECT id, type_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position FROM content_fields WHERE type_id = $1 ORDER BY position, id
+    /// listFieldsOfType: SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position FROM content_fields WHERE type_id = $1 ORDER BY position, id
     ///
     pub def listFieldsOfType(typeId: Int64): List[ListFieldsOfTypeRow] \ DbRead =
-        let sql = "SELECT id, type_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position\n    FROM content_fields WHERE type_id = $1 ORDER BY position, id";
+        let sql = "SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position\n    FROM content_fields WHERE type_id = $1 ORDER BY position, id";
         let params = List#{SqlValue.Int64(typeId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listFieldsOfTypeDecoder(), sql, params))
 
     ///
     /// findField の 1 行。
     ///
-    pub type alias FindFieldRow = { id = Int64, typeId = Int64, apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, targetTypeId = Option[Int64], config = Util.Json.Json, position = Int32 }
+    pub type alias FindFieldRow = { id = Int64, typeId = Int64, parentFieldId = Option[Int64], apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, targetTypeId = Option[Int64], config = Util.Json.Json, position = Int32 }
 
     def findFieldDecoder(): Decoder[FindFieldRow] =
         forA (
             id <- Decoder.int64("id");
             typeId <- Decoder.int64("type_id");
+            parentFieldId <- Decoder.opt(Decoder.int64("parent_field_id"));
             apiId <- Decoder.str("api_id");
             name <- Decoder.str("name");
             kind <- Decoder.str("kind");
@@ -86,13 +89,13 @@ mod ContentFieldsQueries {
             targetTypeId <- Decoder.opt(Decoder.int64("target_type_id"));
             config <- Decoder.json("config");
             position <- Decoder.int32("position")
-        ) yield { id = id, typeId = typeId, apiId = apiId, name = name, kind = kind, isMany = isMany, isRequired = isRequired, isUnique = isUnique, isLocalized = isLocalized, targetTypeId = targetTypeId, config = config, position = position }
+        ) yield { id = id, typeId = typeId, parentFieldId = parentFieldId, apiId = apiId, name = name, kind = kind, isMany = isMany, isRequired = isRequired, isUnique = isUnique, isLocalized = isLocalized, targetTypeId = targetTypeId, config = config, position = position }
 
     ///
-    /// findField: SELECT id, type_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position FROM content_fields WHERE id = $1
+    /// findField: SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position FROM content_fields WHERE id = $1
     ///
     pub def findField(id: Int64): Option[FindFieldRow] \ DbRead =
-        let sql = "SELECT id, type_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position\n    FROM content_fields WHERE id = $1";
+        let sql = "SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position\n    FROM content_fields WHERE id = $1";
         let params = List#{SqlValue.Int64(id)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findFieldDecoder(), sql, params))
 
@@ -120,6 +123,14 @@ mod ContentFieldsQueries {
     pub def setFieldTarget(args: { id = Int64, targetTypeId = Int64 }): Int32 \ DbWrite =
         let sql = "UPDATE content_fields SET target_type_id = $1 WHERE id = $2";
         let params = List#{SqlValue.Int64(args#targetTypeId), SqlValue.Int64(args#id)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// setFieldParent: UPDATE content_fields SET parent_field_id = $1 WHERE id = $2
+    ///
+    pub def setFieldParent(args: { id = Int64, parentFieldId = Int64 }): Int32 \ DbWrite =
+        let sql = "UPDATE content_fields SET parent_field_id = $1 WHERE id = $2";
+        let params = List#{SqlValue.Int64(args#parentFieldId), SqlValue.Int64(args#id)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
@@ -161,11 +172,29 @@ mod ContentFieldsQueries {
         ) yield { next = next }
 
     ///
-    /// nextFieldPosition: SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE type_id = $1
+    /// nextFieldPosition: SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE type_id = $1 AND parent_field_id IS NULL
     ///
     pub def nextFieldPosition(typeId: Int64): Option[NextFieldPositionRow] \ DbRead =
-        let sql = "SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE type_id = $1";
+        let sql = "SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE type_id = $1 AND parent_field_id IS NULL";
         let params = List#{SqlValue.Int64(typeId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(nextFieldPositionDecoder(), sql, params))
+
+    ///
+    /// nextChildPosition の 1 行。
+    ///
+    pub type alias NextChildPositionRow = { next = Option[Int32] }
+
+    def nextChildPositionDecoder(): Decoder[NextChildPositionRow] =
+        forA (
+            next <- Decoder.opt(Decoder.int32("next"))
+        ) yield { next = next }
+
+    ///
+    /// nextChildPosition: SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE parent_field_id = $1
+    ///
+    pub def nextChildPosition(parentFieldId: Int64): Option[NextChildPositionRow] \ DbRead =
+        let sql = "SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE parent_field_id = $1";
+        let params = List#{SqlValue.Int64(parentFieldId)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(nextChildPositionDecoder(), sql, params))
 
 }

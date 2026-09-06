@@ -9,7 +9,7 @@ mod Naming {
     /// Entry interface が持つので、フィールドの apiId に使えない名前。
     ///
     pub def reservedFieldApiIds(): List[String] =
-        "id" :: "stage" :: "publishedAt" :: "updatedAt" :: "createdAt" :: "version" :: Nil
+        "id" :: "stage" :: "publishedAt" :: "updatedAt" :: "createdAt" :: "version" :: "blockType" :: Nil
 
     ///
     /// コンテンツ API が自分で持つので、singular に使えない型名。
@@ -91,8 +91,15 @@ mod Naming {
     ///
     /// フィールドの性質の組み合わせ。unique は配列に付けられない（値ごとの一意を DB で守れない）。
     ///
-    pub def validateFlags(many: Bool, unique: Bool): List[Violation] =
-        if (many and unique) Violation.Violation("unique", "配列のフィールドには付けられません") :: Nil else Nil
+    pub def validateFlags(kind: FieldKind, many: Bool, unique: Bool): List[Violation] =
+        let uniqueChecks = if (many and unique) Violation.Violation("unique", "配列のフィールドには付けられません") :: Nil else Nil;
+        let structureChecks = match kind {
+            case FieldKind.Blocks if not many => Violation.Violation("many", "BLOCKS は常に配列です（many: true）") :: Nil
+            case FieldKind.Object if unique   => Violation.Violation("unique", "OBJECT には付けられません") :: Nil
+            case FieldKind.Blocks if unique   => Violation.Violation("unique", "BLOCKS には付けられません") :: Nil
+            case _                            => Nil
+        };
+        uniqueChecks ::: structureChecks
 
     ///
     /// 参照先の有無。Reference には要り、他には付けられない。参照先の型が存在するかはユースケースが見る。
@@ -102,6 +109,19 @@ mod Naming {
         case (FieldKind.Reference, _)    => Nil
         case (_, Some(_))                => Violation.Violation("targetTypeId", "REFERENCE 以外には付けられません") :: Nil
         case (_, None)                   => Nil
+    }
+
+    ///
+    /// 親子の組み合わせ。Blocks の子は Object（variant）だけ。Object の子に Blocks は置けない（入れ子の union は複雑になる）。
+    /// 親が無ければ何でもよい。
+    ///
+    pub def validateParent(parentKind: Option[FieldKind], childKind: FieldKind): List[Violation] = match (parentKind, childKind) {
+        case (None, _)                              => Nil
+        case (Some(FieldKind.Blocks), FieldKind.Object) => Nil
+        case (Some(FieldKind.Blocks), _)            => Violation.Violation("parentFieldId", "BLOCKS の子は OBJECT（variant）だけです") :: Nil
+        case (Some(FieldKind.Object), FieldKind.Blocks) => Violation.Violation("parentFieldId", "OBJECT の中に BLOCKS は置けません") :: Nil
+        case (Some(FieldKind.Object), _)            => Nil
+        case (Some(_), _)                           => Violation.Violation("parentFieldId", "子を持てるのは OBJECT と BLOCKS だけです") :: Nil
     }
 
     ///
