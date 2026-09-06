@@ -82,6 +82,16 @@ mod TestNaming {
              CmsTestKit.violationPaths(Naming.validateParent(Some(FieldKind.Blocks), FieldKind.Object, true)),
              CmsTestKit.violationPaths(Naming.validateParent(Some(FieldKind.Blocks), FieldKind.Object, false))))
 
+    /// 性質の組み合わせ: 配列に unique は付けられず、BLOCKS は常に配列、OBJECT / BLOCKS に unique は付けられない。単数の Text の unique は通る。
+    @Test
+    def testNamingValidateFlags(): Unit \ Assert =
+        Assert.assertEq(expected = (Nil, List#{"unique"}, List#{"many"}, List#{"unique"}, List#{"unique", "unique"}),
+            (CmsTestKit.violationPaths(Naming.validateFlags(FieldKind.Text, false, true)),
+             CmsTestKit.violationPaths(Naming.validateFlags(FieldKind.Text, true, true)),
+             CmsTestKit.violationPaths(Naming.validateFlags(FieldKind.Blocks, false, false)),
+             CmsTestKit.violationPaths(Naming.validateFlags(FieldKind.Object, false, true)),
+             CmsTestKit.violationPaths(Naming.validateFlags(FieldKind.Blocks, true, true))))
+
     // ---- config ----
 
     /// SLUG は sourceField が要り、それは同じ型にあるフィールドでなければならない。
