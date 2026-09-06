@@ -51,6 +51,10 @@ query softDeleteEntry(id: String) -> exec {
     UPDATE entries SET deleted_at = now() WHERE id = :id AND deleted_at IS NULL
 }
 
+query purgeDeletedEntries(typeId: Int64) -> exec {
+    DELETE FROM entries WHERE type_id = :typeId AND deleted_at IS NOT NULL
+}
+
 query upsertContent(entryId: String, stage: String, data: Json) -> exec {
     INSERT INTO entry_contents (entry_id, stage, data) VALUES (:entryId, :stage, :data)
     ON CONFLICT (entry_id, stage) DO UPDATE SET data = EXCLUDED.data, updated_at = now()

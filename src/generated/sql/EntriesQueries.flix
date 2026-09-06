@@ -7,7 +7,7 @@ mod EntriesQueries {
     ///
     /// 生成元 entries.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 1861726501
+    pub def sourceHash(): Int32 = 75330814
 
     ///
     /// findEntry の 1 行。
@@ -139,6 +139,14 @@ mod EntriesQueries {
     pub def softDeleteEntry(id: String): Int32 \ DbWrite =
         let sql = "UPDATE entries SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL";
         let params = List#{SqlValue.Str(id)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// purgeDeletedEntries: DELETE FROM entries WHERE type_id = $1 AND deleted_at IS NOT NULL
+    ///
+    pub def purgeDeletedEntries(typeId: Int64): Int32 \ DbWrite =
+        let sql = "DELETE FROM entries WHERE type_id = $1 AND deleted_at IS NOT NULL";
+        let params = List#{SqlValue.Int64(typeId)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///

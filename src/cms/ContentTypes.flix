@@ -87,11 +87,13 @@ mod ContentTypes {
 
     ///
     /// content type をフィールドごと消す。無ければ notFound。entry が残っていれば invalid（先に entry を消す）。
+    /// ゴミ箱の entry は型と一緒に消す（残すと型が消せない）。
     ///
     pub def delete(id: TypeId): Unit \ Db + CmsErr =
         discard get(id);
         let remaining = ContentEntries.countOfType(id);
         CmsErr.raiseIfAny(if (remaining == 0i64) Nil else Violation.Violation("id", "entry が ${remaining} 件あります。先に消してください") :: Nil);
+        discard EntriesQueries.purgeDeletedEntries(TypeId.toInt64(id));
         discard ContentTypesQueries.deleteContentType(TypeId.toInt64(id))
 
     // ---- フィールド ----

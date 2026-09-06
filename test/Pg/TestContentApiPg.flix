@@ -44,7 +44,10 @@ def testPgContentApiQueries(): Unit \ {IO, Assert} =
             (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }), "blog" => Value.Null }), None)),
         (byContains, byOr, paged, one, published))
 
-/// 型の定義が変わると（フィールドを足す）エンジンが組み直され、新しいフィールドが引ける。変わらなければ同じエンジン。
+/// 型の定義が変わるとエンジンが組み直される。フィールドを足せば引けるようになり、型を足せば query が増え、型を消せば query が消える。
+///
+///   blog { excerpt } ── 無い ──▶ addField(excerpt) ──▶ null で引ける
+///   tags             ── 無い ──▶ create(tags)     ──▶ 引ける ──▶ delete(tags) ──▶ 無い
 @Test
 def testPgContentEngineRebuilds(): Unit \ {IO, Assert} =
     let pool = Pool.open(Pool.defaultConfig(PgTestSupport.config()));
@@ -56,5 +59,18 @@ def testPgContentEngineRebuilds(): Unit \ {IO, Assert} =
         discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("excerpt", FieldKind.TextArea, FieldConfig.empty()))
     })));
     let after = ContentEngine.current(cache, pool) |> Result.map(engine -> Graphql.runWithEngine(engine, () -> Graphql.execute(GraphqlTestKit.queryOnly("{ blog(id: \"b1\", stage: DRAFT) { excerpt } }"), Context.anonymous())) |> (response -> response#data));
+    let askTags = () -> ContentEngine.current(cache, pool) |> Result.map(engine -> Graphql.runWithEngine(engine, () -> Graphql.execute(GraphqlTestKit.queryOnly("{ tags(stage: DRAFT) { totalCount } }"), Context.anonymous())) |> (response -> (response#data, GraphqlTestKit.firstMessage(response) |> Option.nonEmpty)));
+    let noTags = askTags();
+    let tagsCreated = DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Pool.withLazyTx(pool, () -> {
+        let tags = ContentTypes.create(CmsTestKit.typeDraft("tags", "タグ"));
+        discard ContentTypes.addField(tags#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
+        tags#id
+    })));
+    let withTags = askTags();
+    let tagsDeleted = tagsCreated |> Result.map(Result.map(tagsId -> DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Pool.withLazyTx(pool, () -> ContentTypes.delete(tagsId))))));
+    let withoutTags = askTags();
     Pool.close(pool);
-    Assert.assertEq(expected = (Ok(true), Ok(Ok(())), Ok(Value.Obj(Map#{ "blog" => Value.Obj(Map#{ "excerpt" => Value.Null }) }))), (before, added, after))
+    Assert.assertEq(
+        expected = (Ok(true), Ok(Ok(())), Ok(Value.Obj(Map#{ "blog" => Value.Obj(Map#{ "excerpt" => Value.Null }) })),
+                    Ok((Value.Null, true)), Ok((Value.Obj(Map#{ "tags" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }) }), false)), Ok(Ok(Ok(Ok(())))), Ok((Value.Null, true))),
+        (before, added, after, noTags, withTags, tagsDeleted, withoutTags))
