@@ -15,8 +15,20 @@ mod AdminQueryResolvers {
             case (None, None)       => Err("id か apiId を指定してください")
         }
 
+    /// Query.entries。first は 1 〜 200 に丸める
+    pub def entries(): GeneratedAdmin.QueryEntriesResolver[AdminEff] =
+        (_context, typeId, search, first, skip) -> Ok(ContentEntries.list(AdminMapping.typeId("typeId", typeId), {
+            search = search |> Option.getWithDefault(""),
+            first  = first |> Option.getWithDefault(50) |> Int32.max(1) |> Int32.min(200),
+            skip   = skip |> Option.getWithDefault(0) |> Int32.max(0)
+        }))
+
+    /// Query.entry
+    pub def entry(): GeneratedAdmin.QueryEntryResolver[AdminEff] =
+        (_context, id) -> Ok(ContentEntries.find(AdminMapping.entryId("id", id)))
+
     /// type Query のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.QueryResolvers[AdminEff] =
-        { contentTypes = contentTypes(), contentType = contentType() }
+        { contentTypes = contentTypes(), contentType = contentType(), entries = entries(), entry = entry() }
 
 }

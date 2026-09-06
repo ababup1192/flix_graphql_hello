@@ -132,6 +132,10 @@ mod JavaValue {
             fromLong((unchecked_cast(obj as Long)).longValue())
         else if (isInstance("java.lang.Double", obj))
             Value.Float((unchecked_cast(obj as Double)).doubleValue())
+        else if (isInstance("java.math.BigInteger", obj))
+            fromBigInt(unchecked_cast(obj as BigInt))
+        else if (isInstance("java.math.BigDecimal", obj))
+            fromBigDecimal(unchecked_cast(obj as BigDecimal))
         else if (isInstance("java.lang.Boolean", obj))
             Value.Bool((unchecked_cast(obj as Boolean)).booleanValue())
         else if (isInstance("java.lang.String", obj))
@@ -142,6 +146,21 @@ mod JavaValue {
             Value.List(Adaptor.fromList(unchecked_cast(obj as JList[Object])) |> List.map(item -> fromObject(item)))
         else
             Value.Str(obj.toString())
+
+    ///
+    /// BigInteger（scalar JSON のリテラルの整数）を Int32 に収まれば Int、収まらなければ Float にする。
+    ///
+    def fromBigInt(n: BigInt): Value = match (BigInt.tryToInt32(n), BigInt.tryToInt64(n)) {
+        case (Some(small), _) => Value.Int(small)
+        case (None, Some(big)) => Value.Float(Int64.toFloat64(big))
+        case (None, None)      => Value.Str("${n}")
+    }
+
+    ///
+    /// BigDecimal（scalar JSON のリテラルの小数）を Float にする。表せなければ Null。
+    ///
+    def fromBigDecimal(n: BigDecimal): Value =
+        BigDecimal.tryToFloat64(n) |> Option.map(Value.Float) |> Option.getWithDefault(Value.Null)
 
     ///
     /// Int64 を Int32 に収まれば Int、収まらなければ Float にする。

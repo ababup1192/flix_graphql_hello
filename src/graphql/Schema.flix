@@ -165,6 +165,8 @@ pub enum TypeDecl {
     case EnumDecl(String, Option[String], List[EnumValueInfo])
     /// input Name { ... }
     case InputDecl(String, Option[String], List[ArgInfo])
+    /// scalar Name（組み込み以外のスカラー。今は JSON だけ）
+    case ScalarDecl(String)
 }
 
 ///
@@ -337,6 +339,8 @@ mod Out {
     pub def bool(): Out[Bool, ef] = scalar(GqlCodec.bool())
     /// ID
     pub def id(): Out[Id, ef] = scalar(GqlCodec.id())
+    /// JSON（任意の JSON 値）
+    pub def json(): Out[Value, ef] = scalar(GqlCodec.json())
 
     ///
     /// SDL に出す型参照。オブジェクト型のフィールドを runner で IO に落として型消去する。
@@ -629,7 +633,7 @@ mod Schema {
     ///
     def visit(typeRef: TypeRef, state: VisitState): Result[String, VisitState] =
         match typeRef {
-            case TypeRef.Scalar(_)               => Ok(state)
+            case TypeRef.Scalar(name)            => if (List.memberOf(name, builtinScalars())) Ok(state) else declare(name, TypeDecl.ScalarDecl(name), state, Ok)
             case TypeRef.ListOf(inner)           => visit(inner, state)
             case TypeRef.Nullable(inner)         => visit(inner, state)
             case TypeRef.Enum(name, description, values) => declare(name, TypeDecl.EnumDecl(name, description, values), state, Ok)
@@ -701,7 +705,13 @@ mod Schema {
         case TypeDecl.EnumDecl(name, description, values) =>
             let body = values |> List.map(enumValueLine) |> List.join("\n");
             "${typeDescription(description)}enum ${name} {\n${body}\n}"
+        case TypeDecl.ScalarDecl(name) => "scalar ${name}"
     }
+
+    ///
+    /// GraphQL が最初から持つスカラー。SDL に宣言しない。
+    ///
+    pub def builtinScalars(): List[String] = "Int" :: "Float" :: "String" :: "Boolean" :: "ID" :: Nil
 
     ///
     /// 型の description。あれば宣言の直前の行に出す。

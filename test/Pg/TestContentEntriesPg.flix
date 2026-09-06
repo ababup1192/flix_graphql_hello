@@ -1,0 +1,107 @@
+use Util.Json.Json
+use CmsErr.CmsFailure
+
+///
+/// ContentEntries を実 PostgreSQL で通しで動かす。
+///
+
+def entryId(text: String): EntryId = EntryId.parse(text) |> Option.getWithDefault(EntryId.EntryId("invalid"))
+
+def draftData(pairs: List[(String, Json)]): EntryData =
+    pairs |> List.map(match (key, value) -> (CmsTestKit.apiId(key), value)) |> List.toMap
+
+///
+/// blogs 型（title / views）を作って id を返す。
+///
+def blogsWithFields(): TypeId \ Db + CmsErr =
+    let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
+    discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, { maxLength = Some(10) | FieldConfig.empty() }));
+    discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("views", FieldKind.Number, FieldConfig.empty()));
+    blogs#id
+
+///
+/// 決めた id を振る。
+///
+def withIds(ids: List[String], body: Unit -> a \ ef): a \ ef - IdGen =
+    IdGen.runWithFixed(List.map(entryId, ids), body)
+
+/// 作る・読む・直す・消す。version は保存のたびに進み、JSONB を往復して中身が戻る。
+///
+///   create(a1) v1 → update(title) v2 → update(views: null で消す) v3 → delete → find = None
+@Test
+def testPgEntryLifecycle(): Unit \ {IO, Assert} =
+    let result = PgTestSupport.withDb(() -> withIds(List#{"a1"}, () -> {
+        let blogs = blogsWithFields();
+        let created = ContentEntries.create(blogs, None, draftData(List#{("title", Json.JString("hello")), ("views", Json.JNumber(Int32.toBigDecimal(3)))}));
+        let renamed = ContentEntries.update(created#id, draftData(List#{("title", Json.JString("hi"))}), created#version);
+        let cleared = ContentEntries.update(created#id, draftData(List#{("views", Json.JNull)}), renamed#version);
+        ContentEntries.delete(created#id);
+        ((EntryId.text(created#id), created#version, created#stage, Map.size(created#data)),
+         (renamed#version, Map.get(CmsTestKit.apiId("title"), renamed#data)),
+         (cleared#version, Map.keysOf(cleared#data) |> Set.toList |> List.map(ApiId.text)),
+         ContentEntries.find(created#id) |> Option.isEmpty)
+    }));
+    Assert.assertEq(expected = Ok(Ok((("a1", 1, Stage.Draft, 2), (2, Some(Json.JString("hi"))), (3, List#{"title"}), true))), result)
+
+/// 古い version で保存すると conflict になり、中身は変わらない。
+@Test
+def testPgEntryConflict(): Unit \ {IO, Assert} =
+    let result = PgTestSupport.withDb(() -> withIds(List#{"c1"}, () -> {
+        let blogs = blogsWithFields();
+        let created = ContentEntries.create(blogs, None, draftData(List#{("title", Json.JString("v1"))}));
+        discard ContentEntries.update(created#id, draftData(List#{("title", Json.JString("v2"))}), 1);
+        let stale = CmsErr.runWithResult(() -> ContentEntries.update(created#id, draftData(List#{("title", Json.JString("v3"))}), 1));
+        (stale |> Result.map(entry -> entry#version), ContentEntries.get(created#id) |> (entry -> Map.get(CmsTestKit.apiId("title"), entry#data)))
+    }));
+    Assert.assertEq(expected = Ok(Ok((Err(CmsFailure.Conflict(Entity.Entry, "c1", 2)), Some(Json.JString("v2"))))), result)
+
+/// 一覧は更新が新しい順、search で絞れ、totalCount は絞った後の件数。渡した id はそのまま使われる。
+@Test
+def testPgEntryList(): Unit \ {IO, Assert} =
+    let result = PgTestSupport.withDb(() -> withIds(List#{"unused"}, () -> {
+        let blogs = blogsWithFields();
+        discard ContentEntries.create(blogs, Some(entryId("first")), draftData(List#{("title", Json.JString("apple"))}));
+        discard ContentEntries.create(blogs, Some(entryId("second")), draftData(List#{("title", Json.JString("banana"))}));
+        discard ContentEntries.create(blogs, Some(entryId("third")), draftData(List#{("title", Json.JString("apricot"))}));
+        let all = ContentEntries.list(blogs, { search = "", first = 10, skip = 0 });
+        let searched = ContentEntries.list(blogs, { search = "ap", first = 10, skip = 0 });
+        let paged = ContentEntries.list(blogs, { search = "", first = 1, skip = 1 });
+        (all#totalCount, searched#entries |> List.map(entry -> EntryId.text(entry#id)) |> List.sort, searched#totalCount, paged#entries |> List.length)
+    }));
+    Assert.assertEq(expected = Ok(Ok((3i64, List#{"first", "third"}, 2i64, 1))), result)
+
+/// 型に合わない中身は invalid で、entry が残っている型は消せない。
+@Test
+def testPgEntryGuards(): Unit \ {IO, Assert} =
+    let result = PgTestSupport.withDb(() -> withIds(List#{"g1"}, () -> {
+        let blogs = blogsWithFields();
+        let invalid = CmsErr.runWithResult(() -> ContentEntries.create(blogs, None, draftData(List#{("title", Json.JString("0123456789ab"))})));
+        discard ContentEntries.create(blogs, None, draftData(List#{("title", Json.JString("ok"))}));
+        let blocked = CmsErr.runWithResult(() -> ContentTypes.delete(blogs));
+        (invalid |> Result.map(entry -> entry#version) |> Result.mapErr(CmsErr.toMessage), blocked |> Result.mapErr(CmsErr.toMessage))
+    }));
+    Assert.assertEq(expected = Ok(Ok((Err("fields.title: 10 文字以内にしてください"), Err("id: entry が 1 件あります。先に消してください")))), result)
+
+/// 管理 API のエンジンを通して JSON scalar が往復する。数値は Int、null で消す、規則外のキーは invalid。
+@Test
+def testPgAdminEntryRoundTrip(): Unit \ {IO, Assert} =
+    let pool = Pool.open(Pool.defaultConfig(PgTestSupport.config()));
+    let typeId = PgTestSupport.withDb(() -> blogsWithFields()) |> Result.map(Result.map(id -> "${id}")) |> Result.getWithDefault(Ok("?")) |> Result.getWithDefault("?");
+    let schema = AdminSchema.make(AdminRunner.make(pool));
+    let created = GraphqlTestKit.executeQuery(schema,
+        "mutation { createEntry(typeId: \"${typeId}\", id: \"e1\", fields: { title: \"hello\", views: 7 }) { id version stage fields } }");
+    let updated = GraphqlTestKit.executeQuery(schema,
+        "mutation { updateEntry(id: \"e1\", expectedVersion: 1, fields: { views: null }) { version fields } }");
+    let badKey = GraphqlTestKit.executeOnce(schema, {
+        queryText = "mutation($f: JSON!) { updateEntry(id: \"e1\", expectedVersion: 2, fields: $f) { version } }",
+        variables = Map#{ "f" => Value.Obj(Map#{ "Bad Key" => Value.Int(1) }) },
+        operationName = None }) |> Result.map(GraphqlTestKit.firstMessage);
+    let listed = GraphqlTestKit.executeQuery(schema, "{ entries(typeId: \"${typeId}\") { totalCount nodes { id } } }");
+    Pool.close(pool);
+    Assert.assertEq(
+        expected = (
+            Ok((Value.Obj(Map#{ "createEntry" => Value.Obj(Map#{ "id" => Value.Str("e1"), "version" => Value.Int(1), "stage" => Value.Str("DRAFT"), "fields" => Value.Obj(Map#{ "title" => Value.Str("hello"), "views" => Value.Int(7) }) }) }), None)),
+            Ok((Value.Obj(Map#{ "updateEntry" => Value.Obj(Map#{ "version" => Value.Int(2), "fields" => Value.Obj(Map#{ "title" => Value.Str("hello") }) }) }), None)),
+            Ok(Some("fields.Bad Key: フィールドの apiId は lowerCamel の識別子（[a-z][A-Za-z0-9]*）です")),
+            Ok((Value.Obj(Map#{ "entries" => Value.Obj(Map#{ "totalCount" => Value.Int(1), "nodes" => Value.List(Value.Obj(Map#{ "id" => Value.Str("e1") }) :: Nil) }) }), None))),
+        (created, updated, badKey, listed))

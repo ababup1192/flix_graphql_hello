@@ -13,6 +13,8 @@ authors     = ["abab <ababup1192@gmail.com>"]
 
 [mvn-dependencies]
 "com.graphql-java:graphql-java" = "22.3"
+# scalar JSON の実装（Coercing）。Flix で Java の interface を書くより既製の物を配線する
+"com.graphql-java:graphql-java-extended-scalars" = "22.0"
 "org.xerial:sqlite-jdbc" = "3.46.1.0"
 "org.postgresql:postgresql" = "42.7.4"
 "com.zaxxer:HikariCP" = "5.1.0"

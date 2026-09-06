@@ -29,14 +29,14 @@ mod Emit {
     }
 
     ///
-    /// GraphQL の組み込みスカラー → Flix の型名。
+    /// GraphQL のスカラー → Flix の型名。JSON は `scalar JSON` を SDL に書いた上で Value として使う。
     ///
-    def scalarTypes(): Map[String, String] = Map#{ "Int" => "Int32", "Float" => "Float64", "String" => "String", "Boolean" => "Bool", "ID" => "Id" }
+    def scalarTypes(): Map[String, String] = Map#{ "Int" => "Int32", "Float" => "Float64", "String" => "String", "Boolean" => "Bool", "ID" => "Id", "JSON" => "Value" }
 
     ///
     /// 組み込みスカラーの Codec / Out の関数名（GqlCodec.xxx() / Out.xxx()）。
     ///
-    def scalarFns(): Map[String, String] = Map#{ "Int" => "int32", "Float" => "float64", "String" => "string", "Boolean" => "bool", "ID" => "id" }
+    def scalarFns(): Map[String, String] = Map#{ "Int" => "int32", "Float" => "float64", "String" => "string", "Boolean" => "bool", "ID" => "id", "JSON" => "json" }
 
     ///
     /// 生成物の全文。sdl は生成元の本文で、そのまま生成物に埋めて本体が SDL ファイルと照合する。

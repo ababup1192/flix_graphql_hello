@@ -62,6 +62,18 @@ curl -s -X POST localhost:8080/admin/graphql -d '{"query": "{ contentTypes { api
 
 名前の規則（lowerCamel の apiId、予約名、他の型との衝突）に合わない入力は `errors[].message` に理由が並ぶ。
 
+entry（下書き）は `fields: JSON` で中身を渡す。型に無いフィールドや kind に合わない値は invalid。`updateEntry` は
+`expectedVersion` が今の version と違えば conflict（楽観ロック）。
+
+```bash
+curl -s -X POST localhost:8080/admin/graphql -H 'Content-Type: application/json' \
+  -d '{"query": "mutation { createEntry(typeId: \"1\", fields: { title: \"Flix で GraphQL\" }) { id version fields } }"}'
+# {"data":{"createEntry":{"fields":{"title":"Flix で GraphQL"},"id":"3f1c9a2b7d4e","version":1}}}
+
+curl -s -X POST localhost:8080/admin/graphql -d '{"query": "mutation { updateEntry(id: \"3f1c9a2b7d4e\", expectedVersion: 1, fields: { title: \"直した\" }) { version } }"}'
+curl -s -X POST localhost:8080/admin/graphql -d '{"query": "{ entries(typeId: \"1\", search: \"Flix\") { totalCount nodes { id version fields } } }"}'
+```
+
 カウンタはカレントディレクトリの `counter.db`（SQLite）に保存され、再起動しても値が残る。リポジトリのルートで起動する。
 
 ### リクエストの形

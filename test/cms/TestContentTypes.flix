@@ -111,7 +111,7 @@ def testContentTypesAddFieldAppends(): Unit \ {Assert, IO} =
 def testContentTypesAddFieldToMissingType(): Unit \ {Assert, IO} =
     let (result, _) = DbTest.runRecordingWith(_ -> Some(Nil), 0, () -> DbError.runWithFailure(() -> CmsErr.runWithResult(() ->
         ContentTypes.addField(TypeId.TypeId(7i64), CmsTestKit.fieldDraft("x", FieldKind.Text, FieldConfig.empty())))));
-    Assert.assertEq(expected = Ok(Err(CmsFailure.NotFound(Entity.ContentType, 7i64))), result |> Result.map(Result.map(field -> field#position)))
+    Assert.assertEq(expected = Ok(Err(CmsFailure.NotFound(Entity.ContentType, "7"))), result |> Result.map(Result.map(field -> field#position)))
 
 /// reorderFields は全 id を過不足なく渡さないと invalid。
 @Test

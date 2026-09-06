@@ -37,6 +37,7 @@ pub eff Graphql {
 ///
 mod Graphql {
     import graphql.ExecutionInput
+    import graphql.scalars.ExtendedScalars
     import graphql.GraphQL
     import graphql.ErrorClassification
     import graphql.ErrorType
@@ -136,6 +137,7 @@ mod Graphql {
             }, types);
             let builder = RuntimeWiring.newRuntimeWiring().codeRegistry(codeRegistryBuilder.build());
             List.forEach(decl -> match decl {
+                case TypeDecl.ScalarDecl("JSON")       => discard builder.scalar(ExtendedScalars.Json)
                 case TypeDecl.UnionDecl(union)         => registerTypeResolver(builder, union#name)
                 case TypeDecl.InterfaceDecl(interface) => registerTypeResolver(builder, interface#name)
                 case _                                 => ()

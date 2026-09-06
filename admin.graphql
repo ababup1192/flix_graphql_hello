@@ -1,9 +1,16 @@
-"""管理 API。content type とフィールドの定義を読み書きする。形は固定で、コンテンツ API はこの定義から実行時に組む"""
+"""任意の JSON 値。entry の中身（フィールドの apiId → 値）に使う"""
+scalar JSON
+
+"""管理 API。content type とフィールドの定義と、entry を読み書きする。形は固定で、コンテンツ API は定義から実行時に組む"""
 type Query {
   """全 content type。apiId 順"""
   contentTypes: [ContentType!]!
   """id か apiId で 1 つ。無ければ null"""
   contentType(id: ID, apiId: String): ContentType
+  """型の entry の一覧。更新が新しい順。search は下書きの中身に含む文字列"""
+  entries(typeId: ID!, search: String, first: Int = 50, skip: Int = 0): EntryPage!
+  """entry 1 つ。無ければ null"""
+  entry(id: ID!): Entry
 }
 
 type Mutation {
@@ -17,6 +24,40 @@ type Mutation {
   removeField(id: ID!): ID!
   """ids の順に並べ直す。型の全フィールドを過不足なく渡す"""
   reorderFields(typeId: ID!, ids: [ID!]!): ContentType!
+
+  """下書きを作る。id を渡せば（移行用）それを使い、無ければ振る。fields は apiId → 値"""
+  createEntry(typeId: ID!, fields: JSON!, id: ID): Entry!
+  """下書きを直す。fields のキーだけ上書きし、null で消す。expectedVersion が今の version と違えば CONFLICT"""
+  updateEntry(id: ID!, fields: JSON!, expectedVersion: Int!): Entry!
+  """ゴミ箱へ（soft delete）"""
+  deleteEntry(id: ID!): ID!
+}
+
+"""entry の状態"""
+enum EntryStage {
+  """まだ公開していない"""
+  DRAFT
+  """公開中"""
+  PUBLISHED
+}
+
+"""entry。fields は下書きの中身"""
+type Entry {
+  id: ID!
+  typeId: ID!
+  """楽観ロックの版。updateEntry に expectedVersion として渡す"""
+  version: Int!
+  stage: EntryStage!
+  fields: JSON!
+  publishedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+"""entry の一覧の 1 ページ"""
+type EntryPage {
+  nodes: [Entry!]!
+  totalCount: Int!
 }
 
 """content type の種別"""

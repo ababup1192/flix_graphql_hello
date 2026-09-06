@@ -34,13 +34,13 @@ mod ContentTypes {
     /// id で 1 つ。無ければ notFound。
     ///
     pub def get(id: TypeId): ContentType \ DbRead + CmsErr =
-        find(id) |> CmsErr.orNotFound(Entity.ContentType, TypeId.toInt64(id))
+        find(id) |> CmsErr.orNotFound(Entity.ContentType, "${id}")
 
     ///
     /// フィールド 1 つ。無ければ notFound。
     ///
     pub def getField(id: FieldId): FieldDef \ DbRead + CmsErr =
-        ContentFieldsQueries.findField(FieldId.toInt64(id)) |> Option.map(ContentTypeRows.toFieldDef) |> CmsErr.orNotFound(Entity.Field, FieldId.toInt64(id))
+        ContentFieldsQueries.findField(FieldId.toInt64(id)) |> Option.map(ContentTypeRows.toFieldDef) |> CmsErr.orNotFound(Entity.Field, "${id}")
 
     // ---- content type ----
 
@@ -85,10 +85,12 @@ mod ContentTypes {
         get(id)
 
     ///
-    /// content type をフィールドごと消す。無ければ notFound。
+    /// content type をフィールドごと消す。無ければ notFound。entry が残っていれば invalid（先に entry を消す）。
     ///
     pub def delete(id: TypeId): Unit \ Db + CmsErr =
         discard get(id);
+        let remaining = ContentEntries.countOfType(id);
+        CmsErr.raiseIfAny(if (remaining == 0i64) Nil else Violation.Violation("id", "entry が ${remaining} 件あります。先に消してください") :: Nil);
         discard ContentTypesQueries.deleteContentType(TypeId.toInt64(id))
 
     // ---- フィールド ----

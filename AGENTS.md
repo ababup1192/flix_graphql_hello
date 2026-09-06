@@ -49,10 +49,10 @@ migrations/            DDL。sqlfx の机上スキーマの元で、make migrate
 queries/*.q            SQL
 src/generated/graphql/ schemagen の生成物（触らない）。GeneratedSchema / GeneratedAdminSchema
 src/generated/sql/     sqlfx の生成物（触らない）。*Queries / Tables
-src/cms/model/         ドメインの型。Ids（TypeId / FieldId / ApiId / TypeName）、ContentType（enum・レコード・Draft / Changes・FieldConfig）
-src/cms/rules/         純粋な規則。Naming（予約名・衝突・kind と config）
+src/cms/model/         ドメインの型。Ids（TypeId / FieldId / ApiId / TypeName）、ContentType（enum・レコード・Draft / Changes・FieldConfig）、Entry（EntryId / Stage / EntryData / IdGen）
+src/cms/rules/         純粋な規則。Naming（予約名・衝突・kind と config）、EntryValidation（下書きの中身。緩い）
 src/cms/db/            行とドメインの値の変換。列名を知るのはここだけ
-src/cms/               ユースケース（ContentTypes）と業務エラー（CmsErr）
+src/cms/               ユースケース（ContentTypes / ContentEntries）と業務エラー（CmsErr）
 src/admin/             管理 API。AdminMapping（GraphQL の型 ↔ ドメイン）、リゾルバ、AdminRunner（最初の SQL で借りる Tx）
 src/app/               Server（ルーティング・CORS・/health）、DbConfig、Health
 src/http/              手書き HTTP/1.1 と Cors
@@ -63,6 +63,7 @@ test/                  src と同じ構成。test/Pg/ だけ実 PG
 
 ## 型の決まり
 
-- id はプリミティブで持ち回らない。`TypeId` / `FieldId`（Int64 を包む）で、GraphQL の `Id` との写しは admin 層だけ
+- id はプリミティブで持ち回らない。`TypeId` / `FieldId`（Int64 を包む）、`EntryId`（文字列。parse 済み）で、GraphQL の `Id` との写しは admin 層だけ
 - 識別子は `ApiId`（lowerCamel）と `TypeName`（UpperCamel）で、`parse` を通した物しか作らない。規則外の文字列は境界で invalid になる
 - ドメイン（src/cms）は GeneratedAdmin を知らない。enum と入力レコードはドメインが自分で持ち、写しは `AdminMapping`
+- entry の中身は `EntryData = Map[ApiId, Json]`。GraphQL の `JSON` scalar（`Value`）との往復も `AdminMapping`

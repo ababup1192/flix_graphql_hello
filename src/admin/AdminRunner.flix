@@ -1,7 +1,7 @@
 ///
-/// 管理 API のリゾルバが使う効果の和。DB の読み書きと CMS の業務エラー。
+/// 管理 API のリゾルバが使う効果の和。DB の読み書き、CMS の業務エラー、entry の id の採番。
 ///
-pub type alias AdminEff = {SqlRead, SqlWrite, TransientDbErr, DbErr, CmsErr}
+pub type alias AdminEff = {SqlRead, SqlWrite, TransientDbErr, DbErr, CmsErr, IdGen}
 
 ///
 /// 管理 API の Runner。リゾルバ 1 つの実行を「最初の SQL で借りる接続 1 本・Tx 1 つ」に包み、失敗を GraphQL のエラーに写す。
@@ -25,7 +25,8 @@ mod AdminRunner {
         let outcome = DbError.runWithFailure(() ->
             Retry.withRetry(3, () ->
                 CmsErr.runWithResult(() ->
-                    Pool.withLazyTx(pool, f))));
+                    IdGen.runWithRandom(() ->
+                        Pool.withLazyTx(pool, f)))));
         match outcome {
             case Err(failure)      => Err("database error: ${failure}")
             case Ok(Err(failure))  => Err(CmsErr.toMessage(failure))

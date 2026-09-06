@@ -28,6 +28,7 @@ mod SdlReader {
     import graphql.language.ObjectTypeDefinition
     import graphql.language.OperationTypeDefinition
     import graphql.language.SchemaDefinition
+    import graphql.language.ScalarTypeDefinition
     import graphql.language.StringValue
     import graphql.language.Type
     import graphql.language.TypeName
@@ -40,7 +41,7 @@ mod SdlReader {
     import java.util.Objects
 
     ///
-    /// SDL 文字列を読む。対応していない定義（scalar / directive / subscription / extend）や、
+    /// SDL 文字列を読む。対応していない定義（JSON 以外の scalar / directive / subscription / extend）や、
     /// 型・input に付いた directive、enum 値の @deprecated 以外の directive があれば Err。
     ///
     pub def read(sdl: String): Result[String, SdlDocument] \ IO =
@@ -54,7 +55,7 @@ mod SdlReader {
             let interfaces = definitions |> List.filter(isA("graphql.language.InterfaceTypeDefinition")) |> List.map(readInterface) |> Result.sequence;
             let roots = readRoots(definitions);
             let extensions = definitions |> List.filter(isExtension) |> List.map(unsupported) |> firstErr;
-            let others = definitions |> List.filter(definition -> not (isA("graphql.language.ObjectTypeDefinition", definition) or isA("graphql.language.EnumTypeDefinition", definition) or isA("graphql.language.InputObjectTypeDefinition", definition) or isA("graphql.language.UnionTypeDefinition", definition) or isA("graphql.language.InterfaceTypeDefinition", definition) or isA("graphql.language.SchemaDefinition", definition))) |> List.map(unsupported) |> firstErr;
+            let others = definitions |> List.filter(definition -> not (isA("graphql.language.ObjectTypeDefinition", definition) or isA("graphql.language.EnumTypeDefinition", definition) or isA("graphql.language.InputObjectTypeDefinition", definition) or isA("graphql.language.UnionTypeDefinition", definition) or isA("graphql.language.InterfaceTypeDefinition", definition) or isA("graphql.language.SchemaDefinition", definition) or isJsonScalar(definition))) |> List.map(unsupported) |> firstErr;
             forM (
                 _          <- extensions;
                 _          <- others;
@@ -84,6 +85,12 @@ mod SdlReader {
         case Nil            => Ok(())
         case message :: _   => Err(message)
     }
+
+    ///
+    /// `scalar JSON` か。対応するスカラーはこれだけで、宣言は読み飛ばす（生成物は JSON を Value / GqlCodec.json() に写す）。
+    ///
+    def isJsonScalar(definition: Definition[Object]): Bool \ IO =
+        isA("graphql.language.ScalarTypeDefinition", definition) and (unchecked_cast(definition as ScalarTypeDefinition)).getName() == "JSON"
 
     ///
     /// 対応していない定義のエラー文。

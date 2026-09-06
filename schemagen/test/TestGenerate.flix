@@ -103,6 +103,15 @@ def testGenerateErrors(): Unit \ {Assert, IO} =
          generate("type Query { v: Missing! }") |> errorOf,
          generate("enum E { AB Ab }  type Query { e: E! }") |> errorOf))
 
+/// scalar JSON は宣言を読み飛ばし、Value / GqlCodec.json() / Out.json() に写す。
+@Test
+def testGenerateJsonScalar(): Unit \ {Assert, IO} =
+    let source = generate("scalar JSON  type Query { raw(input: JSON!): JSON! }") |> Result.getWithDefault("");
+    Assert.assertEq(expected = (true, true, true),
+        (String.contains(substr = "Context -> Value -> Result[FieldError, Value]", source),
+         String.contains(substr = "GqlCodec.json()", source),
+         String.contains(substr = "Out.json()", source)))
+
 /// 生成物が Flix にならない SDL は生成器で止める: 大文字始まりのフィールド名、小文字始まりの型名、
 /// ルートから届かない型、先頭が数字になる enum 値。
 @Test

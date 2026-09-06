@@ -53,6 +53,13 @@ mod GqlCodec {
         })
 
     ///
+    /// 任意の JSON（scalar JSON）。Flix 側は Value のまま持つ。値の検証はしない。
+    /// 実行時は graphql-java-extended-scalars の Json が SDL の `scalar JSON` に配線される（Graphql.makeExecutableSchema）。
+    ///
+    pub def json(): GqlCodec[Value] =
+        scalar("JSON", value -> value, Some)
+
+    ///
     /// GraphQL の ID。Flix 側は Id で持つ。
     ///
     pub def id(): GqlCodec[Id] =

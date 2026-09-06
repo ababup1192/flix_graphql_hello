@@ -31,6 +31,21 @@ mod AdminMutationResolvers {
     pub def reorderFields(): GeneratedAdmin.MutationReorderFieldsResolver[AdminEff] =
         (_context, typeId, ids) -> Ok(ContentTypes.reorderFields(AdminMapping.typeId("typeId", typeId), ids |> List.map(AdminMapping.fieldId("ids"))))
 
+    /// Mutation.createEntry
+    pub def createEntry(): GeneratedAdmin.MutationCreateEntryResolver[AdminEff] =
+        (_context, typeId, fields, id) -> Ok(ContentEntries.create(
+            AdminMapping.typeId("typeId", typeId),
+            id |> Option.map(AdminMapping.entryId("id")),
+            AdminMapping.entryData("fields", fields)))
+
+    /// Mutation.updateEntry
+    pub def updateEntry(): GeneratedAdmin.MutationUpdateEntryResolver[AdminEff] =
+        (_context, id, fields, expectedVersion) -> Ok(ContentEntries.update(AdminMapping.entryId("id", id), AdminMapping.entryData("fields", fields), expectedVersion))
+
+    /// Mutation.deleteEntry。消した id を返す
+    pub def deleteEntry(): GeneratedAdmin.MutationDeleteEntryResolver[AdminEff] =
+        (_context, id) -> { ContentEntries.delete(AdminMapping.entryId("id", id)); Ok(id) }
+
     /// type Mutation のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.MutationResolvers[AdminEff] =
         {
@@ -40,7 +55,10 @@ mod AdminMutationResolvers {
             addField          = addField(),
             updateField       = updateField(),
             removeField       = removeField(),
-            reorderFields     = reorderFields()
+            reorderFields     = reorderFields(),
+            createEntry       = createEntry(),
+            updateEntry       = updateEntry(),
+            deleteEntry       = deleteEntry()
         }
 
 }
