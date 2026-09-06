@@ -32,7 +32,26 @@ make check     # 型検査
 make test      # DB 無しのテスト（test/Pg を除く）
 make test-pg   # 実 PostgreSQL 込み（コンテナの起動と停止まで）
 make db-up     # PostgreSQL を起動
+make migrate   # migrations/ を当てる
 make run       # サーバ起動（CMS_DSN 等は Makefile が渡す）
+make generate  # schema.graphql / admin.graphql → src/generated/（schemagen）
+make gen       # migrations/ + queries/*.q → src/Gen/（sqlfx の生成器。flix_db 側で動く）
 ```
 
 実 PG が要るテストは `test/Pg/` に置く。`make test` はそれを除いた写しを `build/unit/` に作って回す。
+
+## ディレクトリ
+
+```
+admin.graphql        管理 API の SDL（正）。src/generated/GeneratedAdminSchema.flix を生やす
+schema.graphql       見本の SDL。src/generated/GeneratedSchema.flix を生やす
+migrations/          DDL。sqlfx の机上スキーマの元で、make migrate が当てる
+queries/*.q          SQL。src/Gen/ を生やす
+src/generated/       schemagen の生成物（触らない）
+src/Gen/             sqlfx の生成物（触らない）
+src/cms/             ユースケース。ContentModel（型と変換）/ Naming（名前の規則。純粋）/ ContentTypes / CmsErr
+src/admin/           管理 API のリゾルバと Runner（1 フィールド = 接続 1 本 = Tx 1 つ）
+src/app/             見本の /graphql、Server（ルーティング・CORS・/health）、DbConfig、Health
+src/http/            手書き HTTP/1.1 と Cors
+src/graphql/         graphql-java の境界と Schema の DSL
+```

@@ -24,7 +24,7 @@ def fromAdmin(method: String, path: String): HttpRequest =
 ///
 /// 管理画面のオリジンだけ許す設定。
 ///
-def adminConfig(): ServerConfig = { cors = { allowedOrigins = "https://admin.example.com" :: Nil } }
+def adminConfig(): ServerConfig = { cors = { allowedOrigins = "https://admin.example.com" :: Nil }, graphqlPath = "/graphql" }
 
 ///
 /// runWithEcho が data に入れて返す形。variables が無いリクエストは空の Obj、operationName が無ければ Null。

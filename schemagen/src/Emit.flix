@@ -39,9 +39,10 @@ mod Emit {
     def scalarFns(): Map[String, String] = Map#{ "Int" => "int32", "Float" => "float64", "String" => "string", "Boolean" => "bool", "ID" => "id" }
 
     ///
-    /// 生成物の全文。sdl は生成元の本文で、そのまま生成物に埋めて本体が schema.graphql と照合する。
+    /// 生成物の全文。sdl は生成元の本文で、そのまま生成物に埋めて本体が SDL ファイルと照合する。
+    /// moduleName は生成物のモジュール名（"Generated" / "GeneratedAdmin"）。スキーマが複数あるときに分ける。
     ///
-    pub def render(document: SdlDocument, sdl: String): Result[String, String] =
+    pub def render(moduleName: String, document: SdlDocument, sdl: String): Result[String, String] =
         forM (
             _        <- validate(document);
             enums    <- Result.traverse(renderEnum, document#enums);
@@ -61,11 +62,11 @@ mod Emit {
             let enumSection = if (List.isEmpty(enums)) Nil else (List.join("\n\n", enums) + "\n") :: Nil;
             List.join("\n",
                 "///" ::
-                "/// schema.graphql から schemagen が生成したファイル。手で編集しない（`make generate` で作り直す）。" ::
+                "/// SDL から schemagen が生成したファイル。手で編集しない（`make generate` で作り直す）。" ::
                 "///" ::
-                "mod Generated {" ::
+                "mod ${moduleName} {" ::
                 "" ::
-                "    /// 生成元の SDL 本文（改行は LF）。GeneratedCheck が schema.graphql と照合する" ::
+                "    /// 生成元の SDL 本文（改行は LF）。GeneratedCheck が SDL ファイルと照合する" ::
                 "    pub def sdlText(): String = ${stringLiteral(sdl)}" ::
                 "" ::
                 "    /// 生成した schemagen のバージョン" ::

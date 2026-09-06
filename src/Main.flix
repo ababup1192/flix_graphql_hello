@@ -1,25 +1,32 @@
 ///
-/// schema.graphql と生成物の一致を確かめ、環境変数から PostgreSQL の接続プールを開き、SQLite のカウンタを開き、
-/// エンジンを 1 回だけ組み立てて 8080 番で GraphQL の HTTP サーバを起動する。
-/// 起動に失敗したら（DB に届かない場合も）メッセージを出して終了コード 1 で終わる。
+/// 起動。SDL と生成物の一致、PostgreSQL の接続、migrations の適用済みを確かめ、2 つのエンジン（見本の /graphql と
+/// 管理 API の /admin/graphql）を組み立てて 8080 番で待つ。起動に失敗したらメッセージを出して終了コード 1 で終わる。
 ///
 /// 環境変数: CMS_DSN / CMS_DB_USER / CMS_DB_PASSWORD（DbConfig）、CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）
 ///
 def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
     let started = forM (
-        _          <- checkGenerated("schema.graphql");
-        connection <- DbConfig.fromEnv();
-        pool       <- openPool(connection);
-        database   <- SqliteCounter.open("counter.db");
-        engine     <- Graphql.buildEngine(AppSchema.make(f -> SqliteCounter.runWithSqlite(database, f)))
-    ) yield (pool, engine);
+        _           <- checkGenerated(GeneratedCheck.schema());
+        _           <- checkGenerated(GeneratedCheck.admin());
+        connection  <- DbConfig.fromEnv();
+        pool        <- openPool(connection);
+        _           <- checkMigrations(connection);
+        database    <- SqliteCounter.open("counter.db");
+        engine      <- Graphql.buildEngine(AppSchema.make(f -> SqliteCounter.runWithSqlite(database, f)));
+        adminEngine <- Graphql.buildEngine(AdminSchema.make(AdminRunner.make(pool)))
+    ) yield (pool, engine, adminEngine);
     match started {
-        case Err(message)      => { println(message); Sys.Exit.exit(1) }
-        case Ok((pool, built)) =>
-            let config = { cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins } };
+        case Err(message) => { println(message); Sys.Exit.exit(1) }
+        case Ok((pool, engine, adminEngine)) =>
+            let cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins };
+            let config = { cors = cors, graphqlPath = "/graphql" };
+            let adminConfig = { cors = cors, graphqlPath = "/admin/graphql" };
             HttpServer.listen(8080, request ->
                 Health.runWithPool(pool, () ->
-                    Graphql.runWithEngine(built, () -> Server.handle(config, request))))
+                    if (Server.pathOf(request#path) == adminConfig#graphqlPath)
+                        Graphql.runWithEngine(adminEngine, () -> Server.handle(adminConfig, request))
+                    else
+                        Graphql.runWithEngine(engine, () -> Server.handle(config, request))))
     }
 
 ///
@@ -36,11 +43,28 @@ def openPool(connection: Jdbc.ConnectionConfig): Result[String, Pool] \ IO =
     }
 
 ///
-/// 生成物が schema.graphql から、期待する版の生成器で作られた物か照合する。
+/// migrations/ が全部適用済みか。未適用や改変があれば Err（`make migrate` を促す）。
+///
+/// WhyNot: 起動時に apply しないのは、複数台が同時に起動した時の順序と、失敗した migration の扱いを
+/// デプロイの手順に置きたいため。起動は check だけにする。
+///
+def checkMigrations(connection: Jdbc.ConnectionConfig): Result[String, Unit] \ {IO, Fs.FileRead} =
+    let outcome = run {
+        Migrate.runWithResult(() -> DbError.runWithFailure(() -> Jdbc.withConnection(connection, conn -> Migrate.check(conn, "migrations"))))
+    } with Fs.ReadFile.runWithFileRead
+      with Fs.DirList.runWithIO;
+    match outcome {
+        case Ok(Ok(()))       => Ok(())
+        case Ok(Err(failure)) => Err("migrations を確かめられません: ${failure}")
+        case Err(message)     => Err("migrations が当たっていません（`make migrate` で当ててください）: ${message}")
+    }
+
+///
+/// 生成物が SDL ファイルから、期待する版の生成器で作られた物か照合する。
 /// テストでも同じ事を確かめるが、SDL だけ変えて起動しても古いスキーマで動いてしまうので、起動時にも止める。
 ///
-def checkGenerated(sdlPath: String): Result[String, Unit] \ {IO, Fs.FileRead} =
+def checkGenerated(generated: GeneratedCheck.Generated): Result[String, Unit] \ {IO, Fs.FileRead} =
     forM (
-        sdl <- Fs.FileRead.read(sdlPath) |> Result.mapErr(error -> "${sdlPath} を読めません: ${error}");
-        _   <- GeneratedCheck.check(sdl)
+        sdl <- Fs.FileRead.read(generated#sdlPath) |> Result.mapErr(error -> "${generated#sdlPath} を読めません: ${error}");
+        _   <- GeneratedCheck.check(generated, sdl)
     ) yield ()

@@ -1,12 +1,18 @@
 # flix_graphql_hello
 
-Flix で書いた GraphQL サーバの最小構成。GraphQL の実行には Java の graphql-java を
-Java interop で使い、Flix 側は代数的 effect でそれを境界に閉じ込めている。
-スキーマは `schema.graphql`（SDL）が正で、そこから型付きの Flix コードを生成する。
-人が書くのは SDL と、生成されたレコード型に合わせたリゾルバだけで、
-スキーマとリゾルバのズレ（不足・余分・型違い）はコンパイルで落ちる。
-HTTP サーバは `java.net.ServerSocket` の上に手書きした最小の HTTP/1.1 で、
-Mutation の例として SQLite に置いたカウンタを持つ。
+Flix と PostgreSQL で書く headless CMS の API サーバ。GraphQL の実行には Java の graphql-java を
+Java interop で使い、Flix 側は代数的 effect でそれを境界に閉じ込めている。DB 層は sqlfx（GitHub の release から取る）。
+
+API は 2 つある。
+
+- `/admin/graphql`: 管理 API。content type とフィールドの定義を読み書きする。スキーマは `admin.graphql`（SDL）が正で、
+  そこから型付きの Flix コードを生成する。人が書くのは SDL と、生成されたレコード型に合わせたリゾルバだけで、
+  スキーマとリゾルバのズレはコンパイルで落ちる
+- `/graphql`: 今は graphql-java を試した見本（`schema.graphql`。add / fibonacci / 固定の Post / SQLite のカウンタ）。
+  コンテンツ API（型の定義から実行時に組む）に置き換わる予定
+
+HTTP サーバは `java.net.ServerSocket` の上に手書きした最小の HTTP/1.1。設計と作る順番は
+[docs/design/cms-spec](https://claude.ai/code/artifact/bdc58ed6-4ee0-45bf-9282-a842a0fcc988) にある。
 
 ## 使い方
 
@@ -15,9 +21,11 @@ JDK と Docker が要る。DB 層は [sqlfx](https://github.com/ababup1192/sqlfx
 
 ```bash
 make db-up     # PostgreSQL 16 を docker compose で起動
+make migrate   # migrations/ を当てる（初回と、migration を足した時）
 make run       # サーバ起動（CMS_DSN 等は Makefile が渡す。初回は Maven 依存の取得で時間がかかる）
 make query     # 起動中のサーバへ /health とサンプルのクエリと mutation を投げる
-make generate  # schema.graphql から src/generated/GeneratedSchema.flix を作り直す
+make generate  # schema.graphql / admin.graphql から src/generated/ を作り直す
+make gen       # migrations/ と queries/*.q から src/Gen/ を作り直す（sqlfx の生成器。flix_db 側で動く）
 make check     # 型検査
 make test      # DB 無しのテスト（test/Pg を除く）
 make test-pg   # コンテナを立てて実 PostgreSQL 込みで全部回し、止める
@@ -36,7 +44,24 @@ VS Code の Flix 拡張にも同じフラグが要り、`.vscode/settings.json` 
 | `CMS_DB_USER` / `CMS_DB_PASSWORD` | 省略時は `cms` |
 | `CMS_CORS_ORIGINS` | 許すオリジンのカンマ区切り（`https://admin.example.com`）。`*` で全部。省略時は CORS ヘッダを付けない |
 
-起動すると `http://localhost:8080/graphql` で待ち受け、`GET /health` が DB に届けば `{"status":"ok"}`、届かなければ 503 を返す。
+起動すると `http://localhost:8080/admin/graphql`（管理 API）と `/graphql`（見本）で待ち受け、`GET /health` が DB に届けば `{"status":"ok"}`、
+届かなければ 503 を返す。起動時に migrations が全部当たっているかも確かめ、未適用なら終了コード 1（`make migrate`）。
+
+### 管理 API の例
+
+```bash
+curl -s -X POST localhost:8080/admin/graphql -H 'Content-Type: application/json' \
+  -d '{"query": "mutation { createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { id singular plural } }"}'
+# {"data":{"createContentType":{"id":"1","plural":"blogs","singular":"Blog"}}}
+
+curl -s -X POST localhost:8080/admin/graphql -H 'Content-Type: application/json' \
+  -d '{"query": "mutation { addField(typeId: \"1\", input: { apiId: \"title\", name: \"題名\", kind: TEXT, required: true, config: { maxLength: 120 } }) { id position } }"}'
+
+curl -s -X POST localhost:8080/admin/graphql -d '{"query": "{ contentTypes { apiId singular fields { apiId kind required config { maxLength } } } }"}'
+```
+
+名前の規則（lowerCamel の apiId、予約名、他の型との衝突）に合わない入力は `errors[].message` に理由が並ぶ。
+
 カウンタはカレントディレクトリの `counter.db`（SQLite）に保存され、再起動しても値が残る。リポジトリのルートで起動する。
 
 ### リクエストの形

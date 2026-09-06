@@ -1,0 +1,137 @@
+"""管理 API。content type とフィールドの定義を読み書きする。形は固定で、コンテンツ API はこの定義から実行時に組む"""
+type Query {
+  """全 content type。apiId 順"""
+  contentTypes: [ContentType!]!
+  """id か apiId で 1 つ。無ければ null"""
+  contentType(id: ID, apiId: String): ContentType
+}
+
+type Mutation {
+  createContentType(input: ContentTypeInput!): ContentType!
+  updateContentType(id: ID!, input: ContentTypePatch!): ContentType!
+  """フィールドごと消す"""
+  deleteContentType(id: ID!): ID!
+  """末尾に足す"""
+  addField(typeId: ID!, input: FieldInput!): FieldDef!
+  updateField(id: ID!, input: FieldPatch!): FieldDef!
+  removeField(id: ID!): ID!
+  """ids の順に並べ直す。型の全フィールドを過不足なく渡す"""
+  reorderFields(typeId: ID!, ids: [ID!]!): ContentType!
+}
+
+"""content type の種別"""
+enum TypeKind {
+  """entry を何件でも持つ"""
+  COLLECTION
+  """entry を 1 件だけ持つ（サイト設定など）"""
+  SINGLETON
+}
+
+"""フィールドの種類"""
+enum FieldKind {
+  TEXT
+  TEXT_AREA
+  """URL に使う識別子。sourceField から自動生成し、型の中で一意"""
+  SLUG
+  NUMBER
+  BOOLEAN
+}
+
+"""content type。apiId がコンテンツ API のクエリ名の元になる"""
+type ContentType {
+  id: ID!
+  """lowerCamel の識別子（"blogs"）"""
+  apiId: String!
+  kind: TypeKind!
+  """管理画面に出す名前"""
+  name: String!
+  """コンテンツ API の型名（"Blog"）"""
+  singular: String!
+  """コンテンツ API の一覧クエリ名（"blogs"）"""
+  plural: String!
+  """管理画面のプレビューが開く URL。{id} を entry の id に置き換える"""
+  previewUrl: String
+  """position 順"""
+  fields: [FieldDef!]!
+  createdAt: String!
+  updatedAt: String!
+}
+
+"""フィールドの定義"""
+type FieldDef {
+  id: ID!
+  apiId: String!
+  name: String!
+  kind: FieldKind!
+  """配列か"""
+  many: Boolean!
+  """公開時に値が要るか"""
+  required: Boolean!
+  """型の中で値が一意か"""
+  unique: Boolean!
+  """言語ごとに値を持つか"""
+  localized: Boolean!
+  config: FieldConfig!
+  position: Int!
+}
+
+"""kind ごとの設定。使わない項目は null"""
+type FieldConfig {
+  """TEXT / TEXT_AREA / SLUG の最大文字数"""
+  maxLength: Int
+  """SLUG の元にするフィールドの apiId"""
+  sourceField: String
+  """NUMBER の下限"""
+  min: Float
+  """NUMBER の上限"""
+  max: Float
+  """NUMBER を整数に限るか"""
+  integer: Boolean
+}
+
+input ContentTypeInput {
+  apiId: String!
+  kind: TypeKind = COLLECTION
+  name: String!
+  """省くと apiId から導く"""
+  singular: String
+  """省くと apiId から導く"""
+  plural: String
+  previewUrl: String
+}
+
+"""触らない項目は省く"""
+input ContentTypePatch {
+  name: String
+  singular: String
+  plural: String
+  previewUrl: String
+}
+
+input FieldInput {
+  apiId: String!
+  name: String!
+  kind: FieldKind!
+  many: Boolean = false
+  required: Boolean = false
+  unique: Boolean = false
+  localized: Boolean = false
+  config: FieldConfigInput
+}
+
+"""触らない項目は省く。config は丸ごと置き換える"""
+input FieldPatch {
+  name: String
+  required: Boolean
+  unique: Boolean
+  localized: Boolean
+  config: FieldConfigInput
+}
+
+input FieldConfigInput {
+  maxLength: Int
+  sourceField: String
+  min: Float
+  max: Float
+  integer: Boolean
+}

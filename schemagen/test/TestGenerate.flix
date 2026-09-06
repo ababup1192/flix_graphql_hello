@@ -6,7 +6,7 @@
 /// SDL から生成物の本文を作る。
 ///
 def generate(sdl: String): Result[String, String] \ IO =
-    SdlReader.read(sdl) |> Result.flatMap(document -> Emit.render(document, sdl))
+    SdlReader.read(sdl) |> Result.flatMap(document -> Emit.render("Generated", document, sdl))
 
 ///
 /// 生成物に無い断片の一覧。全部あれば Ok(Nil)。
@@ -277,7 +277,7 @@ def testGenerateInputUnreachable(): Unit \ {Assert, IO} =
 def scaffoldOf(sdl: String, typeName: String, useDefaults: Bool): Result[String, String] \ IO =
     SdlReader.read(sdl) |> Result.flatMap(document ->
         List.find(object -> object#name == typeName, document#objects)
-            |> Option.map(object -> Scaffold.render(document, object, useDefaults))
+            |> Option.map(object -> Scaffold.render({ moduleName = "Generated", effName = "AppEff" }, document, object, useDefaults))
             |> Option.toOk("no type ${typeName}"))
 
 /// 既定リゾルバは引数の無いスカラー・enum・そのリストのフィールドだけを持ち、source は行変数で開いている。

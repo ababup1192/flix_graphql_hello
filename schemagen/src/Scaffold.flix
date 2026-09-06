@@ -10,10 +10,18 @@ mod Scaffold {
     pub def fileName(typeName: String): String = "${typeName}Resolvers.flix"
 
     ///
-    /// type X の雛形。useDefaults なら素通しのフィールドは Generated.xDefaults() に任せ、残りだけ空の関数を吐く。
+    /// 雛形が参照する名前。
+    ///
+    /// - moduleName: 生成物のモジュール（"Generated"）
+    /// - effName: リゾルバの効果の別名（"AppEff"）
+    ///
+    pub type alias Names = { moduleName = String, effName = String }
+
+    ///
+    /// type X の雛形。useDefaults なら素通しのフィールドは <moduleName>.xDefaults() に任せ、残りだけ空の関数を吐く。
     /// source が enum の型は既定を使えないので useDefaults を false にする。
     ///
-    pub def render(document: SdlDocument, object: ObjectDef, useDefaults: Bool): String =
+    pub def render(target: Names, document: SdlDocument, object: ObjectDef, useDefaults: Bool): String =
         let root = Emit.isRoot(document, object#name);
         let withDefaults = useDefaults and not root and List.exists(Emit.isPassthrough(document), object#fields);
         let handwritten = if (withDefaults) List.filter(field -> not Emit.isPassthrough(document, field), object#fields) else object#fields;
@@ -25,14 +33,14 @@ mod Scaffold {
             };
             List.join("\n",
                 "    /// ${object#name}.${field#name}" ::
-                "    pub def ${Emit.label(field#name)}(): Generated.${Emit.fieldAliasName(object#name, field#name)}[AppEff] =" ::
+                "    pub def ${Emit.label(field#name)}(): ${target#moduleName}.${Emit.fieldAliasName(object#name, field#name)}[${target#effName}] =" ::
                 "        ${params} -> Err(\"not implemented: ${object#name}.${field#name}\")" ::
                 Nil)
         });
         let record =
             if (not withDefaults) "{ " + (handwritten |> List.map(entry(false)) |> List.join(", ")) + " }"
-            else if (List.isEmpty(handwritten)) "Generated.${Emit.defaultsFn(object#name)}()"
-            else "{ " + (handwritten |> List.map(entry(true)) |> List.join(", ")) + " | Generated.${Emit.defaultsFn(object#name)}() }";
+            else if (List.isEmpty(handwritten)) "${target#moduleName}.${Emit.defaultsFn(object#name)}()"
+            else "{ " + (handwritten |> List.map(entry(true)) |> List.join(", ")) + " | ${target#moduleName}.${Emit.defaultsFn(object#name)}() }";
         List.join("\n",
             "///" ::
             "/// type ${object#name} のリゾルバ。`make scaffold` が作った雛形で、人が所有する（作り直されない）。" ::
@@ -41,7 +49,7 @@ mod Scaffold {
             "" ::
             (functions |> List.map(function -> function + "\n")) :::
             "    /// type ${object#name} のリゾルバ一式" ::
-            "    pub def resolvers(): Generated.${object#name}Resolvers[AppEff] =" ::
+            "    pub def resolvers(): ${target#moduleName}.${object#name}Resolvers[${target#effName}] =" ::
             "        ${record}" ::
             "" ::
             "}" ::

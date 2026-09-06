@@ -1,0 +1,18 @@
+///
+/// 管理 API のスキーマ。admin.graphql から生成された GeneratedAdmin.Resolvers に、src/admin/ の型ごとのリゾルバを当てはめる。
+///
+mod AdminSchema {
+
+    ///
+    /// スキーマを組み立てる。runner は AdminEff を IO に落とす（本番はプール、テストはメモリ）。
+    ///
+    pub def make(runner: Runner[AdminEff]): Schema =
+        GeneratedAdmin.schema({
+            queryRoot    = AdminQueryResolvers.resolvers(),
+            mutationRoot = AdminMutationResolvers.resolvers(),
+            contentType  = ContentTypeResolvers.resolvers(),
+            fieldDef     = FieldDefResolvers.resolvers(),
+            fieldConfig  = GeneratedAdmin.fieldConfigDefaults()
+        }, runner)
+
+}

@@ -2,8 +2,9 @@
 /// サーバの設定。
 ///
 /// - cors: 許すオリジン
+/// - graphqlPath: GraphQL を受けるパス（"/graphql" か "/admin/graphql"）
 ///
-pub type alias ServerConfig = { cors = CorsConfig }
+pub type alias ServerConfig = { cors = CorsConfig, graphqlPath = String }
 
 ///
 /// HTTP リクエストを GraphQL の実行と死活監視に橋渡しするルーティング。
@@ -14,11 +15,11 @@ mod Server {
     ///
     /// CORS 無しの設定。テストと、同一オリジンだけで使うとき。
     ///
-    pub def defaultConfig(): ServerConfig = { cors = Cors.none() }
+    pub def defaultConfig(): ServerConfig = { cors = Cors.none(), graphqlPath = "/graphql" }
 
     ///
     /// リクエストを 1 つ処理する。
-    /// - POST /graphql: ボディ {"query": "...", "variables": {...}, "operationName": "..."} を実行して {"data": ..., "errors": [...]} を返す
+    /// - POST <graphqlPath>: ボディ {"query": "...", "variables": {...}, "operationName": "..."} を実行して {"data": ..., "errors": [...]} を返す
     /// - GET /health: DB に届けば 200、届かなければ 503
     /// - OPTIONS: CORS の preflight
     /// パスのクエリ文字列は無視する。許したオリジンからのリクエストには CORS ヘッダを足す。
@@ -33,8 +34,8 @@ mod Server {
     def route(config: ServerConfig, request: HttpRequest): HttpResponse \ {Graphql, Health} =
         match (request#method, pathOf(request#path)) {
             case ("OPTIONS", _)       => Cors.preflight(config#cors, request)
-            case ("POST", "/graphql") => executeBody(request#body)
-            case (_, "/graphql")      => errorResponse(405, ("Allow", "POST") :: Nil, "POST only")
+            case ("POST", path) if path == config#graphqlPath => executeBody(request#body)
+            case (_, path) if path == config#graphqlPath      => errorResponse(405, ("Allow", "POST") :: Nil, "POST only")
             case ("GET", "/health")   => health()
             case (_, "/health")       => errorResponse(405, ("Allow", "GET") :: Nil, "GET only")
             case _                    => errorResponse(404, Nil, "not found")
