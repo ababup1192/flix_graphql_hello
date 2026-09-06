@@ -34,7 +34,8 @@ mod TestContentTypes {
         if (String.startsWith(prefix = "INSERT", sql)) Some(Row.makeRows(List#{"id"}, List#{List#{SqlValue.Int64(99i64)}}))
         else if (String.contains(substr = "max(position)", sql)) Some(Row.makeRows(List#{"next"}, List#{List#{SqlValue.Int32(2)}}))
         else if (String.contains(substr = "FROM content_fields", sql)) Some(fieldRows())
-        else Some(typeRows())
+        else if (String.contains(substr = "FROM content_types", sql)) Some(typeRows())
+        else bug!("想定外の SQL: ${sql}")
 
     ///
     /// 偽ハンドラで thunk を走らせ、(結果, 発行した SQL の先頭語の並び) を返す。DB の失敗は起きない前提で剥がす。
@@ -104,7 +105,7 @@ mod TestContentTypes {
     def testContentTypesAddFieldToMissingType(): Unit \ {Assert, IO} =
         let (result, _) = DbTest.runRecordingWith(_ -> Some(Nil), 0, () -> DbError.runWithFailure(() -> CmsErr.runWithResult(() ->
             ContentTypes.addField(TypeId.TypeId(7i64), CmsTestKit.fieldDraft("x", FieldKind.Text, FieldConfig.empty())))));
-        Assert.assertEq(expected = Ok(Err(CmsFailure.NotFound(Entity.ContentType, "7"))), result |> Result.map(Result.map(field -> field#position)))
+        Assert.assertEq(expected = Ok(Err(CmsFailure.NotFound(Entity.ContentType, "7"))), result |> Result.map(Result.map(_ -> ())))
 
     /// reorderFields は全 id を過不足なく渡さないと invalid。
     @Test

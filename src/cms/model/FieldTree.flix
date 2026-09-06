@@ -19,7 +19,7 @@ mod FieldTree {
     /// key ごとにまとめる。1 挿入 O(1)（先頭に足す）なので、まとめた中の並びは入力の逆になる。
     ///
     def groupBy(key: FieldDef -> k, fields: List[FieldDef]): Map[k, List[FieldDef]] with Order[k] =
-        List.foldLeft((acc, field) -> Map.insertWith((newer, older) -> newer ::: older, key(field), field :: Nil, acc), Map.empty(), fields)
+        List.foldLeft((acc, field) -> Map.insertWith((_, older) -> field :: older, key(field), field :: Nil, acc), Map.empty(), fields)
 
     def childrenOf(byParent: Map[Option[FieldId], List[FieldDef]], parent: Option[FieldId]): List[FieldDef] =
         Map.getWithDefault(parent, Nil, byParent)

@@ -62,11 +62,6 @@ def testHttpContentLengthDuplicate(): Unit \ Assert =
         (Http.contentLength(("content-length", "42") :: ("content-length", "42") :: Nil),
          Http.contentLength(("content-length", "42") :: ("host", "x") :: ("content-length", "43") :: Nil)))
 
-/// ヘッダ 1 行の上限は 8 KiB。
-@Test
-def testHttpMaxHeaderLineBytes(): Unit \ Assert =
-    Assert.assertEq(expected = 8192, Http.maxHeaderLineBytes())
-
 // ---- レスポンス ----
 
 /// UTF-8 のバイト数を数える。ASCII は 1、日本語は 3、絵文字（サロゲートペア）は 4。

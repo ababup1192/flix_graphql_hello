@@ -94,7 +94,7 @@ mod ContentTypes {
     pub def addField(typeId: TypeId, draft: FieldDraft): FieldDef \ Db + CmsErr =
         let owner = get(typeId);
         let parent = draft#parent |> Option.map(parentId -> FieldTree.find(parentId, owner#fields) |> CmsErr.orNotFound(Entity.Field, "${parentId}"));
-        CmsErr.raiseIfAny(validateDraft(takenApiIds(owner#fields, None), parent, draft) ::: validateTarget(draft#target));
+        CmsErr.raiseIfAny(validateDraft(takenApiIds(owner#fields, None), parent, draft) ::: targetTypeExists(draft#target));
         let position = match draft#parent {
             case Some(parentId) => ContentFieldsQueries.nextChildPosition(FieldId.toInt64(parentId)) |> Rows.nextPosition
             case None           => ContentFieldsQueries.nextFieldPosition(TypeId.toInt64(typeId)) |> Rows.nextPosition
@@ -153,9 +153,9 @@ mod ContentTypes {
             ::: Naming.validateConfig(taken, draft#kind, draft#config)
 
     ///
-    /// 参照先の型がある事。
+    /// 参照先の型が DB にある事（kind と target の組み合わせは Naming.validateTarget）。
     ///
-    def validateTarget(target: Option[TypeId]): List[Violation] \ DbRead = match target {
+    def targetTypeExists(target: Option[TypeId]): List[Violation] \ DbRead = match target {
         case Some(typeId) => if (Option.isEmpty(find(typeId))) Violation.Violation("targetTypeId", "型 '${typeId}' がありません") :: Nil else Nil
         case None         => Nil
     }

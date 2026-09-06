@@ -13,35 +13,39 @@ mod EntryValue {
 
     // ---- フィールドの値 ----
 
-    pub def text(apiId: ApiId, data: EntryData): Option[String] =
-        Map.get(apiId, data) |> Option.flatMap(asString)
+    pub def text(apiId: ApiId, data: EntryData): Option[String] = one(asString, apiId, data)
 
-    pub def texts(apiId: ApiId, data: EntryData): List[String] =
-        Map.get(apiId, data) |> Option.map(asStrings) |> Option.getWithDefault(Nil)
+    pub def texts(apiId: ApiId, data: EntryData): List[String] = many(asString, apiId, data)
 
-    pub def number(apiId: ApiId, data: EntryData): Option[Float64] =
-        Map.get(apiId, data) |> Option.flatMap(asFloat64)
+    pub def number(apiId: ApiId, data: EntryData): Option[Float64] = one(asFloat64, apiId, data)
 
-    pub def numbers(apiId: ApiId, data: EntryData): List[Float64] =
-        Map.get(apiId, data) |> Option.map(items(asFloat64)) |> Option.getWithDefault(Nil)
+    pub def numbers(apiId: ApiId, data: EntryData): List[Float64] = many(asFloat64, apiId, data)
 
-    pub def bool(apiId: ApiId, data: EntryData): Option[Bool] =
-        Map.get(apiId, data) |> Option.flatMap(asBool)
+    pub def bool(apiId: ApiId, data: EntryData): Option[Bool] = one(asBool, apiId, data)
 
-    pub def bools(apiId: ApiId, data: EntryData): List[Bool] =
-        Map.get(apiId, data) |> Option.map(items(asBool)) |> Option.getWithDefault(Nil)
+    pub def bools(apiId: ApiId, data: EntryData): List[Bool] = many(asBool, apiId, data)
 
     ///
     /// Object の値（1 つ）。オブジェクトでなければ None。
     ///
-    pub def object(apiId: ApiId, data: EntryData): Option[EntryData] =
-        Map.get(apiId, data) |> Option.flatMap(asObject)
+    pub def object(apiId: ApiId, data: EntryData): Option[EntryData] = one(asObject, apiId, data)
 
     ///
     /// Object の値（配列）。オブジェクトでない要素は捨てる。
     ///
-    pub def objects(apiId: ApiId, data: EntryData): List[EntryData] =
-        Map.get(apiId, data) |> Option.map(items(asObject)) |> Option.getWithDefault(Nil)
+    pub def objects(apiId: ApiId, data: EntryData): List[EntryData] = many(asObject, apiId, data)
+
+    ///
+    /// 単数のフィールドを pick で読む。無い・形が違うなら None。
+    ///
+    def one(pick: Json -> Option[a], apiId: ApiId, data: EntryData): Option[a] =
+        Map.get(apiId, data) |> Option.flatMap(pick)
+
+    ///
+    /// 配列のフィールドの要素を pick で読む。無い・配列でないなら空、読めない要素は捨てる。
+    ///
+    def many(pick: Json -> Option[a], apiId: ApiId, data: EntryData): List[a] =
+        Map.get(apiId, data) |> Option.map(items(pick)) |> Option.getWithDefault(Nil)
 
     ///
     /// Blocks の値。(variant, 中身) の並び。blockType が variant に無い要素は捨てる。
@@ -70,7 +74,7 @@ mod EntryValue {
     pub def objectData(fields: Map[String, Json]): EntryData =
         fields |> Map.toList |> List.filterMap(match (key, value) -> ApiId.parse(key) |> Option.map(apiId -> (apiId, value))) |> List.toMap
 
-    pub def asObject(json: Json): Option[EntryData] = match json {
+    def asObject(json: Json): Option[EntryData] = match json {
         case Json.JObject(fields) => Some(objectData(fields))
         case _                    => None
     }

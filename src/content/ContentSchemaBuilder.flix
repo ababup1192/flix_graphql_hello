@@ -86,11 +86,9 @@ mod ContentSchemaBuilder {
             |> Field.withDescription("${TypeName.text(owner#singular)} の一覧")
 
     ///
-    /// 1 件クエリの名前。singular の先頭を小文字にした物（Blog → blog）。
+    /// 1 件クエリの名前。singular の先頭を小文字にした物（Blog → blog）。規則は Naming が持つ（衝突の検査と同じ物を使う）。
     ///
-    def queryName(owner: ContentType): String =
-        let text = TypeName.text(owner#singular);
-        String.toLowerCase(String.takeLeft(1, text)) + String.dropLeft(1, text)
+    def queryName(owner: ContentType): String = Naming.lowerFirst(TypeName.text(owner#singular))
 
     // ---- 型 ----
 
@@ -165,7 +163,7 @@ mod ContentSchemaBuilder {
     /// source は中身を子の分に差し替えた Entry（linked と contentStage を引き継ぐので、中の参照も同じ stage で引ける）。
     ///
     def nestedType(all: List[ContentType], prefix: String, field: FieldDef): ObjectType[Entry, ContentEff] =
-        let name = "${prefix}${upperFirst(ApiId.text(field#apiId))}";
+        let name = "${prefix}${Naming.upperFirst(ApiId.text(field#apiId))}";
         Schema.objectType(name, () -> List.map(customField(all, name), Children.toList(field#children)))
             |> ObjectType.withDescription(field#name)
 
@@ -173,7 +171,7 @@ mod ContentSchemaBuilder {
     /// Blocks の union。`<prefix><Field>` = variant ごとの `<prefix><Field><Variant>`。値は (variant, 中身の Entry)。
     ///
     def blocksUnion(all: List[ContentType], prefix: String, field: FieldDef): Out[(FieldDef, Entry), ContentEff] =
-        let name = "${prefix}${upperFirst(ApiId.text(field#apiId))}";
+        let name = "${prefix}${Naming.upperFirst(ApiId.text(field#apiId))}";
         let variants = Children.toList(field#children) |> List.map(variant -> (variant#apiId, nestedType(all, name, variant)));
         Out.union(name, variants |> List.map(match (_, objectType) -> Out.member(objectType)), (context, block) -> {
             let (variant, inner) = block;
@@ -193,10 +191,7 @@ mod ContentSchemaBuilder {
     /// Select の enum。`<prefix><Field>`（Blog + category → BlogCategory）。値は config.options。
     ///
     def selectCodec(prefix: String, field: FieldDef): GqlCodec[String] =
-        GqlCodec.enumOf("${prefix}${upperFirst(ApiId.text(field#apiId))}", option -> option, field#config#options)
-
-    def upperFirst(text: String): String =
-        String.toUpperCase(String.takeLeft(1, text)) + String.dropLeft(1, text)
+        GqlCodec.enumOf("${prefix}${Naming.upperFirst(ApiId.text(field#apiId))}", option -> option, field#config#options)
 
     def fieldDescription(field: FieldDef): Field[Entry, ContentEff] -> Field[Entry, ContentEff] =
         if (field#name == "") (built -> built) else Field.withDescription(field#name)
@@ -304,40 +299,55 @@ mod ContentSchemaBuilder {
         List.flatMap(fieldLeafArgs(TypeName.text(owner#singular)), owner#fields)
 
     def fieldLeafArgs(prefix: String, field: FieldDef): List[LeafArg] =
+        let name = ApiId.text(field#apiId);
+        let isNull = leafArg("${name}_isNull", GqlCodec.bool(), flag -> Condition.IsNull(field#apiId, flag) :: Nil);
+        isNull :: (if (field#many) arrayLeafArgs(prefix, field) else scalarLeafArgs(prefix, field))
+
+    ///
+    /// 配列のフィールドの葉。要素の一致（_contains）だけ。OBJECT / BLOCKS / NUMBER / BOOLEAN の配列は _isNull のみ。
+    /// 規則外の id は Never（何にも合わない）に倒す。
+    ///
+    def arrayLeafArgs(prefix: String, field: FieldDef): List[LeafArg] =
         let apiId = field#apiId;
         let name = ApiId.text(apiId);
-        let isNull = leafArg("${name}_isNull", GqlCodec.bool(), flag -> Condition.IsNull(apiId, flag) :: Nil);
-        match (field#kind, field#many) {
-            case (FieldKind.Object, _)     => isNull :: Nil
-            case (FieldKind.Blocks, _)     => isNull :: Nil
-            case (FieldKind.Number, true)  => isNull :: Nil
-            case (FieldKind.Boolean, true) => isNull :: Nil
-            // 規則外の id は Never（何にも合わない）に倒す。_id_in は全部規則外なら Never、混ざっていれば合う物だけ
-            case (FieldKind.Reference, true) =>
-                isNull :: leafArg("${name}_contains", GqlCodec.id(), id -> { let Id.Id(text) = id; EntryId.parse(text) |> Option.map(found -> Condition.ArrayContains(apiId, EntryId.text(found))) |> Option.getWithDefault(Condition.Never) :: Nil }) :: Nil
-            case (FieldKind.Select, true) =>
-                isNull :: leafArg("${name}_contains", selectCodec(prefix, field), text -> Condition.ArrayContains(apiId, text) :: Nil) :: Nil
-            case (_, true) =>
-                isNull :: leafArg("${name}_contains", GqlCodec.string(), text -> Condition.ArrayContains(apiId, text) :: Nil) :: Nil
-            case (FieldKind.Select, false) =>
-                isNull ::
+        match field#kind {
+            case FieldKind.Object    => Nil
+            case FieldKind.Blocks    => Nil
+            case FieldKind.Number    => Nil
+            case FieldKind.Boolean   => Nil
+            case FieldKind.Reference =>
+                leafArg("${name}_contains", GqlCodec.id(), id -> { let Id.Id(text) = id; EntryId.parse(text) |> Option.map(found -> Condition.ArrayContains(apiId, EntryId.text(found))) |> Option.getWithDefault(Condition.Never) :: Nil }) :: Nil
+            case FieldKind.Select    =>
+                leafArg("${name}_contains", selectCodec(prefix, field), text -> Condition.ArrayContains(apiId, text) :: Nil) :: Nil
+            case _                   =>
+                leafArg("${name}_contains", GqlCodec.string(), text -> Condition.ArrayContains(apiId, text) :: Nil) :: Nil
+        }
+
+    ///
+    /// 単数のフィールドの葉。kind ごとに _eq / _in / 範囲 / 部分一致。OBJECT / BLOCKS は _isNull のみ。
+    /// _id_in は全部規則外なら Never（空の IN）、混ざっていれば合う物だけ。
+    ///
+    def scalarLeafArgs(prefix: String, field: FieldDef): List[LeafArg] =
+        let apiId = field#apiId;
+        let name = ApiId.text(apiId);
+        match field#kind {
+            case FieldKind.Object => Nil
+            case FieldKind.Blocks => Nil
+            case FieldKind.Select =>
                 leafArg("${name}_eq", selectCodec(prefix, field), text -> Condition.TextEq(apiId, text) :: Nil) ::
                 leafArg("${name}_in", GqlCodec.list(selectCodec(prefix, field)), texts -> Condition.TextIn(apiId, texts) :: Nil) :: Nil
-            case (FieldKind.Reference, false) =>
-                isNull ::
+            case FieldKind.Reference =>
                 leafArg("${name}_id_eq", GqlCodec.id(), id -> { let Id.Id(text) = id; EntryId.parse(text) |> Option.map(found -> Condition.TextEq(apiId, EntryId.text(found))) |> Option.getWithDefault(Condition.Never) :: Nil }) ::
                 leafArg("${name}_id_in", GqlCodec.list(GqlCodec.id()), ids -> Condition.TextIn(apiId, ids |> List.filterMap(id -> { let Id.Id(text) = id; EntryId.parse(text) |> Option.map(EntryId.text) })) :: Nil) :: Nil
-            case (FieldKind.Number, false) =>
-                isNull ::
+            case FieldKind.Number =>
                 leafArg("${name}_eq", GqlCodec.float64(), x -> Condition.NumberEq(apiId, x) :: Nil) ::
                 leafArg("${name}_gt", GqlCodec.float64(), x -> Condition.NumberGt(apiId, x) :: Nil) ::
                 leafArg("${name}_gte", GqlCodec.float64(), x -> Condition.NumberGte(apiId, x) :: Nil) ::
                 leafArg("${name}_lt", GqlCodec.float64(), x -> Condition.NumberLt(apiId, x) :: Nil) ::
                 leafArg("${name}_lte", GqlCodec.float64(), x -> Condition.NumberLte(apiId, x) :: Nil) :: Nil
-            case (FieldKind.Boolean, false) =>
-                isNull :: leafArg("${name}_eq", GqlCodec.bool(), b -> Condition.BoolEq(apiId, b) :: Nil) :: Nil
-            case (_, false) =>
-                isNull ::
+            case FieldKind.Boolean =>
+                leafArg("${name}_eq", GqlCodec.bool(), b -> Condition.BoolEq(apiId, b) :: Nil) :: Nil
+            case _ =>
                 leafArg("${name}_eq", GqlCodec.string(), text -> Condition.TextEq(apiId, text) :: Nil) ::
                 leafArg("${name}_in", GqlCodec.list(GqlCodec.string()), texts -> Condition.TextIn(apiId, texts) :: Nil) ::
                 leafArg("${name}_contains", GqlCodec.string(), text -> Condition.TextContains(apiId, text) :: Nil) ::

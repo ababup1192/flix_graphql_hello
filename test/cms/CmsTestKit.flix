@@ -99,11 +99,12 @@ mod CmsTestKit {
         violations |> List.map(violation -> { let Violation.Violation(path, _) = violation; path })
 
     ///
-    /// 業務エラーの結果から誤りのパスだけ。invalid でなければ空。
+    /// 業務エラーの結果から誤りのパスだけ。invalid 以外（成功・notFound・conflict）はテストの誤りなので落とす。
     ///
     pub def failurePaths(result: Result[CmsErr.CmsFailure, a]): List[String] = match result {
         case Err(CmsErr.CmsFailure.Invalid(violations)) => violationPaths(violations)
-        case _                                          => Nil
+        case Err(other)                                 => bug!("invalid ではありません: ${other}")
+        case Ok(_)                                      => bug!("invalid のはずが成功しました")
     }
 
     ///

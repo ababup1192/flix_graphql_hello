@@ -20,7 +20,7 @@ mod Naming {
     ///
     /// 型ごとに生える型の接尾辞。singular がこれで終わると、別の型から生えた名前と衝突しうる。
     ///
-    pub def reservedSuffixes(): List[String] = "Where" :: "OrderBy" :: "Connection" :: Nil
+    pub def reservedSuffixes(): List[String] = "Where" :: "WhereLeaf" :: "OrderBy" :: "Connection" :: Nil
 
     ///
     /// apiId から singular を導く。"blogs" → "Blog"、"categories" → "Category"、"news" → "News"（s 1 つでは落とさない語もあるので、合わなければ入力で上書きする）。
@@ -35,7 +35,7 @@ mod Naming {
             else if (keepsS) text
             else if (String.endsWith(suffix = "s", text)) String.dropRight(1, text)
             else text;
-        TypeName.TypeName(String.toUpperCase(String.takeLeft(1, stem)) + String.dropLeft(1, stem))
+        TypeName.TypeName(upperFirst(stem))
 
     ///
     /// apiId から plural を導く。一覧クエリ名は apiId そのまま。
@@ -52,12 +52,6 @@ mod Naming {
     pub type alias TypeNames = { apiId = ApiId, singular = TypeName, plural = ApiId }
 
     ///
-    /// ContentType から名前の組を取り出す。
-    ///
-    pub def namesOf(contentType: ContentType): TypeNames =
-        { apiId = contentType#apiId, singular = contentType#singular, plural = contentType#plural }
-
-    ///
     /// 型の名前を検査する。others は自分以外の既存の型。
     /// apiId が既にあればそれだけ返す（singular / plural は apiId から導くので、続けて見ても同じ原因の誤りが並ぶだけ）。
     ///
@@ -69,10 +63,11 @@ mod Naming {
 
     def validateSingular(others: List[TypeNames], candidate: TypeNames): List[Violation] =
         let singular = TypeName.text(candidate#singular);
+        let queryName = lowerFirst(singular);
         if (List.memberOf(singular, reservedTypeNames())) Violation.Violation("singular", "'${singular}' はコンテンツ API が使う型名なので使えません") :: Nil
         else if (List.exists(suffix -> String.endsWith(suffix = suffix, singular), reservedSuffixes())) Violation.Violation("singular", "'${singular}' は ${List.join(" / ", reservedSuffixes())} で終わる名前なので使えません（他の型から生える型と衝突します）") :: Nil
         else if (List.exists(other -> other#singular == candidate#singular, others)) Violation.Violation("singular", "'${singular}' は既に他の型が使っています") :: Nil
-        else if (List.exists(other -> ApiId.text(other#plural) == lowerFirst(singular), others)) Violation.Violation("singular", "'${singular}' の 1 件のクエリ名（${lowerFirst(singular)}）が他の型の一覧のクエリ名と衝突します") :: Nil
+        else if (List.exists(other -> ApiId.text(other#plural) == queryName, others)) Violation.Violation("singular", "'${singular}' の 1 件のクエリ名（${queryName}）が他の型の一覧のクエリ名と衝突します") :: Nil
         else Nil
 
     ///
@@ -80,6 +75,12 @@ mod Naming {
     ///
     pub def lowerFirst(text: String): String =
         String.toLowerCase(String.takeLeft(1, text)) + String.dropLeft(1, text)
+
+    ///
+    /// 先頭を大文字に。apiId から型名を作る（blog → Blog）。コンテンツ API の入れ子の型名もこの規則で生える。
+    ///
+    pub def upperFirst(text: String): String =
+        String.toUpperCase(String.takeLeft(1, text)) + String.dropLeft(1, text)
 
     def validatePlural(others: List[TypeNames], candidate: TypeNames): List[Violation] =
         let plural = ApiId.text(candidate#plural);
@@ -96,7 +97,7 @@ mod Naming {
         else Nil
 
     ///
-    /// フィールドの性質の組み合わせ。unique は配列に付けられない（値ごとの一意を DB で守れない）。
+    /// フィールドの性質の組み合わせ。unique は配列・OBJECT・BLOCKS に付けられない（値ごとの一意を DB で守れない）。BLOCKS は常に配列。
     ///
     pub def validateFlags(kind: FieldKind, many: Bool, unique: Bool): List[Violation] =
         let uniqueChecks = if (many and unique) Violation.Violation("unique", "配列のフィールドには付けられません") :: Nil else Nil;
@@ -150,33 +151,43 @@ mod Naming {
     /// kind と config の組み合わせを検査する。siblings は同じ型の既存のフィールドの apiId（slug の sourceField の検査用）。
     ///
     pub def validateConfig(siblings: List[ApiId], kind: FieldKind, config: FieldConfig): List[Violation] =
-        let lengthChecks = match config#maxLength {
-            case Some(n) if n <= 0 => Violation.Violation("config.maxLength", "1 以上にしてください") :: Nil
-            case _                 => Nil
-        };
-        let rangeChecks = match (config#min, config#max) {
-            case (Some(low), Some(high)) if low > high => Violation.Violation("config.max", "min 以下にはできません") :: Nil
-            case _                                     => Nil
-        };
-        let optionChecks = match kind {
-            case FieldKind.Select =>
-                if (List.isEmpty(config#options)) Violation.Violation("config.options", "SELECT には選択肢が 1 つ以上要ります") :: Nil
-                else if (List.exists(option -> not isEnumValue(option), config#options)) Violation.Violation("config.options", "選択肢は UPPER_SNAKE（[A-Z][A-Z0-9_]*）にしてください") :: Nil
-                else if (List.length(List.distinct(config#options)) != List.length(config#options)) Violation.Violation("config.options", "選択肢が重複しています") :: Nil
-                else Nil
-            case _ => if (List.isEmpty(config#options)) Nil else Violation.Violation("config.options", "options は SELECT だけの設定です") :: Nil
-        };
-        let kindChecks = match kind {
-            case FieldKind.Slug => match config#sourceField {
-                case None                                                => Violation.Violation("config.sourceField", "SLUG には元にするフィールドの apiId が要ります") :: Nil
-                case Some(source) if not List.memberOf(source, siblings) => Violation.Violation("config.sourceField", "'${source}' はこの型にありません") :: Nil
-                case Some(_)                                             => Nil
-            }
-            case FieldKind.Number => Nil
-            case _ =>
-                let numberOnly = Option.isEmpty(config#min) and Option.isEmpty(config#max) and Option.isEmpty(config#integer);
-                if (numberOnly) Nil else Violation.Violation("config", "min / max / integer は NUMBER だけの設定です") :: Nil
-        };
-        lengthChecks ::: rangeChecks ::: optionChecks ::: kindChecks
+        List.flatten(checkLength(config) :: checkRange(config) :: checkOptions(kind, config) :: checkKindConfig(siblings, kind, config) :: Nil)
+
+    def checkLength(config: FieldConfig): List[Violation] = match config#maxLength {
+        case Some(n) if n <= 0 => Violation.Violation("config.maxLength", "1 以上にしてください") :: Nil
+        case _                 => Nil
+    }
+
+    def checkRange(config: FieldConfig): List[Violation] = match (config#min, config#max) {
+        case (Some(low), Some(high)) if low > high => Violation.Violation("config.max", "min 以下にはできません") :: Nil
+        case _                                     => Nil
+    }
+
+    ///
+    /// SELECT の選択肢。SELECT には 1 つ以上・UPPER_SNAKE・重複無し。他の kind には置けない。
+    ///
+    def checkOptions(kind: FieldKind, config: FieldConfig): List[Violation] = match kind {
+        case FieldKind.Select =>
+            if (List.isEmpty(config#options)) Violation.Violation("config.options", "SELECT には選択肢が 1 つ以上要ります") :: Nil
+            else if (List.exists(option -> not isEnumValue(option), config#options)) Violation.Violation("config.options", "選択肢は UPPER_SNAKE（[A-Z][A-Z0-9_]*）にしてください") :: Nil
+            else if (List.length(List.distinct(config#options)) != List.length(config#options)) Violation.Violation("config.options", "選択肢が重複しています") :: Nil
+            else Nil
+        case _ => if (List.isEmpty(config#options)) Nil else Violation.Violation("config.options", "options は SELECT だけの設定です") :: Nil
+    }
+
+    ///
+    /// kind ごとの設定。SLUG には同じ型にある sourceField が要り、min / max / integer は NUMBER だけ。
+    ///
+    def checkKindConfig(siblings: List[ApiId], kind: FieldKind, config: FieldConfig): List[Violation] = match kind {
+        case FieldKind.Slug => match config#sourceField {
+            case None                                                => Violation.Violation("config.sourceField", "SLUG には元にするフィールドの apiId が要ります") :: Nil
+            case Some(source) if not List.memberOf(source, siblings) => Violation.Violation("config.sourceField", "'${source}' はこの型にありません") :: Nil
+            case Some(_)                                             => Nil
+        }
+        case FieldKind.Number => Nil
+        case _ =>
+            let numberOnly = Option.isEmpty(config#min) and Option.isEmpty(config#max) and Option.isEmpty(config#integer);
+            if (numberOnly) Nil else Violation.Violation("config", "min / max / integer は NUMBER だけの設定です") :: Nil
+    }
 
 }

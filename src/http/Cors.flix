@@ -59,13 +59,13 @@ mod Cors {
     /// そうでなければ何も付けない 204。Allow-Origin と Vary は他のレスポンスと同じく withHeaders が足す。
     ///
     pub def preflight(config: CorsConfig, request: HttpRequest): HttpResponse =
-        let allowHeaders = match responseHeaders(config, request) {
-            case Nil => Nil
-            case _   =>
+        let allowed = originOf(request) |> Option.exists(origin -> isAllowed(config, origin));
+        let allowHeaders =
+            if (allowed)
                 ("Access-Control-Allow-Methods", "GET, POST, OPTIONS") ::
                 ("Access-Control-Allow-Headers", "Content-Type, Authorization") ::
                 ("Access-Control-Max-Age", "86400") :: Nil
-        };
+            else Nil;
         { status = 204, headers = allowHeaders, body = "" }
 
 }

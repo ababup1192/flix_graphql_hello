@@ -30,12 +30,13 @@ mod TestNaming {
         Assert.assertEq(expected = List#{"apiId"},
             CmsTestKit.violationPaths(Naming.validateType(existing(), CmsTestKit.names("blogs", "Blog", "blogs"))))
 
-    /// singular は予約された型名と、Where などで終わる名前と、既存の型と同じ名前が使えない。
+    /// singular は予約された型名と、Where / WhereLeaf などで終わる名前と、既存の型と同じ名前が使えない。
     @Test
     def testNamingValidateTypeSingular(): Unit \ Assert =
-        Assert.assertEq(expected = (List#{"singular"}, List#{"singular"}, List#{"singular"}),
+        Assert.assertEq(expected = (List#{"singular"}, List#{"singular"}, List#{"singular"}, List#{"singular"}),
             (CmsTestKit.violationPaths(Naming.validateType(existing(), CmsTestKit.names("assets", "Asset", "assets"))),
              CmsTestKit.violationPaths(Naming.validateType(existing(), CmsTestKit.names("somewheres", "SomeWhere", "somewheres"))),
+             CmsTestKit.violationPaths(Naming.validateType(existing(), CmsTestKit.names("leaves", "BlogWhereLeaf", "leaves"))),
              CmsTestKit.violationPaths(Naming.validateType(existing(), CmsTestKit.names("posts", "Blog", "posts")))))
 
     /// singular と plural が同じ（news / News）だと 1 件と一覧のクエリ名が衝突するので使えない。既存の型の plural とも衝突しない事。

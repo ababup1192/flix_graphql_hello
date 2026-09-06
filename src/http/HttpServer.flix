@@ -180,6 +180,11 @@ mod HttpServer {
         loop() |> Result.map(line -> String.stripSuffix(substr = "\r", line) |> Option.getWithDefault(line))
 
     ///
+    /// ボディを読むときの 1 回分のバッファ長。確保する長さと 1 回に読む長さは同じでないと読み過ぎる。
+    ///
+    def readBufferBytes(): Int32 = 8192
+
+    ///
     /// ボディを byteCount バイトぶん読んで UTF-8 として返す。EOF が先に来たらそこまでを返す。
     ///
     /// WhyNot: 文字単位で読んで UTF-8 バイト数を引き算しないのは、絵文字のような
@@ -189,12 +194,12 @@ mod HttpServer {
     pub def readBody(input: InputStream, byteCount: Int32): String \ IO =
         region rc {
             let out = new ByteArrayOutputStream();
-            let buffer = Array.repeat(rc, 8192, 0i8);
+            let buffer = Array.repeat(rc, readBufferBytes(), 0i8);
             def loop(remaining) = {
                 if (remaining <= 0)
                     ()
                 else
-                    match input.read(buffer, 0, Int32.min(remaining, 8192)) {
+                    match input.read(buffer, 0, Int32.min(remaining, readBufferBytes())) {
                         case -1    => ()
                         case count =>
                             out.write(buffer, 0, count);

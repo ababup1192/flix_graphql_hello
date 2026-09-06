@@ -11,6 +11,23 @@ mod TestEntryValue {
     def sections(): FieldDef =
         { many = true, children = Children.Children({ children = Children.Children(CmsTestKit.fieldDef("headline", FieldKind.Text) :: Nil) | CmsTestKit.fieldDef("hero", FieldKind.Object) } :: Nil) | CmsTestKit.fieldDef("sections", FieldKind.Blocks) }
 
+    /// text / number / bool は形が違えば None、配列版は配列でない値なら空、読めない要素は捨てる。無いフィールドも同じ。
+    @Test
+    def testEntryValueScalars(): Unit \ Assert =
+        let data = CmsTestKit.entryData(List#{
+            ("title", Json.JString("t")),
+            ("views", CmsTestKit.intJson(3)),
+            ("flag", Json.JBool(true)),
+            ("tags", Json.JArray(Vector#{Json.JString("a"), CmsTestKit.intJson(1), Json.JString("b")})),
+            ("scores", Json.JArray(Vector#{CmsTestKit.intJson(1), Json.JString("x")})),
+            ("flags", Json.JString("not an array"))
+        });
+        let id = CmsTestKit.apiId;
+        Assert.assertEq(expected = (Some("t"), None, Some(3.0), Some(true), None, List#{"a", "b"}, List#{1.0}, Nil, Nil),
+            (EntryValue.text(id("title"), data), EntryValue.text(id("views"), data),
+             EntryValue.number(id("views"), data), EntryValue.bool(id("flag"), data), EntryValue.bool(id("missing"), data),
+             EntryValue.texts(id("tags"), data), EntryValue.numbers(id("scores"), data), EntryValue.bools(id("flags"), data), EntryValue.texts(id("missing"), data)))
+
     /// objects はオブジェクトでない要素を捨て、objectData は apiId の規則に合わないキーを落とす。
     @Test
     def testEntryValueObjects(): Unit \ Assert =

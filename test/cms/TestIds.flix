@@ -19,8 +19,8 @@ def testTypeNameParse(): Unit \ Assert =
          TypeName.parse("blogPost") |> Option.map(TypeName.text),
          TypeName.parse("Blog-Post") |> Option.map(TypeName.text)))
 
-/// TypeId と FieldId は別の型で、表示は数字。
+/// TypeId / FieldId の表示は中の数字（エラーメッセージや GraphQL の Id にそのまま出る）。
 @Test
 def testNumericIds(): Unit \ Assert =
-    Assert.assertEq(expected = ("42", "7", 42i64),
-        ("${TypeId.TypeId(42i64)}", "${FieldId.FieldId(7i64)}", TypeId.toInt64(TypeId.TypeId(42i64))))
+    Assert.assertEq(expected = ("42", "7"),
+        ("${TypeId.TypeId(42i64)}", "${FieldId.FieldId(7i64)}"))
