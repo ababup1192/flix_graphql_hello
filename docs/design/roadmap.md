@@ -47,6 +47,7 @@ HTTP サーバの同時接続の上限（`CMS_MAX_CONNECTIONS`。超えたら 50
 | 14 | codegen の手順と CI の雛形 | 開発者 | 1 日 | elm-graphql / graphql-codegen に委ねる。Webhook で PR を開く |
 | 15 | entry のバージョン間の差分（`Entry.diff(from, to)`） | 編集者・エージェント | 1 日 | 純粋な `EntryDiff`（kind ごとに等値、OBJECT は再帰、many と BLOCKS は位置、richText は Markdown の行差分）。MCP の `diff_entry` と管理画面の履歴が使う。Markdown 変換の直後にテストファーストで |
 | 15a | richText の doc に本文の穴を塞ぐ node（gallery / image の alt / linkCard / codeBlock の fileName と highlightLines） | 編集者 | 半日 | microCMS でカスタムフィールドに追い出されている物を本文の中に持てるようにする。バックエンドは doc の形・validate・HTML・Markdown の方言まで。エディタは管理画面で。脚注は後 |
+| 15b | richText の doc の第 2 弾（数式 / Mermaid / タスクリスト / 動画） | 編集者 | 半日 | 15a と同じ型。動画は AssetRules に mime ごとの上限。entryEmbed（本文に別の entry）は参照展開が絡むので差分と MCP の後に単独で |
 | 16 | 画像の `usedBy`（済み）、pending の掃除 cron、asset の先読み | 編集者・運用 | 半日 | 既存の query を出すだけ + 孤児の削除 |
 | 17 | 課金（Stripe）と組織の上限 | サービス | 1〜2 日 | [hosting-and-externalized-risk.md](hosting-and-externalized-risk.md) |
 | 18 | 監査ログ | 企業 | 半日 | `Actor` が入れば mutation の入口 1 か所 |
