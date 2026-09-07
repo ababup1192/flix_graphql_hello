@@ -12,7 +12,7 @@ mod TestPublishPg {
     ///
     /// blogs（title: required / slug: unique / views）を作って id を返す。
     ///
-    def blogsForPublish(): TypeId \ Db + CmsErr =
+    def blogsForPublish(): TypeId \ Db + CmsErr + Tenant =
         let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
         discard ContentTypes.addField(blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
         discard ContentTypes.addField(blogs#id, { unique = true | CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = CmsTestKit.apiId("title") |> Some | FieldConfig.empty() }) });
@@ -183,5 +183,5 @@ mod TestPublishPg {
     /// プール越しに 1 つの Tx で publish し、(DB の失敗, (業務エラーの文言, stage)) の形で返す。
     ///
     def publishOutcome(pool: Pool, id: String): Result[DbFailure, Result[String, Stage]] \ IO =
-        DbError.runWithFailure(() -> CmsTestKit.messageOr(entry -> entry#stage, () -> Pool.withLazyTx(pool, () -> ContentEntries.publish(CmsTestKit.entryId(id), "tester", false))))
+        DbError.runWithFailure(() -> CmsTestKit.messageOr(entry -> entry#stage, () -> Pool.withLazyTx(pool, () -> Tenant.runWith(ProjectId.default(), () -> ContentEntries.publish(CmsTestKit.entryId(id), "tester", false)))))
 }

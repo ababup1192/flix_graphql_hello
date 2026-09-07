@@ -55,6 +55,22 @@ mod Server {
         errorResponse(503, Nil, message)
 
     ///
+    /// 404。無いプロジェクトなど。
+    ///
+    pub def notFound(message: String): HttpResponse =
+        errorResponse(404, Nil, message)
+
+    ///
+    /// パスの先頭の /p/{slug} を切り出す。"/p/shop/graphql" → (Some("shop"), "/graphql")。無ければ (None, そのまま)。
+    /// slug の無い "/p" や "/p/" は切り出さない（404 に落ちる）。
+    ///
+    pub def splitProject(path: String): (Option[String], String) =
+        match String.splitOn(substr = "/", path) {
+            case "" :: "p" :: slug :: rest if slug != "" => (Some(slug), "/" + List.join("/", rest))
+            case _                                       => (None, path)
+        }
+
+    ///
     /// パスからクエリ文字列を落とす（"/health?probe=1" → "/health"）。
     ///
     def pathOf(path: String): String =

@@ -7,7 +7,7 @@ mod ContentFieldsQueries {
     ///
     /// 生成元 content_fields.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 225501244
+    pub def sourceHash(): Int32 = -1947595877
 
     ///
     /// listAllFields の 1 行。
@@ -32,11 +32,11 @@ mod ContentFieldsQueries {
         ) yield { id = id, typeId = typeId, parentFieldId = parentFieldId, apiId = apiId, name = name, kind = kind, isMany = isMany, isRequired = isRequired, isUnique = isUnique, isLocalized = isLocalized, targetTypeId = targetTypeId, config = config, position = position }
 
     ///
-    /// listAllFields: SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position FROM content_fields ORDER BY type_id, position, id
+    /// listAllFields: SELECT f.id, f.type_id, f.parent_field_id, f.api_id, f.name, f.kind, f.is_many, f.is_required, f.is_unique, f.is_localized, f.target_type_id, f.config, f.position FROM content_fields AS f JOIN content_types AS t ON t.id = f.type_id WHERE t.project_id = $1 ORDER BY f.type_id, f.position, f.id
     ///
-    pub def listAllFields(): List[ListAllFieldsRow] \ DbRead =
-        let sql = "SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position\n    FROM content_fields ORDER BY type_id, position, id";
-        let params = Nil;
+    pub def listAllFields(projectId: Int64): List[ListAllFieldsRow] \ DbRead =
+        let sql = "SELECT f.id, f.type_id, f.parent_field_id, f.api_id, f.name, f.kind, f.is_many, f.is_required, f.is_unique, f.is_localized, f.target_type_id, f.config, f.position\n    FROM content_fields AS f\n    JOIN content_types AS t ON t.id = f.type_id\n    WHERE t.project_id = $1 ORDER BY f.type_id, f.position, f.id";
+        let params = List#{SqlValue.Int64(projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listAllFieldsDecoder(), sql, params))
 
     ///
@@ -92,11 +92,11 @@ mod ContentFieldsQueries {
         ) yield { id = id, typeId = typeId, parentFieldId = parentFieldId, apiId = apiId, name = name, kind = kind, isMany = isMany, isRequired = isRequired, isUnique = isUnique, isLocalized = isLocalized, targetTypeId = targetTypeId, config = config, position = position }
 
     ///
-    /// findField: SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position FROM content_fields WHERE id = $1
+    /// findField: SELECT f.id, f.type_id, f.parent_field_id, f.api_id, f.name, f.kind, f.is_many, f.is_required, f.is_unique, f.is_localized, f.target_type_id, f.config, f.position FROM content_fields AS f JOIN content_types AS t ON t.id = f.type_id WHERE f.id = $1 AND t.project_id = $2
     ///
-    pub def findField(id: Int64): Option[FindFieldRow] \ DbRead =
-        let sql = "SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position\n    FROM content_fields WHERE id = $1";
-        let params = List#{SqlValue.Int64(id)};
+    pub def findField(args: { id = Int64, projectId = Int64 }): Option[FindFieldRow] \ DbRead =
+        let sql = "SELECT f.id, f.type_id, f.parent_field_id, f.api_id, f.name, f.kind, f.is_many, f.is_required, f.is_unique, f.is_localized, f.target_type_id, f.config, f.position\n    FROM content_fields AS f\n    JOIN content_types AS t ON t.id = f.type_id\n    WHERE f.id = $1 AND t.project_id = $2";
+        let params = List#{SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findFieldDecoder(), sql, params))
 
     ///

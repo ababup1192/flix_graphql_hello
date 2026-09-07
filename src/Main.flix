@@ -1,6 +1,7 @@
 ///
 /// 起動。SDL と生成物の一致、PostgreSQL の接続、migrations の適用済みを確かめ、管理 API（/admin/graphql）と
 /// コンテンツ API（/graphql。型の定義から実行時に組み、定義が変われば組み直す）を 8080 番で待つ。
+/// パスの先頭に /p/{slug} を付けるとそのプロジェクト、無ければ既定のプロジェクト（default）。
 /// 起動に失敗したらメッセージを出して終了コード 1 で終わる。
 ///
 /// 環境変数: CMS_DSN / CMS_DB_USER / CMS_DB_PASSWORD（DbConfig）、CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）
@@ -11,11 +12,12 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
         connection  <- DbConfig.fromEnv();
         pool        <- openPool(connection);
         _           <- checkMigrations(connection);
-        adminEngine <- Graphql.buildEngine(AdminSchema.make(AdminRunner.make(pool)))
-    ) yield (pool, adminEngine);
+        adminEngines <- Ok(AdminEngine.create());
+        _           <- AdminEngine.current(adminEngines, pool, ProjectId.default())
+    ) yield (pool, adminEngines);
     match started {
         case Err(message) => { println(message); Sys.Exit.exit(1) }
-        case Ok((pool, adminEngine)) =>
+        case Ok((pool, adminEngines)) =>
             let cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins };
             let contentConfig = { cors = cors, graphqlPath = "/graphql" };
             let adminConfig = { cors = cors, graphqlPath = "/admin/graphql" };
@@ -23,15 +25,34 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
             // WhyNot: コンテンツ API を実行する時以外（/health、404、preflight、GET）でエンジンを組まないのは、型定義が壊れた時に
             // 死活監視や preflight まで 503 になり、404 ごとに目印の SELECT が走るため。GraphQL を実行しない道なので管理 API のエンジンで受ける
             HttpServer.listen(8080, request ->
-                Health.runWithPool(pool, () ->
-                    if (Server.needsGraphqlEngine(contentConfig, request))
-                        match ContentEngine.current(engineCache, pool) {
-                            case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(contentConfig, request))
-                            case Err(message) => Server.unavailable(message)
-                        }
-                    else
-                        Graphql.runWithEngine(adminEngine, () -> Server.handle(adminConfig, request))))
+                Health.runWithPool(pool, () -> {
+                    let (slug, path) = Server.splitProject(request#path);
+                    let scoped = { path = path | request };
+                    match resolveProject(pool, slug) {
+                        case Err(message)      => Server.unavailable(message)
+                        case Ok(None)          => Server.notFound("projectId '${slug |> Option.getWithDefault("")}' がありません")
+                        case Ok(Some(projectId)) =>
+                            if (Server.needsGraphqlEngine(contentConfig, scoped))
+                                match ContentEngine.current(engineCache, pool, projectId) {
+                                    case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(contentConfig, scoped))
+                                    case Err(message) => Server.unavailable(message)
+                                }
+                            else
+                                match AdminEngine.current(adminEngines, pool, projectId) {
+                                    case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(adminConfig, scoped))
+                                    case Err(message) => Server.unavailable(message)
+                                }
+                    }
+                }))
     }
+
+///
+/// パスの slug からプロジェクトを決める。slug が無ければ既定（SQL を出さない）。無い slug は None。
+///
+def resolveProject(pool: Pool, slug: Option[String]): Result[String, Option[ProjectId]] \ IO = match slug {
+    case None        => Ok(Some(ProjectId.default()))
+    case Some(found) => DbRunner.retrying(() -> Pool.withLazyTx(pool, () -> Projects.findBySlug(found))) |> Result.mapErr(DbRunner.failureMessage)
+}
 
 ///
 /// プールを開き、1 回 SELECT 1 を投げて届くことを確かめる。届かなければ閉じて Err。

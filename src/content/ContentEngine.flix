@@ -1,5 +1,5 @@
 ///
-/// コンテンツ API のエンジンの置き場。型の定義が変わったら組み直す。
+/// コンテンツ API のエンジンの置き場。プロジェクトごとに 1 つ持ち、型の定義が変わったら組み直す。
 /// 判断は content_types の件数と最新の updated_at（schemaFingerprint）で、リクエストごとに 1 本の SELECT を出す。
 ///
 /// WhyNot: 管理 API の Mutation の後で明示的に組み直さないのは、複数台で動かした時に他の台の変更を拾えないため。
@@ -11,7 +11,7 @@ mod ContentEngine {
     import java.lang.Object
 
     ///
-    /// 組み立て済みのエンジンと、その時の目印。
+    /// プロジェクトごとの、組み立て済みのエンジンとその時の目印。
     ///
     pub enum Cache {
         case Cache(AtomicReference[Object])
@@ -21,7 +21,7 @@ mod ContentEngine {
     /// 空の置き場。最初のリクエストで組む。
     ///
     pub def create(): Cache \ IO =
-        let empty: Option[(String, Graphql.Engine)] = None;
+        let empty: Map[ProjectId, (String, Graphql.Engine)] = Map.empty();
         Cache.Cache(new AtomicReference(unchecked_cast(empty as Object)))
 
     ///
@@ -32,15 +32,16 @@ mod ContentEngine {
     /// 全断するのを避けるため。目印は更新しないので、定義が直れば次のリクエストで組み直す。
     /// 2 つのリクエストが同時に組み直すと後の書き込みが勝つが、どちらも同じ目印から組んだ物なので構わない。
     ///
-    pub def current(cache: Cache, pool: Pool): Result[String, Graphql.Engine] \ IO =
+    pub def current(cache: Cache, pool: Pool, projectId: ProjectId): Result[String, Graphql.Engine] \ IO =
         let Cache.Cache(slot) = cache;
-        let stored: Option[(String, Graphql.Engine)] = unchecked_cast(slot.get() as Option[(String, Graphql.Engine)]);
-        match readFingerprint(pool) {
+        let engines: Map[ProjectId, (String, Graphql.Engine)] = unchecked_cast(slot.get() as Map[ProjectId, (String, Graphql.Engine)]);
+        let stored = Map.get(projectId, engines);
+        match readFingerprint(pool, projectId) {
             case Err(message)     => stored |> Option.map(snd) |> Option.toOk(message)
             case Ok(fingerprint) => match stored {
                 case Some((known, engine)) if known == fingerprint => Ok(engine)
-                case _ => match rebuild(pool) {
-                    case Ok(engine)   => { slot.set(unchecked_cast(Some((fingerprint, engine)) as Object)); Ok(engine) }
+                case _ => match rebuild(pool, projectId) {
+                    case Ok(engine)   => { slot.set(unchecked_cast(Map.insert(projectId, (fingerprint, engine), engines) as Object)); Ok(engine) }
                     case Err(message) => stored |> Option.map(snd) |> Option.toOk(message)
                 }
             }
@@ -49,12 +50,12 @@ mod ContentEngine {
     ///
     /// 定義を読んで組み直す。
     ///
-    def rebuild(pool: Pool): Result[String, Graphql.Engine] \ IO =
-        read(pool, "content type の定義を読めません", () -> ContentTypes.list())
-            |> Result.flatMap(types -> Graphql.buildEngine(ContentSchemaBuilder.build(types, ContentRunner.make(pool))))
+    def rebuild(pool: Pool, projectId: ProjectId): Result[String, Graphql.Engine] \ IO =
+        read(pool, "content type の定義を読めません", () -> Tenant.runWith(projectId, ContentTypes.list))
+            |> Result.flatMap(types -> Graphql.buildEngine(ContentSchemaBuilder.build(types, ContentRunner.make(pool, projectId))))
 
-    def readFingerprint(pool: Pool): Result[String, String] \ IO =
-        read(pool, "content type の目印を読めません", () -> ContentTypesQueries.schemaFingerprint())
+    def readFingerprint(pool: Pool, projectId: ProjectId): Result[String, String] \ IO =
+        read(pool, "content type の目印を読めません", () -> ContentTypesQueries.schemaFingerprint(ProjectId.toInt64(projectId)))
             |> Result.map(row -> match row {
                 case Some(found) => "${found#types |> Option.getWithDefault(0i64)}/${found#latest |> Option.map(Timestamp.toIso8601) |> Option.getWithDefault("-")}"
                 case None        => "0/-"

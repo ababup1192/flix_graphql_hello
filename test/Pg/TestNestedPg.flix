@@ -8,7 +8,7 @@ mod TestNestedPg {
     ///
     /// pages（title / related: object{label, post→pages} / sections: blocks[hero{headline}, cta{caption, url}]）を作る。
     ///
-    def pagesWithNested(): TypeId \ Db + CmsErr =
+    def pagesWithNested(): TypeId \ Db + CmsErr + Tenant =
         let pages = ContentTypes.create(CmsTestKit.typeDraft("pages", "ページ"));
         discard ContentTypes.addField(pages#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
         let related = ContentTypes.addField(pages#id, CmsTestKit.fieldDraft("related", FieldKind.Object, FieldConfig.empty()));

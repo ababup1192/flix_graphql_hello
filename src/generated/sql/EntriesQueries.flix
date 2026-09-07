@@ -7,7 +7,7 @@ mod EntriesQueries {
     ///
     /// 生成元 entries.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -906867573
+    pub def sourceHash(): Int32 = -2124303439
 
     ///
     /// entryExists の 1 行。
@@ -46,11 +46,11 @@ mod EntriesQueries {
         RawSql.runWithAllow(() -> Sql.fetchOneAs(countEntriesOfTypeDecoder(), sql, params))
 
     ///
-    /// insertEntry: INSERT INTO entries (id, type_id) VALUES ($1, $2)
+    /// insertEntry: INSERT INTO entries (id, type_id, project_id) VALUES ($1, $2, $3)
     ///
-    pub def insertEntry(args: { id = String, typeId = Int64 }): Int32 \ DbWrite =
-        let sql = "INSERT INTO entries (id, type_id) VALUES ($1, $2)";
-        let params = List#{SqlValue.Str(args#id), SqlValue.Int64(args#typeId)};
+    pub def insertEntry(args: { id = String, typeId = Int64, projectId = Int64 }): Int32 \ DbWrite =
+        let sql = "INSERT INTO entries (id, type_id, project_id) VALUES ($1, $2, $3)";
+        let params = List#{SqlValue.Str(args#id), SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
@@ -105,11 +105,11 @@ mod EntriesQueries {
         ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data, contentUpdatedAt = contentUpdatedAt, publishedUpdatedAt = publishedUpdatedAt }
 
     ///
-    /// findEntryByStage: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published' WHERE e.id = $2 AND e.deleted_at IS NULL
+    /// findEntryByStage: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published' WHERE e.id = $2 AND e.project_id = $3 AND e.deleted_at IS NULL
     ///
-    pub def findEntryByStage(args: { id = String, stage = String }): Option[FindEntryByStageRow] \ DbRead =
-        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'\n    WHERE e.id = $2 AND e.deleted_at IS NULL";
-        let params = List#{SqlValue.Str(args#stage), SqlValue.Str(args#id)};
+    pub def findEntryByStage(args: { id = String, stage = String, projectId = Int64 }): Option[FindEntryByStageRow] \ DbRead =
+        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'\n    WHERE e.id = $2 AND e.project_id = $3 AND e.deleted_at IS NULL";
+        let params = List#{SqlValue.Str(args#stage), SqlValue.Str(args#id), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findEntryByStageDecoder(), sql, params))
 
     ///
@@ -132,13 +132,13 @@ mod EntriesQueries {
         ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data, contentUpdatedAt = contentUpdatedAt, publishedUpdatedAt = publishedUpdatedAt }
 
     ///
-    /// listEntriesByStage: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published' WHERE e.type_id = $2 AND e.deleted_at IS NULL AND TRUE LIMIT $3 OFFSET $4
+    /// listEntriesByStage: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published' WHERE e.type_id = $2 AND e.project_id = $3 AND e.deleted_at IS NULL AND TRUE LIMIT $4 OFFSET $5
     ///
-    pub def listEntriesByStage(args: { typeId = Int64, stage = String, limit = Int64, offset = Int64 }, filter: Fragment.Pred[EntryContentsTable.EntryContentsTable], order: Fragment.Order[EntryContentsTable.EntryContentsTable]): List[ListEntriesByStageRow] \ DbRead =
-        let params0 = List#{SqlValue.Str(args#stage), SqlValue.Int64(args#typeId), SqlValue.Int64(args#limit), SqlValue.Int64(args#offset)};
+    pub def listEntriesByStage(args: { typeId = Int64, stage = String, limit = Int64, offset = Int64, projectId = Int64 }, filter: Fragment.Pred[EntryContentsTable.EntryContentsTable], order: Fragment.Order[EntryContentsTable.EntryContentsTable]): List[ListEntriesByStageRow] \ DbRead =
+        let params0 = List#{SqlValue.Str(args#stage), SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Int64(args#limit), SqlValue.Int64(args#offset)};
         let (filterSql, params1) = Fragment.appendPred(filter, params0);
         let orderSql = Fragment.renderOrder(order);
-        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'\n    WHERE e.type_id = $2 AND e.deleted_at IS NULL AND " + filterSql + "\n    " + orderSql + "\n    LIMIT $3 OFFSET $4";
+        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'\n    WHERE e.type_id = $2 AND e.project_id = $3 AND e.deleted_at IS NULL AND " + filterSql + "\n    " + orderSql + "\n    LIMIT $4 OFFSET $5";
         let params = params1;
         RawSql.runWithAllow(() -> Sql.fetchAs(listEntriesByStageDecoder(), sql, params))
 
@@ -153,12 +153,12 @@ mod EntriesQueries {
         ) yield { total = total }
 
     ///
-    /// countEntriesByStage: SELECT count(*)::bigint AS total FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 WHERE e.type_id = $2 AND e.deleted_at IS NULL AND TRUE
+    /// countEntriesByStage: SELECT count(*)::bigint AS total FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 WHERE e.type_id = $2 AND e.project_id = $3 AND e.deleted_at IS NULL AND TRUE
     ///
-    pub def countEntriesByStage(args: { typeId = Int64, stage = String }, filter: Fragment.Pred[EntryContentsTable.EntryContentsTable]): Option[CountEntriesByStageRow] \ DbRead =
-        let params0 = List#{SqlValue.Str(args#stage), SqlValue.Int64(args#typeId)};
+    pub def countEntriesByStage(args: { typeId = Int64, stage = String, projectId = Int64 }, filter: Fragment.Pred[EntryContentsTable.EntryContentsTable]): Option[CountEntriesByStageRow] \ DbRead =
+        let params0 = List#{SqlValue.Str(args#stage), SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId)};
         let (filterSql, params1) = Fragment.appendPred(filter, params0);
-        let sql = "SELECT count(*)::bigint AS total\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    WHERE e.type_id = $2 AND e.deleted_at IS NULL AND " + filterSql;
+        let sql = "SELECT count(*)::bigint AS total\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    WHERE e.type_id = $2 AND e.project_id = $3 AND e.deleted_at IS NULL AND " + filterSql;
         let params = params1;
         RawSql.runWithAllow(() -> Sql.fetchOneAs(countEntriesByStageDecoder(), sql, params))
 
@@ -281,11 +281,11 @@ mod EntriesQueries {
         ) yield { id = id, entryId = entryId, version = version, data = data, author = author, reason = reason, createdAt = createdAt }
 
     ///
-    /// findVersion: SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE id = $1
+    /// findVersion: SELECT v.id, v.entry_id, v.version, v.data, v.author, v.reason, v.created_at FROM entry_versions AS v JOIN entries AS e ON e.id = v.entry_id AND e.project_id = $1 WHERE v.id = $2
     ///
-    pub def findVersion(id: Int64): Option[FindVersionRow] \ DbRead =
-        let sql = "SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE id = $1";
-        let params = List#{SqlValue.Int64(id)};
+    pub def findVersion(args: { id = Int64, projectId = Int64 }): Option[FindVersionRow] \ DbRead =
+        let sql = "SELECT v.id, v.entry_id, v.version, v.data, v.author, v.reason, v.created_at\n    FROM entry_versions AS v\n    JOIN entries AS e ON e.id = v.entry_id AND e.project_id = $1\n    WHERE v.id = $2";
+        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Int64(args#id)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findVersionDecoder(), sql, params))
 
     ///
@@ -308,11 +308,11 @@ mod EntriesQueries {
         ) yield { id = id, typeId = typeId, version = version, stage = stage, publishedAt = publishedAt, createdAt = createdAt, updatedAt = updatedAt, data = data, contentUpdatedAt = contentUpdatedAt, publishedUpdatedAt = publishedUpdatedAt }
 
     ///
-    /// findEntriesByStage: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published' WHERE e.id = ANY($2) AND e.deleted_at IS NULL
+    /// findEntriesByStage: SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1 LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published' WHERE e.id = ANY($2) AND e.project_id = $3 AND e.deleted_at IS NULL
     ///
-    pub def findEntriesByStage(args: { ids = List[String], stage = String }): List[FindEntriesByStageRow] \ DbRead =
-        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'\n    WHERE e.id = ANY($2) AND e.deleted_at IS NULL";
-        let params = List#{SqlValue.Str(args#stage), SqlValue.StrArray(args#ids)};
+    pub def findEntriesByStage(args: { ids = List[String], stage = String, projectId = Int64 }): List[FindEntriesByStageRow] \ DbRead =
+        let sql = "SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = $1\n    LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'\n    WHERE e.id = ANY($2) AND e.project_id = $3 AND e.deleted_at IS NULL";
+        let params = List#{SqlValue.Str(args#stage), SqlValue.StrArray(args#ids), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(findEntriesByStageDecoder(), sql, params))
 
     ///

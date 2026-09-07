@@ -52,8 +52,8 @@ src/generated/sql/     sqlfx の生成物（触らない）。*Queries / Tables
 src/cms/model/         ドメインの型。Ids（TypeId / FieldId / ApiId / TypeName）、ContentType（enum・レコード・Draft / Changes・FieldConfig）、Entry（EntryId / Stage / EntryData / IdGen）
 src/cms/rules/         純粋な規則。Naming（予約名・衝突・kind と config）、EntryValidation（下書きは緩く、公開は required まで）、EntryLinks（中身から参照を取り出す）
 src/cms/db/            行とドメインの値の変換と、絞り込みの SQL 化（EntryFilterSql）。列名と JSONB の式を知るのはここだけ
-src/cms/               ユースケース（ContentTypes / ContentEntries）と業務エラー（CmsErr）
-src/admin/             管理 API。AdminMapping（GraphQL の型 ↔ ドメイン）、リゾルバ、AdminRunner（最初の SQL で借りる Tx）
+src/cms/               ユースケース（ContentTypes / ContentEntries / Projects）と業務エラー（CmsErr）、今のプロジェクト（Tenant effect）
+src/admin/             管理 API。AdminMapping（GraphQL の型 ↔ ドメイン）、リゾルバ、AdminRunner（最初の SQL で借りる Tx）、AdminEngine（プロジェクトごとのエンジン）
 src/content/           コンテンツ API。ContentSchemaBuilder（定義 → Schema）、ContentEngine（目印で組み直す置き場）、ContentRunner（読むだけ）
 src/app/               Server（ルーティング・CORS・/health）、DbConfig、Health
 src/http/              手書き HTTP/1.1 と Cors
@@ -61,6 +61,12 @@ src/graphql/           graphql-java の境界と Schema の DSL
 test/                  src と同じ構成。test/Pg/ だけ実 PG
 test/sample/           graphql-java の境界のテストで使う見本のスキーマ（schema.graphql → GeneratedSchema.flix、Post / Counter）。本番では使わない
 ```
+
+## プロジェクト（テナント）
+
+1 つの DB に複数のプロジェクト（型と entry の集まり）を持つ。パスの先頭 `/p/{slug}/` で選び、無ければ既定（id 1 / `default`）。
+ユースケースは `Tenant.current()`（algebraic effect）で今のプロジェクトを読み、読み書きを全部そこに閉じる。
+Runner がリクエストごとに handler を入れ、テストは `PgTestSupport` が既定のプロジェクトで入れる。他のプロジェクトの id を渡しても notFound。
 
 ## 型の決まり
 

@@ -1,0 +1,40 @@
+///
+/// プロジェクトの分離を実 PostgreSQL で見る。別のプロジェクトの型と entry は、id を知っていても見えない・触れない。
+///
+mod TestTenantPg {
+
+    use Util.Json.Json
+
+    /// 既定のプロジェクトで作った blogs は、別のプロジェクト（shop）からは一覧にも apiId でも id でも見えず、同じ apiId の型を別に作れる。
+    /// entry も同じで、id で引けず、他方の型に作ろうとすると notFound。
+    ///
+    ///   default: blogs(b1)      shop: blogs（別物）
+    @Test
+    def testPgTenantIsolation(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"b1"}, () -> {
+            let shop = Projects.create("shop", "店");
+            let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
+            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+            let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hello"))}));
+            Tenant.runWith(shop, () -> {
+                let own = ContentTypes.create(CmsTestKit.typeDraft("blogs", "商品記事"));
+                (List.length(ContentTypes.list()),
+                 ContentTypes.findByApiId(CmsTestKit.apiId("blogs")) |> Option.map(found -> found#id == own#id),
+                 ContentTypes.find(blogs#id) |> Option.isEmpty,
+                 ContentEntries.find(entry#id) |> Option.isEmpty,
+                 CmsTestKit.failureMessage(() -> ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("body", FieldKind.Text, FieldConfig.empty()))),
+                 CmsTestKit.failureMessage(() -> ContentEntries.create(blogs#id, None, CmsTestKit.entryData(Nil))))
+            })
+        }));
+        Assert.assertEq(expected = Ok(Ok((1, Some(true), true, true, Err("content type '1' が見つかりません"), Err("content type '1' が見つかりません")))), result)
+
+    /// slug の規則と重複。既定のプロジェクトは default。
+    @Test
+    def testPgProjectSlug(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() ->
+            (CmsTestKit.failureMessage(() -> Projects.create("Shop", "x")),
+             CmsTestKit.failureMessage(() -> Projects.create("default", "x")),
+             Projects.findBySlug("default")));
+        Assert.assertEq(expected = Ok(Ok((Err("slug: 'Shop' は英小文字・数字・- を 1 〜 64 文字にしてください"), Err("slug: 'default' は既にあります"), Some(ProjectId.default())))), result)
+
+}

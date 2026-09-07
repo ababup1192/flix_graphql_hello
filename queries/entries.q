@@ -10,8 +10,8 @@ query countEntriesOfType(typeId: Int64) -> one {
     SELECT count(*)::bigint AS total FROM entries WHERE type_id = :typeId AND deleted_at IS NULL
 }
 
-query insertEntry(id: String, typeId: Int64) -> exec {
-    INSERT INTO entries (id, type_id) VALUES (:id, :typeId)
+query insertEntry(id: String, typeId: Int64, projectId: Int64) -> exec {
+    INSERT INTO entries (id, type_id, project_id) VALUES (:id, :typeId, :projectId)
 }
 
 // 楽観ロック。version が合う時だけ進める。影響行数 0 なら誰かが先に進めた
@@ -36,31 +36,31 @@ query upsertContent(entryId: String, stage: String, data: Json) -> exec {
 // ---- コンテンツ API ----
 // stage の行を読む。where は断片 DSL のスロットで、JSONB の式（c.data->>'title'）を EntryFilterSql が組む
 
-query findEntryByStage(id: String, stage: String) -> one {
+query findEntryByStage(id: String, stage: String, projectId: Int64) -> one {
     SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = :stage
     LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'
-    WHERE e.id = :id AND e.deleted_at IS NULL
+    WHERE e.id = :id AND e.project_id = :projectId AND e.deleted_at IS NULL
 }
 
-query listEntriesByStage(typeId: Int64, stage: String, limit: Int64, offset: Int64) -> many
+query listEntriesByStage(typeId: Int64, stage: String, limit: Int64, offset: Int64, projectId: Int64) -> many
     with filter: Pred[entry_contents], order: Order[entry_contents]
 {
     SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = :stage
     LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'
-    WHERE e.type_id = :typeId AND e.deleted_at IS NULL AND {filter}
+    WHERE e.type_id = :typeId AND e.project_id = :projectId AND e.deleted_at IS NULL AND {filter}
     {order}
     LIMIT :limit OFFSET :offset
 }
 
-query countEntriesByStage(typeId: Int64, stage: String) -> one with filter: Pred[entry_contents] {
+query countEntriesByStage(typeId: Int64, stage: String, projectId: Int64) -> one with filter: Pred[entry_contents] {
     SELECT count(*)::bigint AS total
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = :stage
-    WHERE e.type_id = :typeId AND e.deleted_at IS NULL AND {filter}
+    WHERE e.type_id = :typeId AND e.project_id = :projectId AND e.deleted_at IS NULL AND {filter}
 }
 
 // ---- 公開 ----
@@ -107,18 +107,21 @@ query listVersions(entryId: String) -> many {
     SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE entry_id = :entryId ORDER BY id DESC
 }
 
-query findVersion(id: Int64) -> one {
-    SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE id = :id
+query findVersion(id: Int64, projectId: Int64) -> one {
+    SELECT v.id, v.entry_id, v.version, v.data, v.author, v.reason, v.created_at
+    FROM entry_versions AS v
+    JOIN entries AS e ON e.id = v.entry_id AND e.project_id = :projectId
+    WHERE v.id = :id
 }
 
 // ---- 参照 ----
 
-query findEntriesByStage(ids: List[String], stage: String) -> many {
+query findEntriesByStage(ids: List[String], stage: String, projectId: Int64) -> many {
     SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = :stage
     LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'
-    WHERE e.id = ANY(:ids) AND e.deleted_at IS NULL
+    WHERE e.id = ANY(:ids) AND e.project_id = :projectId AND e.deleted_at IS NULL
 }
 
 query deleteLinks(fromEntryId: String, stage: String) -> exec {

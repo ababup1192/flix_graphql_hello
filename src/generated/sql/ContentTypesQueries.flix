@@ -7,7 +7,7 @@ mod ContentTypesQueries {
     ///
     /// 生成元 content_types.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 539140839
+    pub def sourceHash(): Int32 = -1859738683
 
     ///
     /// listContentTypes の 1 行。
@@ -28,11 +28,11 @@ mod ContentTypesQueries {
         ) yield { id = id, apiId = apiId, kind = kind, name = name, singular = singular, plural = plural, previewUrl = previewUrl, createdAt = createdAt, updatedAt = updatedAt }
 
     ///
-    /// listContentTypes: SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at FROM content_types ORDER BY api_id
+    /// listContentTypes: SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at FROM content_types WHERE project_id = $1 ORDER BY api_id
     ///
-    pub def listContentTypes(): List[ListContentTypesRow] \ DbRead =
-        let sql = "SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at\n    FROM content_types ORDER BY api_id";
-        let params = Nil;
+    pub def listContentTypes(projectId: Int64): List[ListContentTypesRow] \ DbRead =
+        let sql = "SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at\n    FROM content_types WHERE project_id = $1 ORDER BY api_id";
+        let params = List#{SqlValue.Int64(projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listContentTypesDecoder(), sql, params))
 
     ///
@@ -54,11 +54,11 @@ mod ContentTypesQueries {
         ) yield { id = id, apiId = apiId, kind = kind, name = name, singular = singular, plural = plural, previewUrl = previewUrl, createdAt = createdAt, updatedAt = updatedAt }
 
     ///
-    /// findContentType: SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at FROM content_types WHERE id = $1
+    /// findContentType: SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at FROM content_types WHERE id = $1 AND project_id = $2
     ///
-    pub def findContentType(id: Int64): Option[FindContentTypeRow] \ DbRead =
-        let sql = "SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at\n    FROM content_types WHERE id = $1";
-        let params = List#{SqlValue.Int64(id)};
+    pub def findContentType(args: { id = Int64, projectId = Int64 }): Option[FindContentTypeRow] \ DbRead =
+        let sql = "SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at\n    FROM content_types WHERE id = $1 AND project_id = $2";
+        let params = List#{SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findContentTypeDecoder(), sql, params))
 
     ///
@@ -80,11 +80,11 @@ mod ContentTypesQueries {
         ) yield { id = id, apiId = apiId, kind = kind, name = name, singular = singular, plural = plural, previewUrl = previewUrl, createdAt = createdAt, updatedAt = updatedAt }
 
     ///
-    /// findContentTypeByApiId: SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at FROM content_types WHERE api_id = $1
+    /// findContentTypeByApiId: SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at FROM content_types WHERE project_id = $1 AND api_id = $2
     ///
-    pub def findContentTypeByApiId(apiId: String): Option[FindContentTypeByApiIdRow] \ DbRead =
-        let sql = "SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at\n    FROM content_types WHERE api_id = $1";
-        let params = List#{SqlValue.Str(apiId)};
+    pub def findContentTypeByApiId(args: { projectId = Int64, apiId = String }): Option[FindContentTypeByApiIdRow] \ DbRead =
+        let sql = "SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at\n    FROM content_types WHERE project_id = $1 AND api_id = $2";
+        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Str(args#apiId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findContentTypeByApiIdDecoder(), sql, params))
 
     ///
@@ -98,11 +98,11 @@ mod ContentTypesQueries {
         ) yield { id = id }
 
     ///
-    /// insertContentType: INSERT INTO content_types (api_id, kind, name, singular, plural, preview_url) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
+    /// insertContentType: INSERT INTO content_types (project_id, api_id, kind, name, singular, plural, preview_url) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
     ///
-    pub def insertContentType(args: { apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String }): Option[InsertContentTypeRow] \ DbWrite =
-        let sql = "INSERT INTO content_types (api_id, kind, name, singular, plural, preview_url)\n    VALUES ($1, $2, $3, $4, $5, $6)\n    RETURNING id";
-        let params = List#{SqlValue.Str(args#apiId), SqlValue.Str(args#kind), SqlValue.Str(args#name), SqlValue.Str(args#singular), SqlValue.Str(args#plural), SqlValue.Str(args#previewUrl)};
+    pub def insertContentType(args: { projectId = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String }): Option[InsertContentTypeRow] \ DbWrite =
+        let sql = "INSERT INTO content_types (project_id, api_id, kind, name, singular, plural, preview_url)\n    VALUES ($1, $2, $3, $4, $5, $6, $7)\n    RETURNING id";
+        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Str(args#apiId), SqlValue.Str(args#kind), SqlValue.Str(args#name), SqlValue.Str(args#singular), SqlValue.Str(args#plural), SqlValue.Str(args#previewUrl)};
         RawSql.runWithAllow(() -> Sql.executeReturningOneAs(insertContentTypeDecoder(), sql, params))
 
     ///
@@ -145,11 +145,11 @@ mod ContentTypesQueries {
         ) yield { types = types, latest = latest }
 
     ///
-    /// schemaFingerprint: SELECT count(*)::bigint AS types, max(updated_at)::timestamptz AS latest FROM content_types
+    /// schemaFingerprint: SELECT count(*)::bigint AS types, max(updated_at)::timestamptz AS latest FROM content_types WHERE project_id = $1
     ///
-    pub def schemaFingerprint(): Option[SchemaFingerprintRow] \ DbRead =
-        let sql = "SELECT count(*)::bigint AS types, max(updated_at)::timestamptz AS latest FROM content_types";
-        let params = Nil;
+    pub def schemaFingerprint(projectId: Int64): Option[SchemaFingerprintRow] \ DbRead =
+        let sql = "SELECT count(*)::bigint AS types, max(updated_at)::timestamptz AS latest FROM content_types WHERE project_id = $1";
+        let params = List#{SqlValue.Int64(projectId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(schemaFingerprintDecoder(), sql, params))
 
 }

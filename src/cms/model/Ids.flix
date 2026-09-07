@@ -98,3 +98,25 @@ mod TypeName {
     pub def rule(): String = "UpperCamel の識別子（[A-Z][A-Za-z0-9]*）"
 
 }
+
+///
+/// プロジェクトの id。projects.id を包む。1 つの DB に複数のプロジェクト（型と entry の集まり）を持つための区切り。
+///
+pub enum ProjectId with Eq, Order {
+    case ProjectId(Int64)
+}
+
+instance ToString[ProjectId] {
+    pub def toString(id: ProjectId): String = Int64.toString(ProjectId.toInt64(id))
+}
+
+mod ProjectId {
+    pub def toInt64(id: ProjectId): Int64 =
+        let ProjectId.ProjectId(number) = id;
+        number
+
+    ///
+    /// 既定のプロジェクト（migration が作る id 1、slug "default"）。/p/ の無いパスと、セルフホストで 1 つだけ使う時はこれ。
+    ///
+    pub def default(): ProjectId = ProjectId.ProjectId(1i64)
+}

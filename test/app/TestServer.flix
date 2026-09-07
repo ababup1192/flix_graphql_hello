@@ -187,4 +187,10 @@ mod TestServer {
         let statuses = List#{"/graphql", "/health", "/nope"} |> List.map(path ->
             GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(adminConfig(), fromAdmin("OPTIONS", path))))#status);
         Assert.assertEq(expected = List#{204, 204, 404}, statuses)
+
+    /// パスの先頭の /p/{slug} を切り出す。無ければそのまま。slug が空なら切り出さない。
+    @Test
+    def testServerSplitProject(): Unit \ Assert =
+        Assert.assertEq(expected = ((Some("shop"), "/graphql"), (Some("shop"), "/admin/graphql?x=1"), (None, "/graphql"), (None, "/p/"), (None, "/health")),
+            (Server.splitProject("/p/shop/graphql"), Server.splitProject("/p/shop/admin/graphql?x=1"), Server.splitProject("/graphql"), Server.splitProject("/p/"), Server.splitProject("/health")))
 }

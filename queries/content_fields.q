@@ -1,8 +1,11 @@
 // content_fields.q: フィールドの定義
 
-query listAllFields() -> many {
-    SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position
-    FROM content_fields ORDER BY type_id, position, id
+// プロジェクトの全フィールド（型ごとに配るのは FieldTree.byType）
+query listAllFields(projectId: Int64) -> many {
+    SELECT f.id, f.type_id, f.parent_field_id, f.api_id, f.name, f.kind, f.is_many, f.is_required, f.is_unique, f.is_localized, f.target_type_id, f.config, f.position
+    FROM content_fields AS f
+    JOIN content_types AS t ON t.id = f.type_id
+    WHERE t.project_id = :projectId ORDER BY f.type_id, f.position, f.id
 }
 
 query listFieldsOfType(typeId: Int64) -> many {
@@ -10,9 +13,11 @@ query listFieldsOfType(typeId: Int64) -> many {
     FROM content_fields WHERE type_id = :typeId ORDER BY position, id
 }
 
-query findField(id: Int64) -> one {
-    SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position
-    FROM content_fields WHERE id = :id
+query findField(id: Int64, projectId: Int64) -> one {
+    SELECT f.id, f.type_id, f.parent_field_id, f.api_id, f.name, f.kind, f.is_many, f.is_required, f.is_unique, f.is_localized, f.target_type_id, f.config, f.position
+    FROM content_fields AS f
+    JOIN content_types AS t ON t.id = f.type_id
+    WHERE f.id = :id AND t.project_id = :projectId
 }
 
 query insertField(typeId: Int64, apiId: String, name: String, kind: String, isMany: Bool, isRequired: Bool, isUnique: Bool, isLocalized: Bool, config: Json, position: Int32) -> one {

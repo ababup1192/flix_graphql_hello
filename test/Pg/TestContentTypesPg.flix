@@ -37,7 +37,7 @@ mod TestContentTypesPg {
             let body = ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("body", FieldKind.TextArea, FieldConfig.empty()));
             let reordered = ContentTypes.reorderFields(blogs#id, List#{body#id, title#id}) |> (found -> found#fields |> List.map(field -> ApiId.text(field#apiId)));
             ContentTypes.delete(blogs#id);
-            (reordered, ContentTypes.find(blogs#id) |> Option.isEmpty, ContentFieldsQueries.listAllFields() |> List.length)
+            (reordered, ContentTypes.find(blogs#id) |> Option.isEmpty, ContentFieldsQueries.listAllFields(1i64) |> List.length)
         });
         Assert.assertEq(expected = Ok(Ok((List#{"body", "title"}, true, 0))), result)
 
@@ -58,10 +58,10 @@ mod TestContentTypesPg {
     def testPgApiIdUniqueInDb(): Unit \ {IO, Assert} =
         let kind = PgTestSupport.withDb(() -> {
             discard ContentTypes.create(blogsDraft());
-            DbError.runWithKind(() -> ContentTypesQueries.insertContentType({ apiId = "blogs", kind = "collection", name = "x", singular = "X", plural = "xs", previewUrl = "" }))
+            DbError.runWithKind(() -> ContentTypesQueries.insertContentType({ projectId = 1i64, apiId = "blogs", kind = "collection", name = "x", singular = "X", plural = "xs", previewUrl = "" }))
                 |> Result.map(Option.map(row -> row#id))
         });
-        Assert.assertEq(expected = Ok(Ok(Err(DbError.DbErrorKind.UniqueViolation("content_types_api_id_key")))), kind)
+        Assert.assertEq(expected = Ok(Ok(Err(DbError.DbErrorKind.UniqueViolation("content_types_project_api_id_key")))), kind)
 
     /// 管理 API のエンジンを通しても同じ。SDL・リゾルバ・Runner・GraphQL とドメインの写しをここで 1 回だけ確かめる。
     @Test
