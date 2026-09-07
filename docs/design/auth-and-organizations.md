@@ -49,6 +49,64 @@ api_keys         (id, project_id, key_hash, scope, created_at, revoked_at)  -- �
 - `Server.splitProject` の前に Host の先頭ラベルを slug として拾う。パスの `/p/` があればそちらを優先。予約 slug（`www` / `api` / `admin` / `app` など）は `Projects.create` で弾く。slug は作った後は変えない（URL が変わるため。microCMS も同じ）
 - JWT は Flix で発行しない。**OIDC の JWKS で検証し `sub` と `email` を取るだけ**に閉じ、発行元は環境変数（issuer URL / JWKS URL / audience）で差し替える。最初は Cloudflare Access（50 人まで無料、社内利用向き。ヘッダ `Cf-Access-Jwt-Assertion`）。顧客が自分で登録する段になったら Clerk / Auth0（1 万 MAU まで無料）、セルフホストは Keycloak か自前のマジックリンクへ。どれも同じ検証コードで通る
 
+## アーキテクチャの決め（2026-09-07 追記）
+
+### 流れ
+
+Host / パスから projectId（既存の Tenant）→ ヘッダ（`Cf-Access-Jwt-Assertion` / `Authorization: Bearer` / `X-Api-Key`）を読む →
+`TokenVerifier` effect で JWT を検証して Principal（issuer, sub, email）→ users / memberships から Actor（ユーザー + このプロジェクトの役割）→
+`Actor` effect の handler に入れ、ユースケースは `Actor.require(permission)`。
+
+### effect
+
+| effect | 操作 | handler |
+|---|---|---|
+| `TokenVerifier` | `verify(token): Result[String, Principal]` | 本番: JWKS（`Net.Http`、10 分キャッシュ）と Java 標準の `KeyFactory` / `Signature` で RS256 / ES256。テスト: 固定。開発: `CMS_AUTH=dev` の時だけ `X-Dev-User` を信じる（`CMS_VERSION` が dev 以外なら起動を拒む） |
+| `Actor` | `current(): Actor`、`require(permission): Unit \ CmsErr` | Runner がリクエストごとに入れる。テストは `PgTestSupport.withDb` が既定で owner を入れ、権限のテストだけ `Actor.runAs(...)` で上書き |
+
+### Datalog は権限の判定に使う
+
+`Authz`（純粋な mod）の中で、役割が持つ権限・役割の包含（owner ⊃ editor ⊃ writer ⊃ viewer）・組織の owner が全プロジェクトの owner である事を
+事実と規則で書き、`Authz.can(roles, permission)` で引く。理由: 包含と継承が再帰で、後から「この型だけ」「この entry の担当」を事実 1 行で足せる。
+Fixpoint の導出追跡で「なぜ駄目か」を出す道もある。判定だけに使い、DB や JWT には使わない。
+
+### データ
+
+```
+users          (id, issuer, subject, email, name, created_at)   -- 本人の鍵は (issuer, subject)。email は表示と招待の突き合わせ
+organizations  (id, name, created_at)
+org_members    (user_id, org_id, role: owner | member)
+projects       (+ org_id, visibility: public | private)
+memberships    (user_id, project_id, role: owner | editor | writer | viewer)
+api_keys       (id, project_id, name, key_hash, scope: read | readDraft, created_at, revoked_at)   -- sha256(pepper + key)
+```
+
+- 公開 API は既定でキー無し（公開中の中身だけ。CDN のキャッシュキーにヘッダを入れずに済む）。`readDraft` のキーで下書きの一覧を読める。
+  プロジェクトの `visibility = private` ならキー必須
+- 最初の owner: `CMS_BOOTSTRAP_OWNER=you@example.com`。その email の初回ログインを既定の組織の owner にする
+- 招待: email で users に無ければ招待中の行を作り、初回ログインで (issuer, subject) を結ぶ
+- slug 無しの管理 API（`example.com/admin/graphql`）は `Tenant` を「無し」にし、`me` / 組織 / プロジェクト作成だけ受ける
+
+### 環境変数
+
+`CMS_AUTH`（`jwks` | `dev`）、`CMS_AUTH_ISSUER`、`CMS_AUTH_JWKS_URL`、`CMS_AUTH_AUDIENCE`、`CMS_AUTH_HEADER`（既定 `Cf-Access-Jwt-Assertion`）、
+`CMS_BOOTSTRAP_OWNER`、`CMS_API_KEY_PEPPER`。インフラは増えない（Access は無料、セルフホストは compose の profile `auth` で Keycloak）。
+
+### 懸念と対処
+
+| 懸念 | 対処 |
+|---|---|
+| JWT 検証の自作（alg 混同、exp / aud / iss の見落とし） | alg を RS256 / ES256 に固定、全項目を検査、自前の鍵で署名したテストで固定 |
+| email で人を同定する危うさ（発行元を替えると sub が変わる） | 鍵は (issuer, subject)。発行元の移行は email で 1 回だけ結び直す手順を持つ |
+| 既存の PG テスト 46 件 | `withDb` が既定で owner を入れるので変更ゼロ |
+| ブラウザの Cookie と CORS | 管理画面を Access の同じアプリの下に置く。`Allow-Credentials` を足す |
+| 公開 API をキー無しにする判断 | `visibility` で切り替え。既定は公開 |
+| 監査ログ | この段では入れない。Runner で Actor と操作名が揃うので後で 1 か所 |
+
+### 作業の順
+
+表と migration → `Authz`（Datalog）→ `TokenVerifier` → `Actor` と Runner と PgTestSupport → 既存 mutation に `require`、`me` と組織・メンバー・鍵 → Host で slug、slug 無しの管理 API、公開 API のキー。
+
 ## 管理 API に足す物
 
 - `me { id email projects { slug name role } }`: 切り替え候補。membership が無いプロジェクトは出ない
