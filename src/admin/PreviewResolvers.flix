@@ -6,10 +6,9 @@ mod PreviewTokenResolvers {
     /// type PreviewToken のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.PreviewTokenResolvers[AdminEff] =
         {
-            token     = (_context, source) -> Ok(source#token),
             entryId   = (_context, source) -> Ok(AdminMapping.idOfEntry(source#entryId)),
-            expiresAt = (_context, source) -> Ok(Timestamp.toIso8601(source#expiresAt)),
-            url       = (_context, source) -> Ok(source#url)
+            expiresAt = (_context, source) -> Ok(Timestamp.toIso8601(source#expiresAt))
+            | GeneratedAdmin.previewTokenDefaults()
         }
 
 }

@@ -153,6 +153,38 @@ overdue = (_context, source) -> Ok(isOverdue(source)),
 
 フィールドを足したら、`TestApiSurface` の期待値と、上の Pg テストの selection の**両方**に足す。
 
+## GraphQL のリゾルバは既定に足す形で書く
+
+schemagen は object 型ごとに **既定リゾルバ** `<型名>Defaults()` を生成する。
+中身は「source の同名ラベルをそのまま返す」だけで、対象は**素通しにできるフィールド**
+（引数が無く、スカラーか enum かそのリストを返す物）。source の型は行変数で開けてあるので、
+SDL に無いラベル（`publicId` など）をドメインの型が持っていてもよい。
+
+手書きのリゾルバは**写しが要るフィールドだけ**を書き、残りは既定に任せる。
+
+```flix
+pub def resolvers(): GeneratedAdmin.WebhookResolvers[AdminEff] =
+    {
+        id        = (_context, source) -> Ok(AdminMapping.idOfPublic(source#publicId)),
+        events    = (_context, source) -> Ok(source#events |> List.map(AdminMapping.webhookEventToGql)),
+        createdAt = (_context, source) -> Ok(Timestamp.toIso8601(source#createdAt))
+        | GeneratedAdmin.webhookDefaults()
+    }
+```
+
+- `名前 = ...` は**レコードの更新**。既定にあるフィールドを差し替える（Flix の更新は型も変えられる）。
+  `ID`・`DateTime`・enum は既定の型（`Id` / `String` / GraphQL の enum）とドメインの型が違うので、
+  ここで `AdminMapping.idOfPublic` / `Timestamp.toIso8601` / `AdminMapping.xxxToGql` を通す
+- `+名前 = ...` は**レコードの拡張**。既定に無いフィールド（オブジェクト型を返す物・引数を持つ物）に使う。
+  同じフィールドに `+` を使うとラベルが重複して `XxxResolvers[ef]` と一致しない
+- 既定のフィールドを 1 つも残さないなら、既定を使わず全部書く（`| ...Defaults()` が飾りになる）
+
+**書き忘れは型検査で落ちる。** SDL にフィールドを足すと既定リゾルバに `Ok(src#新しい名前)` が増え、
+ドメインの型に同名のラベルが無ければ `XxxResolvers[ef]` と一致せず、そのフィールドだけ
+`{ 新しい名前 = String | r1 }` の形が残った型で `Type Error [E6794]` が出る。
+
+雛形は `make scaffold TYPE=Xxx` が既定を使う形で吐く（`DEFAULTS=no` で全フィールド）。
+
 ## その他の落とし穴
 
 - レコードは `Eq` / `Order` を持てない。比較したい値は名前付き 1 フィールドの enum で包む

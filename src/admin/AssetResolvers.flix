@@ -1,5 +1,6 @@
 ///
 /// 管理 API の type Asset のリゾルバ。source はドメインの Asset。url は ObjectStore が組む。
+/// 素通しのフィールドは生成された既定リゾルバに任せ、写しが要る物だけレコードの更新で上書きする。
 ///
 mod AssetResolvers {
 
@@ -8,15 +9,11 @@ mod AssetResolvers {
         {
             id        = (_context, source) -> Ok(AdminMapping.idOfAsset(source#id)),
             url       = (_context, source) -> Ok(ObjectStore.publicUrl(source#key)),
-            fileName  = (_context, source) -> Ok(source#fileName),
-            mime      = (_context, source) -> Ok(source#mime),
             size      = (_context, source) -> Ok(AdminMapping.sizeToGql(source#size)),
-            width     = (_context, source) -> Ok(source#width),
-            height    = (_context, source) -> Ok(source#height),
-            alt       = (_context, source) -> Ok(source#alt),
             status    = (_context, source) -> Ok(AdminMapping.assetStatusToGql(source#status)),
             createdAt = (_context, source) -> Ok(Timestamp.toIso8601(source#createdAt)),
-            usedBy    = (_context, source) -> Ok(Assets.holders(source#id) |> List.filterMap(ContentEntries.find))
+            +usedBy   = (_context, source) -> Ok(Assets.holders(source#id) |> List.filterMap(ContentEntries.find))
+            | GeneratedAdmin.assetDefaults()
         }
 
 }
@@ -43,9 +40,8 @@ mod UploadResolvers {
     /// type Upload のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.UploadResolvers[AdminEff] =
         {
-            asset            = (_context, source) -> Ok(source#asset),
-            uploadUrl        = (_context, source) -> Ok(source#uploadUrl),
-            expiresInSeconds = (_context, source) -> Ok(source#expiresInSeconds)
+            +asset = (_context, source) -> Ok(source#asset)
+            | GeneratedAdmin.uploadDefaults()
         }
 
 }

@@ -57,7 +57,7 @@ account.graphql        Account API の SDL（正）
 schema.graphql         見本の SDL
 migrations/            DDL。sqlfx の机上スキーマの元で、make migrate が当てる
 queries/*.q            SQL
-src/generated/graphql/ schemagen の生成物（触らない）。GeneratedAdminSchema / GeneratedAccountSchema
+src/generated/graphql/ schemagen の生成物（触らない）。GeneratedAdminSchema / GeneratedAccountSchema。素通しのフィールド（引数が無く、スカラーか enum かそのリストを返す）は既定リゾルバ `<型名>Defaults()` を生成するので、手書きのリゾルバは写しが要る物だけをレコードの更新で上書きする（書き方は [docs/flix-conventions.md](docs/flix-conventions.md)）
 src/generated/sql/     sqlfx の生成物（触らない）。*Queries / Tables
 src/cms/model/         ドメインの型。Auth（UserId / OrgId / Role / Permission / Actor / ApiKeyScope / Visibility）、Webhook（WebhookEvent / DeliveryStatus / Webhook / WebhookDelivery）、Schedule（ScheduleAction / ScheduleStatus / Schedule）、Ulid（配信記録など時刻順の記録の id）、Ids（TypeId / FieldId / ApiId / TypeName）、ContentType（enum・レコード・Draft / Changes・FieldConfig）、Entry（EntryId / Stage / EntryData / IdGen）、Asset（AssetId / AssetStatus / Upload）
 src/cms/rules/         純粋な規則。Authz（役割 → 権限の Datalog。`can` は resource も受ける。read の PAT は viewer に落ちる）、SecretHash（API キー・PAT・プレビュートークンの pepper 付き hash と寿命）、Naming（予約名・衝突・kind と config）、EntryValidation（下書きは緩く、公開は required まで）、EntryLinks（中身から参照を取り出す）、AssetRules（置いてよい mime と大きさ）、RichText（doc の検査・平文・HTML）、AssetRefs（中身から asset を取り出す）
