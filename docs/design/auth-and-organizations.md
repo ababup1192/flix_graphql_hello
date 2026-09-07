@@ -164,16 +164,21 @@ api_keys       (id, project_id, name, key_hash, scope: read | readDraft, created
 
 - `ApiKeyScope` に `Write(Role)` を足した。DB は `scope='write'` + `role` 列（`CHECK ((scope='write') = (role IS NOT NULL))`、役割は writer / editor / owner。viewer の write は readDraft と同じなので作らせない）
 - `Authz.can(Actor.ApiKey(Write(role)))` はその役割の表で引く。ただし **manageMembers / manageApiKeys / manageProject は鍵では常に false**（鍵で鍵やメンバーを作る道を作らない）
-- 発行者（人）の役割より高い役割の鍵は invalid。発行は owner だけなので今は owner 以下の検査
+- 発行者（人）の役割より高い役割の鍵は invalid。発行は owner だけなので今は owner 以下の検査。`expiresAt` は未来だけ（過去は invalid。今は Runner の `Time.Clock`）。
+  番兵（role 無し = ''、期限無し = 0）を知るのは `AuthRows.toApiKeyInsert` だけ
+- **発行はログインの JWT で来た本人だけ**（`Session.requireInteractive`）。PAT や API キーからは作れない。鍵が書いた版の author は `api-key:<鍵の名前>`（`Actor.ApiKey(name, scope)`）
 - `expires_at`（任意）と `last_used_at`。期限切れは `ApiKeys.resolve` が None にする（時計は Runner が `Time.Clock.now()` で渡す）。`last_used_at` は **管理 API と Account API の Runner** が主体を決めた後に書き、前回から 60 秒より古い時だけ UPDATE する。
   コンテンツ API（ContentRunner。GET と POST の読み取り）では書かない: CDN 越しに大量に来る道に UPDATE を足さない。「CI の鍵が生きているか」は管理 API の使用で分かる
 
 ### Personal Access Token（PAT）
 
-- 表 `personal_access_tokens`（user_id → users、token_hash UNIQUE、scope read / write、expires_at NOT NULL、last_used_at、revoked_at）。接頭辞 `cmspat_`、ハッシュは API キーと同じ pepper 方式（`ApiKeys.hash`）。既定 90 日、最長 365 日
+- 表 `personal_access_tokens`（user_id → users、token_hash UNIQUE、scope read / write、expires_at NOT NULL、last_used_at、revoked_at）。接頭辞 `cmspat_`、ハッシュは API キーと同じ pepper 方式（`SecretHash.hash`。寿命の判定も `SecretHash.isAlive`）。既定 90 日、最長 365 日
 - ドメインは `PersonalTokens`（issue / revoke / list / resolve / touch）。プロジェクトを持たない（本人に付く）ので Tenant を取らない
-- 主体: `Deps.resolvePersonalToken` が hash で引き、`Accounts.resolveUserById`（users を引いて `app.user_id` の印を置く。招待の受け入れと bootstrap はしない）→ 管理 API は `Accounts.actorFor`（本人のそのプロジェクトでの役割）、Account API は `actorWithoutProject`。
-  **read の PAT は `Actor.ReadOnlyUser`** になり、`Authz` が役割を viewer に落とし、書く操作の入口 `Session.currentUser()`（組織の作成、メンバー、PAT の発行と失効）は forbidden。期限切れ・失効・知らない物・消えたユーザーは Anonymous
+- 主体: `RequestIdentity.resolveForProject` / `resolveForAccount` が hash で引き、`Accounts.resolveUserById`（users を引いて `app.user_id` の印を置く。招待の受け入れと bootstrap はしない）→ 管理 API は `Accounts.actorFor`（本人のそのプロジェクトでの役割）、Account API は `actorWithoutProject`。
+  主体は **`Actor.User(id, email, roles, Login)`** で、`Login` が `Interactive`（ログインの JWT）か `PersonalToken(scope)` かを持つ。
+  - read の PAT: `Authz.effectiveRoles` が役割を viewer に落とし、書く操作の入口 `Session.currentUser()`（組織の作成、メンバー、PAT の失効）は `requiresLogin`。自分を読む物（me、`organization(id)` / members / projects、自分の PAT の一覧）は `Session.currentUserForRead()` で読める
+  - write の PAT: 本人と同じ（メンバー管理まで。CLI の用途）。ただし **PAT と API キーの発行は `Session.requireInteractive()` でログインの JWT だけ**（漏れた PAT を失効すれば、それで作られた物は無い）。失効は PAT からもできる（減らす方向）
+  - 期限切れ・失効・知らない物・消えたユーザーは `PatRejection`（Expired / Revoked / Unknown）で Runner が「認証に失敗しました: …」として断る（`Credential.Invalid` と同じ形。黙って匿名にしない）
 - ヘッダ: `Credentials.ofHeaders` が `Authorization: Bearer` の値が `cmspat_` で始まれば `Credential.PersonalToken`、そうでなければ今まで通り（`CMS_AUTH_HEADER` の JWT）。JWT のヘッダが別（Cloudflare Access）でも PAT は Authorization から読む
 - Account API: `createPersonalAccessToken(name, scope, ttlDays)` / `revokePersonalAccessToken(id)` / `Me.personalAccessTokens`。本人だけ
 
@@ -182,7 +187,9 @@ api_keys       (id, project_id, name, key_hash, scope: read | readDraft, created
 一覧と失効は本人の印 `app.user_id`（`Accounts.resolveUser` / `resolveUserById` が置く）で守る。hash での解決は本人が分かる **前** に走るので、
 policy 無しの SELECT にすると一覧が RLS で守られなくなる（query の WHERE だけになる）。代わりに **トークンの hash 自体を Tx の印（`app.token_hash`。`TenantQueries.stampTokenHash`）** にし、
 policy を `USING (user_id = app.user_id OR token_hash = app.token_hash)`、`WITH CHECK (user_id = app.user_id)` にした。印は秘密から導いた値なので、印を知る者は既にトークンを持っており、他人の行は hash が違うので見えない。
-`last_used_at` の UPDATE は `WITH CHECK` が本人の印を見るので、必ず `resolveUserById` の後に流す（`Deps.touch` / AccountRunner）。
+`last_used_at` の UPDATE は `WITH CHECK` が本人の印を見るので、必ず `resolveUserById` の後に流す（`RequestIdentity.touch`）。
+
+pepper の回転: 行の `pepper_id` は解決時に使っていないので、`CMS_API_KEY_PEPPER` を回すと API キーと PAT は全部再発行になる（deploy/README）。
 
 ## 管理 API に足す物
 

@@ -29,33 +29,42 @@ mod Session {
         if (Authz.can(Session.current(), permission, resource)) () else CmsErr.forbidden(permission)
 
     ///
-    /// 書く操作をする人としての主体。鍵・匿名・read の PAT なら forbidden（メンバー操作や組織の作成など、人しかできない物の入口）。
+    /// 書く操作をする人としての主体。read の PAT なら requiresLogin、鍵・匿名・プレビューなら forbidden
+    /// （メンバー操作や組織の作成など、人しかできない物の入口）。
     ///
     pub def currentUser(): UserId \ Session + CmsErr = match Session.current() {
-        case Actor.User(id, _, _)         => id
-        case Actor.ReadOnlyUser(_, _, _)  => CmsErr.forbidden(Permission.WriteEntries)
-        case _                            => CmsErr.forbidden(Permission.ReadDraft)
+        case Actor.User(id, _, _, Login.Interactive)                       => id
+        case Actor.User(id, _, _, Login.PersonalToken(PatScope.Write))     => id
+        case Actor.User(_, _, _, Login.PersonalToken(PatScope.Read))       => CmsErr.requiresLogin(LoginRequirement.WritingPerson)
+        case _                                                             => CmsErr.forbidden(Permission.ReadDraft)
     }
 
     ///
-    /// 自分を読む人としての主体。read の PAT でも自分（me や自分の PAT の一覧）は読める。人でなければ None。
+    /// ログインの JWT で来た本人（かサーバ自身）でなければ requiresLogin。鍵や PAT の発行の入口（鍵で鍵を作る道を塞ぐ）。
+    ///
+    pub def requireInteractive(): Unit \ Session + CmsErr = match Session.current() {
+        case Actor.User(_, _, _, Login.Interactive) => ()
+        case Actor.System                           => ()
+        case _                                      => CmsErr.requiresLogin(LoginRequirement.Interactive)
+    }
+
+    ///
+    /// 自分を読む人としての主体。read の PAT でも自分（me や自分の PAT の一覧、自分の組織）は読める。人でなければ None。
     ///
     pub def currentUserForRead(): Option[UserId] \ Session = match Session.current() {
-        case Actor.User(id, _, _)         => Some(id)
-        case Actor.ReadOnlyUser(id, _, _) => Some(id)
-        case _                            => None
+        case Actor.User(id, _, _, _) => Some(id)
+        case _                       => None
     }
 
     ///
-    /// 表示用の名前（email）。人でなければ "api-key" / "anonymous"。版の author に使う。
+    /// 表示用の名前。人なら email、鍵なら "api-key:<鍵の名前>"。版の author に使う。
     ///
     pub def displayName(): String \ Session = match Session.current() {
-        case Actor.User(_, email, _)         => email
-        case Actor.ReadOnlyUser(_, email, _) => email
-        case Actor.ApiKey(_)                 => "api-key"
-        case Actor.Anonymous         => "anonymous"
-        case Actor.Preview(_)        => "preview"
-        case Actor.System            => "system"
+        case Actor.User(_, email, _, _) => email
+        case Actor.ApiKey(name, _)      => "api-key:${name}"
+        case Actor.Anonymous            => "anonymous"
+        case Actor.Preview(_)           => "preview"
+        case Actor.System               => "system"
     }
 
 }

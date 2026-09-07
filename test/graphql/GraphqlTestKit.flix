@@ -71,6 +71,26 @@ mod GraphqlTestKit {
     }
 
     ///
+    /// ask の応答の data から path の文字列（id など）を取る。無ければ空。
+    ///
+    pub def stringAt(path: List[String], response: (Value, Option[String])): String =
+        valueAt(path, response) |> Value.asStr |> Option.getWithDefault("")
+
+    ///
+    /// ask の応答の data の一部（期待値との比較用）。
+    ///
+    pub def valueAt(path: List[String], response: (Value, Option[String])): Value =
+        Value.path(path, fst(response))
+
+    ///
+    /// ask の応答の data の path にある配列。配列でなければテストの前提が壊れている。
+    ///
+    pub def listAt(path: List[String], response: (Value, Option[String])): List[Value] = match valueAt(path, response) {
+        case Value.List(items) => items
+        case other             => bug!("${List.join(".", path)} は配列ではありません: ${other}")
+    }
+
+    ///
     /// (data, 先頭の errors[].message)。
     ///
     def summarize(response: GraphqlResponse): (Value, Option[String]) =

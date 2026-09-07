@@ -6,7 +6,7 @@ mod TestPreviewPg {
 
     use Util.Json.Json
 
-    def pepper(): ApiKeys.Pepper = { pepperId = "test", secret = "test-pepper" }
+    def pepper(): SecretHash.Pepper = { pepperId = "test", secret = "test-pepper" }
 
     /// 2100 年を「今」として発行する（検証は本物の時計で、期限はその 1 時間後なので切れない）。
     def farFuture(): Int64 = 4_102_444_800_000i64

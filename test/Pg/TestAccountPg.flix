@@ -105,10 +105,10 @@ mod TestAccountPg {
     def testPgAccountOwnerReachesProjectAdmin(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
             let alice = Accounts.resolveUser({ ownerEmail = None }, { issuer = "test", subject = "alice", email = "alice@example.com", name = "alice" });
-            let org = Session.runWith(Accounts.actorWithoutProject(alice), () -> Organizations.create(Signup.Open, "Acme"));
-            let blog = Session.runWith(Accounts.actorWithoutProject(alice), () -> Organizations.createProject(org#id, ProjectSlug.ProjectSlug("blog"), "Blog"));
-            PgTestSupport.asProject(blog#id, () -> Session.runWith(Accounts.actorFor(alice, blog#id), () ->
-                (ContentTypes.create(CmsTestKit.typeDraft("posts", "記事"))#apiId, Session.current() == Actor.User(alice#id, "alice@example.com", Role.Owner :: Nil))))
+            let org = Session.runWith(Accounts.actorWithoutProject(alice, Login.Interactive), () -> Organizations.create(Signup.Open, "Acme"));
+            let blog = Session.runWith(Accounts.actorWithoutProject(alice, Login.Interactive), () -> Organizations.createProject(org#id, ProjectSlug.ProjectSlug("blog"), "Blog"));
+            PgTestSupport.asProject(blog#id, () -> Session.runWith(Accounts.actorFor(alice, blog#id, Login.Interactive), () ->
+                (ContentTypes.create(CmsTestKit.typeDraft("posts", "記事"))#apiId, Session.current() == Actor.User(alice#id, "alice@example.com", Role.Owner :: Nil, Login.Interactive))))
         });
         Assert.assertEq(expected = Ok(Ok((ApiId.ApiId("posts"), true))), result)
 
@@ -120,8 +120,8 @@ mod TestAccountPg {
         let result = PgTestSupport.withDb(() -> {
             let owner = Accounts.resolveUser({ ownerEmail = Some("owner@test") }, { issuer = "test", subject = "owner", email = "owner@test", name = "owner" });
             let stranger = Accounts.resolveUser({ ownerEmail = Some("owner@test") }, { issuer = "test", subject = "s", email = "s@example.com", name = "s" });
-            (Session.runWith(Accounts.actorWithoutProject(stranger), () -> CmsTestKit.failureMessage(() -> Organizations.create(Signup.Closed, "x"))),
-             Session.runWith(Accounts.actorWithoutProject(owner), () -> Organizations.create(Signup.Closed, "Acme"))#name)
+            (Session.runWith(Accounts.actorWithoutProject(stranger, Login.Interactive), () -> CmsTestKit.failureMessage(() -> Organizations.create(Signup.Closed, "x"))),
+             Session.runWith(Accounts.actorWithoutProject(owner, Login.Interactive), () -> Organizations.create(Signup.Closed, "Acme"))#name)
         });
         Assert.assertEq(expected = Ok(Ok((Err("この操作（manageProject）の権限がありません"), "Acme"))), result)
 

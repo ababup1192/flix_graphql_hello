@@ -16,7 +16,8 @@ mod AccountRunner {
         (context, f) -> runOne(pool, deps, context, f)
 
     ///
-    /// 1 フィールドぶん。Invalid（トークンが付いていたが検証に落ちた）と ApiKey は SQL を出さずに断る。PAT は本人として通す。
+    /// 1 フィールドぶん。Invalid（ログインの JWT が付いていたが検証に落ちた）と ApiKey は SQL を出さずに断る。PAT は本人として通し、
+    /// 死んだ PAT（期限切れ・失効・知らない）はリゾルバの SQL を出さずに同じ形で断る。
     ///
     /// WhyNot: API キーを Anonymous 扱いにして通さないのは、鍵はプロジェクトの読み取り用で、組織の操作に使う理由が無く、
     /// 黙って匿名になると「鍵が効いていない」と読み違えるため。
@@ -29,28 +30,11 @@ mod AccountRunner {
             case credential =>
                 let outcome =
                     IdGen.runWithRandom(() -> Time.Clock.runWithIO(() ->
-                        DbRunner.transact(pool, None, () -> {
-                            let resolved = resolve(deps, credential);
-                            touch(resolved);
-                            Session.runWith(resolved#actor, f)
+                        DbRunner.transact(pool, None, () -> match RequestIdentity.resolveForAccount(deps, credential) {
+                            case Err(rejection) => Err(RequestIdentity.rejectionMessage(rejection))
+                            case Ok(resolved)   => { RequestIdentity.touch(resolved); Session.runWith(resolved#actor, f) }
                         })));
                 DbRunner.toFieldResult(outcome)
         }
-
-    ///
-    /// 身元から主体。Bearer なら本人（初回なら users を作り、招待を受け入れる）、PAT なら本人（プロジェクトの役割は無し）、無ければ Anonymous。
-    ///
-    def resolve(deps: Deps, credential: Credential): Deps.Resolved \ Db + IdGen + Time.Clock.Clock = match credential {
-        case Credential.Bearer(issuer, subject, email, name) =>
-            { actor = Accounts.actorWithoutProject(Accounts.resolveUser(deps#auth#bootstrap, { issuer = issuer, subject = subject, email = email, name = name })), touch = Deps.Touch.None }
-        case Credential.PersonalToken(raw) => Deps.resolvePersonalToken(deps, raw, Accounts.actorWithoutProject)
-        case _ => { actor = Actor.Anonymous, touch = Deps.Touch.None }
-    }
-
-    /// PAT の使用時刻。Account API は Tenant を持たないので API キーの道は無い。
-    def touch(resolved: Deps.Resolved): Unit \ DbWrite = match resolved#touch {
-        case Deps.Touch.PersonalToken(id) => PersonalTokens.touch(id)
-        case _                            => ()
-    }
 
 }

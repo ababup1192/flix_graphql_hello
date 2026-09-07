@@ -103,7 +103,7 @@ mod AdminMutationResolvers {
         (_context, name, scope, role, expiresAt) -> match deps#auth#pepper {
             case Some(pepper) => Ok(ApiKeys.create(pepper, {
                 name = name, scope = AdminMapping.apiKeyScopeOf(scope, role),
-                expiresAt = expiresAt |> Option.map(text -> AdminMapping.timestampOf("expiresAt", text)) }))
+                expiresAt = expiresAt |> Option.map(text -> AdminMapping.timestampOf("expiresAt", text)) }, Time.Clock.now()))
             case None         => Err("API キーを発行できません（CMS_API_KEY_PEPPER が設定されていません）")
         }
 

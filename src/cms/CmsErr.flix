@@ -25,6 +25,16 @@ pub enum Violation with Eq, Order, ToString {
 }
 
 ///
+/// 「ログインが要る」操作に、どんな主体が要るか。
+///
+pub enum LoginRequirement with Eq, Order, ToString {
+    /// 書く操作をする人。ログインの JWT か write の PAT（read の PAT は不可）
+    case WritingPerson
+    /// ログインの JWT で来た本人。PAT や API キーは不可（鍵で鍵を作る道を塞ぐ）
+    case Interactive
+}
+
+///
 /// CMS の業務エラー。DbErr と同じくエフェクトで上げ、途中の関数は戻り値を包まず、境界（Runner / テスト）で 1 回受ける。
 ///
 pub eff CmsErr {
@@ -47,6 +57,11 @@ pub eff CmsErr {
     /// 権限が無い。permission は要求した操作。
     ///
     def forbidden(permission: Permission): Void
+
+    ///
+    /// 主体の種類が合わない（役割の問題ではない）。requirement は要る主体。
+    ///
+    def requiresLogin(requirement: LoginRequirement): Void
 }
 
 mod CmsErr {
@@ -59,6 +74,7 @@ mod CmsErr {
         case Invalid(List[Violation])
         case Conflict(Entity, String, Int32)
         case Forbidden(Permission)
+        case RequiresLogin(LoginRequirement)
     }
 
     ///
@@ -72,6 +88,7 @@ mod CmsErr {
             def invalid(violations, _resume) = Err(CmsFailure.Invalid(violations))
             def conflict(entity, id, version, _resume) = Err(CmsFailure.Conflict(entity, id, version))
             def forbidden(permission, _resume) = Err(CmsFailure.Forbidden(permission))
+            def requiresLogin(requirement, _resume) = Err(CmsFailure.RequiresLogin(requirement))
         }
 
     ///
@@ -83,6 +100,8 @@ mod CmsErr {
             violations |> List.map(violation -> { let Violation.Violation(path, message) = violation; "${path}: ${message}" }) |> List.join("; ")
         case CmsFailure.Conflict(entity, id, version) => "${describe(entity)} '${id}' は他で更新されています（今の version は ${version}）。読み直してから保存してください"
         case CmsFailure.Forbidden(permission) => "この操作（${Permission.text(permission)}）の権限がありません"
+        case CmsFailure.RequiresLogin(LoginRequirement.WritingPerson) => "この操作は read の PAT ではできません。write の PAT かログインした本人で行ってください"
+        case CmsFailure.RequiresLogin(LoginRequirement.Interactive)   => "この操作はログインした本人だけができます（PAT や API キーではできません）"
     }
 
     ///

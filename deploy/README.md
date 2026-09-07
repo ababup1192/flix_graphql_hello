@@ -32,11 +32,12 @@ curl -s localhost:8080/health # {"status":"ok","version":"..."}
 どちらも生の値は発行した応答でしか見えず、DB には `CMS_API_KEY_PEPPER` を混ぜたハッシュだけ置く。
 
 **CI 用の API キー**は owner が管理 API で作る。`scope: WRITE` に役割を付けると、その役割の範囲で管理 API の mutation を叩ける（entry の作成・公開、型の編集など）。
-メンバー・鍵・プロジェクトの管理は owner の役割の鍵でもできない（鍵で鍵やメンバーを作る道を作らない）。`expiresAt` を付けるとその時刻で切れ、`apiKeys` の `lastUsedAt` に最後に管理 API で使った時刻（1 分の粒度）が出る。
+メンバー・鍵・プロジェクトの管理は owner の役割の鍵でもできない（鍵で鍵やメンバーを作る道を作らない）。`expiresAt`（未来の時刻だけ）を付けるとその時刻で切れ、`apiKeys` の `lastUsedAt` に最後に管理 API で使った時刻（1 分の粒度）が出る。
+**API キーの発行はログインした本人（管理画面か、ログインの JWT を付けた curl）から。** PAT や API キーからは作れない（漏れた PAT を失効すれば、それで作られた物は無い）。鍵が書いた版の author は `api-key:<鍵の名前>`。
 
 ```bash
-# owner がログインした状態（ログインの JWT か PAT）で発行。key はこの応答でしか見えない
-curl -s -X POST https://cms.example.com/p/blog/admin/graphql -H "Authorization: Bearer $PAT" -H 'Content-Type: application/json' \
+# owner がログインの JWT で発行。key はこの応答でしか見えない
+curl -s -X POST https://cms.example.com/p/blog/admin/graphql -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
   -d '{"query": "mutation { createApiKey(name: \"github-actions\", scope: WRITE, role: EDITOR, expiresAt: \"2027-01-01T00:00:00Z\") { id key expiresAt } }"}'
 
 # CI からはその鍵を X-Api-Key で渡す
@@ -44,8 +45,10 @@ curl -s -X POST https://cms.example.com/p/blog/admin/graphql -H "X-Api-Key: $CMS
   -d '{"query": "mutation { publishEntry(id: \"post-1\") { stage } }"}'
 ```
 
-**自分の PAT**は Account API（`/account/graphql`）で作る。本人の役割で動き（プロジェクトごとに違ってよい）、`scope: READ` なら読むだけ。期限は必須（`ttlDays`。既定 90 日、最長 365 日）。
+**自分の PAT**は Account API（`/account/graphql`）でログインの JWT から作る（PAT から PAT は作れない）。本人の役割で動き（プロジェクトごとに違ってよい）、`scope: READ` なら読むだけ（自分の me / 組織 / PAT の一覧は読める）。
+`scope: WRITE` ならメンバー管理まで本人と同じにできるが、API キーと PAT の発行だけはできない。期限は必須（`ttlDays`。既定 90 日、最長 365 日）。
 `me { personalAccessTokens { ... } }` で自分の分だけ見え、`revokePersonalAccessToken(id)` で失効できる（他人の物は見えない・失効できない）。
+失効した PAT や期限切れの PAT で叩くと `認証に失敗しました: PAT は失効しています` のように断られる（黙って匿名にはならない）。
 
 ```bash
 # ログインの JWT で 1 回だけ発行
@@ -57,7 +60,9 @@ curl -s -X POST https://cms.example.com/p/blog/admin/graphql -H "Authorization: 
   -d '{"query": "{ me { email roles } }"}'
 ```
 
-`CMS_AUTH_HEADER` が `Cf-Access-Jwt-Assertion` の環境でも、PAT は `Authorization` から読む（`cmspat_` で始まる Bearer だけ。それ以外の Bearer はログインの JWT として検証する）。
+`CMS_AUTH_HEADER` が `Cf-Access-Jwt-Assertion` の環境でも、PAT は `Authorization` から読む（`cmspat_` で始まる Bearer だけ。それ以外の Bearer はログインの JWT として検証する）。`Bearer` の scheme は大文字小文字を問わない。
+
+`CMS_API_KEY_PEPPER` を回すと、API キーと PAT は全部再発行になる（行の pepper_id は解決に使っていない）。
 
 ## CDN に乗せる（GET）
 

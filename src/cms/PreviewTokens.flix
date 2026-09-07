@@ -22,7 +22,7 @@ mod PreviewTokens {
     ///
     /// 発行する。readDraft を持つ人（writer 以上・readDraft の鍵）だけ。entry が無ければ notFound。
     ///
-    pub def issue(pepper: ApiKeys.Pepper, entryId: EntryId, window: { ttlSeconds = Int64, nowMillis = Int64 }): PreviewToken \ DbRead + CmsErr + Tenant + Session =
+    pub def issue(pepper: SecretHash.Pepper, entryId: EntryId, window: { ttlSeconds = Int64, nowMillis = Int64 }): PreviewToken \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ReadDraft);
         let entry = ContentEntries.get(entryId);
         let owner = ContentTypes.get(entry#typeId);
@@ -43,7 +43,7 @@ mod PreviewTokens {
     ///
     /// 検証する。署名・期限・プロジェクトが合えば entry の id。純粋。
     ///
-    pub def verify(pepper: ApiKeys.Pepper, raw: String, projectId: ProjectId, nowMillis: Int64): Option[EntryId] =
+    pub def verify(pepper: SecretHash.Pepper, raw: String, projectId: ProjectId, nowMillis: Int64): Option[EntryId] =
         if (not String.startsWith(prefix = prefix(), raw)) None
         else match String.splitOn(substr = ".", String.drop(String.length(prefix()), raw)) {
             case encoded :: signature :: Nil => match Base64Url.decode(encoded) {
@@ -54,7 +54,7 @@ mod PreviewTokens {
         }
 
     /// 復号した payload（projectId.entryId.exp）を、署名・期限・プロジェクトで確かめる。
-    def verifyPayload(pepper: ApiKeys.Pepper, payload: String, signature: String, projectId: ProjectId, nowMillis: Int64): Option[EntryId] =
+    def verifyPayload(pepper: SecretHash.Pepper, payload: String, signature: String, projectId: ProjectId, nowMillis: Int64): Option[EntryId] =
         if (Sha256.hmacHex(pepper#secret, payload) != signature) None
         else match String.splitOn(substr = ".", payload) {
             case projectText :: entryText :: expText :: Nil =>

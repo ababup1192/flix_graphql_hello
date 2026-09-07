@@ -67,38 +67,44 @@ mod TestRlsPg {
     def stampUser(userId: String, email: String): Unit \ DbRead + RawSql =
         discard Sql.fetch("SELECT set_config('app.user_id', $1, false), set_config('app.email', $2, false)", SqlValue.Str(userId) :: SqlValue.Str(email) :: Nil)
 
-    /// (memberships, invitations, api_keys) の行数。
-    def countAuthRows(): (Int64, Int64, Int64) \ DbRead + RawSql + DbErr =
-        (countRows("memberships"), countRows("invitations"), countRows("api_keys"))
+    /// (memberships, invitations, api_keys, personal_access_tokens) の行数。
+    def countAuthRows(): (Int64, Int64, Int64, Int64) \ DbRead + RawSql + DbErr =
+        (countRows("memberships"), countRows("invitations"), countRows("api_keys"), countRows("personal_access_tokens"))
+
+    def stampTokenHash(tokenHash: String): Unit \ DbRead + RawSql =
+        discard Sql.fetch("SELECT set_config('app.token_hash', $1, false)", SqlValue.Str(tokenHash) :: Nil)
 
     ///
-    /// auth の表。default と shop の両方に招待された a が初回ログインで両方の membership を持ち、b は default に招待だけ、鍵は各 1 つ。
+    /// auth の表。default と shop の両方に招待された a が初回ログインで両方の membership を持ち、b は default に招待だけ、鍵は各 1 つ、
+    /// a の PAT が 1 つ。
     ///
-    ///   印 = default            : memberships 1（a）、invitations 1（b）、api_keys 1
-    ///   印 = shop               : 1（a）、0、1
-    ///   印 無し + user = a      : 2（a の両方）、0（a 宛は受け入れ済み）、0
-    ///   印 無し + email = b     : 0、1（b 宛）、0
-    ///   印 無し                 : 0、0、0
+    ///   印 = default            : memberships 1（a）、invitations 1（b）、api_keys 1、personal_access_tokens 0
+    ///   印 = shop               : 1（a）、0、1、0
+    ///   印 無し + user = a      : 2（a の両方）、0（a 宛は受け入れ済み）、0、1（a の PAT）
+    ///   印 無し + email = b     : 0、1（b 宛）、0、0
+    ///   印 無し                 : 0、0、0、0
+    ///   印 無し + token_hash    : 0、0、0、1（その PAT だけ）
     ///
     @Test
     def testPgRlsGuardsAuthTables(): Unit \ {IO, Assert} =
         let pepper = { pepperId = "test", secret = "test-pepper" };
-        let (shop, alice) = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1", "k2"}, () -> {
+        let (shop, alice, tokenHash) = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1", "k2", "p1"}, () -> {
             let bootstrap = { ownerEmail = Some("owner@test") };
             let owner = Accounts.resolveUser(bootstrap, { issuer = "test", subject = "owner", email = "owner@test", name = "owner" });
             let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
-            let asOwner = (projectId, thunk) -> PgTestSupport.asProject(projectId, () -> Session.runWith(Accounts.actorFor(owner, projectId), thunk));
+            let asOwner = (projectId, thunk) -> PgTestSupport.asProject(projectId, () -> Session.runWith(Accounts.actorFor(owner, projectId, Login.Interactive), thunk));
             asOwner(ProjectId.default(), () -> {
                 discard Members.invite("a@test.dev", Role.Editor);
                 discard Members.invite("b@test.dev", Role.Viewer);
-                discard ApiKeys.create(pepper, { name = "default-key", scope = ApiKeyScope.Read, expiresAt = None })
+                discard ApiKeys.create(pepper, { name = "default-key", scope = ApiKeyScope.Read, expiresAt = None }, 0i64)
             });
             asOwner(shop, () -> {
                 discard Members.invite("a@test.dev", Role.Writer);
-                discard ApiKeys.create(pepper, { name = "shop-key", scope = ApiKeyScope.Read, expiresAt = None })
+                discard ApiKeys.create(pepper, { name = "shop-key", scope = ApiKeyScope.Read, expiresAt = None }, 0i64)
             });
             let alice = Accounts.resolveUser(bootstrap, { issuer = "test", subject = "a", email = "a@test.dev", name = "a" });
-            (shop, alice)
+            let pat = Session.runWith(Accounts.actorWithoutProject(alice, Login.Interactive), () -> PersonalTokens.issue(pepper, { name = "cli", scope = PatScope.Read, ttlDays = None }, 0i64));
+            (shop, alice, SecretHash.hash(pepper, pat#token))
         })) |> PgTestSupport.seededOrBug;
         let outcome = DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(PgTestSupport.appConfig(), _ -> {
             stampSession("${ProjectId.default()}");
@@ -112,10 +118,12 @@ mod TestRlsPg {
             let byBobEmail = countAuthRows();
             stampUser("", "");
             let unstamped = countAuthRows();
-            (byDefault, byShop, byAlice, byBobEmail, unstamped)
+            stampTokenHash(tokenHash);
+            let byTokenHash = countAuthRows();
+            (byDefault, byShop, byAlice, byBobEmail, unstamped, byTokenHash)
         })));
         Assert.assertEq(
-            expected = Ok(((1i64, 1i64, 1i64), (1i64, 0i64, 1i64), (2i64, 0i64, 0i64), (0i64, 1i64, 0i64), (0i64, 0i64, 0i64))),
+            expected = Ok(((1i64, 1i64, 1i64, 0i64), (1i64, 0i64, 1i64, 0i64), (2i64, 0i64, 0i64, 1i64), (0i64, 1i64, 0i64, 0i64), (0i64, 0i64, 0i64, 0i64), (0i64, 0i64, 0i64, 1i64))),
             outcome)
 
     ///

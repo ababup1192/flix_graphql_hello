@@ -1,6 +1,6 @@
 // PreviewTokens: 署名・期限・プロジェクトの検証（純粋な部分）と previewUrl の組み立て。
 
-def pepper(): ApiKeys.Pepper = { pepperId = "test", secret = "test-pepper" }
+def pepper(): SecretHash.Pepper = { pepperId = "test", secret = "test-pepper" }
 
 /// 同じ手順で作ったトークン（テスト用。issue は DB を引くのでここでは組み立てだけ真似る）。
 def tokenOf(secret: String, projectId: Int64, entryId: String, exp: Int64): String =

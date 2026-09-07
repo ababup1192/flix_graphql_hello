@@ -108,7 +108,7 @@ mod OrgRole {
 }
 
 ///
-/// 操作の種類。ユースケースが `Actor.require` で要求する。
+/// 操作の種類。ユースケースが `Session.require` で要求する。
 ///
 pub enum Permission with Eq, Order, ToString {
     /// 下書きと型の定義を読む（管理 API の Query 全部）
@@ -143,22 +143,30 @@ mod Permission {
 }
 
 ///
-/// 今のリクエストの主体。人（JWT）か、公開 API の鍵か、誰でもない（公開の読み取り）か。
+/// 人がどうやって来たか。ログインの JWT か、Personal Access Token（PAT）か。
 ///
-/// - user: 人。roles は今のプロジェクトで持つ役割（直接の membership と、組織の owner として持つ物）
-/// - apiKey: 鍵。scope は read か readDraft
-/// - anonymous: 公開 API をキー無しで読む人
-/// - system: サーバ自身の内部処理
+/// - Interactive: ログインの JWT（管理画面や、JWT を付けた curl）
+/// - PersonalToken: PAT。read なら役割は viewer に落ちる（Authz）。鍵や PAT の発行はできない（Session.requireInteractive）
+///
+pub enum Login with Eq, Order, ToString {
+    case Interactive
+    case PersonalToken(PatScope)
+}
+
+///
+/// 今のリクエストの主体。
+///
+/// - User: 人。roles は今のプロジェクトで持つ役割（直接の membership と、組織の owner として持つ物）。Login はどう来たか
+/// - ApiKey: プロジェクトの鍵。名前は版の author に出す。scope は read / readDraft / write(役割)
+/// - Anonymous: 身元の無い読み取り（公開 API）
+/// - Preview: プレビュートークンの持ち主。その entry（と参照先）の下書きだけ読める
+/// - System: サーバ自身（エンジンの組み直しなど、リクエストの主体が無い内部の処理）。何でもできる
 ///
 pub enum Actor with Eq, Order, ToString {
-    case User(UserId, String, List[Role])
-    /// read の PAT で来た人。役割は本人の物だが、読む操作しかできない（Authz が viewer に落とす。書く操作の入口 Session.currentUser は拒む）
-    case ReadOnlyUser(UserId, String, List[Role])
-    case ApiKey(ApiKeyScope)
+    case User(UserId, String, List[Role], Login)
+    case ApiKey(String, ApiKeyScope)
     case Anonymous
-    /// プレビュートークンの持ち主。その entry（と参照先）の下書きだけ読める
     case Preview(EntryId)
-    /// サーバ自身（エンジンの組み直しなど、リクエストの主体が無い内部の処理）。何でもできる
     case System
 }
 
@@ -328,3 +336,24 @@ pub type alias PersonalTokenDraft = { name = String, scope = PatScope, ttlDays =
 /// hash で解決した PAT。主体を組むのに要る物だけ。
 ///
 pub type alias ResolvedPersonalToken = { id = Int64, userId = UserId, scope = PatScope }
+
+///
+/// PAT で来たが主体になれなかった理由。Runner が「認証に失敗しました」として返す（黙って匿名にしない）。
+///
+pub enum PatRejection with Eq, Order, ToString {
+    /// hash に合う行が無い（知らないトークン、pepper が違う、持ち主のユーザーが消えた）
+    case Unknown
+    /// expires_at を過ぎた
+    case Expired
+    /// 失効済み
+    case Revoked
+}
+
+mod PatRejection {
+    /// 人が読む理由。
+    pub def describe(rejection: PatRejection): String = match rejection {
+        case PatRejection.Unknown => "PAT が見つかりません"
+        case PatRejection.Expired => "PAT が期限切れです"
+        case PatRejection.Revoked => "PAT は失効しています"
+    }
+}

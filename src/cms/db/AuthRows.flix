@@ -1,5 +1,6 @@
 ///
-/// auth の表（users / organizations / projects / memberships / invitations / api_keys）の行とドメインの値の変換。列名を知るのはここだけ。
+/// auth の表（users / organizations / projects / memberships / invitations / api_keys / personal_access_tokens）の行とドメインの値の変換。
+/// 列名と、列の番兵（role 無し = ''、期限無し = 0）を知るのはここだけ。
 /// enum の列は書く時に検査しているので、読めなければ DB の壊れ（DbErr）。
 ///
 mod AuthRows {
@@ -33,6 +34,16 @@ mod AuthRows {
         { id = row#id, publicId = row#publicId, name = row#name,
           scope = toApiKeyScope(row),
           createdAt = row#createdAt, expiresAt = row#expiresAt, lastUsedAt = row#lastUsedAt, revokedAt = row#revokedAt }
+
+    ///
+    /// API キーの発行の入力を insertApiKey の行に。役割が無ければ ''（query が NULL にする）、期限が無ければ 0（query が NULL にする）。
+    ///
+    pub def toApiKeyInsert(draft: { publicId = String, projectId = Int64, name = String, keyHash = String, pepperId = String, scope = ApiKeyScope, expiresAt = Option[Timestamp.Timestamp] }):
+            { publicId = String, projectId = Int64, name = String, keyHash = String, pepperId = String, scope = String, role = String, expiresAtMillis = Int64 } =
+        { publicId = draft#publicId, projectId = draft#projectId, name = draft#name, keyHash = draft#keyHash, pepperId = draft#pepperId,
+          scope = ApiKeyScope.text(draft#scope),
+          role = ApiKeyScope.roleOf(draft#scope) |> Option.map(Role.text) |> Option.getWithDefault(""),
+          expiresAtMillis = draft#expiresAt |> Option.map(Timestamp.toEpochMillis) |> Option.getWithDefault(0i64) }
 
     /// scope 列と role 列の組から。組が合わなければ DB の壊れ。
     pub def toApiKeyScope(row: { scope = String, role = Option[String] | r }): ApiKeyScope \ DbErr =

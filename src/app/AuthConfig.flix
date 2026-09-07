@@ -30,7 +30,7 @@ mod AuthConfig {
         tokenHeader = String,
         bootstrap = Accounts.Bootstrap,
         signup = Signup,
-        pepper = Option[ApiKeys.Pepper]
+        pepper = Option[SecretHash.Pepper]
     }
 
     ///
@@ -74,12 +74,16 @@ mod AuthConfig {
         Sys.Env.getVar(name) |> Option.toOk("${name} が設定されていません（CMS_AUTH=jwks には要ります）")
 
     ///
-    /// リクエストからトークンを取り出す。`Authorization` なら `Bearer ` を剥がす。無ければ None。
+    /// リクエストからトークンを取り出す。`Authorization` なら `Bearer `（scheme は大文字小文字を問わない）を剥がす。無ければ None。
     ///
     pub def tokenOf(headerName: String, headers: List[(String, String)]): Option[String] =
         Http.findHeader(headerName, headers)
-            |> Option.map(value -> if (String.startsWith(prefix = "Bearer ", value)) String.drop(7, value) else value)
+            |> Option.map(stripBearer)
             |> Option.filter(value -> not String.isEmpty(value))
+
+    /// `Bearer ` / `bearer ` を剥がす。その形でなければそのまま。
+    def stripBearer(value: String): String =
+        if (String.toLowerCase(String.takeLeft(7, value)) == "bearer ") String.dropLeft(7, value) else value
 
     ///
     /// リクエストから API キー（X-Api-Key）。

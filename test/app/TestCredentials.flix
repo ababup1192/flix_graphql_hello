@@ -28,6 +28,20 @@ mod TestCredentials {
              ofHeaders("Authorization", ("X-Preview-Token", "pv_x") :: Nil),
              ofHeaders("Authorization", Nil)))
 
+    /// 同じリクエストに 2 つ付いていれば、ログインの JWT と PAT が X-Api-Key より先。Bearer の scheme は小文字でも読む。
+    @Test
+    def testCredentialsPrecedenceAndLowercaseScheme(): Unit \ Assert =
+        Assert.assertEq(
+            expected = (
+                Credential.Bearer("test", "u1", "a@example.com", "A"),
+                Credential.PersonalToken("cmspat_abc"),
+                Credential.Bearer("test", "u1", "a@example.com", "A"),
+                Credential.PersonalToken("cmspat_abc")),
+            (ofHeaders("Authorization", ("Authorization", "Bearer good") :: ("X-Api-Key", "cms_k") :: Nil),
+             ofHeaders("Authorization", ("Authorization", "Bearer cmspat_abc") :: ("X-Api-Key", "cms_k") :: Nil),
+             ofHeaders("Authorization", ("Authorization", "bearer good") :: Nil),
+             ofHeaders("Authorization", ("Authorization", "bearer cmspat_abc") :: Nil)))
+
     /// JWT が別のヘッダ（Cf-Access-Jwt-Assertion）で来る設定でも、PAT は Authorization から読め、JWT はそのヘッダから読む。PAT が JWT より先。
     @Test
     def testCredentialsWithSeparateJwtHeader(): Unit \ Assert =

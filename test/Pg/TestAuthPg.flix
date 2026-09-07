@@ -12,7 +12,7 @@ mod TestAuthPg {
 
     /// その人として今のプロジェクトで走らせる。
     def runAs(user: User, f: Unit -> a \ ef): a \ (ef - Session) + DbRead + Tenant =
-        Session.runWith(Accounts.actorFor(user, Tenant.current()), f)
+        Session.runWith(Accounts.actorFor(user, Tenant.current(), Login.Interactive), f)
 
     ///
     /// bootstrap の email の初回ログインは既定の組織の owner になり、既定のプロジェクトの owner として振る舞える。
@@ -24,8 +24,8 @@ mod TestAuthPg {
             let owner = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
             let stranger = Accounts.resolveUser(bootstrap(), principal("u-2", "someone@test"));
             let again = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
-            (Accounts.actorFor(owner, ProjectId.default()) == Actor.User(owner#id, "owner@test", Role.Owner :: Nil),
-             Accounts.actorFor(stranger, ProjectId.default()) == Actor.User(stranger#id, "someone@test", Nil),
+            (Accounts.actorFor(owner, ProjectId.default(), Login.Interactive) == Actor.User(owner#id, "owner@test", Role.Owner :: Nil, Login.Interactive),
+             Accounts.actorFor(stranger, ProjectId.default(), Login.Interactive) == Actor.User(stranger#id, "someone@test", Nil, Login.Interactive),
              again#id == owner#id,
              Accounts.projectsOf(owner#id) |> List.map(membership -> (ProjectSlug.text(membership#target#slug), membership#role)))
         });
@@ -81,7 +81,7 @@ mod TestAuthPg {
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1", "k2"}, () -> {
             let owner = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
             let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
-            let issued = runAs(owner, () -> ApiKeys.create(pepper, readKey("site")));
+            let issued = runAs(owner, () -> ApiKeys.create(pepper, readKey("site"), 0i64));
             let scopeOf = found -> found |> Option.map(key -> key#scope);
             let resolved = ApiKeys.resolve(pepper, issued#key, ProjectId.default(), 0i64) |> scopeOf;
             let otherProject = ApiKeys.resolve(pepper, issued#key, shop, 0i64) |> scopeOf;
@@ -137,7 +137,7 @@ mod TestAuthPg {
             discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             let entry = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("e1")), CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
             discard ContentEntries.publish(entry#id, "tester", false);
-            runAs(owner, () -> ApiKeys.create(pepper, readKey("site")))#key
+            runAs(owner, () -> ApiKeys.create(pepper, readKey("site"), 0i64))#key
         });
         let (publicRead, anonymousDraft, ownerDraft, privateAnonymous, privateWithKey) = PgTestSupport.withContentApiAndPool(seed, (pool, askOwner) -> {
             let cache = ContentEngine.create(PgTestSupport.deps());
@@ -150,7 +150,7 @@ mod TestAuthPg {
             let privateAnonymous = anonymous("{ blogs { totalCount } }") |> snd;
             let key = match PgTestSupport.mutate(pool, () -> CmsTestKit.withIds(List#{"k9"}, () -> {
                 let owner = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
-                runAs(owner, () -> ApiKeys.create(pepper, readKey("site2")))#key
+                runAs(owner, () -> ApiKeys.create(pepper, readKey("site2"), 0i64))#key
             })) { case Ok(Ok(found)) => found case other => bug!("${other}") };
             let privateWithKey = GraphqlTestKit.askEngineWith(engine, Context.withCredential(Credential.ApiKey(key)), "{ blogs { totalCount } }");
             (publicRead, anonymousDraft, ownerDraft, privateAnonymous, privateWithKey)

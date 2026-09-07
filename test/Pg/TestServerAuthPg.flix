@@ -7,10 +7,6 @@
 ///
 mod TestServerAuthPg {
 
-    /// 応答の data から文字列（id など）を取る。無ければ空。
-    def strIn(path: List[String], response: (Value, Option[String])): String =
-        Value.path(path, fst(response)) |> Value.asStr |> Option.getWithDefault("")
-
     /// ログインの JWT は無い（検証は必ず落ちる）設定でヘッダから身元を組む。
     def credentialOf(request: HttpRequest): Credential =
         Credentials.ofHeaders("Authorization", _ -> Err("JWT は無し"), request#headers)
@@ -34,6 +30,7 @@ mod TestServerAuthPg {
     ///
     /// owner が PAT と WRITE / EDITOR の鍵を発行し、HTTP のヘッダで
     ///   Authorization: Bearer cmspat_... → createContentType が通る
+    ///   authorization: bearer cmspat_... → 小文字の scheme でも me が本人
     ///   X-Api-Key: cms_...              → createEntry が通る
     ///   ヘッダ無し                       → forbidden
     ///   壊れた Bearer（JWT でない）      → 認証に失敗
@@ -47,15 +44,17 @@ mod TestServerAuthPg {
             let account = AccountSchema.make(deps, AccountRunner.make(pool, deps));
             let owner = PgTestSupport.askOwner(admin);
             let accountOwner = queryText -> GraphqlTestKit.askWith(account, Context.withCredential(PgTestSupport.ownerCredential()), queryText);
-            let token = strIn(List#{"createPersonalAccessToken", "token"}, accountOwner("mutation { createPersonalAccessToken(name: \"cli\", scope: WRITE) { token } }"));
-            let key = strIn(List#{"createApiKey", "key"}, owner("mutation { createApiKey(name: \"ci\", scope: WRITE, role: EDITOR) { key } }"));
+            let token = GraphqlTestKit.stringAt(List#{"createPersonalAccessToken", "token"}, accountOwner("mutation { createPersonalAccessToken(name: \"cli\", scope: WRITE) { token } }"));
+            let key = GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, owner("mutation { createApiKey(name: \"ci\", scope: WRITE, role: EDITOR) { key } }"));
             let engine = engineOf(admin);
             let viaPat = handle(engine, post(("Authorization", "Bearer ${token}") :: Nil, "mutation { createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { id apiId } }"));
             let typeId = Value.path(List#{"data", "createContentType", "id"}, snd(viaPat)) |> Value.asStr |> Option.getWithDefault("");
+            let viaLowercase = handle(engine, post(("authorization", "bearer ${token}") :: Nil, "{ me { email } }"));
             let viaKey = handle(engine, post(("X-Api-Key", key) :: Nil, "mutation { createEntry(typeId: \"${typeId}\", fields: {}) { stage } }"));
             let anonymous = handle(engine, post(Nil, "mutation { createContentType(input: { apiId: \"tags\", name: \"x\" }) { id } }"));
             let badBearer = handle(engine, post(("Authorization", "Bearer not-a-jwt") :: Nil, "{ me { email } }"));
             (fst(viaPat), Value.path(List#{"data", "createContentType", "apiId"}, snd(viaPat)),
+             Value.path(List#{"data", "me", "email"}, snd(viaLowercase)),
              fst(viaKey), Value.path(List#{"data", "createEntry", "stage"}, snd(viaKey)),
              Value.path(List#{"errors"}, snd(anonymous)) |> firstMessage,
              Value.path(List#{"errors"}, snd(badBearer)) |> firstMessage)
@@ -63,6 +62,7 @@ mod TestServerAuthPg {
         Assert.assertEq(
             expected = (
                 200, Value.Str("blogs"),
+                Value.Str("owner@test"),
                 200, Value.Str("DRAFT"),
                 Some("この操作（manageTypes）の権限がありません"),
                 Some("認証に失敗しました: JWT は無し")),

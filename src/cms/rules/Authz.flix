@@ -40,18 +40,26 @@ mod Authz {
     }
 
     ///
-    /// 主体がこの操作をできるか。人は役割の表で引き、read の PAT の人は viewer に落とし、write の鍵はその役割で引く（ただし管理は不可）、
+    /// 主体がこの操作をできるか。人は役割（read の PAT なら viewer に落とした物）の表で引き、write の鍵はその役割で引く（ただし管理は不可）、
     /// 読む鍵は読み取りだけ、誰でもない人は何もできない。
     ///
     pub def can(actor: Actor, permission: Permission, resource: Resource): Bool = match actor {
-        case Actor.User(_, _, roles)             => canWithRoles(roles, permission)
-        case Actor.ReadOnlyUser(_, _, roles)     => canWithRoles(capToViewer(roles), permission)
-        case Actor.Preview(id)                   => permission == Permission.ReadDraft and resource#entryId == Some(id)
-        case Actor.ApiKey(ApiKeyScope.Write(role)) => not isManagement(permission) and canWithRoles(role :: Nil, permission)
-        case Actor.ApiKey(ApiKeyScope.ReadDraft) => permission == Permission.ReadDraft
-        case Actor.ApiKey(ApiKeyScope.Read)      => false
-        case Actor.Anonymous                     => false
-        case Actor.System                        => true
+        case Actor.User(_, _, roles, login)           => canWithRoles(effectiveRoles(login, roles), permission)
+        case Actor.Preview(id)                        => permission == Permission.ReadDraft and resource#entryId == Some(id)
+        case Actor.ApiKey(_, ApiKeyScope.Write(role)) => not isManagement(permission) and canWithRoles(role :: Nil, permission)
+        case Actor.ApiKey(_, ApiKeyScope.ReadDraft)   => permission == Permission.ReadDraft
+        case Actor.ApiKey(_, ApiKeyScope.Read)        => false
+        case Actor.Anonymous                          => false
+        case Actor.System                             => true
+    }
+
+    ///
+    /// 来かたで役割を落とす。read の PAT は viewer、ログインの JWT と write の PAT は本人の役割のまま。
+    ///
+    pub def effectiveRoles(login: Login, roles: List[Role]): List[Role] = match login {
+        case Login.PersonalToken(PatScope.Read)  => capToViewer(roles)
+        case Login.PersonalToken(PatScope.Write) => roles
+        case Login.Interactive                   => roles
     }
 
     ///

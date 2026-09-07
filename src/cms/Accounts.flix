@@ -64,27 +64,19 @@ mod Accounts {
     ///
     /// このプロジェクトでの主体。直接の membership と、プロジェクトが属する組織での役割から役割の並びを組む。
     ///
-    pub def actorFor(user: User, projectId: ProjectId): Actor \ DbRead =
+    pub def actorFor(user: User, projectId: ProjectId, login: Login): Actor \ DbRead =
         let membership = AuthQueries.findMembership({ userId = UserId.toInt64(user#id), projectId = ProjectId.toInt64(projectId) })
             |> Option.flatMap(row -> Role.parse(row#role));
         let orgRole = AuthQueries.findProjectOrg(ProjectId.toInt64(projectId))
             |> Option.flatMap(owner -> AuthQueries.findOrgRole({ userId = UserId.toInt64(user#id), orgId = owner#orgId }))
             |> Option.flatMap(row -> OrgRole.parse(row#role));
-        Actor.User(user#id, user#email, Authz.rolesOf(membership, orgRole))
+        Actor.User(user#id, user#email, Authz.rolesOf(membership, orgRole), login)
 
     ///
     /// Account API（プロジェクトを選ぶ前の操作）の主体。プロジェクトの役割は空。
     ///
-    pub def actorWithoutProject(user: User): Actor =
-        Actor.User(user#id, user#email, Nil)
-
-    ///
-    /// PAT の範囲で主体を落とす。read なら読むだけの人（ReadOnlyUser）、write ならそのまま。
-    ///
-    pub def withPatScope(scope: PatScope, actor: Actor): Actor = match (scope, actor) {
-        case (PatScope.Read, Actor.User(id, email, roles)) => Actor.ReadOnlyUser(id, email, roles)
-        case _                                             => actor
-    }
+    pub def actorWithoutProject(user: User, login: Login): Actor =
+        Actor.User(user#id, user#email, Nil, login)
 
     ///
     /// email で 1 人。誰も居なければ None、同じ email が発行元をまたいで複数居れば invalid（どちらか決められない）。
@@ -136,9 +128,8 @@ mod Accounts {
     /// 自分。人でなければ None。
     ///
     pub def me(): Option[Me] \ DbRead + DbErr + Session = match Session.current() {
-        case Actor.User(id, _, roles)         => meOf(id, roles)
-        case Actor.ReadOnlyUser(id, _, roles) => meOf(id, Authz.capToViewer(roles))
-        case _                                => None
+        case Actor.User(id, _, roles, login) => meOf(id, Authz.effectiveRoles(login, roles))
+        case _                               => None
     }
 
     def meOf(id: UserId, roles: List[Role]): Option[Me] \ DbRead + DbErr =

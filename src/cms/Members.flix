@@ -93,12 +93,12 @@ mod Organizations {
         { id = OrgId.OrgId(id), publicId = publicId, name = name }
 
     ///
-    /// 1 つ。自分が member でなければ None（存在も教えない）。
+    /// 1 つ。自分が member でなければ None（存在も教えない）。read の PAT でも読める。
     ///
-    pub def find(orgId: OrgId): Option[Organization] \ DbRead + CmsErr + Session =
-        let user = Session.currentUser();
-        if (Option.isEmpty(roleOf(user, orgId))) None
-        else AuthQueries.findOrganization(OrgId.toInt64(orgId)) |> Option.map(AuthRows.toOrganization)
+    pub def find(orgId: OrgId): Option[Organization] \ DbRead + Session =
+        Session.currentUserForRead()
+            |> Option.filter(user -> Option.nonEmpty(roleOf(user, orgId)))
+            |> Option.flatMap(_ -> AuthQueries.findOrganization(OrgId.toInt64(orgId)) |> Option.map(AuthRows.toOrganization))
 
     ///
     /// 外向きの id から内部の id。無ければ notFound（member かどうかは呼ぶ先が見る）。
@@ -129,10 +129,10 @@ mod Organizations {
         }
 
     ///
-    /// 組織のメンバー。owner だけが見られる（member には空）。
+    /// 組織のメンバー。owner だけが見られる（member と人でない主体には空）。read の PAT でも読める。
     ///
-    pub def members(orgId: OrgId): List[OrganizationMember] \ DbRead + DbErr + CmsErr + Session =
-        if (isOwner(Session.currentUser(), orgId))
+    pub def members(orgId: OrgId): List[OrganizationMember] \ DbRead + DbErr + Session =
+        if (Session.currentUserForRead() |> Option.exists(user -> isOwner(user, orgId)))
             AuthQueries.listOrgMembers(OrgId.toInt64(orgId)) |> List.map(AuthRows.toOrganizationMember)
         else Nil
 
@@ -178,9 +178,9 @@ mod Organizations {
         Projects.find(id) |> CmsErr.orNotFound(Entity.Organization, "${id}")
 
     ///
-    /// 組織の下のプロジェクト。member なら見られる。
+    /// 組織の下のプロジェクト。member なら見られる（人でない主体には空）。read の PAT でも読める。
     ///
-    pub def projects(orgId: OrgId): List[Project] \ DbRead + DbErr + CmsErr + Session =
-        if (Option.nonEmpty(roleOf(Session.currentUser(), orgId))) Projects.listOfOrg(orgId) else Nil
+    pub def projects(orgId: OrgId): List[Project] \ DbRead + DbErr + Session =
+        if (Session.currentUserForRead() |> Option.exists(user -> Option.nonEmpty(roleOf(user, orgId)))) Projects.listOfOrg(orgId) else Nil
 
 }
