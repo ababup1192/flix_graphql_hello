@@ -78,4 +78,49 @@ mod TestImpactPg {
                 List#{ ("b1", "profile", Stage.Draft), ("b1", "profile", Stage.Published) }))),
             result)
 
+
+    /// 循環（b2 ⇄ b3 が互いに本文でリンク）でも impact(PUBLISH) は止まり、各 1 回だけ出る。
+    /// dry-run は unique（ロック無し）と、消された参照先（ゴミ箱の p1）を required と一緒に全部返す。無い id は notFound。
+    @Test
+    def testPgImpactCyclesAndReportCollectsAll(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(Nil, () -> {
+            let (p1, b1, b2, b3) = seedGraph();
+            let blogs = ContentEntries.get(b1)#typeId;
+            discard ContentTypes.addField(blogs, { unique = true | CmsTestKit.fieldDraft("slug", FieldKind.Text, FieldConfig.empty()) });
+            discard ContentEntries.update(b3, CmsTestKit.entryData(List#{("body", docLinkingTo("b2")), ("slug", Json.JString("same"))}), 1);
+            discard ContentEntries.publish(b3, "tester", true);
+            discard ContentEntries.update(b1, CmsTestKit.entryData(List#{("slug", Json.JString("same"))}), 1);
+            ContentEntries.delete(p1);
+            let cycle = ContentEntries.impact(b2, ImpactAction.Publish);
+            let report = ContentEntries.publishReport(b1);
+            (cycle#cascades |> List.map(entry -> EntryId.text(entry#id)),
+             report#violations |> List.map(violation -> { let Violation.Violation(path, _) = violation; path }),
+             CmsTestKit.failureMessage(() -> ContentEntries.impact(CmsTestKit.entryId("nope"), ImpactAction.Delete)))
+        }));
+        Assert.assertEq(
+            expected = Ok(Ok((
+                Nil,
+                List#{ "fields.title", "fields.slug", "references" },
+                Err("entry 'nope' が見つかりません")))),
+            result)
+
+    /// 管理 API を通した形。publishCheck / impact が SDL の型で返る。依存は直接の物が id 順、cascades は依存の順（b2 → その先の b3 → p1）。
+    @Test
+    def testPgImpactViaAdminApi(): Unit \ {IO, Assert} =
+        let (check, impact) = PgTestSupport.withAdminApi(() -> CmsTestKit.withIds(Nil, () -> discard seedGraph()), (schema, _) -> {
+            let ask = GraphqlTestKit.ask(schema);
+            (ask("{ publishCheck(id: \"b1\") { ok violations { path message } unpublishedDependencies { id } } }"),
+             ask("{ impact(id: \"b1\", action: PUBLISH) { breaks { via } cascades { id } } }"))
+        });
+        Assert.assertEq(
+            expected = (
+                (Value.Obj(Map#{ "publishCheck" => Value.Obj(Map#{
+                    "ok" => Value.Bool(false),
+                    "violations" => Value.List(Value.Obj(Map#{ "path" => Value.Str("fields.title"), "message" => Value.Str("公開には値が要ります") }) :: Nil),
+                    "unpublishedDependencies" => Value.List(Value.Obj(Map#{ "id" => Value.Str("b2") }) :: Value.Obj(Map#{ "id" => Value.Str("p1") }) :: Nil) }) }), None),
+                (Value.Obj(Map#{ "impact" => Value.Obj(Map#{
+                    "breaks" => Value.List(Nil),
+                    "cascades" => Value.List(Value.Obj(Map#{ "id" => Value.Str("b2") }) :: Value.Obj(Map#{ "id" => Value.Str("b3") }) :: Value.Obj(Map#{ "id" => Value.Str("p1") }) :: Nil) }) }), None)),
+            (check, impact))
+
 }

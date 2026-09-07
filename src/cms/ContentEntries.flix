@@ -137,7 +137,7 @@ mod ContentEntries {
     def reportOf(lock: Bool, owner: ContentType, existing: Entry, data: EntryData): PublishReport \ DbRead + DbErr + Tenant =
         let key = EntryId.text(existing#id);
         let missing = EntriesQueries.missingTargets(key) |> List.filterMap(EntryRows.toTargetId);
-        let pending = EntriesQueries.unpublishedTargets(key) |> List.filterMap(EntryRows.toTargetId) |> List.filter(target -> not List.memberOf(target, missing));
+        let pending = EntriesQueries.unpublishedTargets(key) |> List.filterMap(EntryRows.toTargetId) |> List.filter(target -> not List.memberOf(target, missing)) |> List.sort;
         {
             violations = EntryValidation.publish(owner#fields, data) ::: uniqueViolations(lock, owner, existing)
                 ::: (missing |> List.map(target -> Violation.Violation("references", "参照先 '${target}' はありません（消されています）。参照を外してください")))
@@ -162,11 +162,11 @@ mod ContentEntries {
             |> List.filterMap(row -> EntryId.parse(row#fromEntryId) |> Option.flatMap(find) |> Option.map(entry ->
                 { entry = entry, via = ContentTypes.getField(FieldId.FieldId(row#fieldId))#apiId, stage = stage }))
 
-    /// 未公開の参照先を再帰的に集める（重複と循環は visited で止める）。
+    /// 未公開の参照先を深さ優先で集める（依存の順。直接の参照先は id 順。重複と循環は visited で止める）。
     def dependenciesOf(visited: List[EntryId], id: EntryId): List[EntryId] \ DbRead =
         let missing = EntriesQueries.missingTargets(EntryId.text(id)) |> List.filterMap(EntryRows.toTargetId);
         let direct = EntriesQueries.unpublishedTargets(EntryId.text(id)) |> List.filterMap(EntryRows.toTargetId)
-            |> List.filter(target -> not List.memberOf(target, missing) and not List.memberOf(target, visited));
+            |> List.filter(target -> not List.memberOf(target, missing) and not List.memberOf(target, visited)) |> List.sort;
         List.foldLeft((acc, target) -> if (List.memberOf(target, acc)) acc else acc ::: (target :: dependenciesOf(visited ::: acc ::: (target :: Nil), target)), Nil, direct)
 
     ///
