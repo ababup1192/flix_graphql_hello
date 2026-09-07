@@ -50,11 +50,11 @@ mod Server {
         }
 
     ///
-    /// このリクエストが config の GraphQL を実行するか（POST でそのパス宛。クエリ文字列は無視）。
-    /// どのエンジンで受けるかの振り分けに使う。preflight や GET はエンジンを要らない（405 / 204 を返すだけ）。
+    /// このリクエストが config の GraphQL を実行するか（POST か GET でそのパス宛。クエリ文字列は無視）。
+    /// どのエンジンで受けるかの振り分けに使う。preflight や他のメソッドはエンジンを要らない（204 / 405 を返すだけ）。
     ///
     pub def needsGraphqlEngine(config: ServerConfig, request: HttpRequest): Bool =
-        request#method == "POST" and pathOf(request#path) == config#graphqlPath
+        (request#method == "POST" or request#method == "GET") and pathOf(request#path) == config#graphqlPath
 
     ///
     /// 503。コンテンツ API のスキーマを組めなかった時など、サーバ側の一時的な失敗。

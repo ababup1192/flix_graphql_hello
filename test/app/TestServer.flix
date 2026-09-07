@@ -224,8 +224,8 @@ mod TestServer {
 
     /// エンジンが要るのは POST でそのパス宛の時だけ。preflight / GET / 他のパスは要らない。
     @Test
-    def testServerNeedsGraphqlEngineOnlyForPost(): Unit \ Assert =
-        Assert.assertEq(expected = (true, true, false, false, false),
+    def testServerNeedsGraphqlEngineForPostAndGet(): Unit \ Assert =
+        Assert.assertEq(expected = (true, true, false, true, false),
             (Server.needsGraphqlEngine(adminConfig(), fromAdmin("POST", "/graphql")),
              Server.needsGraphqlEngine(adminConfig(), fromAdmin("POST", "/graphql?x=1")),
              Server.needsGraphqlEngine(adminConfig(), fromAdmin("OPTIONS", "/graphql")),
