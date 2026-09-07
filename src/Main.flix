@@ -7,7 +7,8 @@
 /// 環境変数: CMS_DSN / CMS_DB_USER / CMS_DB_PASSWORD（DbConfig。表の所有者）、CMS_DB_APP_USER / CMS_DB_APP_PASSWORD（リクエスト用のロール。無ければ所有者で繋ぐ）、ASSET_*（StorageConfig。省略時は asset 無し）、
 /// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_BASE_DOMAIN（`{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。省略時は /p/ だけ）、
 /// CMS_DEFAULT_PROJECT（プロジェクト slug 無しの時のプロジェクト slug。省略時は default、空ならプロジェクト slug 無しは 404）、CMS_SIGNUP（open / closed）、
-/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（停止時に実行中の仕事を待つ秒数。既定 15）、CMS_CACHE_MAX_AGE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 60、0 で no-store）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
+/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（停止時に実行中の仕事を待つ秒数。既定 15）、CMS_CACHE_MAX_AGE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 60、0 で no-store）、
+/// CMS_MODE=import-microcms（サーバを立てず、CMS_IMPORT_DIR の microCMS のスキーマを写してダミーの entry を CMS_IMPORT_COUNT 件ずつ積んで終わる）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
 /// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health に出す版。省略時は dev）
 ///
 def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
@@ -27,9 +28,17 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
         adminEngines <- Ok(AdminEngine.create(deps));
         _           <- AdminEngine.current(adminEngines, pool, defaultProject |> Option.getWithDefault(ProjectId.default()))
     ) yield (pool, adminEngines, deps, defaultProject, accountEngine);
-    match started {
-        case Err(message) => { println(message); Sys.Exit.exit(1) }
-        case Ok((pool, adminEngines, deps, defaultProject, accountEngine)) =>
+    match (started, Sys.Env.getVar("CMS_MODE")) {
+        case (Err(message), _) => { println(message); Sys.Exit.exit(1) }
+        // 一発処理: microCMS のスキーマを写してダミーを積み、終わる（サーバは立てない）
+        case (Ok((pool, _, deps, defaultProject, _)), Some("import-microcms")) =>
+            let dir = Sys.Env.getVar("CMS_IMPORT_DIR") |> Option.getWithDefault("import/microcms/schema");
+            let count = Sys.Env.getVar("CMS_IMPORT_COUNT") |> Option.flatMap(Int32.fromString) |> Option.getWithDefault(3);
+            match MicrocmsCli.execute(dir, pool, deps, defaultProject |> Option.getWithDefault(ProjectId.default()), count) {
+                case Ok(summary)  => { println(summary); Pool.close(pool) }
+                case Err(message) => { println(message); Pool.close(pool); Sys.Exit.exit(1) }
+            }
+        case (Ok((pool, adminEngines, deps, defaultProject, accountEngine)), _) =>
             let jwks = TokenVerifier.createCache();
             let cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins };
             let version = Sys.Env.getVar("CMS_VERSION") |> Option.getWithDefault("dev");

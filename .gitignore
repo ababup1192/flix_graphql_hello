@@ -4,3 +4,4 @@ artifact/
 counter.db
 deploy/.env
 deploy/backups/
+import/microcms/contents/

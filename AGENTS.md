@@ -37,6 +37,7 @@ make run       # サーバ起動（CMS_DSN 等は Makefile が渡す）
 make generate  # admin.graphql / account.graphql → src/generated/graphql/、schema.graphql（見本）→ test/sample/（schemagen）
 make gen       # migrations/ + queries/*.q → src/generated/sql/（sqlfx の生成器。flix_db 側で動く）
 make fatjar    # 実行可能な jar（artifact/）
+make import-microcms  # import/microcms/schema/*.json（microCMS の API スキーマ）を既定プロジェクトに写し、ダミーの entry を積んで公開
 make image     # Docker イメージ（手元用。CI は ghcr.io に amd64 / arm64）
 ```
 
@@ -65,6 +66,7 @@ src/account/           Account API（/account/graphql。プロジェクトを選
 src/admin/             管理 API。AdminMapping（GraphQL の型 ↔ ドメイン）、リゾルバ、AdminRunner（最初の SQL で借りる Tx）、AdminEngine（プロジェクトごとのエンジン）
 src/content/           コンテンツ API。ContentSchemaBuilder（定義 → Schema）、ContentEngine（目印で組み直す置き場）、ContentRunner（読むだけ）
 src/app/               Server（ルーティング・CORS・/health・Host の slug）、DbConfig（所有者とアプリ用ロール）、TenantTx（RLS の印付き Tx）、AppRole（cms_app の作成）、BackgroundJobs（プロセス内のバックグラウンドワーカー。2 秒ごとに回復・掃除 → Scheduler.tick → WebhookDispatcher.tick。外部トリガー POST /jobs/tick も同じ tick）、Scheduler（予約公開の実行）、WebhookDispatcher（配信行を拾って POST）、JobLog（仕事 1 件の 1 行ログ）、DbRunner（Tx と業務エラー。transact / toFieldResult）、StorageConfig（ASSET_*。無ければ asset 無し）、AuthConfig（CMS_AUTH=jwks|dev|none）、Deps、Health
+src/import/            microCMS からの取り込み。MicrocmsSchema（API スキーマの export を読む。純粋）、MicrocmsImport（型に写し、ダミーの entry を積む）、MicrocmsCli（CMS_MODE=import-microcms の一発処理）
 src/crypto/            Sha256（sha256 / HMAC / 16 進）と Base64Url。署名と鍵のハッシュが共通で使う。ドメインは storage や auth に依存しない
 src/auth/              JWT の検証（RS256 固定。kid / iss / aud / exp / nbf）と TokenVerifier effect（JWKS の取得とキャッシュ）
 src/storage/           asset の置き先。SigV4（純粋な署名）、ObjectStore effect（署名付き URL / HEAD / DELETE。MinIO と R2 は同じ handler）

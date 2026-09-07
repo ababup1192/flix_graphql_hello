@@ -1,4 +1,4 @@
-.PHONY: run check test test-unit test-pg db-up db-down query generate scaffold gen gen-check migrate migrate-status migrate-new fatjar image
+.PHONY: run check test test-unit test-pg import-microcms db-up db-down query generate scaffold gen gen-check migrate migrate-status migrate-new fatjar image
 
 # 実 PG と MinIO 用の接続。docker-compose.yml と同じ値。run と test-pg の両方で使う
 PG_ENV = CMS_DSN=jdbc:postgresql://127.0.0.1:5432/cms CMS_DB_USER=cms CMS_DB_PASSWORD=cms \
@@ -9,6 +9,10 @@ PG_ENV = CMS_DSN=jdbc:postgresql://127.0.0.1:5432/cms CMS_DB_USER=cms CMS_DB_PAS
 # サーバ起動。PG は make db-up で立てておく
 run:
 	$(PG_ENV) bin/flix run
+
+# microCMS の API スキーマ（import/microcms/schema/*.json）を既定プロジェクトに写し、ダミーの entry を積んで公開する。PG は make db-up で
+import-microcms:
+	$(PG_ENV) CMS_MODE=import-microcms CMS_IMPORT_DIR=import/microcms/schema bin/flix run
 
 check:
 	bin/flix check
