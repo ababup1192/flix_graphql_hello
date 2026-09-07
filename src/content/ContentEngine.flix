@@ -7,22 +7,18 @@
 ///
 mod ContentEngine {
 
-    import java.util.concurrent.atomic.AtomicReference
-    import java.lang.Object
-
     ///
-    /// プロジェクトごとの、組み立て済みのエンジンとその時の目印。
+    /// エンジンの置き場と、Runner に渡す asset の保存先。
     ///
     pub enum Cache {
-        case Cache(Option[StorageConfig.StorageConfig], AtomicReference[Object])
+        case Cache(Option[StorageConfig.StorageConfig], EngineCache.Cache)
     }
 
     ///
-    /// 空の置き場。最初のリクエストで組む。storage は Runner に渡す asset の保存先。
+    /// 空の置き場。最初のリクエストで組む。
     ///
     pub def create(storage: Option[StorageConfig.StorageConfig]): Cache \ IO =
-        let empty: Map[ProjectId, (String, Graphql.Engine)] = Map.empty();
-        Cache.Cache(storage, new AtomicReference(unchecked_cast(empty as Object)))
+        Cache.Cache(storage, EngineCache.create())
 
     ///
     /// 今の定義に合ったエンジン。目印が変わっていなければ前の物を返す。定義の読み込みや組み立てに失敗すれば、
@@ -30,18 +26,16 @@ mod ContentEngine {
     ///
     /// WhyNot: 組み直しに失敗した時に前のエンジンを捨てないのは、管理 API の 1 操作（名前の衝突など）で公開サイトが
     /// 全断するのを避けるため。目印は更新しないので、定義が直れば次のリクエストで組み直す。
-    /// 2 つのリクエストが同時に組み直すと後の書き込みが勝つが、どちらも同じ目印から組んだ物なので構わない。
     ///
     pub def current(cache: Cache, pool: Pool, projectId: ProjectId): Result[String, Graphql.Engine] \ IO =
-        let Cache.Cache(storage, slot) = cache;
-        let engines: Map[ProjectId, (String, Graphql.Engine)] = unchecked_cast(slot.get() as Map[ProjectId, (String, Graphql.Engine)]);
-        let stored = Map.get(projectId, engines);
+        let Cache.Cache(storage, engines) = cache;
+        let stored = EngineCache.get(projectId, engines);
         match readFingerprint(pool, projectId) {
             case Err(message)     => stored |> Option.map(snd) |> Option.toOk(message)
             case Ok(fingerprint) => match stored {
                 case Some((known, engine)) if known == fingerprint => Ok(engine)
                 case _ => match rebuild(pool, storage, projectId) {
-                    case Ok(engine)   => { slot.set(unchecked_cast(Map.insert(projectId, (fingerprint, engine), engines) as Object)); Ok(engine) }
+                    case Ok(engine)   => { EngineCache.put(projectId, fingerprint, engine, engines); Ok(engine) }
                     case Err(message) => stored |> Option.map(snd) |> Option.toOk(message)
                 }
             }
