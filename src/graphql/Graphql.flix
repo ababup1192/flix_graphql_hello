@@ -207,6 +207,7 @@ import graphql.analysis.MaxQueryDepthInstrumentation
 
     ///
     /// FieldError を、値 null とエラー 1 つを持つ DataFetcherResult にする。
+    /// message は人が読む文、extensions は機械が読む物（code と、分類ごとの追加）。
     /// path と locations は env から取り、graphql-java が付ける物と同じ形にする。
     ///
     /// WhyNot: GraphqlErrorBuilder を使わないのは、message(String, Object...) の可変長引数を
@@ -215,11 +216,14 @@ import graphql.analysis.MaxQueryDepthInstrumentation
     def toErrorResult(env: DataFetchingEnvironment, error: FieldError): Object \ IO =
         let path: JList[Object] = env.getExecutionStepInfo().getPath().toList();
         let locations: JList[SourceLocation] = Adaptor.toList(env.getField().getSourceLocation() :: Nil);
+        let message = FieldError.message(error);
+        let extensions: JMap[String, Object] = unchecked_cast(JavaValue.toObject(Value.Obj(FieldError.extensions(error))) as JMap[String, Object]);
         let graphqlError = new GraphQLError {
-            def getMessage(_this: GraphQLError): String = error
+            def getMessage(_this: GraphQLError): String = message
             def getLocations(_this: GraphQLError): JList[SourceLocation] = locations
             def getErrorType(_this: GraphQLError): ErrorClassification = checked_cast(ErrorType.DataFetchingException)
             def getPath(_this: GraphQLError): JList[Object] = path
+            def getExtensions(_this: GraphQLError): JMap[String, Object] = extensions
         };
         unchecked_cast(DataFetcherResult.newResult().error(graphqlError).build() as Object)
 

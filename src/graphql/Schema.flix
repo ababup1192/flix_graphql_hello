@@ -38,12 +38,97 @@ mod Context {
 }
 
 ///
-/// リゾルバが返すエラー。今はメッセージ文字列だけで、GraphQL の errors[].message になる。
+/// クライアントが分岐に使うエラーの分類。GraphQL の errors[].extensions.code になる。
+/// 文字列は API の一部なので、値を足すことはあっても綴りは変えない。
 ///
-/// WhyNot: 最初から enum にしないのは、リゾルバ側の `Err("...")` の書き味を保つため。
-/// extensions（code など）が要るときは、この alias を enum に差し替えれば署名は全部ここに向いている。
+pub enum ErrorCode with Eq, Order, ToString {
+    /// 入力が規則に合わない。violations にどのフィールドかが出る
+    case Invalid
+    /// 指した物が無い
+    case NotFound
+    /// 主体に権限が無い
+    case Forbidden
+    /// 楽観ロックに負けた（他で更新された）
+    case Conflict
+    /// 主体の種類が合わない（read の PAT で書く、API キーで本人の操作をする）
+    case RequiresLogin
+    /// 身元の検証に失敗した（壊れた JWT、死んだ PAT）
+    case Unauthenticated
+    /// 上のどれでもない。クライアントからは直せない
+    case Internal
+}
+
+mod ErrorCode {
+
+    ///
+    /// extensions.code に出す文字列。
+    ///
+    pub def text(code: ErrorCode): String = match code {
+        case ErrorCode.Invalid         => "INVALID"
+        case ErrorCode.NotFound        => "NOT_FOUND"
+        case ErrorCode.Forbidden       => "FORBIDDEN"
+        case ErrorCode.Conflict        => "CONFLICT"
+        case ErrorCode.RequiresLogin   => "REQUIRES_LOGIN"
+        case ErrorCode.Unauthenticated => "UNAUTHENTICATED"
+        case ErrorCode.Internal        => "INTERNAL"
+    }
+
+}
+
 ///
-pub type alias FieldError = String
+/// リゾルバが返すエラー。message は人が読む文、code と extras は機械が読む物で、
+/// GraphQL の errors[] の message と extensions になる。
+///
+/// WhyNot: extras に code を入れないのは、code だけは必ず出す物で、Map に入れると
+/// 「入れ忘れた」形が型で作れてしまうため。
+///
+pub enum FieldError with Eq, ToString {
+    /// 分類、人が読むメッセージ、extensions の追加分（violations / entity / id など）
+    case FieldError(ErrorCode, String, Map[String, Value])
+}
+
+mod FieldError {
+
+    ///
+    /// 分類とメッセージだけのエラー。
+    ///
+    pub def of(code: ErrorCode, message: String): FieldError =
+        FieldError.FieldError(code, message, Map.empty())
+
+    ///
+    /// extensions の追加分まで持つエラー。
+    ///
+    pub def make(code: ErrorCode, message: String, extras: Map[String, Value]): FieldError =
+        FieldError.FieldError(code, message, extras)
+
+    ///
+    /// クライアントからは直せないエラー。
+    ///
+    pub def internal(message: String): FieldError =
+        of(ErrorCode.Internal, message)
+
+    ///
+    /// 人が読むメッセージ。
+    ///
+    pub def message(error: FieldError): String =
+        let FieldError.FieldError(_, text, _) = error;
+        text
+
+    ///
+    /// 分類。
+    ///
+    pub def code(error: FieldError): ErrorCode =
+        let FieldError.FieldError(found, _, _) = error;
+        found
+
+    ///
+    /// GraphQL の errors[].extensions に出す物。code は必ず入る。
+    ///
+    pub def extensions(error: FieldError): Map[String, Value] =
+        let FieldError.FieldError(found, _, extras) = error;
+        Map.insert("code", Value.Str(ErrorCode.text(found)), extras)
+
+}
 
 ///
 /// リゾルバの効果 ef を IO に落とすハンドラ。Schema.make に 1 回だけ渡す。
@@ -243,19 +328,22 @@ mod Arg {
     /// 型が合わなければ引数名と SDL の型を含む Err。
     ///
     pub def decode(arg: Arg[a], args: Args): Result[FieldError, a] =
-        decodeAs("argument", arg, args)
+        decodeAs("argument", arg, args) |> Result.mapErr(FieldError.of(ErrorCode.Invalid))
 
     ///
     /// input 型のフィールドとして取り出す。エラー文が「field 'x' must be ...」になる以外は decode と同じ。
     /// 外側の decode がこの文を包むので、ネストした位置（argument 'input' must be PostInput!: field 'status' must be ...）が読める。
     ///
-    pub def decodeField(arg: Arg[a], fields: Args): Result[FieldError, a] =
+    /// WhyNot: 戻りが FieldError でないのは、GqlCodec.inputObject の build が理由の文字列を返す形で、
+    /// その文字列を外側の decode が包んで 1 つの FieldError にするため。
+    ///
+    pub def decodeField(arg: Arg[a], fields: Args): Result[String, a] =
         decodeAs("field", arg, fields)
 
     ///
     /// decode / decodeField の共通部分。kind はエラー文の頭。
     ///
-    def decodeAs(kind: String, arg: Arg[a], args: Args): Result[FieldError, a] =
+    def decodeAs(kind: String, arg: Arg[a], args: Args): Result[String, a] =
         let Arg.Arg(inner) = arg;
         GqlCodec.decode(inner#codec, Map.getWithDefault(inner#name, Value.Null, args))
             |> Result.mapErr(reason -> "${kind} '${inner#name}' must be ${TypeRef.toSdl(GqlCodec.typeRef(inner#codec))}: ${reason}")
@@ -556,7 +644,7 @@ mod Schema {
     /// 戻り値の型の遅延（Runner を待つ）を通常のフィールドと共有するため。resolve は呼ばれない。
     ///
     pub def abstractField(name: String, args: List[ArgInfo], out: Out[r, ef]): Field[Unit, ef] =
-        makeField(name, args, out, (_context, _src, _args) -> Err("interface field is resolved by the implementing type"))
+        makeField(name, args, out, (_context, _src, _args) -> Err(FieldError.internal("interface field is resolved by the implementing type")))
 
     ///
     /// スキーマを作る。runner がリゾルバの効果 ef を IO に落とす（graphql-java の DataFetcher から呼ばれる

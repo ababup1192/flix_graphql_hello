@@ -104,7 +104,7 @@ mod AdminMutationResolvers {
             case Some(pepper) => Ok(ApiKeys.create(pepper, {
                 name = name, scope = AdminMapping.apiKeyScopeOf(scope, role),
                 expiresAt = expiresAt |> Option.map(text -> AdminMapping.timestampOf("expiresAt", text)) }, Time.Clock.now()))
-            case None         => Err("API キーを発行できません（CMS_API_KEY_PEPPER が設定されていません）")
+            case None         => Err(FieldError.internal("API キーを発行できません（CMS_API_KEY_PEPPER が設定されていません）"))
         }
 
     /// Mutation.revokeApiKey。失効した id を返す
@@ -115,7 +115,7 @@ mod AdminMutationResolvers {
     pub def createPreviewToken(deps: Deps): GeneratedAdmin.MutationCreatePreviewTokenResolver[AdminEff] =
         (_context, entryId, expiresInSeconds) -> match deps#auth#pepper {
             case Some(pepper) => Ok(PreviewTokens.issue(pepper, AdminMapping.entryId("entryId", entryId), { ttlSeconds = expiresInSeconds |> Option.map(Int32.toInt64) |> Option.getWithDefault(PreviewTokens.defaultTtlSeconds()), nowMillis = Time.Clock.now() }))
-            case None         => Err("プレビュートークンを発行できません（CMS_API_KEY_PEPPER が設定されていません）")
+            case None         => Err(FieldError.internal("プレビュートークンを発行できません（CMS_API_KEY_PEPPER が設定されていません）"))
         }
 
     /// Mutation.schedulePublish

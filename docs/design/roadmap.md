@@ -9,6 +9,8 @@
 テナント、asset（S3 互換、署名付き URL）、richText（doc / html / text / 目次 / 抜粋 / 埋め込み / 表 / callout）、
 Docker（起動時 migration、JSON ログ、/health の版）、deploy/ の compose。
 
+エラーの分類（2026-09-08 に実装済み）: `errors[].extensions.code`（`INVALID` / `NOT_FOUND` / `FORBIDDEN` / `CONFLICT` / `REQUIRES_LOGIN` / `UNAUTHENTICATED` / `INTERNAL`）と `violations` / `entity` / `id` / `expectedVersion` / `actualVersion`。message は日本語のままで、クライアント・CLI・MCP は code で分岐する（[error-codes.md](error-codes.md)）。
+
 ## 優先度順（上から着手）
 
 ### 必須: 無いと乗り換え候補にならない

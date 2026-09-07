@@ -40,11 +40,11 @@ mod DbRunner {
         }
 
     ///
-    /// transact の結果を GraphQL のフィールドの結果に。DB の失敗と業務エラーはそれぞれの文言、成功はリゾルバの戻りをそのまま。
+    /// transact の結果を GraphQL のフィールドの結果に。DB の失敗と業務エラーは GraphqlErrors が写し、成功はリゾルバの戻りをそのまま。
     ///
     pub def toFieldResult(outcome: Result[DbFailure, Result[CmsFailure, Result[FieldError, a]]]): Result[FieldError, a] = match outcome {
-        case Err(failure)     => Err(failureMessage(failure))
-        case Ok(Err(failure)) => Err(CmsErr.toMessage(failure))
+        case Err(failure)     => Err(GraphqlErrors.fromDbFailure(failure))
+        case Ok(Err(failure)) => Err(GraphqlErrors.toFieldError(failure))
         case Ok(Ok(result))   => result
     }
 
@@ -55,8 +55,8 @@ mod DbRunner {
         DbError.runWithFailure(() -> Retry.withRetry(3, thunk))
 
     ///
-    /// DbFailure を GraphQL のエラー文言に。
+    /// DbFailure を人が読む文言に。
     ///
-    pub def failureMessage(failure: DbFailure): FieldError = "database error: ${failure}"
+    pub def failureMessage(failure: DbFailure): String = "database error: ${failure}"
 
 }

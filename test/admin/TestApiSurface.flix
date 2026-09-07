@@ -11,10 +11,10 @@
 mod TestApiSurface {
 
     /// リゾルバを呼ばない Runner。スキーマを組むだけなら DB もプールも要らない。
-    def unusedRunner(): Runner[AdminEff] = (_context, _f) -> Err("組み立てだけ")
+    def unusedRunner(): Runner[AdminEff] = (_context, _f) -> Err(FieldError.internal("組み立てだけ"))
 
     /// リゾルバを呼ばない Runner（Account API）。
-    def unusedAccountRunner(): Runner[AccountEff] = (_context, _f) -> Err("組み立てだけ")
+    def unusedAccountRunner(): Runner[AccountEff] = (_context, _f) -> Err(FieldError.internal("組み立てだけ"))
 
     /// introspection の 1 件の name。
     def nameOf(item: Value): String = Value.field("name", item) |> Value.asStr |> Option.getWithDefault("?")

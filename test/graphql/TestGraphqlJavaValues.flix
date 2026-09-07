@@ -78,7 +78,7 @@ mod TestGraphqlJavaValues {
     /// locations にはクエリ内の行と列が付く。
     @Test
     def testGraphqlJavaNonNullErrBubbles(): Unit \ {Assert, IO} =
-        let schema = queryOnlySchema(field0("strict", Out.int32(), (_context, _root) -> Err("boom")) :: Nil);
+        let schema = queryOnlySchema(field0("strict", Out.int32(), (_context, _root) -> Err(FieldError.internal("boom"))) :: Nil);
         Assert.assertEq(expected = Ok((Value.Null, 1, Some("boom"), Value.List(Value.Obj(Map#{ "line" => Value.Int(1), "column" => Value.Int(3) }) :: Nil))),
             executeOnce(schema, queryOnly("{ strict }"))
                 |> Result.map(response -> (response#data, List.length(response#errors), GraphqlTestKit.firstMessage(response),
@@ -88,7 +88,7 @@ mod TestGraphqlJavaValues {
     @Test
     def testGraphqlJavaListChildErrPath(): Unit \ {Assert, IO} =
         let itemType = objectType("Item", () ->
-            field0("v", Out.option(Out.int32()), (_context, n) -> if (n == 2) Err("bad item") else Ok(Some(n))) :: Nil);
+            field0("v", Out.option(Out.int32()), (_context, n) -> if (n == 2) Err(FieldError.internal("bad item")) else Ok(Some(n))) :: Nil);
         let schema = queryOnlySchema(field0("items", Out.list(Out.obj(itemType)), (_context, _root) -> Ok(1 :: 2 :: 3 :: Nil)) :: Nil);
         Assert.assertEq(expected = Ok((Value.Obj(Map#{ "items" => Value.List(
                     Value.Obj(Map#{ "v" => Value.Int(1) }) :: Value.Obj(Map#{ "v" => Value.Null }) :: Value.Obj(Map#{ "v" => Value.Int(3) }) :: Nil) }),

@@ -262,13 +262,13 @@ mod ContentEntries {
     ///
     def writeDraft(owner: ContentType, existing: Entry, given: EntryData, expectedVersion: Int32): Entry \ Db + CmsErr + Tenant =
         let id = existing#id;
-        if (existing#version != expectedVersion) CmsErr.conflict(Entity.Entry, EntryId.text(id), existing#version) else ();
+        if (existing#version != expectedVersion) CmsErr.conflict(Entity.Entry, EntryId.text(id), expectedVersion, existing#version) else ();
         let data = EntryValidation.normalize(owner#fields, given);
         CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data));
         writeContent(id, Stage.Draft, owner, data);
         let advanced = EntriesQueries.bumpEntryVersion({ id = EntryId.text(id), expected = expectedVersion, projectId = Tenant.currentId() });
         // 0 行なら読んでから書くまでに誰かが進めた（またはゴミ箱に入った）。今の版は読み直して報告する
-        if (advanced == 0) CmsErr.conflict(Entity.Entry, EntryId.text(id), get(id)#version) else ();
+        if (advanced == 0) CmsErr.conflict(Entity.Entry, EntryId.text(id), expectedVersion, get(id)#version) else ();
         get(id)
 
     ///

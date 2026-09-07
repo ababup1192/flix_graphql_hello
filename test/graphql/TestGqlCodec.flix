@@ -60,7 +60,7 @@ mod TestGqlCodec {
     @Test
     def testGqlCodecInputAsArgument(): Unit \ Assert =
         Assert.assertEq(expected = (Err("argument 'p' must be Pair!: field 'n' must be Int!: expected Int"), "Pair!"),
-            (Arg.decode(Arg.arg("p", pairCodec()), Map#{ "p" => Value.Obj(Map#{ "n" => Value.Str("x") }) }) |> Result.map(r -> (r#n, r#tag)),
+            (Arg.decode(Arg.arg("p", pairCodec()), Map#{ "p" => Value.Obj(Map#{ "n" => Value.Str("x") }) }) |> Result.map(r -> (r#n, r#tag)) |> Result.mapErr(FieldError.message),
              TypeRef.toSdl(GqlCodec.typeRef(pairCodec()))))
 
     /// ネストした input のエラー文は、引数 → 外の input のフィールド → 内の input のフィールドと位置がつながる。
@@ -70,7 +70,7 @@ mod TestGqlCodec {
         let outer = GqlCodec.inputObject("Outer", Arg.info(inner) :: Nil, fields -> Arg.decodeField(inner, fields) |> Result.map(p -> { inner = p }));
         Assert.assertEq(expected = Err("argument 'p' must be Outer!: field 'inner' must be Pair!: field 'n' must be Int!: expected Int"),
             Arg.decode(Arg.arg("p", outer), Map#{ "p" => Value.Obj(Map#{ "inner" => Value.Obj(Map#{ "n" => Value.Str("x") }) }) })
-                |> Result.map(o -> o#inner#n))
+                |> Result.map(o -> o#inner#n) |> Result.mapErr(FieldError.message))
 
     /// describeValue / deprecateValue は指定した値だけを書き換える（Color は GraphqlFixtures の enum）。
     @Test

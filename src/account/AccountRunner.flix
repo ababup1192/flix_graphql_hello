@@ -24,14 +24,14 @@ mod AccountRunner {
     ///
     def runOne(pool: Pool, deps: Deps, context: Context, f: Unit -> Result[FieldError, JavaValue.Boxed] \ AccountEff + IO): Result[FieldError, JavaValue.Boxed] \ IO =
         match context#credential {
-            case Credential.Invalid(reason) => Err("認証に失敗しました: ${reason}")
-            case Credential.ApiKey(_)       => Err("Account API は API キーでは使えません。ログインしてください")
-            case Credential.Preview(_)      => Err("Account API はプレビュートークンでは使えません。ログインしてください")
+            case Credential.Invalid(reason) => Err(GraphqlErrors.unauthenticated("認証に失敗しました: ${reason}"))
+            case Credential.ApiKey(_)       => Err(GraphqlErrors.requiresLogin("Account API は API キーでは使えません。ログインしてください"))
+            case Credential.Preview(_)      => Err(GraphqlErrors.requiresLogin("Account API はプレビュートークンでは使えません。ログインしてください"))
             case credential =>
                 let outcome =
                     IdGen.runWithRandom(() -> Time.Clock.runWithIO(() ->
                         DbRunner.transact(pool, None, () -> match RequestIdentity.resolveForAccount(deps, credential) {
-                            case Err(rejection) => Err(RequestIdentity.rejectionMessage(rejection))
+                            case Err(rejection) => Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection)))
                             case Ok(resolved)   => { RequestIdentity.touch(resolved); Session.runWith(resolved#actor, f) }
                         })));
                 DbRunner.toFieldResult(outcome)

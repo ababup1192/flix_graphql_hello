@@ -27,7 +27,7 @@ mod AccountMutationResolvers {
     def createPersonalAccessToken(deps: Deps): GeneratedAccount.MutationCreatePersonalAccessTokenResolver[AccountEff] =
         (_context, name, scope, ttlDays) -> match deps#auth#pepper {
             case Some(pepper) => Ok(PersonalTokens.issue(pepper, { name = name, scope = AccountMapping.patScopeOf(scope), ttlDays = ttlDays }, Time.Clock.now()))
-            case None         => Err("Personal Access Token を発行できません（CMS_API_KEY_PEPPER が設定されていません）")
+            case None         => Err(FieldError.internal("Personal Access Token を発行できません（CMS_API_KEY_PEPPER が設定されていません）"))
         }
 
 }

@@ -14,7 +14,7 @@ mod TestGraphqlJava {
     /// いつも Err("boom") を返す fail だけのスキーマ。
     ///
     def failSchema(): Schema =
-        queryOnlySchema(field0("fail", Out.option(Out.int32()), (_context, _root) -> Err("boom")) :: Nil)
+        queryOnlySchema(field0("fail", Out.option(Out.int32()), (_context, _root) -> Err(FieldError.internal("boom"))) :: Nil)
 
     // ---- クエリの実行 ----
 
@@ -76,7 +76,7 @@ mod TestGraphqlJava {
     def testGraphqlJavaChildRunsOnlyWhenSelected(): Unit \ {Assert, IO} =
         let itemType = objectType("Item", () ->
             field0("ok", Out.int32(), (_context, item) -> Ok(item)) ::
-            field0("broken", Out.option(Out.int32()), (_context, _item) -> Err("child boom")) ::
+            field0("broken", Out.option(Out.int32()), (_context, _item) -> Err(FieldError.internal("child boom"))) ::
             Nil);
         let schema = queryOnlySchema(field0("item", Out.obj(itemType), (_context, _root) -> Ok(7)) :: Nil);
         Assert.assertEq(
@@ -202,7 +202,7 @@ mod TestGraphqlJava {
     @Test
     def testGraphqlJavaResolverEffectRunsThroughRunner(): Unit \ {Assert, IO} =
         let root = objectType("Query", () ->
-            field0("stored", Out.int32(), (_context, _root) -> CounterStore.load()) ::
+            field0("stored", Out.int32(), (_context, _root) -> CounterStore.load() |> Result.mapErr(FieldError.internal)) ::
             field0("pure", Out.int32(), (_context, _root) -> Ok(1)) :: Nil);
         let schema = Schema.make(root, None, (_, f) -> CounterFake.runWithMemory(41, f));
         Assert.assertEq(expected = Ok((Value.Obj(Map#{ "stored" => Value.Int(41), "pure" => Value.Int(1) }), None)),

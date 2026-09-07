@@ -22,14 +22,14 @@ mod AdminRunner {
     ///
     def runOne(pool: Pool, deps: Deps, projectId: ProjectId, context: Context, f: Unit -> Result[FieldError, JavaValue.Boxed] \ AdminEff + IO): Result[FieldError, JavaValue.Boxed] \ IO =
         match context#credential {
-            case Credential.Invalid(reason) => Err("認証に失敗しました: ${reason}")
+            case Credential.Invalid(reason) => Err(GraphqlErrors.unauthenticated("認証に失敗しました: ${reason}"))
             case credential =>
                 let outcome =
                     IdGen.runWithRandom(() ->
                         Tenant.runWith(projectId, () ->
                             Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () ->
                                 DbRunner.transact(pool, Some(projectId), () -> match RequestIdentity.resolveForProject(deps, projectId, credential) {
-                                    case Err(rejection) => Err(RequestIdentity.rejectionMessage(rejection))
+                                    case Err(rejection) => Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection)))
                                     case Ok(resolved)   => { RequestIdentity.touch(resolved); Session.runWith(resolved#actor, f) }
                                 }))))));
                 DbRunner.toFieldResult(outcome)

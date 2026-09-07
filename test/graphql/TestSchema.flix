@@ -107,10 +107,10 @@ mod TestSchema {
         Assert.assertEq(expected = (Ok(2), true),
             (Schema.collectTypes(same) |> Result.map(List.length), Schema.toSdl(conflicting) |> Result.isErr))
 
-    /// Arg.decode は無い引数を nullable なら None、non-null なら引数名と型を含む Err にする。
+    /// Arg.decode は無い引数を nullable なら None、non-null なら引数名と型を含む INVALID の Err にする。
     @Test
     def testSchemaArgDecode(): Unit \ Assert =
-        Assert.assertEq(expected = (Ok(None), Err("argument 'n' must be Int!: expected Int"), Ok(3)),
+        Assert.assertEq(expected = (Ok(None), Err(FieldError.of(ErrorCode.Invalid, "argument 'n' must be Int!: expected Int")), Ok(3)),
             (Arg.decode(arg("n", GqlCodec.option(GqlCodec.int32())), Map#{}),
              Arg.decode(arg("n", GqlCodec.int32()), Map#{}),
              Arg.decode(arg("n", GqlCodec.int32()), Map#{ "n" => Value.Int(3) })))

@@ -9,8 +9,8 @@ mod TestContentSchemaBuilder {
     def dryRunner(): Runner[ContentEff] =
         (_, f) -> match DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> ObjectStore.runWithFake(Map.empty(), () -> DbTest.runWithRows(Nil, f)))))) {
             case Ok(Ok(result))   => result
-            case Ok(Err(failure)) => Err(CmsErr.toMessage(failure))
-            case Err(failure)     => Err("${failure}")
+            case Ok(Err(failure)) => Err(GraphqlErrors.toFieldError(failure))
+            case Err(failure)     => Err(GraphqlErrors.fromDbFailure(failure))
         }
 
     ///

@@ -328,8 +328,8 @@ def testGenerateResolversFieldName(): Unit \ {Assert, IO} =
 def testScaffoldWithDefaults(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = Ok(Nil), missing(
         "mod PostResolvers {" ::
-        "    pub def author(): Generated.PostAuthorResolver[AppEff] =\n        (_context, _src) -> Err(\"not implemented: Post.author\")" ::
-        "    pub def slug(): Generated.PostSlugResolver[AppEff] =\n        (_context, _src, _n) -> Err(\"not implemented: Post.slug\")" ::
+        "    pub def author(): Generated.PostAuthorResolver[AppEff] =\n        (_context, _src) -> Err(FieldError.internal(\"not implemented: Post.author\"))" ::
+        "    pub def slug(): Generated.PostSlugResolver[AppEff] =\n        (_context, _src, _n) -> Err(FieldError.internal(\"not implemented: Post.slug\"))" ::
         "    pub def resolvers(): Generated.PostResolvers[AppEff] =\n        { +author = author(), +slug = slug() | Generated.postDefaults() }" :: Nil,
         scaffoldOf("type Query { post: Post! }  type Post { id: ID!  author: Author!  slug(n: Int!): String! }  type Author { id: ID! }", "Post", true)))
 
@@ -339,7 +339,7 @@ def testScaffoldWithoutDefaults(): Unit \ {Assert, IO} =
     Assert.assertEq(expected = (Ok(Nil), Ok(Nil)),
         (missing("    pub def id(): Generated.PostIdResolver[AppEff] =" :: "{ id = id(), author = author() }" :: Nil,
             scaffoldOf("type Query { post: Post! }  type Post { id: ID!  author: Author! }  type Author { id: ID! }", "Post", false)),
-         missing("mod QueryResolvers {" :: "        _context -> Err(\"not implemented: Query.n\")" :: "{ n = n(), from_ = from_() }" :: Nil,
+         missing("mod QueryResolvers {" :: "        _context -> Err(FieldError.internal(\"not implemented: Query.n\"))" :: "{ n = n(), from_ = from_() }" :: Nil,
             scaffoldOf("type Query { n: Int!  from: String! }", "Query", true))))
 
 /// 素通しのフィールドしか無い型の雛形は既定リゾルバをそのまま返す。

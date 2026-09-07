@@ -10,10 +10,10 @@ mod AdminQueryResolvers {
     /// Query.contentType。id か apiId のどちらかで引く。両方無ければエラー
     pub def contentType(): GeneratedAdmin.QueryContentTypeResolver[AdminEff] =
         (_context, id, apiId) -> match (id, apiId) {
-            case (Some(_), Some(_)) => Err("id か apiId のどちらか一方にしてください")
+            case (Some(_), Some(_)) => Err(GraphqlErrors.invalid("apiId", "id か apiId のどちらか一方にしてください"))
             case (Some(given), _)   => Ok(ContentTypes.find(AdminMapping.typeId("id", given)))
             case (None, Some(text)) => Ok(ApiId.parse(text) |> Option.flatMap(ContentTypes.findByApiId))
-            case (None, None)       => Err("id か apiId を指定してください")
+            case (None, None)       => Err(GraphqlErrors.invalid("id", "id か apiId を指定してください"))
         }
 
     /// Query.entries。first は 0 〜 200 に丸める

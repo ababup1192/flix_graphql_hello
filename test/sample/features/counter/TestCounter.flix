@@ -18,7 +18,7 @@ def testCounterIncrement(): Unit \ Assert =
 /// 保存先の Err はそのままリゾルバの Err になる。
 @Test
 def testCounterStoreErrorPassesThrough(): Unit \ Assert =
-    Assert.assertEq(expected = (Err("db down"), Err("db down")),
+    Assert.assertEq(expected = (Err(FieldError.internal("db down")), Err(FieldError.internal("db down"))),
         (CounterFake.runWithBroken("db down", () -> Counter.counter(Context.anonymous())),
          CounterFake.runWithBroken("db down", () -> Counter.increment(Context.anonymous(), 1))))
 

@@ -6,7 +6,7 @@ mod PostResolvers {
 
     /// Post.author
     pub def author(): Generated.PostAuthorResolver[AppEff] =
-        (_context, post) -> Post.findAuthor(post#authorId) |> Option.toOk("author '${post#authorId}' not found")
+        (_context, post) -> Post.findAuthor(post#authorId) |> Option.toOk(FieldError.of(ErrorCode.NotFound, "author '${post#authorId}' not found"))
 
     /// type Post のリゾルバ一式
     pub def resolvers(): Generated.PostResolvers[AppEff] =

@@ -11,12 +11,12 @@ mod Counter {
     /// Query.counter。今の値を返す。
     ///
     pub def counter(_context: Context): Result[FieldError, Int32] \ CounterStore =
-        CounterStore.load()
+        CounterStore.load() |> Result.mapErr(FieldError.internal)
 
     ///
     /// Mutation.increment。引数 by だけ増やし、増やした後の値を返す。
     ///
     pub def increment(_context: Context, by: Int32): Result[FieldError, Int32] \ CounterStore =
-        CounterStore.increment(by)
+        CounterStore.increment(by) |> Result.mapErr(FieldError.internal)
 
 }

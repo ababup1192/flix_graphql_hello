@@ -43,7 +43,7 @@ mod TestContentEntriesPg {
             let stale = CmsErr.runWithResult(() -> ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("v3"))}), 1));
             (stale |> Result.map(entry -> entry#version), ContentEntries.get(created#id) |> (entry -> Map.get(CmsTestKit.apiId("title"), entry#data)))
         }));
-        Assert.assertEq(expected = Ok(Ok((Err(CmsFailure.Conflict(Entity.Entry, "c1", 2)), Some(Json.JString("v2"))))), result)
+        Assert.assertEq(expected = Ok(Ok((Err(CmsFailure.Conflict(Entity.Entry, "c1", 1, 2)), Some(Json.JString("v2"))))), result)
 
     /// 一覧は更新が新しい順、search で絞れ、totalCount は絞った後の件数。渡した id はそのまま使われる。
     @Test

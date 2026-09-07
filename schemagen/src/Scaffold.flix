@@ -34,7 +34,7 @@ mod Scaffold {
             List.join("\n",
                 "    /// ${object#name}.${field#name}" ::
                 "    pub def ${Emit.label(field#name)}(): ${target#moduleName}.${Emit.fieldAliasName(object#name, field#name)}[${target#effName}] =" ::
-                "        ${params} -> Err(\"not implemented: ${object#name}.${field#name}\")" ::
+                "        ${params} -> Err(FieldError.internal(\"not implemented: ${object#name}.${field#name}\"))" ::
                 Nil)
         });
         let record =
