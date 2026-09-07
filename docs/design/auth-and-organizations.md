@@ -103,6 +103,27 @@ api_keys       (id, project_id, name, key_hash, scope: read | readDraft, created
 | 公開 API をキー無しにする判断 | `visibility` で切り替え。既定は公開 |
 | 監査ログ | この段では入れない。Runner で Actor と操作名が揃うので後で 1 か所 |
 
+### セキュリティの決め（規模で緩めない）
+
+**先に直すコードの問題**
+
+- `POST /graphql` は `Content-Type: application/json` 以外を 415 にする（Cookie 認証を入れた時の CSRF。`text/plain` の form POST は preflight 無しで届く）。mutation は `Origin` / `Sec-Fetch-Site` も見る
+- JSON ログの `path` からクエリ文字列を落とす（プレビュー トークンや GET のクエリを残さない）
+
+**設計**
+
+- 管理 API の Query（`contentTypes` / `entries` / `entry` / `assets` / `publishCheck` / `impact`）も `readDraft` を要求。既定は拒否
+- `CMS_AUTH=dev` は 127.0.0.1 にしか bind せず、`CMS_VERSION=dev` の時だけ起動する。ヘッダで人になれる経路が本番に存在しない事を起動時に保証
+- JWT: alg は RS256 / ES256 のみ（`none` / HS256 は拒否）、`kid` で鍵を引き、無ければ JWKS の再取得は 1 回だけ（以後 10 分待つ）、`iss` / `aud` / `exp` / `nbf` を全部検査、時計のずれ 60 秒、`email_verified` があれば true を要求
+- API キー: 256 bit の乱数、`cms_` 接頭辞 + 検査和、`sha256(pepper + key)` に pepper の版（`pepper_id`）を持って回せる、比較は `MessageDigest.isEqual`、hash で引いた後に Host のプロジェクトと一致するかを確かめる（キーがプロジェクトを決めない）、失効は行を残す
+- プレビュー トークン: project + entry + 期限 + 用途を署名、定数時間の比較、API キーの pepper とは別の秘密、最大 7 日
+- `image/svg+xml` は既定の許可リストから外す（スクリプトを含められる）。要る時は設定で明示し `Content-Disposition: attachment`
+- `users` は `(issuer, subject)` UNIQUE、`email` は UNIQUE にしない（発行元をまたぐと重なる）。招待は `invitations(org_id, email, role, token_hash, expires_at)` を別表にし、初回ログインで消す
+- 他テナントの物は 404 のまま（存在を漏らさない）。権限の失効は membership を毎リクエスト引くので即時
+- `api_keys.key_hash` UNIQUE、`(project_id, revoked_at)` に index
+
+**確認済みで問題なし**: richText の HTML（エスケープ、href / embed の許可リスト、noopener）、asset（署名に Content-Type / Length、乱数 id、一覧不可、使用中は消せない）、GraphQL（深さ 15、first 200、1 操作）、HTTP（上限とタイムアウト、制御文字除去）、テナントの型強制、compose の必須値。
+
 ### 作業の順
 
 表と migration → `Authz`（Datalog）→ `TokenVerifier` → `Actor` と Runner と PgTestSupport → 既存 mutation に `require`、`me` と組織・メンバー・鍵 → Host で slug、slug 無しの管理 API、公開 API のキー。

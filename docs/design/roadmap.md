@@ -17,7 +17,7 @@ Docker（起動時 migration、JSON ログ、/health の版）、deploy/ の com
 |---|---|---|---|---|
 | 1 | dry-run（`publishCheck`）済み 2026-09-07 | 編集者 | 2 時間 | 検査を `publishReport` に切り出し、required / unique / 参照 / asset の違反と未公開の参照先を全部一度に返す |
 | 2 | 影響の見える化（`impact`）済み 2026-09-07。本文内のリンクも entry_links に載せた | 編集者 | 半日 | 取り下げ・削除で壊れる entry（フィールドの参照・本文内の `entryId` リンク・asset の使用先）と、一緒に動く物を返す。**microCMS には無い** |
-| 3 | 認証・組織・権限 + subdomain | 全員 | 1〜2 時間 | [auth-and-organizations.md](auth-and-organizations.md)。`TokenVerifier`（JWKS。最初は Cloudflare Access）、`Actor` effect、memberships、`me`、Host で slug、API キー |
+| 3 | 認証・組織・権限 + subdomain（先に Content-Type 415 とログのクエリ除去。SVG を許可リストから外す） | 全員 | 1〜2 時間 | [auth-and-organizations.md](auth-and-organizations.md)。`TokenVerifier`（JWKS。最初は Cloudflare Access）、`Actor` effect、memberships、`me`、Host で slug、API キー |
 | 4 | Webhook | サイト運営者 | 30 分 | 公開・取り下げ・型の変更で URL を叩く。HMAC 署名、再試行、`schema.changed` |
 | 5 | プレビュー トークン | 編集者 | 半日 | HMAC 署名、期限付き、参照先も下書きで辿れる。`previewUrl` と組み合わせ |
 | 6 | 予約公開・公開停止予約 | 編集者 | 半日 | `publishAt` / `unpublishAt` と compose の cron サービス |
