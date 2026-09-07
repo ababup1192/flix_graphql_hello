@@ -30,6 +30,10 @@ pub enum FieldKind with Eq, Order, ToString {
     case Object
     /// 複数の Object（variant）から選んで並べる。値は { blockType: <variant の apiId>, ... } の配列
     case Blocks
+    /// 画像やファイル。値は asset の id。コンテンツ API では Asset（url など）に展開する
+    case Asset
+    /// 構造化した本文（ProseMirror の doc）。コンテンツ API では RichText（json / html / text）
+    case RichText
 }
 
 ///

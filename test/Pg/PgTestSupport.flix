@@ -98,7 +98,7 @@ mod PgTestSupport {
     pub def withContentApiAndPool(seeding: Unit -> b \ ef2, body: (Pool, String -> (Value, Option[String]) \ IO) -> a \ ef): a \ (ef2 - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr, Tenant, ObjectStore}) + ef + IO =
         withPool(pool -> {
             discard seed(seeding);
-            let cache = ContentEngine.create();
+            let cache = ContentEngine.create(storage());
             body(pool, queryText -> GraphqlTestKit.askEngine(engineOrBug(cache, pool), queryText))
         })
 

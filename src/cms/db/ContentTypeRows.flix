@@ -27,6 +27,8 @@ mod ContentTypeRows {
         case FieldKind.Reference => "reference"
         case FieldKind.Object   => "object"
         case FieldKind.Blocks   => "blocks"
+        case FieldKind.Asset    => "asset"
+        case FieldKind.RichText => "richText"
     }
 
     ///
@@ -51,6 +53,8 @@ mod ContentTypeRows {
         case "reference" => Some(FieldKind.Reference)
         case "object"   => Some(FieldKind.Object)
         case "blocks"   => Some(FieldKind.Blocks)
+        case "asset"    => Some(FieldKind.Asset)
+        case "richText" => Some(FieldKind.RichText)
         case _          => None
     }
 

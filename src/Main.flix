@@ -16,14 +16,14 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
         storage     <- StorageConfig.fromEnv();
         adminEngines <- Ok(AdminEngine.create(storage));
         _           <- AdminEngine.current(adminEngines, pool, ProjectId.default())
-    ) yield (pool, adminEngines);
+    ) yield (pool, adminEngines, storage);
     match started {
         case Err(message) => { println(message); Sys.Exit.exit(1) }
-        case Ok((pool, adminEngines)) =>
+        case Ok((pool, adminEngines, storage)) =>
             let cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins };
             let contentConfig = { cors = cors, graphqlPath = "/graphql" };
             let adminConfig = { cors = cors, graphqlPath = "/admin/graphql" };
-            let engineCache = ContentEngine.create();
+            let engineCache = ContentEngine.create(storage);
             // WhyNot: コンテンツ API を実行する時以外（/health、404、preflight、GET）でエンジンを組まないのは、型定義が壊れた時に
             // 死活監視や preflight まで 503 になり、404 ごとに目印の SELECT が走るため。GraphQL を実行しない道なので管理 API のエンジンで受ける
             HttpServer.listen(8080, request ->

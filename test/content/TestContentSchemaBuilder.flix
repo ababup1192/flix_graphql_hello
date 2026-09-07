@@ -7,7 +7,7 @@
 mod TestContentSchemaBuilder {
 
     def dryRunner(): Runner[ContentEff] =
-        f -> match DbError.runWithFailure(() -> Tenant.runWith(ProjectId.default(), () -> DbTest.runWithRows(Nil, f))) {
+        f -> match DbError.runWithFailure(() -> Tenant.runWith(ProjectId.default(), () -> ObjectStore.runWithFake(Map.empty(), () -> DbTest.runWithRows(Nil, f)))) {
             case Ok(result)   => result
             case Err(failure) => Err("${failure}")
         }
@@ -46,6 +46,23 @@ mod TestContentSchemaBuilder {
         Assert.assertEq(expected = (Ok((false, false)), Ok(true)),
             (sdlOf(empties) |> Result.map(sdl -> (String.contains(substr = "related", sdl), String.contains(substr = "sections", sdl))),
              sdlOf(filled) |> Result.map(String.contains(substr = "related: BlogRelated"))))
+
+    /// ASSET は共通の Asset 型に、RICH_TEXT は RichText 型に生え、どちらも orderBy には出ない。配列の ASSET は _contains で絞れる。
+    @Test
+    def testContentSchemaBuilderAssetAndRichText(): Unit \ Assert =
+        let fields = CmsTestKit.fieldDef("cover", FieldKind.Asset) :: { many = true | CmsTestKit.fieldDef("gallery", FieldKind.Asset) } :: CmsTestKit.fieldDef("body", FieldKind.RichText) :: Nil;
+        let sdl = Schema.toSdl(ContentSchemaBuilder.build(CmsTestKit.contentType(1i64, "blogs", TypeKind.Collection, "記事", fields) :: Nil, dryRunner()));
+        Assert.assertEq(
+            expected = Ok((true, true, true, true, true, true, false, false)),
+            sdl |> Result.map(text -> (
+                String.contains(substr = "cover: Asset", text),
+                String.contains(substr = "gallery: [Asset!]!", text),
+                String.contains(substr = "body: RichText", text),
+                String.contains(substr = "html: String!", text),
+                String.contains(substr = "cover_id_eq: ID", text),
+                String.contains(substr = "gallery_contains: ID", text),
+                String.contains(substr = "cover_ASC", text),
+                String.contains(substr = "body_ASC", text))))
 
     /// 型が 1 つも無くても Query は組める（_types だけ）。
     @Test

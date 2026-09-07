@@ -81,6 +81,10 @@ mod EntryValidation {
             case (FieldKind.Boolean, Json.JBool(_))       => Nil
             case (FieldKind.Select, Json.JString(text))   => if (List.memberOf(text, field#config#options)) Nil else Violation.Violation(path, "選択肢（${List.join(", ", field#config#options)}）にありません") :: Nil
             case (FieldKind.Reference, Json.JString(text)) => if (Option.nonEmpty(EntryId.parse(text))) Nil else Violation.Violation(path, "entry の id（${EntryId.rule()}）にしてください") :: Nil
+            case (FieldKind.Asset, Json.JString(text))    => if (Option.nonEmpty(AssetId.parse(text))) Nil else Violation.Violation(path, "asset の id（${EntryId.rule()}）にしてください") :: Nil
+            case (FieldKind.RichText, Json.JObject(_))    => RichText.validate(path, value)
+            case (FieldKind.Asset, _)                     => Violation.Violation(path, "asset の id にしてください") :: Nil
+            case (FieldKind.RichText, _)                  => Violation.Violation(path, "richText は { type: \"doc\", content: [...] } のオブジェクトにしてください") :: Nil
             case (FieldKind.Select, _)                    => Violation.Violation(path, "文字列にしてください") :: Nil
             case (FieldKind.Reference, _)                 => Violation.Violation(path, "entry の id にしてください") :: Nil
             case (FieldKind.Text, _)                      => Violation.Violation(path, "文字列にしてください") :: Nil

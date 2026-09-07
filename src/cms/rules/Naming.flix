@@ -141,7 +141,8 @@ mod Naming {
         else Nil
 
     ///
-    /// フィールドの性質の組み合わせ。unique は配列・OBJECT・BLOCKS に付けられない（値ごとの一意を DB で守れない）。BLOCKS は常に配列。
+    /// フィールドの性質の組み合わせ。unique は配列・OBJECT・BLOCKS・ASSET・RICH_TEXT に付けられない（値ごとの一意を DB で守れない）。
+    /// BLOCKS は常に配列、RICH_TEXT は配列にできない。
     ///
     pub def validateFlags(kind: FieldKind, many: Bool, unique: Bool): List[Violation] =
         let uniqueChecks = if (many and unique) Violation.Violation("unique", "配列のフィールドには付けられません") :: Nil else Nil;
@@ -149,6 +150,9 @@ mod Naming {
             case FieldKind.Blocks if not many => Violation.Violation("many", "BLOCKS は常に配列です（many: true）") :: Nil
             case FieldKind.Object if unique   => Violation.Violation("unique", "OBJECT には付けられません") :: Nil
             case FieldKind.Blocks if unique   => Violation.Violation("unique", "BLOCKS には付けられません") :: Nil
+            case FieldKind.Asset if unique    => Violation.Violation("unique", "ASSET には付けられません") :: Nil
+            case FieldKind.RichText if many   => Violation.Violation("many", "RICH_TEXT は配列にできません") :: Nil
+            case FieldKind.RichText if unique => Violation.Violation("unique", "RICH_TEXT には付けられません") :: Nil
             case _                            => Nil
         };
         uniqueChecks ::: structureChecks

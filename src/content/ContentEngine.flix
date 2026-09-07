@@ -14,15 +14,15 @@ mod ContentEngine {
     /// プロジェクトごとの、組み立て済みのエンジンとその時の目印。
     ///
     pub enum Cache {
-        case Cache(AtomicReference[Object])
+        case Cache(Option[StorageConfig.StorageConfig], AtomicReference[Object])
     }
 
     ///
-    /// 空の置き場。最初のリクエストで組む。
+    /// 空の置き場。最初のリクエストで組む。storage は Runner に渡す asset の保存先。
     ///
-    pub def create(): Cache \ IO =
+    pub def create(storage: Option[StorageConfig.StorageConfig]): Cache \ IO =
         let empty: Map[ProjectId, (String, Graphql.Engine)] = Map.empty();
-        Cache.Cache(new AtomicReference(unchecked_cast(empty as Object)))
+        Cache.Cache(storage, new AtomicReference(unchecked_cast(empty as Object)))
 
     ///
     /// 今の定義に合ったエンジン。目印が変わっていなければ前の物を返す。定義の読み込みや組み立てに失敗すれば、
@@ -33,14 +33,14 @@ mod ContentEngine {
     /// 2 つのリクエストが同時に組み直すと後の書き込みが勝つが、どちらも同じ目印から組んだ物なので構わない。
     ///
     pub def current(cache: Cache, pool: Pool, projectId: ProjectId): Result[String, Graphql.Engine] \ IO =
-        let Cache.Cache(slot) = cache;
+        let Cache.Cache(storage, slot) = cache;
         let engines: Map[ProjectId, (String, Graphql.Engine)] = unchecked_cast(slot.get() as Map[ProjectId, (String, Graphql.Engine)]);
         let stored = Map.get(projectId, engines);
         match readFingerprint(pool, projectId) {
             case Err(message)     => stored |> Option.map(snd) |> Option.toOk(message)
             case Ok(fingerprint) => match stored {
                 case Some((known, engine)) if known == fingerprint => Ok(engine)
-                case _ => match rebuild(pool, projectId) {
+                case _ => match rebuild(pool, storage, projectId) {
                     case Ok(engine)   => { slot.set(unchecked_cast(Map.insert(projectId, (fingerprint, engine), engines) as Object)); Ok(engine) }
                     case Err(message) => stored |> Option.map(snd) |> Option.toOk(message)
                 }
@@ -50,9 +50,9 @@ mod ContentEngine {
     ///
     /// 定義を読んで組み直す。
     ///
-    def rebuild(pool: Pool, projectId: ProjectId): Result[String, Graphql.Engine] \ IO =
+    def rebuild(pool: Pool, storage: Option[StorageConfig.StorageConfig], projectId: ProjectId): Result[String, Graphql.Engine] \ IO =
         read(pool, "content type の定義を読めません", () -> Tenant.runWith(projectId, ContentTypes.list))
-            |> Result.flatMap(types -> Graphql.buildEngine(ContentSchemaBuilder.build(types, ContentRunner.make(pool, projectId))))
+            |> Result.flatMap(types -> Graphql.buildEngine(ContentSchemaBuilder.build(types, ContentRunner.make(pool, storage, projectId))))
 
     def readFingerprint(pool: Pool, projectId: ProjectId): Result[String, String] \ IO =
         read(pool, "content type の目印を読めません", () -> ContentTypesQueries.schemaFingerprint(ProjectId.toInt64(projectId)))

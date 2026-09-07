@@ -111,6 +111,8 @@ mod AdminMapping {
         case GeneratedAdmin.FieldKind.Reference => FieldKind.Reference
         case GeneratedAdmin.FieldKind.Object   => FieldKind.Object
         case GeneratedAdmin.FieldKind.Blocks   => FieldKind.Blocks
+        case GeneratedAdmin.FieldKind.Asset    => FieldKind.Asset
+        case GeneratedAdmin.FieldKind.RichText => FieldKind.RichText
     }
 
     pub def fieldKindToGql(kind: FieldKind): GeneratedAdmin.FieldKind = match kind {
@@ -123,6 +125,8 @@ mod AdminMapping {
         case FieldKind.Reference => GeneratedAdmin.FieldKind.Reference
         case FieldKind.Object   => GeneratedAdmin.FieldKind.Object
         case FieldKind.Blocks   => GeneratedAdmin.FieldKind.Blocks
+        case FieldKind.Asset    => GeneratedAdmin.FieldKind.Asset
+        case FieldKind.RichText => GeneratedAdmin.FieldKind.RichText
     }
 
     ///

@@ -133,8 +133,54 @@ mod ContentSchemaBuilder {
                     entry -> EntryValue.text(apiId, entry#data) |> Option.map(Id.Id),
                     entry -> EntryValue.texts(apiId, entry#data) |> List.map(Id.Id)) |> described
             }
+            case FieldKind.Asset => valueField(name, field#many, Out.obj(assetType()),
+                entry -> EntryValue.text(apiId, entry#data) |> Option.flatMap(AssetId.parse) |> Option.flatMap(readyAsset),
+                entry -> EntryValue.texts(apiId, entry#data) |> List.filterMap(AssetId.parse) |> List.filterMap(readyAsset)) |> described
+            case FieldKind.RichText => valueField(name, field#many, Out.obj(richTextType()),
+                entry -> Map.get(apiId, entry#data) |> Option.filter(RichText.isDoc),
+                entry -> Map.get(apiId, entry#data) |> Option.map(EntryValue.items(json -> if (RichText.isDoc(json)) Some(json) else None)) |> Option.getWithDefault(Nil)) |> described
             case _ => valueField(name, field#many, Out.string(), entry -> EntryValue.text(apiId, entry#data), entry -> EntryValue.texts(apiId, entry#data)) |> described
         }
+
+    ///
+    /// asset。ready の物だけ返す（pending や消えた物は null / 配列から落ちる）。
+    ///
+    /// WhyNot: 参照（Linked）のように先読みしないのは、1 entry の asset は数個で、まとめ読みの効果より複雑さが勝つため。
+    /// 一覧で重くなったら Linked と同じ形に寄せる。
+    ///
+    def readyAsset(id: AssetId): Option[Asset] \ ContentEff =
+        Assets.find(id) |> Option.filter(asset -> asset#status == AssetStatus.Ready)
+
+    ///
+    /// `Asset { id url fileName mime size width height alt }`。全型で共通の 1 つ。
+    ///
+    def assetType(): ObjectType[Asset, ContentEff] =
+        Schema.objectType("Asset", () ->
+            Schema.field0("id", Out.id(), (_context, asset) -> Ok(Id.Id(AssetId.text(asset#id)))) ::
+            Schema.field0("url", Out.string(), (_context, asset) -> Ok(ObjectStore.publicUrl(asset#key))) ::
+            Schema.field0("fileName", Out.string(), (_context, asset) -> Ok(asset#fileName)) ::
+            Schema.field0("mime", Out.string(), (_context, asset) -> Ok(asset#mime)) ::
+            Schema.field0("size", Out.int32(), (_context, asset) -> Ok(Int64.clampToInt32(min = 0, max = Int32.maxValue(), asset#size))) ::
+            Schema.field0("width", Out.option(Out.int32()), (_context, asset) -> Ok(asset#width)) ::
+            Schema.field0("height", Out.option(Out.int32()), (_context, asset) -> Ok(asset#height)) ::
+            Schema.field0("alt", Out.string(), (_context, asset) -> Ok(asset#alt)) :: Nil)
+            |> ObjectType.withDescription("画像やファイル。url で配信する")
+
+    ///
+    /// `RichText { json html text }`。source は doc の JSON。html の image は ready な asset の配信 URL を埋め、無い物は出さない。
+    ///
+    def richTextType(): ObjectType[Util.Json.Json, ContentEff] =
+        Schema.objectType("RichText", () ->
+            Schema.field0("json", Out.json(), (_context, doc) -> Ok(JsonValue.fromJson(doc))) ::
+            Schema.field0("html", Out.string(), (_context, doc) -> Ok(RichText.toHtml(assetUrls(doc), doc))) ::
+            Schema.field0("text", Out.string(), (_context, doc) -> Ok(RichText.toText(doc))) :: Nil)
+            |> ObjectType.withDescription("構造化した本文。json は ProseMirror の doc、html はその描画、text は平文")
+
+    def assetUrls(doc: Util.Json.Json): Map[AssetId, String] \ ContentEff =
+        Assets.findMany(RichText.assetIds(doc))
+            |> List.filter(asset -> asset#status == AssetStatus.Ready)
+            |> List.map(asset -> (asset#id, ObjectStore.publicUrl(asset#key)))
+            |> List.toMap
 
     ///
     /// 値を返すフィールド。単数なら `T`（無ければ null）、配列なら `[T!]!`。取り出し方だけ kind ごとに渡す。
@@ -223,7 +269,7 @@ mod ContentSchemaBuilder {
     ///
     def orderByCodec(owner: ContentType): GqlCodec[(SortKey, Direction)] =
         let keys = SortKey.ById :: SortKey.ByPublishedAt :: SortKey.ByUpdatedAt :: SortKey.ByCreatedAt ::
-            (owner#fields |> List.filter(field -> not field#many and not List.memberOf(field#kind, FieldKind.Reference :: FieldKind.Object :: FieldKind.Blocks :: Nil)) |> List.map(field -> SortKey.ByField(field#apiId)));
+            (owner#fields |> List.filter(field -> not field#many and not List.memberOf(field#kind, FieldKind.Reference :: FieldKind.Object :: FieldKind.Blocks :: FieldKind.Asset :: FieldKind.RichText :: Nil)) |> List.map(field -> SortKey.ByField(field#apiId)));
         let values = keys |> List.flatMap(key -> (key, Direction.Asc) :: (key, Direction.Desc) :: Nil);
         GqlCodec.enumOf("${TypeName.text(owner#singular)}OrderBy", orderByName, values)
 
@@ -315,8 +361,11 @@ mod ContentSchemaBuilder {
             case FieldKind.Blocks    => Nil
             case FieldKind.Number    => Nil
             case FieldKind.Boolean   => Nil
+            case FieldKind.RichText  => Nil
             case FieldKind.Reference =>
                 leafArg("${name}_contains", GqlCodec.id(), id -> { let Id.Id(text) = id; EntryId.parse(text) |> Option.map(found -> Condition.ArrayContains(apiId, EntryId.text(found))) |> Option.getWithDefault(Condition.Never) :: Nil }) :: Nil
+            case FieldKind.Asset =>
+                leafArg("${name}_contains", GqlCodec.id(), id -> { let Id.Id(text) = id; AssetId.parse(text) |> Option.map(found -> Condition.ArrayContains(apiId, AssetId.text(found))) |> Option.getWithDefault(Condition.Never) :: Nil }) :: Nil
             case FieldKind.Select    =>
                 leafArg("${name}_contains", selectCodec(prefix, field), text -> Condition.ArrayContains(apiId, text) :: Nil) :: Nil
             case _                   =>
@@ -331,8 +380,11 @@ mod ContentSchemaBuilder {
         let apiId = field#apiId;
         let name = ApiId.text(apiId);
         match field#kind {
-            case FieldKind.Object => Nil
-            case FieldKind.Blocks => Nil
+            case FieldKind.Object   => Nil
+            case FieldKind.Blocks   => Nil
+            case FieldKind.RichText => Nil
+            case FieldKind.Asset =>
+                leafArg("${name}_id_eq", GqlCodec.id(), id -> { let Id.Id(text) = id; AssetId.parse(text) |> Option.map(found -> Condition.TextEq(apiId, AssetId.text(found))) |> Option.getWithDefault(Condition.Never) :: Nil }) :: Nil
             case FieldKind.Select =>
                 leafArg("${name}_eq", selectCodec(prefix, field), text -> Condition.TextEq(apiId, text) :: Nil) ::
                 leafArg("${name}_in", GqlCodec.list(selectCodec(prefix, field)), texts -> Condition.TextIn(apiId, texts) :: Nil) :: Nil

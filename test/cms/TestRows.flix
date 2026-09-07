@@ -8,10 +8,10 @@ mod TestRows {
     /// FieldKind と TypeKind は DB の文字列と往復し、知らない文字列は None。
     @Test
     def testRowsKindRoundTrip(): Unit \ Assert =
-        let kinds = List#{FieldKind.Text, FieldKind.TextArea, FieldKind.Slug, FieldKind.Number, FieldKind.Boolean, FieldKind.Select, FieldKind.Reference, FieldKind.Object, FieldKind.Blocks};
+        let kinds = List#{FieldKind.Text, FieldKind.TextArea, FieldKind.Slug, FieldKind.Number, FieldKind.Boolean, FieldKind.Select, FieldKind.Reference, FieldKind.Object, FieldKind.Blocks, FieldKind.Asset, FieldKind.RichText};
         Assert.assertEq(expected = (List.map(Some, kinds), None, Some(TypeKind.Singleton), None),
             (kinds |> List.map(kind -> ContentTypeRows.fieldKindFromDb(ContentTypeRows.fieldKindToDb(kind))),
-             ContentTypeRows.fieldKindFromDb("richText"),
+             ContentTypeRows.fieldKindFromDb("markdown"),
              ContentTypeRows.typeKindFromDb(ContentTypeRows.typeKindToDb(TypeKind.Singleton)),
              ContentTypeRows.typeKindFromDb("page")))
 

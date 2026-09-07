@@ -186,6 +186,10 @@ enum FieldKind {
   OBJECT
   """複数の OBJECT（variant）から選んで並べる。常に配列。値は { blockType: <variant の apiId>, ... } の並び"""
   BLOCKS
+  """画像やファイル。値は asset の id（createUploadUrl で作った物）。コンテンツ API では Asset に展開する"""
+  ASSET
+  """構造化した本文。値は ProseMirror の doc（{ type: "doc", content: [...] }）。配列にできない。コンテンツ API では json / html / text"""
+  RICH_TEXT
 }
 
 """content type。apiId がコンテンツ API のクエリ名の元になる"""

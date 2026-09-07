@@ -113,7 +113,8 @@ mod ContentEntries {
         let data = EntryValidation.prune(owner#fields, existing#data);
         let missing = EntriesQueries.missingTargets(key) |> List.filterMap(EntryRows.toTargetId);
         CmsErr.raiseIfAny(EntryValidation.publish(owner#fields, data) ::: uniqueViolations(owner, existing)
-            ::: (missing |> List.map(target -> Violation.Violation("references", "参照先 '${target}' はありません（消されています）。参照を外してください"))));
+            ::: (missing |> List.map(target -> Violation.Violation("references", "参照先 '${target}' はありません（消されています）。参照を外してください")))
+            ::: assetViolations(owner, data));
         let pending = EntriesQueries.unpublishedTargets(key) |> List.filterMap(EntryRows.toTargetId);
         if (withDependencies)
             List.forEach(dependency -> if (List.memberOf(dependency, id :: visited)) () else discard publishWithin(id :: visited, dependency, author, true), pending)
@@ -123,6 +124,15 @@ mod ContentEntries {
         discard EntriesQueries.insertVersion(EntryRows.versionInsert(existing, author, VersionReason.Publish));
         discard EntriesQueries.markPublished(key);
         get(id)
+
+    ///
+    /// 中身が指す asset が全部このプロジェクトにあって ready か。無い・pending の物は公開できない（配信 URL が空になる）。
+    ///
+    def assetViolations(owner: ContentType, data: EntryData): List[Violation] \ DbRead + DbErr + Tenant =
+        let referenced = AssetRefs.extract(owner#fields, data);
+        let ready = Assets.findMany(referenced) |> List.filter(asset -> asset#status == AssetStatus.Ready) |> List.map(asset -> asset#id);
+        referenced |> List.filter(id -> not List.memberOf(id, ready))
+            |> List.map(id -> Violation.Violation("assets", "asset '${id}' がありません（消されているか、アップロードが終わっていません）"))
 
     ///
     /// 公開を取り下げる。published の行と一意の値を消す。下書きは残る。未公開なら何もしない。
