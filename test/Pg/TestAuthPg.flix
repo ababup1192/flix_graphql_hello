@@ -24,22 +24,16 @@ mod TestAuthPg {
             let owner = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
             let stranger = Accounts.resolveUser(bootstrap(), principal("u-2", "someone@test"));
             let again = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
-            (Accounts.actorFor(owner, ProjectId.default()),
-             Accounts.actorFor(stranger, ProjectId.default()),
+            (Accounts.actorFor(owner, ProjectId.default()) == Actor.User(owner#id, "owner@test", Role.Owner :: Nil),
+             Accounts.actorFor(stranger, ProjectId.default()) == Actor.User(stranger#id, "someone@test", Nil),
              again#id == owner#id,
              Accounts.projectsOf(owner#id) |> List.map(membership -> (ProjectSlug.text(membership#target#slug), membership#role)))
         });
-        Assert.assertEq(
-            expected = Ok(Ok((
-                Actor.User(UserId.UserId(1i64), "owner@test", Role.Owner :: Nil),
-                Actor.User(UserId.UserId(2i64), "someone@test", Nil),
-                true,
-                List#{ ("default", Role.Owner) }))),
-            result)
+        Assert.assertEq(expected = Ok(Ok((true, true, true, List#{ ("default", Role.Owner) }))), result)
 
     ///
     /// 招待 → 初回ログインで membership に写る。viewer は型を作れず、writer は公開できず、editor は公開できる。
-    /// 最後の owner は外せない。
+    /// プロジェクトの owner が 1 人（second。bootstrap の owner は組織の owner なので数えない）なら外せない。
     ///
     @Test
     def testPgInvitationsAndRoles(): Unit \ {IO, Assert} =
@@ -48,8 +42,10 @@ mod TestAuthPg {
             runAs(owner, () -> {
                 discard Members.invite("Viewer@Test.dev", Role.Viewer);
                 discard Members.invite("writer@test.dev", Role.Writer);
-                discard Members.invite("editor@test.dev", Role.Editor)
+                discard Members.invite("editor@test.dev", Role.Editor);
+                discard Members.invite("second@test.dev", Role.Owner)
             });
+            let second = Accounts.resolveUser(bootstrap(), principal("u-s", "second@test.dev"));
             let viewer = Accounts.resolveUser(bootstrap(), principal("u-v", "viewer@test.dev"));
             let writer = Accounts.resolveUser(bootstrap(), principal("u-w", "writer@test.dev"));
             let editor = Accounts.resolveUser(bootstrap(), principal("u-e", "editor@test.dev"));
@@ -61,8 +57,8 @@ mod TestAuthPg {
             let writerPublishes = runAs(writer, () -> CmsTestKit.failureMessage(() -> ContentEntries.publish(entry#id, "writer", false)));
             let editorPublishes = runAs(editor, () -> ContentEntries.publish(entry#id, "editor", false))#stage;
             let invitationsLeft = runAs(owner, () -> List.length(Members.invitations()));
-            let members = runAs(owner, () -> Members.list() |> List.map(member -> (member#email, member#role)));
-            let lastOwner = runAs(owner, () -> CmsTestKit.failureMessage(() -> Members.remove(owner#id)));
+            let members = runAs(owner, () -> Members.list() |> List.map(member -> (member#email, member#role)) |> List.sort);
+            let lastOwner = runAs(owner, () -> CmsTestKit.failureMessage(() -> Members.remove(second#id)));
             (viewerCreatesType, viewerReads, writerPublishes, editorPublishes, invitationsLeft, members, lastOwner)
         }));
         Assert.assertEq(
@@ -72,8 +68,8 @@ mod TestAuthPg {
                 Err("この操作（publishEntries）の権限がありません"),
                 Stage.Published,
                 0,
-                List#{ ("viewer@test.dev", Role.Viewer), ("writer@test.dev", Role.Writer), ("editor@test.dev", Role.Editor) },
-                Err("member '1' が見つかりません")))),
+                List#{ ("editor@test.dev", Role.Editor), ("second@test.dev", Role.Owner), ("viewer@test.dev", Role.Viewer), ("writer@test.dev", Role.Writer) },
+                Err("role: 最後の owner は外せません。先に別の owner を付けてください")))),
             result)
 
     ///
@@ -146,7 +142,7 @@ mod TestAuthPg {
             let publicRead = anonymous("{ blogs { totalCount } }");
             let anonymousDraft = anonymous("{ blogs(stage: DRAFT) { totalCount } }") |> snd;
             let ownerDraft = askOwner("{ blogs(stage: DRAFT) { totalCount } }");
-            discard PgTestSupport.mutate(pool, () -> AuthQueries.updateProjectVisibility({ projectId = 1i64, visibility = "private" }));
+            discard PgTestSupport.mutate(pool, () -> AuthQueries.updateProjectVisibility({ projectId = ProjectId.toInt64(ProjectId.default()), visibility = "private" }));
             let privateAnonymous = anonymous("{ blogs { totalCount } }") |> snd;
             let key = match PgTestSupport.mutate(pool, () -> CmsTestKit.withIds(List#{"k9"}, () -> {
                 let owner = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));

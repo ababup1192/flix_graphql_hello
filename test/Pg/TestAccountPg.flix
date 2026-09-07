@@ -10,6 +10,10 @@ mod TestAccountPg {
 
     def obj(fields: List[(String, Value)]): Value = Value.Obj(List.toMap(fields))
 
+    /// 応答の data から id の文字列を取る（"createOrganization" → "id" など）。テストは連番の値を知らず、返ってきた物をそのまま次に渡す。
+    def idIn(path: List[String], response: (Value, Option[String])): String =
+        List.foldLeft((value, name) -> Value.field(name, value), fst(response), path) |> Value.asStr |> Option.getWithDefault("")
+
     ///
     /// 登録したての人（どのプロジェクトにも属さない）が組織を作り、その下にプロジェクトを作ると、me に owner として出る。
     /// プロジェクト slug の形が違えば invalid、予約した物は使えない。
@@ -20,16 +24,17 @@ mod TestAccountPg {
             let ask = asUser(schema, bearer("alice", "alice@example.com"));
             let before = ask("{ me { email organizations { role } projects { role } } }");
             let created = ask("mutation { createOrganization(name: \"Acme\") { id name } }");
-            let createdProject = ask("mutation { createProject(orgId: \"2\", slug: \"blog\", name: \"Blog\") { slug name visibility } }");
-            let badSlug = ask("mutation { createProject(orgId: \"2\", slug: \"Blog\", name: \"x\") { id } }") |> snd;
-            let reserved = ask("mutation { createProject(orgId: \"2\", slug: \"account\", name: \"x\") { id } }") |> snd;
+            let orgId = idIn(List#{"createOrganization", "id"}, created);
+            let createdProject = ask("mutation { createProject(orgId: \"${orgId}\", slug: \"blog\", name: \"Blog\") { slug name visibility } }");
+            let badSlug = ask("mutation { createProject(orgId: \"${orgId}\", slug: \"Blog\", name: \"x\") { id } }") |> snd;
+            let reserved = ask("mutation { createProject(orgId: \"${orgId}\", slug: \"account\", name: \"x\") { id } }") |> snd;
             let after = ask("{ me { organizations { organization { name } role } projects { project { slug } role } } }");
-            (before, created, createdProject, badSlug, reserved, after)
+            (before, created |> fst |> Value.field("createOrganization") |> Value.field("name"), createdProject, badSlug, reserved, after)
         });
         Assert.assertEq(
             expected = (
                 (obj(("me", obj(("email", Value.Str("alice@example.com")) :: ("organizations", Value.List(Nil)) :: ("projects", Value.List(Nil)) :: Nil)) :: Nil), None),
-                (obj(("createOrganization", obj(("id", Value.Str("2")) :: ("name", Value.Str("Acme")) :: Nil)) :: Nil), None),
+                Value.Str("Acme"),
                 (obj(("createProject", obj(("slug", Value.Str("blog")) :: ("name", Value.Str("Blog")) :: ("visibility", Value.Str("PUBLIC")) :: Nil)) :: Nil), None),
                 Some("slug: 'Blog' は 英小文字・数字・- を 1 〜 64 文字（先頭は英数字） にしてください"),
                 Some("slug: 'account' は予約されています"),
@@ -48,29 +53,30 @@ mod TestAccountPg {
             let alice = asUser(schema, bearer("alice", "alice@example.com"));
             let bob = asUser(schema, bearer("bob", "bob@example.com"));
             let carol = asUser(schema, bearer("carol", "carol@example.com"));
-            discard alice("mutation { createOrganization(name: \"Acme\") { id } }");
-            discard bob("{ me { id } }");
+            let bobId = idIn(List#{"me", "id"}, bob("{ me { id } }"));
+            let aliceId = idIn(List#{"me", "id"}, alice("{ me { id } }"));
             discard carol("{ me { id } }");
-            let added = alice("mutation { addOrganizationMember(orgId: \"2\", email: \"Bob@Example.com\", role: MEMBER) { email role } }");
-            let members = alice("{ organization(id: \"2\") { members { email role } } }");
-            let memberAdds = bob("mutation { addOrganizationMember(orgId: \"2\", email: \"carol@example.com\", role: MEMBER) { email } }") |> snd;
-            let outsiderSees = carol("{ organization(id: \"2\") { name } }");
-            let memberSees = bob("{ organization(id: \"2\") { name members { email } } }");
-            let lastOwner = alice("mutation { removeOrganizationMember(orgId: \"2\", userId: \"1\") }") |> snd;
-            let removed = alice("mutation { removeOrganizationMember(orgId: \"2\", userId: \"2\") }");
-            (added, members, memberAdds, outsiderSees, memberSees, lastOwner, removed)
+            let orgId = idIn(List#{"createOrganization", "id"}, alice("mutation { createOrganization(name: \"Acme\") { id } }"));
+            let added = alice("mutation { addOrganizationMember(orgId: \"${orgId}\", email: \"Bob@Example.com\", role: MEMBER) { email role } }");
+            let members = alice("{ organization(id: \"${orgId}\") { members { email role } } }");
+            let memberAdds = bob("mutation { addOrganizationMember(orgId: \"${orgId}\", email: \"carol@example.com\", role: MEMBER) { email } }") |> snd;
+            let outsiderSees = carol("{ organization(id: \"${orgId}\") { name } }");
+            let memberSees = bob("{ organization(id: \"${orgId}\") { name members { email } } }");
+            let lastOwner = alice("mutation { removeOrganizationMember(orgId: \"${orgId}\", userId: \"${aliceId}\") }") |> snd;
+            let removed = alice("mutation { removeOrganizationMember(orgId: \"${orgId}\", userId: \"${bobId}\") }");
+            (added, members, memberAdds, outsiderSees, memberSees, lastOwner, removed |> fst |> Value.field("removeOrganizationMember") |> Value.asStr |> Option.map(id -> id == bobId))
         });
         Assert.assertEq(
             expected = (
                 (obj(("addOrganizationMember", obj(("email", Value.Str("bob@example.com")) :: ("role", Value.Str("MEMBER")) :: Nil)) :: Nil), None),
                 (obj(("organization", obj(("members", Value.List(
-                    obj(("email", Value.Str("alice@example.com")) :: ("role", Value.Str("OWNER")) :: Nil) ::
-                    obj(("email", Value.Str("bob@example.com")) :: ("role", Value.Str("MEMBER")) :: Nil) :: Nil)) :: Nil)) :: Nil), None),
+                    obj(("email", Value.Str("bob@example.com")) :: ("role", Value.Str("MEMBER")) :: Nil) ::
+                    obj(("email", Value.Str("alice@example.com")) :: ("role", Value.Str("OWNER")) :: Nil) :: Nil)) :: Nil)) :: Nil), None),
                 Some("この操作（manageProject）の権限がありません"),
                 (obj(("organization", Value.Null) :: Nil), None),
                 (obj(("organization", obj(("name", Value.Str("Acme")) :: ("members", Value.List(Nil)) :: Nil)) :: Nil), None),
                 Some("role: 最後の owner は外せません。先に別の owner を付けてください"),
-                (obj(("removeOrganizationMember", Value.Str("2")) :: Nil), None)),
+                Some(true)),
             (added, members, memberAdds, outsiderSees, memberSees, lastOwner, removed))
 
     ///
@@ -102,11 +108,9 @@ mod TestAccountPg {
             let org = Session.runWith(Accounts.actorWithoutProject(alice), () -> Organizations.create(Signup.Open, "Acme"));
             let blog = Session.runWith(Accounts.actorWithoutProject(alice), () -> Organizations.createProject(org#id, ProjectSlug.ProjectSlug("blog"), "Blog"));
             Tenant.runWith(blog#id, () -> Session.runWith(Accounts.actorFor(alice, blog#id), () ->
-                (ContentTypes.create(CmsTestKit.typeDraft("posts", "記事"))#apiId, Session.current())))
+                (ContentTypes.create(CmsTestKit.typeDraft("posts", "記事"))#apiId, Session.current() == Actor.User(alice#id, "alice@example.com", Role.Owner :: Nil))))
         });
-        Assert.assertEq(
-            expected = Ok(Ok((ApiId.ApiId("posts"), Actor.User(UserId.UserId(1i64), "alice@example.com", Role.Owner :: Nil)))),
-            result)
+        Assert.assertEq(expected = Ok(Ok((ApiId.ApiId("posts"), true))), result)
 
     ///
     /// CMS_SIGNUP=closed なら既定の組織の owner だけが組織を作れる。
