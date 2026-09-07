@@ -68,4 +68,9 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_CORS_ORIGINS` | 許すオリジン（カンマ区切り） | 無し |
 | `CMS_VERSION` | `/health` に出す版 | イメージのビルド時に git の sha |
 | `ASSET_ENDPOINT` ほか | asset の置き先。無ければ asset の機能だけ使えない | 無し |
+| `CMS_AUTH` | `jwks`（発行元の JWT を検証）/ `dev`（`X-Dev-User` を信じる。`CMS_VERSION=dev` の時だけ）/ `none`（管理 API を閉じる） | none |
+| `CMS_AUTH_ISSUER` / `CMS_AUTH_JWKS_URL` / `CMS_AUTH_AUDIENCE` | jwks の時に必須。Cloudflare Access なら `https://<team>.cloudflareaccess.com`、`.../cdn-cgi/access/certs`、アプリの AUD | 無し |
+| `CMS_AUTH_HEADER` | JWT のヘッダ名。Clerk 等は `Authorization` | Cf-Access-Jwt-Assertion |
+| `CMS_BOOTSTRAP_OWNER` | 最初の owner の email。その初回ログインを既定の組織の owner にする | 無し |
+| `CMS_API_KEY_PEPPER` / `CMS_API_KEY_PEPPER_ID` | 公開 API の鍵のハッシュに混ぜる秘密と版。無ければ鍵を発行できない | 無し / v1 |
 | `JAVA_OPTS` | JVM の引数 | `-Xss32m -XX:MaxRAMPercentage=70` |

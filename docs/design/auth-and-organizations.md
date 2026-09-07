@@ -1,7 +1,11 @@
 # 設計: 認証・組織・権限と subdomain ルーティング
 
-状態: 未着手（2026-09-07 に方針だけ決めた）。テナント（projects / `Tenant` effect / `/p/{slug}/`）は
-実装済みで、この設計はその上に載せる。今の実装で先にやっておく事は無い。
+状態: 2026-09-07 に実装（users / organizations / memberships / invitations / api_keys、Authz の Datalog、JWT の検証、`Session` effect、
+管理 API の `me` / メンバー / 招待 / 鍵、公開 API の visibility）。まだ無い物: Host ヘッダで slug、slug 無しの管理 API（今は既定プロジェクト）、RLS。
+
+実装での名前: 主体の effect は `Actor` ではなく `Session`（`Session.current()` / `Session.require(permission)`。`Actor` は主体の enum）。
+ユーザーの解決は `Accounts`（`resolveUser` / `actorFor` / `me`）、身元は graphql 層の `Credential`（Bearer / ApiKey / Missing / Invalid）で
+`Context` に載り、Runner が Tx の中で主体を決める。
 
 ## 目的
 

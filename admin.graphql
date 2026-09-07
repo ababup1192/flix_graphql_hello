@@ -19,6 +19,15 @@ type Query {
   publishCheck(id: ID!): PublishReport!
   """操作の影響。取り下げ・削除で壊れる参照元と、公開で一緒に動く参照先"""
   impact(id: ID!, action: ImpactAction!): Impact!
+
+  """自分。ログインしていなければ null。organizations と projects は自分が触れる物だけ"""
+  me: Me
+  """今のプロジェクトのメンバー（owner だけ）"""
+  members: [Member!]!
+  """今のプロジェクトの招待（owner だけ）"""
+  invitations: [Invitation!]!
+  """今のプロジェクトの API キー（owner だけ）。生の鍵は出ない"""
+  apiKeys: [ApiKey!]!
 }
 
 """入力の 1 つの誤り。path は GraphQL の入力に対応（"fields.title" など）"""
@@ -102,6 +111,118 @@ type Mutation {
   updateAsset(id: ID!, input: AssetPatch!): Asset!
   """消す。entry（下書き・公開・richText の画像を含む）が使っていればエラー"""
   deleteAsset(id: ID!): ID!
+
+  """組織を作る。作った人が owner"""
+  createOrganization(name: String!): Organization!
+  """組織の下にプロジェクトを作る。組織の owner だけ。slug は subdomain と /p/ に出る"""
+  createProject(orgId: ID!, slug: String!, name: String!): Project!
+  """今のプロジェクトの公開範囲（owner だけ）"""
+  updateProjectVisibility(visibility: Visibility!): Project!
+  """email で招待する（owner だけ）。初回ログインで役割が付く"""
+  inviteMember(email: String!, role: Role!): Invitation!
+  cancelInvitation(id: ID!): ID!
+  """役割を変える（owner だけ）。最後の owner は降格できない"""
+  changeMemberRole(userId: ID!, role: Role!): Member!
+  """外す（owner だけ）。最後の owner は外せない"""
+  removeMember(userId: ID!): ID!
+  """API キーを発行する（owner だけ）。key はこの応答でしか見えない"""
+  createApiKey(name: String!, scope: ApiKeyScope!): IssuedApiKey!
+  """失効する（owner だけ）"""
+  revokeApiKey(id: ID!): ID!
+}
+
+"""プロジェクトでの役割。上が下を含む"""
+enum Role {
+  VIEWER
+  WRITER
+  EDITOR
+  OWNER
+}
+
+"""組織での役割。OWNER は組織の全プロジェクトの owner でもある"""
+enum OrgRole {
+  MEMBER
+  OWNER
+}
+
+"""公開 API の鍵の範囲"""
+enum ApiKeyScope {
+  """公開中の中身"""
+  READ
+  """下書きも"""
+  READ_DRAFT
+}
+
+"""プロジェクトの見え方"""
+enum Visibility {
+  """公開中の中身はキー無しで読める"""
+  PUBLIC
+  """read のキーが要る"""
+  PRIVATE
+}
+
+"""自分"""
+type Me {
+  id: ID!
+  email: String!
+  name: String!
+  """今のプロジェクトでの役割（無ければ空）と、できる事"""
+  roles: [Role!]!
+  permissions: [String!]!
+  organizations: [OrganizationMembership!]!
+  projects: [ProjectMembership!]!
+}
+
+type Organization {
+  id: ID!
+  name: String!
+}
+
+type OrganizationMembership {
+  organization: Organization!
+  role: OrgRole!
+}
+
+type Project {
+  id: ID!
+  slug: String!
+  name: String!
+  visibility: Visibility!
+}
+
+type ProjectMembership {
+  project: Project!
+  role: Role!
+}
+
+type Member {
+  userId: ID!
+  email: String!
+  name: String!
+  role: Role!
+}
+
+type Invitation {
+  id: ID!
+  email: String!
+  role: Role!
+  createdAt: String!
+}
+
+type ApiKey {
+  id: ID!
+  name: String!
+  scope: ApiKeyScope!
+  createdAt: String!
+  revokedAt: String
+}
+
+"""発行した鍵。key はこの時だけ"""
+type IssuedApiKey {
+  id: ID!
+  name: String!
+  scope: ApiKeyScope!
+  key: String!
 }
 
 """asset の状態"""

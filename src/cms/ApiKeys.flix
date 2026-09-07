@@ -8,26 +8,13 @@ mod ApiKeys {
     ///
     pub type alias Pepper = { pepperId = String, secret = String }
 
-    ///
-    /// 発行した鍵。
-    ///
-    /// - id: api_keys.id
-    /// - key: 生の鍵。この時だけ見える
-    ///
-    pub type alias IssuedKey = { id = Int64, name = String, scope = ApiKeyScope, key = String }
-
-    ///
-    /// 鍵の一覧の 1 行。生の鍵は持たない。
-    ///
-    pub type alias ApiKeyInfo = { id = Int64, name = String, scope = ApiKeyScope, createdAt = Timestamp.Timestamp, revokedAt = Option[Timestamp.Timestamp] }
-
     /// 生の鍵の接頭辞。secret scanning に引っかかる形で、他の文字列と見分けやすくする。
     pub def prefix(): String = "cms_"
 
     ///
     /// 発行する。今のプロジェクトに付く。
     ///
-    pub def create(pepper: Pepper, name: String, scope: ApiKeyScope): IssuedKey \ DbWrite + CmsErr + IdGen + Tenant + Session =
+    pub def create(pepper: Pepper, name: String, scope: ApiKeyScope): IssuedApiKey \ DbWrite + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageApiKeys);
         CmsErr.raiseIfAny(if (String.isEmpty(String.trim(name))) Violation.Violation("name", "名前を付けてください") :: Nil else Nil);
         let key = prefix() ++ IdGen.freshSecret();
@@ -45,7 +32,7 @@ mod ApiKeys {
     ///
     /// 今のプロジェクトの鍵の一覧。
     ///
-    pub def list(): List[ApiKeyInfo] \ DbRead + DbErr + CmsErr + Tenant + Session =
+    pub def list(): List[ApiKey] \ DbRead + DbErr + CmsErr + Tenant + Session =
         Session.require(Permission.ManageApiKeys);
         AuthQueries.listApiKeys(Tenant.currentId()) |> List.map(row -> {
             id = row#id, name = row#name,

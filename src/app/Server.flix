@@ -85,6 +85,30 @@ mod Server {
             |> Option.getWithDefault(false)
 
     ///
+    /// Host ヘッダから slug を取る。`{slug}.{baseDomain}` の形の時だけ Some。ポートは無視する。
+    /// baseDomain が無い（CMS_BASE_DOMAIN 未設定）なら常に None で、/p/{slug}/ だけが効く。
+    ///
+    pub def slugFromHost(baseDomain: Option[String], headers: List[(String, String)]): Option[String] =
+        let host = headers
+            |> List.find(match (name, _) -> String.toLowerCase(name) == "host")
+            |> Option.map(match (_, value) -> value |> String.trim |> String.toLowerCase |> String.splitOn(substr = ":") |> List.head |> Option.getWithDefault(""));
+        match (baseDomain |> Option.map(String.toLowerCase), host) {
+            case (Some(base), Some(found)) if String.endsWith(suffix = ".${base}", found) =>
+                let label = String.dropRight(String.length(base) + 1, found);
+                if (String.isMatch(regex = "^[a-z0-9][a-z0-9-]{0,63}$", label)) Some(label) else None
+            case _ => None
+        }
+
+    ///
+    /// リクエストのプロジェクトの slug と、プロジェクトを除いたパス。/p/{slug}/ があればそれを優先し、無ければ Host から。
+    ///
+    pub def projectOf(baseDomain: Option[String], request: HttpRequest): (Option[String], String) =
+        match splitProject(request#path) {
+            case (Some(slug), rest) => (Some(slug), rest)
+            case (None, rest)       => (slugFromHost(baseDomain, request#headers), rest)
+        }
+
+    ///
     /// パスからクエリ文字列を落とす（"/health?probe=1" → "/health"）。
     ///
     pub def pathOf(path: String): String =

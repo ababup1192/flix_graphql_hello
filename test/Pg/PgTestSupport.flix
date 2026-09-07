@@ -83,7 +83,7 @@ mod PgTestSupport {
     pub def withAdminApi(seeding: Unit -> b \ ef2, body: (Schema, b) -> a \ ef): a \ (ef2 - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr, Tenant, Session, ObjectStore}) + ef + IO =
         withPool(pool -> {
             let seeded = seed(seeding);
-            body(AdminSchema.make(AdminRunner.make(pool, deps(), ProjectId.default())), seeded)
+            body(AdminSchema.make(deps(), AdminRunner.make(pool, deps(), ProjectId.default())), seeded)
         })
 
     ///

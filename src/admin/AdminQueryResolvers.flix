@@ -46,9 +46,25 @@ mod AdminQueryResolvers {
     pub def impact(): GeneratedAdmin.QueryImpactResolver[AdminEff] =
         (_context, id, action) -> Ok(ContentEntries.impact(AdminMapping.entryId("id", id), AdminMapping.impactActionOf(action)))
 
+    /// Query.me
+    pub def me(): GeneratedAdmin.QueryMeResolver[AdminEff] =
+        _context -> Ok(Accounts.me())
+
+    /// Query.members
+    pub def members(): GeneratedAdmin.QueryMembersResolver[AdminEff] =
+        _context -> Ok(Members.list())
+
+    /// Query.invitations
+    pub def invitations(): GeneratedAdmin.QueryInvitationsResolver[AdminEff] =
+        _context -> Ok(Members.invitations())
+
+    /// Query.apiKeys
+    pub def apiKeys(): GeneratedAdmin.QueryApiKeysResolver[AdminEff] =
+        _context -> Ok(ApiKeys.list())
+
     /// type Query のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.QueryResolvers[AdminEff] =
         { contentTypes = contentTypes(), contentType = contentType(), entries = entries(), entry = entry(), assets = assets(), asset = asset(),
-          publishCheck = publishCheck(), impact = impact() }
+          publishCheck = publishCheck(), impact = impact(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys() }
 
 }

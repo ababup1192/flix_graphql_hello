@@ -202,4 +202,21 @@ mod TestServer {
     def testServerSplitProject(): Unit \ Assert =
         Assert.assertEq(expected = ((Some("shop"), "/graphql"), (Some("shop"), "/admin/graphql?x=1"), (None, "/graphql"), (None, "/p/"), (None, "/health")),
             (Server.splitProject("/p/shop/graphql"), Server.splitProject("/p/shop/admin/graphql?x=1"), Server.splitProject("/graphql"), Server.splitProject("/p/"), Server.splitProject("/health")))
+
+    /// Host の先頭ラベルを slug にする。ポートは無視、base が違えば None、/p/ があればそちらが勝つ、base 未設定なら Host は見ない。
+    @Test
+    def testServerSlugFromHost(): Unit \ Assert =
+        let base = Some("example.com");
+        let hostOf = host -> ("Host", host) :: Nil;
+        Assert.assertEq(
+            expected = (Some("consumer"), Some("consumer"), None, None, None, (Some("shop"), "/graphql"), (Some("business"), "/admin/graphql"), (None, "/graphql")),
+            (Server.slugFromHost(base, hostOf("consumer.example.com")),
+             Server.slugFromHost(base, hostOf("Consumer.Example.com:8080")),
+             Server.slugFromHost(base, hostOf("example.com")),
+             Server.slugFromHost(base, hostOf("consumer.other.com")),
+             Server.slugFromHost(None, hostOf("consumer.example.com")),
+             Server.projectOf(base, { method = "GET", path = "/p/shop/graphql", headers = hostOf("consumer.example.com"), body = "" }),
+             Server.projectOf(base, { method = "GET", path = "/admin/graphql", headers = hostOf("business.example.com"), body = "" }),
+             Server.projectOf(None, { method = "GET", path = "/graphql", headers = hostOf("business.example.com"), body = "" })))
+
 }

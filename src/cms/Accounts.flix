@@ -67,26 +67,38 @@ mod Accounts {
     ///
     /// ユーザーが属する組織と役割。
     ///
-    pub def organizationsOf(userId: UserId): List[{ id = OrgId, name = String, role = OrgRole }] \ DbRead =
+    pub def organizationsOf(userId: UserId): List[OrganizationMembership] \ DbRead =
         AuthQueries.listOrganizationsOfUser(UserId.toInt64(userId))
-            |> List.filterMap(row -> OrgRole.parse(row#role) |> Option.map(role -> { id = OrgId.OrgId(row#id), name = row#name, role = role }))
+            |> List.filterMap(row -> OrgRole.parse(row#role) |> Option.map(role -> { organization = { id = OrgId.OrgId(row#id), name = row#name }, role = role }))
 
     ///
     /// ユーザーが触れるプロジェクトと役割。直接の membership に加え、owner である組織の全プロジェクト（owner として）。
     /// 同じプロジェクトが両方にあれば高い方の役割。
     ///
-    pub def projectsOf(userId: UserId): List[{ id = ProjectId, slug = String, name = String, role = Role }] \ DbRead =
+    pub def projectsOf(userId: UserId): List[ProjectMembership] \ DbRead =
+        let projectOf = (id, slug, name, visibility) -> { id = ProjectId.ProjectId(id), slug = slug, name = name, visibility = Visibility.parse(visibility) |> Option.getWithDefault(Visibility.Private) };
         let direct = AuthQueries.listMembershipsOfUser(UserId.toInt64(userId))
-            |> List.filterMap(row -> Role.parse(row#role) |> Option.map(role -> { id = ProjectId.ProjectId(row#id), slug = row#slug, name = row#name, role = role }));
+            |> List.filterMap(row -> Role.parse(row#role) |> Option.map(role -> { target = projectOf(row#id, row#slug, row#name, row#visibility), role = role }));
         let owned = organizationsOf(userId) |> List.filter(org -> org#role == OrgRole.Owner)
-            |> List.flatMap(org -> AuthQueries.listProjectsOfOrg(OrgId.toInt64(org#id))
-                |> List.map(row -> { id = ProjectId.ProjectId(row#id), slug = row#slug, name = row#name, role = Role.Owner }));
+            |> List.flatMap(org -> AuthQueries.listProjectsOfOrg(OrgId.toInt64(org#organization#id))
+                |> List.map(row -> { target = projectOf(row#id, row#slug, row#name, row#visibility), role = Role.Owner }));
         (direct ::: owned)
-            |> List.foldLeft((acc, item) -> match List.find(found -> found#id == item#id, acc) {
+            |> List.foldLeft((acc, item) -> match List.find(found -> found#target#id == item#target#id, acc) {
                 case Some(found) if found#role >= item#role => acc
-                case Some(_) => (item :: List.filter(found -> found#id != item#id, acc))
+                case Some(_) => (item :: List.filter(found -> found#target#id != item#target#id, acc))
                 case None    => item :: acc
             }, Nil)
-            |> List.sortWith((a, b) -> Order.compare(a#id, b#id))
+            |> List.sortWith((a, b) -> Order.compare(a#target#id, b#target#id))
+
+    ///
+    /// 自分。人でなければ None。
+    ///
+    pub def me(): Option[Me] \ DbRead + Session = match Session.current() {
+        case Actor.User(id, _, roles) =>
+            AuthQueries.findUserById(UserId.toInt64(id)) |> Option.map(row ->
+                { user = { id = id, issuer = row#issuer, subject = row#subject, email = row#email, name = row#name },
+                  roles = roles, organizations = organizationsOf(id), projects = projectsOf(id) })
+        case _ => None
+    }
 
 }

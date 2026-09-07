@@ -196,3 +196,48 @@ mod Visibility {
         case _         => None
     }
 }
+
+///
+/// 組織。
+///
+pub type alias Organization = { id = OrgId, name = String }
+
+///
+/// 自分が属する組織と役割。
+///
+pub type alias OrganizationMembership = { organization = Organization, role = OrgRole }
+
+///
+/// プロジェクト（認証の文脈で見る形）。
+///
+pub type alias Project = { id = ProjectId, slug = String, name = String, visibility = Visibility }
+
+///
+/// 自分が触れるプロジェクトと役割。
+///
+pub type alias ProjectMembership = { target = Project, role = Role }
+
+///
+/// 自分。roles は今のプロジェクトでの役割。
+///
+pub type alias Me = { user = User, roles = List[Role], organizations = List[OrganizationMembership], projects = List[ProjectMembership] }
+
+///
+/// プロジェクトのメンバー 1 人。
+///
+pub type alias Member = { userId = UserId, email = String, name = String, role = Role }
+
+///
+/// 招待 1 つ。
+///
+pub type alias Invitation = { id = Int64, email = String, role = Role, createdAt = Timestamp.Timestamp }
+
+///
+/// API キーの 1 行。生の鍵は持たない。
+///
+pub type alias ApiKey = { id = Int64, name = String, scope = ApiKeyScope, createdAt = Timestamp.Timestamp, revokedAt = Option[Timestamp.Timestamp] }
+
+///
+/// 発行した鍵。key はこの時だけ見える。
+///
+pub type alias IssuedApiKey = { id = Int64, name = String, scope = ApiKeyScope, key = String }

@@ -4,16 +4,6 @@
 mod Members {
 
     ///
-    /// メンバー 1 人。
-    ///
-    pub type alias Member = { userId = UserId, email = String, name = String, role = Role }
-
-    ///
-    /// 招待 1 つ。
-    ///
-    pub type alias Invitation = { id = Int64, email = String, role = Role, createdAt = Timestamp.Timestamp }
-
-    ///
     /// 今のプロジェクトのメンバー。
     ///
     pub def list(): List[Member] \ DbRead + DbErr + CmsErr + Tenant + Session =
@@ -35,21 +25,23 @@ mod Members {
     /// WhyNot: email でユーザーを探して直接付けるのを「同じ発行元のユーザーだけ」に限らないのは、招待は owner の明示の操作で、
     /// 発行元は環境で 1 つに決まっているため。
     ///
-    pub def invite(email: String, role: Role): Unit \ DbWrite + CmsErr + Tenant + Session =
+    pub def invite(email: String, role: Role): Invitation \ Db + CmsErr + Tenant + Session =
         Session.require(Permission.ManageMembers);
         let normalized = String.toLowerCase(String.trim(email));
         CmsErr.raiseIfAny(if (String.isMatch(regex = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", normalized)) Nil else Violation.Violation("email", "'${email}' は email の形ではありません") :: Nil);
         let inviter = Session.currentUser();
-        discard AuthQueries.upsertInvitation({ projectId = Tenant.currentId(), email = normalized, role = Role.text(role), invitedBy = UserId.toInt64(inviter) })
+        discard AuthQueries.upsertInvitation({ projectId = Tenant.currentId(), email = normalized, role = Role.text(role), invitedBy = UserId.toInt64(inviter) });
+        invitations() |> List.find(invitation -> invitation#email == normalized) |> CmsErr.orNotFound(Entity.Invitation, normalized)
 
     ///
     /// 役割を変える。最後の owner を降格させる事はできない。
     ///
-    pub def changeRole(userId: UserId, role: Role): Unit \ Db + CmsErr + Tenant + Session =
+    pub def changeRole(userId: UserId, role: Role): Member \ Db + CmsErr + Tenant + Session =
         Session.require(Permission.ManageMembers);
         let current = AuthQueries.findMembership({ userId = UserId.toInt64(userId), projectId = Tenant.currentId() }) |> CmsErr.orNotFound(Entity.Member, "${userId}");
         if (current#role == Role.text(Role.Owner) and role != Role.Owner) guardLastOwner() else ();
-        discard AuthQueries.upsertMembership({ userId = UserId.toInt64(userId), projectId = Tenant.currentId(), role = Role.text(role) })
+        discard AuthQueries.upsertMembership({ userId = UserId.toInt64(userId), projectId = Tenant.currentId(), role = Role.text(role) });
+        list() |> List.find(member -> member#userId == userId) |> CmsErr.orNotFound(Entity.Member, "${userId}")
 
     ///
     /// 外す。最後の owner は外せない。

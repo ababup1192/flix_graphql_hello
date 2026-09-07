@@ -19,7 +19,7 @@ mod AdminEngine {
         match EngineCache.get(projectId, engines) {
             case Some((_, engine)) => Ok(engine)
             case None =>
-                Graphql.buildEngine(AdminSchema.make(AdminRunner.make(pool, deps, projectId)))
+                Graphql.buildEngine(AdminSchema.make(deps, AdminRunner.make(pool, deps, projectId)))
                     |> Result.map(engine -> { EngineCache.put(projectId, "", engine, engines); engine })
         }
 

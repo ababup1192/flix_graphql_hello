@@ -5,7 +5,7 @@
 /// 起動に失敗したらメッセージを出して終了コード 1 で終わる。
 ///
 /// 環境変数: CMS_DSN / CMS_DB_USER / CMS_DB_PASSWORD（DbConfig）、ASSET_*（StorageConfig。省略時は asset 無し）、
-/// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
+/// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_BASE_DOMAIN（`{slug}.{base}` の Host でプロジェクトを選ぶ。省略時は /p/ だけ）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
 /// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health に出す版。省略時は dev）
 ///
 def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
@@ -26,14 +26,17 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
             let jwks = TokenVerifier.createCache();
             let cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins };
             let version = Sys.Env.getVar("CMS_VERSION") |> Option.getWithDefault("dev");
+            let baseDomain = Sys.Env.getVar("CMS_BASE_DOMAIN") |> Option.filter(text -> not String.isEmpty(text));
             let contentConfig = { cors = cors, graphqlPath = "/graphql", version = version };
             let adminConfig = { cors = cors, graphqlPath = "/admin/graphql", version = version };
             let engineCache = ContentEngine.create(deps);
             // WhyNot: コンテンツ API を実行する時以外（/health、404、preflight、GET）でエンジンを組まないのは、型定義が壊れた時に
             // 死活監視や preflight まで 503 になり、404 ごとに目印の SELECT が走るため。GraphQL を実行しない道なので管理 API のエンジンで受ける
-            HttpServer.listen(8080, request ->
+            // WhyNot: 開発モード（X-Dev-User を信じる）で 127.0.0.1 にしか bind しないのは、ヘッダで人になれる経路を LAN に開けないため
+            let bind = match deps#auth#mode { case AuthConfig.Mode.Dev => Some("127.0.0.1") case _ => None };
+            HttpServer.listen(bind, 8080, request ->
                 Health.runWithPool(pool, () -> {
-                    let (slug, path) = Server.splitProject(request#path);
+                    let (slug, path) = Server.projectOf(baseDomain, request);
                     let scoped = { path = path | request };
                     let credential = credentialOf(deps#auth, jwks, request);
                     match resolveProject(pool, slug) {

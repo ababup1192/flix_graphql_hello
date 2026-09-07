@@ -56,6 +56,61 @@ mod AdminMapping {
     pub def idOfAsset(id: AssetId): Id = Id.Id(AssetId.text(id))
 
     ///
+    /// ユーザー・組織・プロジェクトの id と GraphQL の ID。
+    ///
+    pub def idOfUser(id: UserId): Id = Id.Id(Int64.toString(UserId.toInt64(id)))
+
+    pub def idOfOrg(id: OrgId): Id = Id.Id(Int64.toString(OrgId.toInt64(id)))
+
+    pub def idOfProject(id: ProjectId): Id = Id.Id(Int64.toString(ProjectId.toInt64(id)))
+
+    pub def userId(argument: String, id: Id): UserId \ CmsErr = UserId.UserId(number(argument, id))
+
+    pub def orgId(argument: String, id: Id): OrgId \ CmsErr = OrgId.OrgId(number(argument, id))
+
+    ///
+    /// 役割・範囲・公開範囲の enum の写し。
+    ///
+    pub def roleOf(role: GeneratedAdmin.Role): Role = match role {
+        case GeneratedAdmin.Role.Viewer => Role.Viewer
+        case GeneratedAdmin.Role.Writer => Role.Writer
+        case GeneratedAdmin.Role.Editor => Role.Editor
+        case GeneratedAdmin.Role.Owner  => Role.Owner
+    }
+
+    pub def roleToGql(role: Role): GeneratedAdmin.Role = match role {
+        case Role.Viewer => GeneratedAdmin.Role.Viewer
+        case Role.Writer => GeneratedAdmin.Role.Writer
+        case Role.Editor => GeneratedAdmin.Role.Editor
+        case Role.Owner  => GeneratedAdmin.Role.Owner
+    }
+
+    pub def orgRoleToGql(role: OrgRole): GeneratedAdmin.OrgRole = match role {
+        case OrgRole.Member => GeneratedAdmin.OrgRole.Member
+        case OrgRole.Owner  => GeneratedAdmin.OrgRole.Owner
+    }
+
+    pub def apiKeyScopeOf(scope: GeneratedAdmin.ApiKeyScope): ApiKeyScope = match scope {
+        case GeneratedAdmin.ApiKeyScope.Read      => ApiKeyScope.Read
+        case GeneratedAdmin.ApiKeyScope.ReadDraft => ApiKeyScope.ReadDraft
+    }
+
+    pub def apiKeyScopeToGql(scope: ApiKeyScope): GeneratedAdmin.ApiKeyScope = match scope {
+        case ApiKeyScope.Read      => GeneratedAdmin.ApiKeyScope.Read
+        case ApiKeyScope.ReadDraft => GeneratedAdmin.ApiKeyScope.ReadDraft
+    }
+
+    pub def visibilityOf(visibility: GeneratedAdmin.Visibility): Visibility = match visibility {
+        case GeneratedAdmin.Visibility.Public  => Visibility.Public
+        case GeneratedAdmin.Visibility.Private => Visibility.Private
+    }
+
+    pub def visibilityToGql(visibility: Visibility): GeneratedAdmin.Visibility = match visibility {
+        case Visibility.Public  => GeneratedAdmin.Visibility.Public
+        case Visibility.Private => GeneratedAdmin.Visibility.Private
+    }
+
+    ///
     /// Violation の path と message。
     ///
     pub def violationPath(violation: Violation): String = { let Violation.Violation(path, _) = violation; path }
@@ -106,7 +161,7 @@ mod AdminMapping {
         case None        => { width = None, height = None, alt = None }
     }
 
-    def number(argument: String, id: Id): Int64 \ CmsErr =
+    pub def number(argument: String, id: Id): Int64 \ CmsErr =
         let Id.Id(text) = id;
         match Int64.fromString(text) {
             case Some(found) => found

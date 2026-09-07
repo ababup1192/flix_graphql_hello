@@ -3,7 +3,8 @@
 # 実 PG と MinIO 用の接続。docker-compose.yml と同じ値。run と test-pg の両方で使う
 PG_ENV = CMS_DSN=jdbc:postgresql://127.0.0.1:5432/cms CMS_DB_USER=cms CMS_DB_PASSWORD=cms \
 	ASSET_ENDPOINT=http://127.0.0.1:9000 ASSET_BUCKET=cms ASSET_ACCESS_KEY=cms ASSET_SECRET_KEY=cms-secret \
-	ASSET_REGION=us-east-1 ASSET_PUBLIC_URL=http://127.0.0.1:9000/cms
+	ASSET_REGION=us-east-1 ASSET_PUBLIC_URL=http://127.0.0.1:9000/cms \
+	CMS_AUTH=dev CMS_BOOTSTRAP_OWNER=dev@localhost CMS_API_KEY_PEPPER=dev-pepper
 
 # サーバ起動。PG は make db-up で立てておく
 run:

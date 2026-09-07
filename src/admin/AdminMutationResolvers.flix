@@ -78,8 +78,53 @@ mod AdminMutationResolvers {
     pub def deleteAsset(): GeneratedAdmin.MutationDeleteAssetResolver[AdminEff] =
         (_context, id) -> { Assets.delete(AdminMapping.assetId("id", id)); Ok(id) }
 
+    /// Mutation.createOrganization
+    pub def createOrganization(): GeneratedAdmin.MutationCreateOrganizationResolver[AdminEff] =
+        (_context, name) -> {
+            let id = Organizations.create(name);
+            Ok({ id = id, name = name })
+        }
+
+    /// Mutation.createProject
+    pub def createProject(): GeneratedAdmin.MutationCreateProjectResolver[AdminEff] =
+        (_context, orgId, slug, name) -> {
+            let id = Organizations.createProject(AdminMapping.orgId("orgId", orgId), slug, name);
+            Ok(Projects.find(id) |> CmsErr.orNotFound(Entity.Organization, "${id}"))
+        }
+
+    /// Mutation.updateProjectVisibility
+    pub def updateProjectVisibility(): GeneratedAdmin.MutationUpdateProjectVisibilityResolver[AdminEff] =
+        (_context, visibility) -> Ok(Projects.updateVisibility(AdminMapping.visibilityOf(visibility)))
+
+    /// Mutation.inviteMember
+    pub def inviteMember(): GeneratedAdmin.MutationInviteMemberResolver[AdminEff] =
+        (_context, email, role) -> Ok(Members.invite(email, AdminMapping.roleOf(role)))
+
+    /// Mutation.cancelInvitation。消した id を返す
+    pub def cancelInvitation(): GeneratedAdmin.MutationCancelInvitationResolver[AdminEff] =
+        (_context, id) -> { Members.cancelInvitation(AdminMapping.number("id", id)); Ok(id) }
+
+    /// Mutation.changeMemberRole
+    pub def changeMemberRole(): GeneratedAdmin.MutationChangeMemberRoleResolver[AdminEff] =
+        (_context, userId, role) -> Ok(Members.changeRole(AdminMapping.userId("userId", userId), AdminMapping.roleOf(role)))
+
+    /// Mutation.removeMember。外した id を返す
+    pub def removeMember(): GeneratedAdmin.MutationRemoveMemberResolver[AdminEff] =
+        (_context, userId) -> { Members.remove(AdminMapping.userId("userId", userId)); Ok(userId) }
+
+    /// Mutation.createApiKey。pepper が無ければ発行できない
+    pub def createApiKey(deps: Deps): GeneratedAdmin.MutationCreateApiKeyResolver[AdminEff] =
+        (_context, name, scope) -> match deps#auth#pepper {
+            case Some(pepper) => Ok(ApiKeys.create(pepper, name, AdminMapping.apiKeyScopeOf(scope)))
+            case None         => Err("API キーを発行できません（CMS_API_KEY_PEPPER が設定されていません）")
+        }
+
+    /// Mutation.revokeApiKey。失効した id を返す
+    pub def revokeApiKey(): GeneratedAdmin.MutationRevokeApiKeyResolver[AdminEff] =
+        (_context, id) -> { ApiKeys.revoke(AdminMapping.number("id", id)); Ok(id) }
+
     /// type Mutation のリゾルバ一式
-    pub def resolvers(): GeneratedAdmin.MutationResolvers[AdminEff] =
+    pub def resolvers(deps: Deps): GeneratedAdmin.MutationResolvers[AdminEff] =
         {
             createContentType = createContentType(),
             updateContentType = updateContentType(),
@@ -98,7 +143,16 @@ mod AdminMutationResolvers {
             createUploadUrl   = createUploadUrl(),
             confirmAsset      = confirmAsset(),
             updateAsset       = updateAsset(),
-            deleteAsset       = deleteAsset()
+            deleteAsset       = deleteAsset(),
+            createOrganization      = createOrganization(),
+            createProject           = createProject(),
+            updateProjectVisibility = updateProjectVisibility(),
+            inviteMember            = inviteMember(),
+            cancelInvitation        = cancelInvitation(),
+            changeMemberRole        = changeMemberRole(),
+            removeMember            = removeMember(),
+            createApiKey            = createApiKey(deps),
+            revokeApiKey            = revokeApiKey()
         }
 
 }

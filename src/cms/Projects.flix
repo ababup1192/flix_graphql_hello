@@ -10,6 +10,21 @@ mod Projects {
         ProjectsQueries.findProjectBySlug(slug) |> Option.map(row -> ProjectId.ProjectId(row#id))
 
     ///
+    /// id で 1 つ（認証の文脈の形）。無ければ None。
+    ///
+    pub def find(id: ProjectId): Option[Project] \ DbRead =
+        ProjectsQueries.listProjects() |> List.find(row -> row#id == ProjectId.toInt64(id)) |> Option.map(row ->
+            { id = ProjectId.ProjectId(row#id), slug = row#slug, name = row#name, visibility = Visibility.parse(row#visibility) |> Option.getWithDefault(Visibility.Private) })
+
+    ///
+    /// 今のプロジェクトの公開範囲を変える。owner だけ。
+    ///
+    pub def updateVisibility(visibility: Visibility): Project \ Db + CmsErr + Tenant + Session =
+        Session.require(Permission.ManageProject);
+        discard AuthQueries.updateProjectVisibility({ projectId = Tenant.currentId(), visibility = Visibility.text(visibility) });
+        find(Tenant.current()) |> CmsErr.orNotFound(Entity.Organization, "${Tenant.current()}")
+
+    ///
     /// subdomain と /p/ で使えない slug。DNS のラベルとしては有効だが、入口や他のホストと衝突する。
     ///
     pub def reservedSlugs(): List[String] =

@@ -18,6 +18,7 @@ mod HttpServer {
     import java.io.PrintWriter
     import java.lang.Exception
     import java.lang.System
+    import java.net.InetAddress
     import java.net.ServerSocket
     import java.time.Instant
     import java.net.Socket
@@ -29,17 +30,20 @@ mod HttpServer {
 
     ///
     /// 指定ポートで待ち受け、接続ごとにスレッドを起こして handle に渡す。戻らない。
-    /// ログは 1 本のチャネルに集めて logger スレッドが順に表示する。
+    /// ログは 1 本のチャネルに集めて logger スレッドが順に表示する。bind が Some なら、そのアドレスにだけ bind する（開発モードで外に開けないため）。
     ///
     /// WhyNot: handle のエフェクトを多相にしないのは、spawn に渡す式は IO 以外の
     /// algebraic effect を残せないため。Graphql などは呼び出し側が剥がしてから渡す。
     ///
-    pub def listen(port: Int32, handle: HttpRequest -> HttpResponse \ IO): Unit \ {IO, Chan, NonDet} =
+    pub def listen(bind: Option[String], port: Int32, handle: HttpRequest -> HttpResponse \ IO): Unit \ {IO, Chan, NonDet} =
         region rc {
             let (sender, receiver) = Channel.buffered(1024);
             spawn logger(receiver) @ rc;
-            let server = new ServerSocket(port);
-            println("listening on http://localhost:${port}/");
+            let server = match bind {
+                case Some(address) => new ServerSocket(port, 50, InetAddress.getByName(address))
+                case None          => new ServerSocket(port)
+            };
+            println("listening on http://${bind |> Option.getWithDefault("0.0.0.0")}:${port}/");
             def accept() = {
                 let socket = server.accept();
                 spawn serve(socket, sender, handle) @ rc;

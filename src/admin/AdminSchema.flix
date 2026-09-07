@@ -6,10 +6,19 @@ mod AdminSchema {
     ///
     /// スキーマを組み立てる。runner は AdminEff を IO に落とす（本番はプール、テストはメモリ）。
     ///
-    pub def make(runner: Runner[AdminEff]): Schema =
+    pub def make(deps: Deps, runner: Runner[AdminEff]): Schema =
         GeneratedAdmin.schema({
             queryRoot    = AdminQueryResolvers.resolvers(),
-            mutationRoot = AdminMutationResolvers.resolvers(),
+            mutationRoot = AdminMutationResolvers.resolvers(deps),
+            me                     = MeResolvers.resolvers(),
+            organization           = OrganizationResolvers.resolvers(),
+            organizationMembership = OrganizationMembershipResolvers.resolvers(),
+            project_               = ProjectResolvers.resolvers(),
+            projectMembership      = ProjectMembershipResolvers.resolvers(),
+            member                 = MemberResolvers.resolvers(),
+            invitation             = InvitationResolvers.resolvers(),
+            apiKey                 = ApiKeyResolvers.resolvers(),
+            issuedApiKey           = IssuedApiKeyResolvers.resolvers(),
             asset        = AssetResolvers.resolvers(),
             assetPage    = AssetPageResolvers.resolvers(),
             upload       = UploadResolvers.resolvers(),
