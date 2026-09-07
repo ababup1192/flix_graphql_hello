@@ -70,7 +70,7 @@ mod TestSchedulesPg {
                 Sql.execute("UPDATE scheduled_actions SET status = 'running', claimed_at = now() - interval '1 hour' WHERE id = $1", SqlValue.Str(stuckId) :: Nil))));
             let untouched = Scheduler.tick(pool);
             let beforeRecovery = statusOf(pool, stuckId);
-            let jobs = BackgroundJobs.createState();
+            let jobs = BackgroundJobs.createState(15i64);
             let failures = BackgroundJobs.tick(pool, jobs);
             (cancelled, cancelAgainRejected, untouched, beforeRecovery, failures, statusOf(pool, stuckId), stageOf(pool, "e1"), Option.nonEmpty(Ref.get(jobs#lastTick)))
         });

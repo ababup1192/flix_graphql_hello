@@ -35,7 +35,7 @@ curl -s localhost:8080/health # {"status":"ok","version":"..."}
 `/health` の `jobs` にワーカーの最終実行時刻（`lastTickAt`）と、待ち・失敗の件数（`pendingSchedules` / `failedSchedules` / `pendingDeliveries` / `failedDeliveries`。数えられなければ -1）が出る。
 外形監視で `lastTickAt` が古ければワーカーが止まっている。`failedDeliveries` が増えていれば受け手が落ちている。仕事 1 件ごとに `{"job":"webhook","id":...,"status":"delivered",...}` の 1 行 JSON もログに出る。
 
-SIGTERM / SIGINT を受けると、新しい仕事を拾うのをやめ、実行中の 1 周が終わるまで（最長 15 秒）待ってから終わる。`docker stop` の既定の猶予（10 秒）で足りない時は `stop_grace_period` を延ばす。
+SIGTERM / SIGINT を受けると、新しい仕事を拾うのをやめ、実行中の 1 周が終わるまで（最長 `CMS_JOBS_DRAIN_SECONDS`。既定 15 秒）待ってから終わる。compose の `stop_grace_period` はそれより長くする。
 
 保険として、外の cron から同じ処理を呼べる（`CMS_JOBS_TOKEN` を設定した時だけ）。同時に呼ばれても二重にはならない。
 
@@ -65,7 +65,7 @@ X-Cms-Signature: sha256=<hex>           # HMAC-SHA256(secret, "<timestamp>.<body
 
 受け手は同じ計算で署名を照合し、timestamp が古すぎれば捨てる。照合の見本は `scripts/webhook-receiver.py`（`python3 scripts/webhook-receiver.py secret.txt received.log` で 127.0.0.1:9999 に立つ）。中身は入っていないので、必要ならコンテンツ API で読む。
 2xx 以外なら 1 分 → 5 分 → 30 分 → 2 時間の後に送り直し、5 回目で失敗になる（管理 API の `webhookDeliveries` で見え、`redeliverWebhook` で送り直せる）。
-本文の `at` は積んだ時刻（ISO 8601）。同じ entry を続けて公開すると、配信は順不同で届きうる（再試行があるため）。順序が要る受け手は `at` か `X-Cms-Delivery`（ULID。時刻順）で並べ直す。
+本文の `at` は積んだ時刻（ISO 8601）。同じ Webhook 宛の配信は積んだ順に 1 件ずつ送る（前の物が再試行待ちなら次も待つ）ので、受け手には順に届く。届いた順を信じない受け手は `at` か `X-Cms-Delivery`（ULID。時刻順）で並べ直せる。
 
 ## 更新
 
@@ -130,6 +130,7 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_SIGNUP` | `open`（ログインした人は誰でも組織を作れる）/ `closed`（既定の組織の owner だけ） | open |
 | `CMS_JOBS` | `on` ならプロセス内のバックグラウンドワーカー（予約公開と Webhook の配信）を回す。`off` は外部トリガーか別の worker で回す時 | on |
 | `CMS_JOBS_TOKEN` | `POST /jobs/tick`（外部トリガー）を許す `X-Jobs-Token` の値。無ければその口は閉じる | 無し |
+| `CMS_JOBS_DRAIN_SECONDS` | 停止時に実行中の仕事を待つ秒数 | 15 |
 | `CMS_BASE_DOMAIN` | `{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。無ければ `/p/{プロジェクト slug}/` だけ | 無し |
 | `CMS_API_KEY_PEPPER` / `CMS_API_KEY_PEPPER_ID` | 公開 API の鍵のハッシュに混ぜる秘密と版。無ければ鍵を発行できない | 無し / v1 |
 | `JAVA_OPTS` | JVM の引数 | `-Xss32m -XX:MaxRAMPercentage=70` |

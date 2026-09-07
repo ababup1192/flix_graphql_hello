@@ -56,11 +56,17 @@ query resetDelivery(id: String, projectId: Int64) -> exec {
 }
 
 // unscoped: dispatcher はプロジェクトを跨いで送る番の物を拾い、1 件ずつそのプロジェクトの印で送る。複数台でも同じ行を二重に拾わない（SKIP LOCKED）
+// 同じ Webhook 宛は id（ULID = 積んだ順）で直列にする: それより古い物が未完（pending / sending）なら拾わない。順序が要る受け手が並べ直さずに済む
 query claimDueDeliveries(limit: Int64) -> many {
     UPDATE webhook_deliveries SET status = 'sending', attempts = attempts + 1, claimed_at = now()
     WHERE id IN (
-        SELECT id FROM webhook_deliveries WHERE status = 'pending' AND next_attempt_at <= now()
-        ORDER BY next_attempt_at LIMIT :limit FOR UPDATE SKIP LOCKED
+        SELECT d.id FROM webhook_deliveries AS d
+        WHERE d.status = 'pending' AND d.next_attempt_at <= now()
+          AND NOT EXISTS (
+              SELECT 1 FROM webhook_deliveries AS e
+              WHERE e.webhook_id = d.webhook_id AND e.id < d.id AND e.status IN ('pending', 'sending')
+          )
+        ORDER BY d.id LIMIT :limit FOR UPDATE OF d SKIP LOCKED
     )
     RETURNING id, project_id, webhook_id, event, payload, attempts, created_at
 }

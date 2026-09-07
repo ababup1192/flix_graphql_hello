@@ -31,13 +31,24 @@ mod WebhookDispatcher {
         Thread.sleep(intervalMs());
         runForever(pool)
 
+    /// 1 回の tick で拾い直す回数の上限。同じ Webhook 宛は 1 度に 1 件しか拾えない（順序を守るため）ので、送れたら続けて拾う。
+    def maxRounds(): Int32 = 25
+
     ///
-    /// 送る番の配信を拾って送る。送った数を返す。テストは Http の handler を差し替えて相手の応答を作る。
+    /// 送る番の配信を拾って送る。送った数を返す。拾える物が無くなるか上限の回数まで繰り返す。
+    /// テストは Http の handler を差し替えて相手の応答を作る。
     ///
     pub def tick(pool: Pool): Result[String, Int32] \ {IO, Http} =
-        DbRunner.retrying(() -> Pool.withLazyTx(pool, () -> WebhooksQueries.claimDueDeliveries(batchSize())))
-            |> Result.mapErr(failure -> "配信を拾えません: ${failure}")
-            |> Result.flatMap(claimed -> Result.traverse(deliverOne(pool), claimed) |> Result.map(List.length))
+        rounds(pool, maxRounds(), 0)
+
+    def rounds(pool: Pool, remaining: Int32, sent: Int32): Result[String, Int32] \ {IO, Http} =
+        if (remaining <= 0) Ok(sent)
+        else
+            DbRunner.retrying(() -> Pool.withLazyTx(pool, () -> WebhooksQueries.claimDueDeliveries(batchSize())))
+                |> Result.mapErr(failure -> "配信を拾えません: ${failure}")
+                |> Result.flatMap(claimed ->
+                    if (List.isEmpty(claimed)) Ok(sent)
+                    else Result.traverse(deliverOne(pool), claimed) |> Result.flatMap(done -> rounds(pool, remaining - 1, sent + List.length(done))))
 
     ///
     /// 1 件送って結果を書く。

@@ -19,8 +19,6 @@ mod BackgroundJobs {
     /// 終わった記録を残す日数。
     def keepDays(): Int64 = 30i64
 
-    /// 停止時に実行中の 1 周を待つ上限（ミリ秒）。
-    def drainTimeoutMs(): Int64 = 15000i64
 
     ///
     /// ワーカーの状態。/health と停止処理が読む。
@@ -28,11 +26,12 @@ mod BackgroundJobs {
     /// - lastTick: 最後に 1 周が終わった時刻（UNIX ミリ秒）
     /// - stopping: 停止が始まった。新しい周を始めない
     /// - inTick: 1 周の途中
+    /// - drainMs: 停止時に実行中の 1 周を待つ上限（ミリ秒。CMS_JOBS_DRAIN_SECONDS）
     ///
-    pub type alias State = { lastTick = Ref[Option[Int64], Static], stopping = Ref[Bool, Static], inTick = Ref[Bool, Static] }
+    pub type alias State = { lastTick = Ref[Option[Int64], Static], stopping = Ref[Bool, Static], inTick = Ref[Bool, Static], drainMs = Int64 }
 
-    pub def createState(): State \ IO =
-        { lastTick = Ref.fresh(Static, None), stopping = Ref.fresh(Static, false), inTick = Ref.fresh(Static, false) }
+    pub def createState(drainSeconds: Int64): State \ IO =
+        { lastTick = Ref.fresh(Static, None), stopping = Ref.fresh(Static, false), inTick = Ref.fresh(Static, false), drainMs = drainSeconds * 1000i64 }
 
     ///
     /// 止まらずに回す。失敗はログに出して次の周へ。停止が始まったら抜ける。
@@ -56,7 +55,7 @@ mod BackgroundJobs {
         let onSignal = new SignalHandler {
             def handle(_this: SignalHandler, _signal: Signal): Unit \ IO = {
                 Ref.put(true, state#stopping);
-                drain(state, System.currentTimeMillis() + drainTimeoutMs());
+                drain(state, System.currentTimeMillis() + state#drainMs);
                 System.exit(0)
             }
         };

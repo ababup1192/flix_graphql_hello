@@ -26,7 +26,8 @@ mod TestWebhooksPg {
 
     ///
     /// 型を作る（schema.changed）→ フィールド（schema.changed）→ entry を公開（entry.published）→ 取り下げ（entry.unpublished）で 4 件積まれ、新しい順に並ぶ。
-    /// 相手が 500 なら attempts 1 で pending に戻り、次の周では拾われない（次の時刻が先）。redeliver して 200 なら delivered。
+    /// 同じ Webhook 宛は古い順に 1 件ずつなので、相手が 500 なら最古の 1 件だけ attempts 1 で pending に戻り、残りは待つ。次の周では 0 件。
+    /// 最古を redeliver して 200 なら、同じ tick で 4 件が順に送られ delivered。最後に送られたのは最新の entry.unpublished。
     /// 送ったリクエストには出来事・配信 id・署名が付き、署名は secret から同じ計算で照合できる。
     ///
     @Test
@@ -63,13 +64,13 @@ mod TestWebhooksPg {
             expected = (
                 List#{ (WebhookEvent.EntryUnpublished, DeliveryStatus.Pending, 0), (WebhookEvent.EntryPublished, DeliveryStatus.Pending, 0),
                        (WebhookEvent.SchemaChanged, DeliveryStatus.Pending, 0), (WebhookEvent.SchemaChanged, DeliveryStatus.Pending, 0) },
-                Ok(4),
-                List.repeat(4, (DeliveryStatus.Pending, 1, 500)),
-                Ok(0),
                 Ok(1),
+                List#{ (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 1, 500) },
+                Ok(0),
+                Ok(4),
                 Some((DeliveryStatus.Delivered, 2, 200, true)),
                 Some(true),
-                Some(("schema.changed", true, "https://example.com/hook")),
+                Some(("entry.unpublished", false, "https://example.com/hook")),
                 Some(true),
                 5),
             outcome)
@@ -167,5 +168,36 @@ mod TestWebhooksPg {
             }))
         });
         Assert.assertEq(expected = Ok((1, Ok(0), Ok(0))), outcome)
+
+
+    ///
+    /// 同じ Webhook 宛は積んだ順に 1 件ずつ送る。1 件目が 500 で再試行待ちの間、2 件目は拾われない。1 件目を再送して 200 なら、続けて 2 件目も同じ tick で送られる。
+    ///
+    ///   [d1, d2] 積む → tick(500): d1 だけ送る（attempts 1）、d2 は pending のまま attempts 0
+    ///   → tick(500): 0 件（d1 が待ち中なので d2 も待つ）→ redeliver(d1) → tick(200): d1, d2 の順に 2 件
+    ///
+    @Test
+    def testPgWebhookKeepsOrderPerWebhook(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withPool(pool -> {
+            let issued = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
+                let issued = Webhooks.create(draft(List#{WebhookEvent.SchemaChanged}));
+                let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
+                discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+                issued
+            }));
+            let received = Ref.fresh(Static, Nil);
+            let deliveries = () -> PgTestSupport.mutate(pool, () -> Webhooks.deliveries(issued#webhook#publicId, 10)) |> PgTestSupport.seededOrBug |> List.reverse;
+            let ids = deliveries() |> List.map(delivery -> delivery#id);
+            let first = tickWith(500, received, pool);
+            let afterFirst = deliveries() |> List.map(delivery -> delivery#attempts);
+            let blocked = tickWith(500, received, pool);
+            discard PgTestSupport.mutate(pool, () -> Webhooks.redeliver(List.head(ids) |> Option.getWithDefault("?")));
+            let third = tickWith(200, received, pool);
+            let sentOrder = Ref.get(received) |> List.reverse |> List.map(req -> header("X-Cms-Delivery", req));
+            (List.length(ids), first, afterFirst, blocked, third, sentOrder == (ids ::: List.take(1, ids)) or sentOrder == (List.take(1, ids) ::: ids), deliveries() |> List.map(delivery -> delivery#status))
+        });
+        Assert.assertEq(
+            expected = (2, Ok(1), List#{1, 0}, Ok(0), Ok(2), true, List#{DeliveryStatus.Delivered, DeliveryStatus.Delivered}),
+            outcome)
 
 }

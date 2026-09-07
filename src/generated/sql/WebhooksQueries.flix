@@ -7,7 +7,7 @@ mod WebhooksQueries {
     ///
     /// 生成元 webhooks.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 746548391
+    pub def sourceHash(): Int32 = -1164326182
 
     ///
     /// insertWebhook の 1 行。
@@ -215,10 +215,10 @@ mod WebhooksQueries {
         ) yield { id = id, projectId = projectId, webhookId = webhookId, event = event, payload = payload, attempts = attempts, createdAt = createdAt }
 
     ///
-    /// claimDueDeliveries: UPDATE webhook_deliveries SET status = 'sending', attempts = attempts + 1, claimed_at = now() WHERE id IN ( SELECT id FROM webhook_deliveries WHERE status = 'pending' AND next_attempt_at <= now() ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED ) RETURNING id, project_id, webhook_id, event, payload, attempts, created_at
+    /// claimDueDeliveries: UPDATE webhook_deliveries SET status = 'sending', attempts = attempts + 1, claimed_at = now() WHERE id IN ( SELECT d.id FROM webhook_deliveries AS d WHERE d.status = 'pending' AND d.next_attempt_at <= now() AND NOT EXISTS ( SELECT 1 FROM webhook_deliveries AS e WHERE e.webhook_id = d.webhook_id AND e.id < d.id AND e.status IN ('pending', 'sending') ) ORDER BY d.id LIMIT $1 FOR UPDATE OF d SKIP LOCKED ) RETURNING id, project_id, webhook_id, event, payload, attempts, created_at
     ///
     pub def claimDueDeliveries(limit: Int64): List[ClaimDueDeliveriesRow] \ DbWrite =
-        let sql = "UPDATE webhook_deliveries SET status = 'sending', attempts = attempts + 1, claimed_at = now()\n    WHERE id IN (\n        SELECT id FROM webhook_deliveries WHERE status = 'pending' AND next_attempt_at <= now()\n        ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED\n    )\n    RETURNING id, project_id, webhook_id, event, payload, attempts, created_at";
+        let sql = "UPDATE webhook_deliveries SET status = 'sending', attempts = attempts + 1, claimed_at = now()\n    WHERE id IN (\n        SELECT d.id FROM webhook_deliveries AS d\n        WHERE d.status = 'pending' AND d.next_attempt_at <= now()\n          AND NOT EXISTS (\n              SELECT 1 FROM webhook_deliveries AS e\n              WHERE e.webhook_id = d.webhook_id AND e.id < d.id AND e.status IN ('pending', 'sending')\n          )\n        ORDER BY d.id LIMIT $1 FOR UPDATE OF d SKIP LOCKED\n    )\n    RETURNING id, project_id, webhook_id, event, payload, attempts, created_at";
         let params = List#{SqlValue.Int64(limit)};
         RawSql.runWithAllow(() -> Sql.executeReturningAs(claimDueDeliveriesDecoder(), sql, params))
 
