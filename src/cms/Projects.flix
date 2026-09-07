@@ -13,7 +13,13 @@ mod Projects {
     /// id で 1 つ（認証の文脈の形）。無ければ None。
     ///
     pub def find(id: ProjectId): Option[Project] \ DbRead =
-        ProjectsQueries.listProjects() |> List.find(row -> row#id == ProjectId.toInt64(id)) |> Option.map(fromRow)
+        ProjectsQueries.findProjectById(ProjectId.toInt64(id)) |> Option.map(fromRow)
+
+    ///
+    /// プロジェクトの見え方。無いプロジェクトは private 扱い（存在を教えない）。
+    ///
+    pub def visibilityOf(id: ProjectId): Visibility \ DbRead + DbErr =
+        find(id) |> Option.map(found -> found#visibility) |> Option.getWithDefault(Visibility.Private)
 
     ///
     /// 行からプロジェクト。プロジェクト slug と visibility は書く時に検査しているので、読めなければ DB の壊れ。

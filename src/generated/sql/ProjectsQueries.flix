@@ -7,7 +7,7 @@ mod ProjectsQueries {
     ///
     /// 生成元 projects.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -1795930603
+    pub def sourceHash(): Int32 = 1742884277
 
     ///
     /// findProjectBySlug の 1 行。
@@ -31,6 +31,29 @@ mod ProjectsQueries {
         let sql = "SELECT id, public_id, slug, name, org_id, visibility FROM projects WHERE slug = $1";
         let params = List#{SqlValue.Str(slug)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findProjectBySlugDecoder(), sql, params))
+
+    ///
+    /// findProjectById の 1 行。
+    ///
+    pub type alias FindProjectByIdRow = { id = Int64, publicId = String, slug = String, name = String, orgId = Int64, visibility = String }
+
+    def findProjectByIdDecoder(): Decoder[FindProjectByIdRow] =
+        forA (
+            id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
+            slug <- Decoder.str("slug");
+            name <- Decoder.str("name");
+            orgId <- Decoder.int64("org_id");
+            visibility <- Decoder.str("visibility")
+        ) yield { id = id, publicId = publicId, slug = slug, name = name, orgId = orgId, visibility = visibility }
+
+    ///
+    /// findProjectById: SELECT id, public_id, slug, name, org_id, visibility FROM projects WHERE id = $1
+    ///
+    pub def findProjectById(id: Int64): Option[FindProjectByIdRow] \ DbRead =
+        let sql = "SELECT id, public_id, slug, name, org_id, visibility FROM projects WHERE id = $1";
+        let params = List#{SqlValue.Int64(id)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(findProjectByIdDecoder(), sql, params))
 
     ///
     /// listProjects の 1 行。

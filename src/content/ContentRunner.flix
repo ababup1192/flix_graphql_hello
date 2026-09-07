@@ -33,11 +33,8 @@ mod ContentRunner {
     ///
     /// private なプロジェクトは、鍵か役割を持つ人しか読めない。
     ///
-    def guardVisibility(projectId: ProjectId, actor: Actor): Unit \ DbRead + CmsErr =
-        let visibility = AuthQueries.findProjectOrg(ProjectId.toInt64(projectId))
-            |> Option.flatMap(row -> Visibility.parse(row#visibility))
-            |> Option.getWithDefault(Visibility.Private);
-        match (visibility, actor) {
+    def guardVisibility(projectId: ProjectId, actor: Actor): Unit \ DbRead + DbErr + CmsErr =
+        match (Projects.visibilityOf(projectId), actor) {
             case (Visibility.Public, _)                => ()
             case (Visibility.Private, Actor.Anonymous) => CmsErr.invalid(Violation.Violation("auth", "このプロジェクトは非公開です。API キーを X-Api-Key で渡してください") :: Nil)
             case (Visibility.Private, Actor.User(_, _, Nil)) => CmsErr.invalid(Violation.Violation("auth", "このプロジェクトのメンバーではありません") :: Nil)

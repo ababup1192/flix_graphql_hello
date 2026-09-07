@@ -38,8 +38,8 @@ mod Members {
     ///
     pub def changeRole(userId: UserId, role: Role): Member \ Db + CmsErr + Tenant + Session =
         Session.require(Permission.ManageMembers);
-        let current = AuthQueries.findMembership({ userId = UserId.toInt64(userId), projectId = Tenant.currentId() }) |> CmsErr.orNotFound(Entity.Member, "${userId}");
-        if (current#role == Role.text(Role.Owner) and role != Role.Owner) guardLastOwner() else ();
+        let current = roleOf(userId) |> CmsErr.orNotFound(Entity.Member, "${userId}");
+        if (current == Role.Owner and role != Role.Owner) guardLastOwner() else ();
         discard AuthQueries.upsertMembership({ userId = UserId.toInt64(userId), projectId = Tenant.currentId(), role = Role.text(role) });
         list() |> List.find(member -> member#userId == userId) |> CmsErr.orNotFound(Entity.Member, "${userId}")
 
@@ -48,8 +48,8 @@ mod Members {
     ///
     pub def remove(userId: UserId): Unit \ Db + CmsErr + Tenant + Session =
         Session.require(Permission.ManageMembers);
-        let current = AuthQueries.findMembership({ userId = UserId.toInt64(userId), projectId = Tenant.currentId() }) |> CmsErr.orNotFound(Entity.Member, "${userId}");
-        if (current#role == Role.text(Role.Owner)) guardLastOwner() else ();
+        let current = roleOf(userId) |> CmsErr.orNotFound(Entity.Member, "${userId}");
+        if (current == Role.Owner) guardLastOwner() else ();
         discard AuthQueries.deleteMembership({ userId = UserId.toInt64(userId), projectId = Tenant.currentId() })
 
     ///
@@ -59,6 +59,10 @@ mod Members {
         Session.require(Permission.ManageMembers);
         let deleted = AuthQueries.deleteInvitationByPublicId({ publicId = publicId, projectId = Tenant.currentId() });
         if (deleted == 0) CmsErr.notFound(Entity.Invitation, publicId) else ()
+
+    /// 今のプロジェクトでの直接の役割。membership が無ければ None。
+    def roleOf(userId: UserId): Option[Role] \ DbRead + Tenant =
+        AuthQueries.findMembership({ userId = UserId.toInt64(userId), projectId = Tenant.currentId() }) |> Option.flatMap(row -> Role.parse(row#role))
 
     /// プロジェクトの owner が 1 人しかいなければ invalid。組織の owner は数えない（組織側で守る）。
     def guardLastOwner(): Unit \ DbRead + CmsErr + Tenant =

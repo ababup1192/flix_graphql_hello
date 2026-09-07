@@ -4,6 +4,10 @@ query findProjectBySlug(slug: String) -> one {
     SELECT id, public_id, slug, name, org_id, visibility FROM projects WHERE slug = :slug
 }
 
+query findProjectById(id: Int64) -> one {
+    SELECT id, public_id, slug, name, org_id, visibility FROM projects WHERE id = :id
+}
+
 query listProjects() -> many {
     SELECT id, public_id, slug, name, org_id, visibility FROM projects ORDER BY id
 }
