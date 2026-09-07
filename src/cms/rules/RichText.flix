@@ -1,22 +1,28 @@
 ///
-/// richText の中身。ProseMirror の doc 形式（TipTap 互換）を正として保存し、コンテンツ API で HTML と平文にする。全部純粋。
+/// richText の中身。ProseMirror の doc 形式（TipTap 互換）を正として保存し、コンテンツ API で HTML・平文・目次・抜粋にする。全部純粋。
 ///
 /// 形: `{ type: "doc", content: [node] }`。node は `{ type, attrs?, content?, marks?, text? }`。
 /// 許すノードとマークはホワイトリストで、知らない物は invalid にする（後から足すのは易しく、外すのは既存の entry が壊れる）。
+///
+/// HTML には class を付けない。サイト側が `.prose h2` のように親で当てる。種類の区別が要る所（callout / embed）は data 属性。
 ///
 mod RichText {
 
     use Util.Json.Json
 
-    /// 子（content）を持てるノード。
+    /// 子（content）を持てるノード。table > tableRow > tableCell / tableHeader > paragraph。callout の中は段落など。
     pub def containerNodes(): List[String] =
-        "paragraph" :: "heading" :: "bulletList" :: "orderedList" :: "listItem" :: "blockquote" :: "codeBlock" :: Nil
+        "paragraph" :: "heading" :: "bulletList" :: "orderedList" :: "listItem" :: "blockquote" :: "codeBlock" ::
+        "table" :: "tableRow" :: "tableCell" :: "tableHeader" :: "callout" :: Nil
 
-    /// 子を持たないノード。image は attrs.assetId で asset を指す。
-    pub def leafNodes(): List[String] = "text" :: "hardBreak" :: "horizontalRule" :: "image" :: Nil
+    /// 子を持たないノード。image は attrs.assetId で asset を、embed は attrs.url で外部の動画や投稿を指す。
+    pub def leafNodes(): List[String] = "text" :: "hardBreak" :: "horizontalRule" :: "image" :: "embed" :: Nil
 
-    /// text に付けられるマーク。link は attrs.href。
+    /// text に付けられるマーク。link は attrs.href（外部）か attrs.entryId（この CMS の entry）。
     pub def markNames(): List[String] = "bold" :: "italic" :: "strike" :: "underline" :: "code" :: "link" :: Nil
+
+    /// callout の種類。html では data-kind に出る。
+    pub def calloutKinds(): List[String] = "note" :: "tip" :: "warning" :: Nil
 
     /// heading の level の範囲。
     pub def maxHeadingLevel(): Int32 = 4
@@ -34,6 +40,15 @@ mod RichText {
     /// html の image に埋める asset の情報。
     ///
     pub type alias ImageRef = { url = String, width = Option[Int32], height = Option[Int32] }
+
+    ///
+    /// 埋め込みの提供元。url から決まる。
+    ///
+    pub enum EmbedProvider with Eq, Order, ToString {
+        case YouTube
+        case Vimeo
+        case X
+    }
 
     ///
     /// doc の形か（type が "doc" のオブジェクト）。中身までは見ない。
@@ -65,7 +80,9 @@ mod RichText {
             case Some("text") => checkText(path, fields)
             case Some("heading") => checkHeading(path, fields) ::: checkChildren(path, fields)
             case Some("codeBlock") => checkCodeBlock(path, fields) ::: checkChildren(path, fields)
+            case Some("callout") => checkCallout(path, fields) ::: checkChildren(path, fields)
             case Some("image") => checkImage(path, fields)
+            case Some("embed") => checkEmbed(path, fields)
             case Some(name) if List.memberOf(name, containerNodes()) => checkChildren(path, fields)
             case Some(name) if List.memberOf(name, leafNodes()) => Nil
             case Some(name) => Violation.Violation(path, "知らないノード '${name}' です（${List.join(", ", containerNodes() ::: leafNodes())}）") :: Nil
@@ -73,7 +90,7 @@ mod RichText {
         case _ => Violation.Violation(path, "ノードはオブジェクトにしてください") :: Nil
     }
 
-    /// text ノード。text は文字列、marks は許可リストの物だけ、link には http(s) / mailto の href。
+    /// text ノード。text は文字列、marks は許可リストの物だけ。
     def checkText(path: String, fields: Map[String, Json]): List[Violation] =
         let textCheck = match Map.get("text", fields) |> Option.flatMap(EntryValue.asString) {
             case Some(_) => Nil
@@ -81,10 +98,12 @@ mod RichText {
         };
         textCheck ::: (marksOf(fields) |> List.zipWithIndex |> List.flatMap(match (index, mark) -> checkMark("${path}.marks[${index}]", mark)))
 
+    /// link は href（http(s) / mailto）か entryId（entry の id）のどちらか 1 つ。
     def checkMark(path: String, mark: Map[String, Json]): List[Violation] = match typeOf(mark) {
-        case Some("link") => match attrString("href", mark) {
-            case Some(href) if isSafeHref(href) => Nil
-            case _ => Violation.Violation(path, "link の href は http(s):// か mailto: で始めてください") :: Nil
+        case Some("link") => match (attrString("href", mark), attrString("entryId", mark)) {
+            case (Some(href), None) if isSafeHref(href) => Nil
+            case (None, Some(entryId)) if Option.nonEmpty(EntryId.parse(entryId)) => Nil
+            case _ => Violation.Violation(path, "link は attrs.href（http(s):// か mailto:）か attrs.entryId（entry の id）のどちらか 1 つにしてください") :: Nil
         }
         case Some(name) if List.memberOf(name, markNames()) => Nil
         case Some(name) => Violation.Violation(path, "知らないマーク '${name}' です（${List.join(", ", markNames())}）") :: Nil
@@ -111,21 +130,59 @@ mod RichText {
         case Some(_) => Violation.Violation(path, "codeBlock の attrs.language は小文字英数字と + # - を 1 〜 32 文字にしてください") :: Nil
     }
 
+    /// callout。attrs.kind は note / tip / warning。
+    def checkCallout(path: String, fields: Map[String, Json]): List[Violation] = match attrString("kind", fields) {
+        case Some(kind) if List.memberOf(kind, calloutKinds()) => Nil
+        case _ => Violation.Violation(path, "callout の attrs.kind は ${List.join(" / ", calloutKinds())} にしてください") :: Nil
+    }
+
+    /// image ノード。attrs.assetId は asset の id。alt と caption は任意の文字列。
+    def checkImage(path: String, fields: Map[String, Json]): List[Violation] = match attrString("assetId", fields) |> Option.flatMap(AssetId.parse) {
+        case Some(_) => Nil
+        case None    => Violation.Violation(path, "image の attrs.assetId は asset の id にしてください") :: Nil
+    }
+
+    /// embed ノード。attrs.url が知っている提供元の形でなければ止める（任意の iframe は通さない）。
+    def checkEmbed(path: String, fields: Map[String, Json]): List[Violation] = match attrString("url", fields) |> Option.flatMap(embedOf) {
+        case Some(_) => Nil
+        case None    => Violation.Violation(path, "embed の attrs.url は YouTube / Vimeo / X の投稿の URL にしてください") :: Nil
+    }
+
     /// 見出しの id に許す形。
     pub def isHeadingId(id: String): Bool = String.isMatch(regex = "^[A-Za-z0-9_-]{1,64}$", id)
 
     /// コードの言語名に許す形（ts / c++ / c# / objective-c）。
     pub def isLanguage(language: String): Bool = String.isMatch(regex = "^[a-z0-9+#-]{1,32}$", language)
 
-    /// image ノード。attrs.assetId は asset の id。alt は任意の文字列。
-    def checkImage(path: String, fields: Map[String, Json]): List[Violation] = match attrString("assetId", fields) |> Option.flatMap(AssetId.parse) {
-        case Some(_) => Nil
-        case None    => Violation.Violation(path, "image の attrs.assetId は asset の id にしてください") :: Nil
-    }
-
     /// link に許す href。javascript: 等を通さない。
     pub def isSafeHref(href: String): Bool =
         String.startsWith(prefix = "https://", href) or String.startsWith(prefix = "http://", href) or String.startsWith(prefix = "mailto:", href)
+
+    ///
+    /// 埋め込みの URL から (提供元, id)。知らない形は None。
+    ///
+    /// - YouTube: `https://www.youtube.com/watch?v=ID`、`https://youtu.be/ID`
+    /// - Vimeo: `https://vimeo.com/ID`
+    /// - X: `https://x.com/{user}/status/ID`、`https://twitter.com/{user}/status/ID`
+    ///
+    pub def embedOf(url: String): Option[(EmbedProvider, String)] =
+        if (String.isMatch(regex = "^https://(www\\.)?youtube\\.com/watch\\?v=[A-Za-z0-9_-]{6,20}([&#].*)?$", url))
+            Some((EmbedProvider.YouTube, url |> afterMarker("v=") |> takeWhileIdChar))
+        else if (String.isMatch(regex = "^https://youtu\\.be/[A-Za-z0-9_-]{6,20}([?#].*)?$", url))
+            Some((EmbedProvider.YouTube, url |> afterMarker("youtu.be/") |> takeWhileIdChar))
+        else if (String.isMatch(regex = "^https://vimeo\\.com/[0-9]{1,20}([?#].*)?$", url))
+            Some((EmbedProvider.Vimeo, url |> afterMarker("vimeo.com/") |> takeWhileIdChar))
+        else if (String.isMatch(regex = "^https://(x\\.com|twitter\\.com)/[A-Za-z0-9_]{1,15}/status/[0-9]{1,25}([?#].*)?$", url))
+            Some((EmbedProvider.X, url |> afterMarker("/status/") |> takeWhileIdChar))
+        else None
+
+    def afterMarker(marker: String, text: String): String = match String.indexOf(substr = marker, text) {
+        case Some(i) => String.drop(i + String.length(marker), text)
+        case None    => ""
+    }
+
+    def takeWhileIdChar(text: String): String =
+        text |> String.toList |> List.takeWhile(c -> Char.isLetterOrDigit(c) or c == '_' or c == '-') |> List.map(Char.toString) |> List.join("")
 
     // ---- 取り出し ----
 
@@ -134,6 +191,12 @@ mod RichText {
     ///
     pub def assetIds(doc: Json): List[AssetId] =
         nodes(doc) |> List.filter(fields -> typeOf(fields) == Some("image")) |> List.filterMap(attrString("assetId")) |> List.filterMap(AssetId.parse) |> List.distinct
+
+    ///
+    /// link が指す entry の id。重複を除く。
+    ///
+    pub def linkedEntryIds(doc: Json): List[EntryId] =
+        nodes(doc) |> List.flatMap(marksOf) |> List.filter(mark -> typeOf(mark) == Some("link")) |> List.filterMap(attrString("entryId")) |> List.filterMap(EntryId.parse) |> List.distinct
 
     ///
     /// 見出しの一覧。出現順。id は html の見出しと同じ。
@@ -187,20 +250,61 @@ mod RichText {
     def childrenText(fields: Map[String, Json]): String =
         children(fields) |> List.map(textOf) |> List.join("")
 
+    // ---- 派生値（ブログ向け）----
+
+    ///
+    /// 抜粋。平文の改行を空白にし、先頭 length 文字。切れたら末尾に `…`。
+    ///
+    pub def excerpt(length: Int32, doc: Json): String =
+        let flat = toText(doc) |> String.replace(src = "\n", dst = " ") |> String.trim;
+        let chars = String.toList(flat);
+        if (List.length(chars) <= length) flat
+        else (chars |> List.take(length) |> List.map(Char.toString) |> List.join("") |> String.trim) ++ "…"
+
+    ///
+    /// 語数。日本語など（ひらがな・カタカナ・漢字・ハングル）は 1 文字 1 語、それ以外は空白で区切った語。
+    ///
+    pub def wordCount(doc: Json): Int32 =
+        let (cjk, latinWords) = countWords(doc);
+        cjk + latinWords
+
+    ///
+    /// 読了時間（分）。日本語は 1 分 500 文字、それ以外は 1 分 200 語として切り上げ。最低 1 分。
+    ///
+    pub def readingTimeMinutes(doc: Json): Int32 =
+        let (cjk, latinWords) = countWords(doc);
+        let minutes = (Int32.toFloat64(cjk) / 500.0 + Int32.toFloat64(latinWords) / 200.0) |> Float64.ceil |> Float64.tryToInt32 |> Option.getWithDefault(1);
+        Int32.max(1, minutes)
+
+    /// (日本語などの文字数, それ以外の語数)。
+    def countWords(doc: Json): (Int32, Int32) =
+        let chars = toText(doc) |> String.toList;
+        let cjk = chars |> List.count(isCjk);
+        let latinWords = chars |> List.map(c -> if (isCjk(c) or c == '\n') ' ' else c) |> List.map(Char.toString) |> List.join("")
+            |> String.splitOn(substr = " ") |> List.count(word -> not String.isEmpty(String.trim(word)));
+        (cjk, latinWords)
+
+    /// ひらがな・カタカナ・CJK 統合漢字・全角の記号と英数・ハングル。
+    def isCjk(c: Char): Bool =
+        let code = Char.toBmpCodePoint(c);
+        (code >= 0x3040 and code <= 0x30FF) or (code >= 0x3400 and code <= 0x9FFF) or (code >= 0xFF00 and code <= 0xFFEF) or (code >= 0xAC00 and code <= 0xD7AF)
+
     // ---- HTML ----
 
     ///
     /// HTML にする。images は image の asset id → 配信 URL と寸法。無い asset の image は出さない。文字は全部エスケープする。
-    /// 見出しには headings と同じ id が付く。class は付けない（サイト側が `.prose h2` のように親で当てる）。
+    /// 見出しには headings と同じ id が付く。空の段落は出さない。
+    /// 外部リンクは `target="_blank" rel="noopener noreferrer"`、entry へのリンクは `href="#entry:{id}" data-entry-id`
+    /// （サイトが slug に置き換える。json 側の entryId と同じ値）。
     ///
     pub def toHtml(images: Map[AssetId, ImageRef], doc: Json): String = htmlOf(images, withHeadingIds(doc))
 
-    def htmlOf(urls: Map[AssetId, ImageRef], node: Json): String = match node {
+    def htmlOf(images: Map[AssetId, ImageRef], node: Json): String = match node {
         case Json.JObject(fields) =>
-            let inner = () -> children(fields) |> List.map(htmlOf(urls)) |> List.join("");
+            let inner = () -> children(fields) |> List.map(htmlOf(images)) |> List.join("");
             match typeOf(fields) {
                 case Some("text")           => applyMarks(marksOf(fields), escape(Map.get("text", fields) |> Option.flatMap(EntryValue.asString) |> Option.getWithDefault("")))
-                case Some("paragraph")      => "<p>${inner()}</p>"
+                case Some("paragraph")      => { let body = inner(); if (String.isEmpty(String.trim(body))) "" else "<p>${body}</p>" }
                 case Some("heading")        =>
                     let level = attrInt("level", fields) |> Option.getWithDefault(1);
                     let id = attrString("id", fields) |> Option.map(found -> " id=\"${escape(found)}\"") |> Option.getWithDefault("");
@@ -212,14 +316,21 @@ mod RichText {
                 case Some("codeBlock")      =>
                     let language = attrString("language", fields) |> Option.filter(isLanguage) |> Option.map(found -> " class=\"language-${found}\"") |> Option.getWithDefault("");
                     "<pre><code${language}>${inner()}</code></pre>"
+                case Some("table")          => "<table>${inner()}</table>"
+                case Some("tableRow")       => "<tr>${inner()}</tr>"
+                case Some("tableCell")      => "<td>${inner()}</td>"
+                case Some("tableHeader")    => "<th>${inner()}</th>"
+                case Some("callout")        => "<aside data-kind=\"${escape(attrString("kind", fields) |> Option.getWithDefault("note"))}\">${inner()}</aside>"
                 case Some("horizontalRule") => "<hr>"
                 case Some("hardBreak")      => "<br>"
-                case Some("image")          => imageHtml(urls, fields)
+                case Some("image")          => imageHtml(images, fields)
+                case Some("embed")          => embedHtml(fields)
                 case _                      => inner()
             }
         case _ => ""
     }
 
+    /// image。caption があれば figure で包む。
     def imageHtml(images: Map[AssetId, ImageRef], fields: Map[String, Json]): String =
         match attrString("assetId", fields) |> Option.flatMap(AssetId.parse) |> Option.flatMap(id -> Map.get(id, images)) {
             case Some(image) =>
@@ -227,7 +338,23 @@ mod RichText {
                     case (Some(width), Some(height)) => " width=\"${width}\" height=\"${height}\""
                     case _                           => ""
                 };
-                "<img src=\"${escape(image#url)}\" alt=\"${escape(attrString("alt", fields) |> Option.getWithDefault(""))}\"${size}>"
+                let img = "<img src=\"${escape(image#url)}\" alt=\"${escape(attrString("alt", fields) |> Option.getWithDefault(""))}\"${size}>";
+                match attrString("caption", fields) |> Option.filter(caption -> not String.isEmpty(caption)) {
+                    case Some(caption) => "<figure>${img}<figcaption>${escape(caption)}</figcaption></figure>"
+                    case None          => img
+                }
+            case None => ""
+        }
+
+    /// embed。提供元ごとの固定の形。X はサイト側で widgets.js を読めば埋め込みになり、読まなければリンクとして残る。
+    def embedHtml(fields: Map[String, Json]): String =
+        match attrString("url", fields) |> Option.flatMap(url -> embedOf(url) |> Option.map(found -> (url, found))) {
+            case Some((_, (EmbedProvider.YouTube, id))) =>
+                "<figure data-embed=\"youtube\"><iframe src=\"https://www.youtube.com/embed/${id}\" loading=\"lazy\" allowfullscreen allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture\"></iframe></figure>"
+            case Some((_, (EmbedProvider.Vimeo, id))) =>
+                "<figure data-embed=\"vimeo\"><iframe src=\"https://player.vimeo.com/video/${id}\" loading=\"lazy\" allowfullscreen allow=\"autoplay; fullscreen; picture-in-picture\"></iframe></figure>"
+            case Some((url, (EmbedProvider.X, _))) =>
+                "<figure data-embed=\"x\"><blockquote class=\"twitter-tweet\"><a href=\"${escape(url)}\">${escape(url)}</a></blockquote></figure>"
             case None => ""
         }
 
@@ -239,9 +366,10 @@ mod RichText {
             case Some("strike")    => "<s>${acc}</s>"
             case Some("underline") => "<u>${acc}</u>"
             case Some("code")      => "<code>${acc}</code>"
-            case Some("link")      => match attrString("href", mark) {
-                case Some(href) if isSafeHref(href) => "<a href=\"${escape(href)}\" rel=\"noopener\">${acc}</a>"
-                case _                              => acc
+            case Some("link")      => match (attrString("href", mark), attrString("entryId", mark) |> Option.flatMap(EntryId.parse)) {
+                case (Some(href), _) if isSafeHref(href) => "<a href=\"${escape(href)}\" target=\"_blank\" rel=\"noopener noreferrer\">${acc}</a>"
+                case (_, Some(entryId)) => "<a href=\"#entry:${EntryId.text(entryId)}\" data-entry-id=\"${EntryId.text(entryId)}\">${acc}</a>"
+                case _ => acc
             }
             case _ => acc
         }, text, marks)

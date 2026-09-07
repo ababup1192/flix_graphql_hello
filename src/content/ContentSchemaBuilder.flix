@@ -174,8 +174,15 @@ mod ContentSchemaBuilder {
             Schema.field0("json", Out.json(), (_context, doc) -> Ok(JsonValue.fromJson(doc))) ::
             Schema.field0("html", Out.string(), (_context, doc) -> Ok(RichText.toHtml(imageRefs(doc), doc))) ::
             Schema.field0("text", Out.string(), (_context, doc) -> Ok(RichText.toText(doc))) ::
-            Schema.field0("headings", Out.list(Out.obj(headingType())), (_context, doc) -> Ok(RichText.headings(doc))) :: Nil)
-            |> ObjectType.withDescription("構造化した本文。json は ProseMirror の doc、html はその描画（見出しに id 付き）、text は平文、headings は目次用")
+            Schema.field0("headings", Out.list(Out.obj(headingType())), (_context, doc) -> Ok(RichText.headings(doc))) ::
+            Schema.field1("excerpt", excerptLengthArg(), Out.string(), (_context, doc, length) -> Ok(RichText.excerpt(length |> Option.getWithDefault(120), doc))) ::
+            Schema.field0("wordCount", Out.int32(), (_context, doc) -> Ok(RichText.wordCount(doc))) ::
+            Schema.field0("readingTimeMinutes", Out.int32(), (_context, doc) -> Ok(RichText.readingTimeMinutes(doc))) :: Nil)
+            |> ObjectType.withDescription("構造化した本文。json は ProseMirror の doc、html はその描画（見出しに id 付き）、text は平文、headings は目次用、excerpt / wordCount / readingTimeMinutes は一覧向けの派生値")
+
+    /// `excerpt(length: Int = 120)`
+    def excerptLengthArg(): Arg[Option[Int32]] =
+        Schema.arg("length", GqlCodec.option(GqlCodec.int32())) |> Arg.withDefaultValue(Value.Int(120)) |> Arg.withDescription("抜粋の文字数")
 
     ///
     /// `Heading { level text id }`。id は html の見出しと同じ。
