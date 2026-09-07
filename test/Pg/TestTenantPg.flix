@@ -12,7 +12,7 @@ mod TestTenantPg {
     @Test
     def testPgTenantIsolation(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"b1"}, () -> {
-            let shop = Projects.create("shop", "店");
+            let shop = Projects.create(OrgId.default(), "shop", "店");
             let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
             discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hello"))}));
@@ -32,8 +32,8 @@ mod TestTenantPg {
     @Test
     def testPgProjectSlug(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() ->
-            (CmsTestKit.failureMessage(() -> Projects.create("Shop", "x")),
-             CmsTestKit.failureMessage(() -> Projects.create("default", "x")),
+            (CmsTestKit.failureMessage(() -> Projects.create(OrgId.default(), "Shop", "x")),
+             CmsTestKit.failureMessage(() -> Projects.create(OrgId.default(), "default", "x")),
              Projects.findBySlug("default")));
         Assert.assertEq(expected = Ok(Ok((Err("slug: 'Shop' は英小文字・数字・- を 1 〜 64 文字にしてください"), Err("slug: 'default' は既にあります"), Some(ProjectId.default())))), result)
 

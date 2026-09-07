@@ -116,7 +116,7 @@ mod TestAssetsPg {
     def testPgAssetIsolation(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"asset003"}, () -> {
             let upload = Assets.createUpload({ fileName = "a.png", mime = "image/png", size = 5i64 });
-            let shop = Projects.create("shop", "店");
+            let shop = Projects.create(OrgId.default(), "shop", "店");
             Tenant.runWith(shop, () ->
                 (Assets.find(upload#asset#id) |> Option.isEmpty,
                  CmsTestKit.failureMessage(() -> Assets.delete(upload#asset#id))))

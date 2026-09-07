@@ -10,11 +10,18 @@ mod Projects {
         ProjectsQueries.findProjectBySlug(slug) |> Option.map(row -> ProjectId.ProjectId(row#id))
 
     ///
-    /// 作る。slug は URL に出るので lowerCamel か kebab（[a-z0-9-]）に限る。
+    /// subdomain と /p/ で使えない slug。DNS のラベルとしては有効だが、入口や他のホストと衝突する。
     ///
-    pub def create(slug: String, name: String): ProjectId \ Db + CmsErr =
+    pub def reservedSlugs(): List[String] =
+        List#{ "www", "api", "admin", "app", "assets", "cdn", "mail", "static", "p", "default-org" }
+
+    ///
+    /// 組織の下に作る。slug は URL と subdomain に出るので DNS のラベル（[a-z0-9-]）に限り、予約した物は使えない。
+    ///
+    pub def create(orgId: OrgId, slug: String, name: String): ProjectId \ Db + CmsErr =
         CmsErr.raiseIfAny(if (String.isMatch(regex = "^[a-z0-9][a-z0-9-]{0,63}$", slug)) Nil else Violation.Violation("slug", "'${slug}' は英小文字・数字・- を 1 〜 64 文字にしてください") :: Nil);
+        CmsErr.raiseIfAny(if (List.memberOf(slug, reservedSlugs())) Violation.Violation("slug", "'${slug}' は予約されています") :: Nil else Nil);
         CmsErr.raiseIfAny(if (Option.isEmpty(findBySlug(slug))) Nil else Violation.Violation("slug", "'${slug}' は既にあります") :: Nil);
-        ProjectsQueries.insertProject({ slug = slug, name = name }) |> Rows.expectId |> ProjectId.ProjectId
+        ProjectsQueries.insertProject({ orgId = OrgId.toInt64(orgId), slug = slug, name = name }) |> Rows.expectId |> ProjectId.ProjectId
 
 }
