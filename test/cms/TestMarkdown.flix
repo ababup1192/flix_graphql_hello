@@ -1,6 +1,7 @@
 ///
 /// richText の doc と Markdown の双方向変換。方言の表・往復・境界・壊れた入力・RichText との整合。
-/// 本文の穴を塞ぐノード（gallery / image の alt / linkCard / codeBlock の fileName と highlightLines / details）の方言もここ。
+/// 本文の穴を塞ぐノード（gallery / image の alt / linkCard / codeBlock の fileName と highlightLines / details）と、
+/// 数式（`$…$` `$$`）・Mermaid・タスクリスト（`- [ ]`）・動画（`@[video]`）の方言もここ。
 ///
 mod TestMarkdown {
 
@@ -77,6 +78,18 @@ mod TestMarkdown {
 
     def simpleParagraph(text: String): Json = paragraph(List#{ plain(text) })
 
+    def mathText(tex: String): Json = marked("math", tex)
+
+    def mathBlock(tex: String): Json = CmsTestKit.richLeaf("mathBlock", List#{ ("tex", Json.JString(tex)) })
+
+    def taskItem(checked: Bool, blocks: List[Json]): Json = CmsTestKit.richNode("listItem", List#{ ("checked", Json.JBool(checked)) }, blocks)
+
+    def video(assetId: String, caption: Option[String], poster: Option[String]): Json =
+        CmsTestKit.richLeaf("video",
+            (("assetId", Json.JString(assetId)) :: Nil)
+                ::: (caption |> Option.map(found -> ("caption", Json.JString(found))) |> Option.toList)
+                ::: (poster |> Option.map(found -> ("poster", Json.JString(found))) |> Option.toList))
+
     ///
     /// 方言の表。1 行 = (doc, 正規形の Markdown)。書く方向と読む方向の両方で使う。
     ///
@@ -143,7 +156,22 @@ mod TestMarkdown {
         (doc(List#{ paragraph(List#{ plain("a "), marked("code", "x*y"), plain(" b") }) }), "a `x*y` b"),
         (doc(List#{ paragraph(List#{ plain("a "), marked("underline", "下線"), plain(" b") }) }), "a <u>下線</u> b"),
         (doc(List#{ paragraph(List#{ linked("https://example.com/?a=1&b=2", "外部") }) }), "[外部](https://example.com/?a=1&b=2)"),
-        (doc(List#{ paragraph(List#{ entryLinked("post-1", "記事") }) }), "[記事](entry:post-1)")
+        (doc(List#{ paragraph(List#{ entryLinked("post-1", "記事") }) }), "[記事](entry:post-1)"),
+        // math: `$…$`。TeX はそのまま。text の中の $ は \$
+        (doc(List#{ paragraph(List#{ plain("和は "), mathText("a^2 + b_1"), plain(" です") }) }), "和は $a^2 + b_1$ です"),
+        (doc(List#{ simpleParagraph("価格は $10 です") }), "価格は \\$10 です"),
+        // mathBlock: `$$` の行で囲む。中身はエスケープしない
+        (doc(List#{ mathBlock("E = mc^2\n\\frac{1}{2}") }), "$$\nE = mc^2\n\\frac{1}{2}\n$$"),
+        // Mermaid: 普通の codeBlock
+        (doc(List#{ codeBlock(Some("mermaid"), "graph TD;\nA-->B") }), "```mermaid\ngraph TD;\nA-->B\n```"),
+        // タスクリスト: listItem の checked は `- [ ]` `- [x]`。無ければ普通の項目。orderedList でも同じ
+        (doc(List#{ bulletList(List#{ taskItem(true, List#{ simpleParagraph("a") }), taskItem(false, List#{ simpleParagraph("b") }), listItem(List#{ simpleParagraph("c") }) }) }), "- [x] a\n- [ ] b\n- c"),
+        (doc(List#{ orderedList(List#{ taskItem(false, List#{ simpleParagraph("a") }) }) }), "1. [ ] a"),
+        // video: `@[video](asset:ID "caption"){poster=asset:ID}`
+        (doc(List#{ video("asset001", None, None) }), "@[video](asset:asset001)"),
+        (doc(List#{ video("asset001", Some("動画"), None) }), "@[video](asset:asset001 \"動画\")"),
+        (doc(List#{ video("asset001", None, Some("asset002")) }), "@[video](asset:asset001){poster=asset:asset002}"),
+        (doc(List#{ video("asset001", Some("動画"), Some("asset002")) }), "@[video](asset:asset001 \"動画\"){poster=asset:asset002}")
     }
 
     ///
@@ -184,7 +212,11 @@ mod TestMarkdown {
         // CRLF
         ("a\r\n\r\nb", doc(List#{ simpleParagraph("a"), simpleParagraph("b") })),
         // 末尾の改行
-        ("a\n", doc(List#{ simpleParagraph("a") }))
+        ("a\n", doc(List#{ simpleParagraph("a") })),
+        // 大文字の X も済みと読む
+        ("- [X] a", doc(List#{ bulletList(List#{ taskItem(true, List#{ simpleParagraph("a") }) }) })),
+        // `$$` の行の後ろの空白
+        ("$$  \nx\n$$  ", doc(List#{ mathBlock("x") }))
     }
 
     // ---- 1. doc → Markdown ----
@@ -234,6 +266,11 @@ mod TestMarkdown {
     ///   ├ linkCard(https://example.com/card)
     ///   ├ codeBlock(ts, src/a.ts, 1,3-5) "const y = 2;"
     ///   ├ details("補足") ─ paragraph "畳んだ中身" / gallery(2) ─ image(asset005) / image(asset006)
+    ///   ├ paragraph "和は " math "a^2" " で $10"
+    ///   ├ mathBlock "E = mc^2"
+    ///   ├ codeBlock(mermaid) "graph TD;\nA-->B"
+    ///   ├ bulletList ─ listItem(checked) "済み" / listItem(unchecked) "未着手"
+    ///   ├ video(asset007, "動画", poster asset008)
     ///   └ paragraph "行 1" hardBreak "行 2"
     ///
     def article(): Json = doc(List#{
@@ -258,6 +295,11 @@ mod TestMarkdown {
         linkCard("https://example.com/card"),
         codeBlockWith(Some("ts"), Some("src/a.ts"), Some("1,3-5"), "const y = 2;"),
         details("補足", List#{ simpleParagraph("畳んだ中身"), gallery(2, List#{ image("asset005", None, None, None), image("asset006", None, None, None) }) }),
+        paragraph(List#{ plain("和は "), mathText("a^2"), plain(" で $10") }),
+        mathBlock("E = mc^2"),
+        codeBlock(Some("mermaid"), "graph TD;\nA-->B"),
+        bulletList(List#{ taskItem(true, List#{ simpleParagraph("済み") }), taskItem(false, List#{ simpleParagraph("未着手") }) }),
+        video("asset007", Some("動画"), Some("asset008")),
         paragraph(List#{ plain("行 1"), hardBreak(), plain("行 2") })
     })
 
@@ -279,6 +321,11 @@ mod TestMarkdown {
         ++ "https://example.com/card\n\n"
         ++ "```ts:src/a.ts {1,3-5}\nconst y = 2;\n```\n\n"
         ++ "<details><summary>補足</summary>\n\n畳んだ中身\n\n![](asset:asset005) ![](asset:asset006)\n\n</details>\n\n"
+        ++ "和は $a^2$ で \\$10\n\n"
+        ++ "$$\nE = mc^2\n$$\n\n"
+        ++ "```mermaid\ngraph TD;\nA-->B\n```\n\n"
+        ++ "- [x] 済み\n- [ ] 未着手\n\n"
+        ++ "@[video](asset:asset007 \"動画\"){poster=asset:asset008}\n\n"
         ++ "行 1\\\n行 2"
 
     /// 見本の記事は doc → md → doc で元に戻り、md → doc → md でも元に戻る。
@@ -383,6 +430,24 @@ mod TestMarkdown {
              Markdown.fromMarkdown("<details><summary>補足</summary>\na\n</details>\nb"),
              Markdown.fromMarkdown("</details>\na")))
 
+    /// 閉じない `$$` は末尾まで mathBlock、中身の無い `$$` は何も作らない。`$` が 1 つだけの文と `- [ ]` の後に何も無い項目は文字のまま。
+    /// `[ ] a` で始まる段落の項目は書く時にエスケープされ、タスクにならず往復する。
+    @Test
+    def testBrokenSecondWave(): Unit \ Assert =
+        let bracketItem = doc(List#{ bulletList(List#{ listItem(List#{ simpleParagraph("[ ] a") }) }) });
+        Assert.assertEq(
+            expected = (
+                doc(List#{ mathBlock("x\ny") }),
+                doc(Nil),
+                doc(List#{ simpleParagraph("a $ b") }),
+                doc(List#{ bulletList(List#{ listItem(List#{ simpleParagraph("[ ]") }) }) }),
+                bracketItem),
+            (Markdown.fromMarkdown("$$\nx\ny"),
+             Markdown.fromMarkdown("$$\n$$"),
+             Markdown.fromMarkdown("a $ b"),
+             Markdown.fromMarkdown("- [ ]"),
+             Markdown.fromMarkdown(Markdown.toMarkdown(bracketItem))))
+
     /// 壊れた入力でも validate に通る doc を返す（規則外の言語名・見出しの id・5 段以上の見出し・規則外の asset id・規則外のファイル名と行）。
     @Test
     def testBrokenInputStillValidates(): Unit \ Assert =
@@ -404,7 +469,7 @@ mod TestMarkdown {
         let roundTripped = Markdown.fromMarkdown(Markdown.toMarkdown(article()));
         Assert.assertEq(
             expected = (Nil,
-                "タイトル\nこれは 太字 と 斜体 と 打ち消し と code と 下線 と 外部 と 記事 です。\n見出し 2\n箇条書き 1\n箇条書き 2\n入れ子\n番号 1\n番号 2\n引用\nconst x = 1;\n見出し\n値\n太字\na|b\nヒント\n図 2\nhttps://example.com/card\nconst y = 2;\n補足\n畳んだ中身\n行 1\n行 2"),
+                "タイトル\nこれは 太字 と 斜体 と 打ち消し と code と 下線 と 外部 と 記事 です。\n見出し 2\n箇条書き 1\n箇条書き 2\n入れ子\n番号 1\n番号 2\n引用\nconst x = 1;\n見出し\n値\n太字\na|b\nヒント\n図 2\nhttps://example.com/card\nconst y = 2;\n補足\n畳んだ中身\n和は a^2 で $10\nE = mc^2\ngraph TD;\nA-->B\n済み\n未着手\n行 1\n行 2"),
             (RichText.validate("fields.body", roundTripped),
              RichText.toText(roundTripped) |> String.replaceMatches(regex = "\n+", to = "\n")))
 

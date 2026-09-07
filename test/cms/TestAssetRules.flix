@@ -13,7 +13,7 @@ mod TestAssetRules {
     def testInvalidUpload(): Unit \ Assert =
         Assert.assertEq(
             expected = List#{ "mime", "size", "fileName" },
-            AssetRules.validateUpload({ fileName = "///", mime = "video/mp4", size = 21i64 * 1024i64 * 1024i64 })
+            AssetRules.validateUpload({ fileName = "///", mime = "video/quicktime", size = 21i64 * 1024i64 * 1024i64 })
                 |> List.map(violation -> { let Violation.Violation(path, _) = violation; path }))
 
     /// size 0 は置けない。
@@ -27,9 +27,29 @@ mod TestAssetRules {
     /// size は上限ちょうどまで置け、1 バイト超えると落ちる。
     @Test
     def testMaxSizeBoundary(): Unit \ Assert =
-        let cases = List#{ (AssetRules.maxSize(), Nil), (AssetRules.maxSize() + 1i64, List#{"size"}) };
+        let cases = List#{ (AssetRules.maxSize("image/png"), Nil), (AssetRules.maxSize("image/png") + 1i64, List#{"size"}) };
         Assert.assertEq(expected = cases,
             cases |> List.map(match (size, _) -> (size, CmsTestKit.violationPaths(AssetRules.validateUpload({ fileName = "a.png", mime = "image/png", size = size })))))
+
+    /// 上限は mime ごと。動画（mp4 / webm）は 200 MB、画像と PDF は 20 MB。
+    @Test
+    def testMaxSizeByMime(): Unit \ Assert =
+        let cases = List#{ ("video/mp4", 200i64), ("video/webm", 200i64), ("image/png", 20i64), ("application/pdf", 20i64) };
+        Assert.assertEq(expected = cases, cases |> List.map(match (mime, _) -> (mime, AssetRules.maxSize(mime) / 1024i64 / 1024i64)))
+
+    /// 動画は 200 MB ちょうどまで置け、1 バイト超えると落ちる。画像に 200 MB は落ち、video/quicktime は mime で落ちる。
+    @Test
+    def testVideoUpload(): Unit \ Assert =
+        let videoMax = 200i64 * 1024i64 * 1024i64;
+        let cases = List#{
+            ("a.mp4",  "video/mp4",       videoMax,        Nil),
+            ("a.webm", "video/webm",      videoMax,        Nil),
+            ("a.mp4",  "video/mp4",       videoMax + 1i64, List#{"size"}),
+            ("a.png",  "image/png",       videoMax,        List#{"size"}),
+            ("a.mov",  "video/quicktime", 1i64,            List#{"mime"})
+        };
+        Assert.assertEq(expected = cases |> List.map(match (_, _, _, paths) -> paths),
+            cases |> List.map(match (fileName, mime, size, _) -> CmsTestKit.violationPaths(AssetRules.validateUpload({ fileName = fileName, mime = mime, size = size }))))
 
     /// mime は許可リストの綴りそのまま。SVG は置けず、大文字の綴りも通らない。
     @Test

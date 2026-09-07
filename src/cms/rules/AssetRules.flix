@@ -4,16 +4,21 @@
 mod AssetRules {
 
     ///
-    /// 置いてよい mime。画像と PDF だけ。動画は寸法の扱いを決めていないので入れない。
+    /// 置いてよい mime。画像・PDF・動画（mp4 / webm）。
     ///
     /// WhyNot: image/svg+xml を入れないのは、SVG がスクリプトを含められ、配信 URL を直接開かれると実行されるため。
     /// 要る時はプロジェクトの設定で明示し、Content-Disposition: attachment で配る。
+    /// WhyNot: video/quicktime（mov）を入れないのは、ブラウザで直に再生できる保証が無く、変換もしないため。
     ///
     pub def allowedMimes(): List[String] =
-        List#{ "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "application/pdf" }
+        List#{ "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "application/pdf" } ::: videoMimes()
 
-    /// 1 ファイルの上限。20 MB。
-    pub def maxSize(): Int64 = 20i64 * 1024i64 * 1024i64
+    /// 動画の mime。上限が画像より大きい。
+    pub def videoMimes(): List[String] = List#{ "video/mp4", "video/webm" }
+
+    /// 1 ファイルの上限。動画は 200 MB、他は 20 MB。
+    pub def maxSize(mime: String): Int64 =
+        (if (List.memberOf(mime, videoMimes())) 200i64 else 20i64) * 1024i64 * 1024i64
 
     /// ファイル名の上限（文字数）。key に入るので長すぎる物は切る。
     pub def maxFileNameLength(): Int32 = 200
@@ -26,7 +31,7 @@ mod AssetRules {
             if (List.memberOf(request#mime, allowedMimes())) None
             else Some(Violation.Violation("mime", "'${request#mime}' は置けません（${List.join(", ", allowedMimes())}）")),
             if (request#size <= 0i64) Some(Violation.Violation("size", "1 バイト以上にしてください"))
-            else if (request#size > maxSize()) Some(Violation.Violation("size", "${maxSize() / 1024i64 / 1024i64} MB までです"))
+            else if (request#size > maxSize(request#mime)) Some(Violation.Violation("size", "${maxSize(request#mime) / 1024i64 / 1024i64} MB までです"))
             else None,
             if (String.isEmpty(safeFileName(request#fileName))) Some(Violation.Violation("fileName", "ファイル名が空です")) else None
         })

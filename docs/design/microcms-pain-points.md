@@ -18,8 +18,8 @@ microCMS を日常で使ってきた人が挙げた不満。管理画面の計�
 | 脚注が無い | 末尾に手書き | footnote mark。Markdown は `[^1]`（gallery などの後で） |
 | 文字色・寄せ・カスタムクラスがあり、本文にスタイルが混ざる | サイトの見た目と食い違う。移行で消える | 出さない（決め）。強調は mark、区別は callout。表のセル結合も入れない |
 | 折りたたみ（Notion のトグル、GitHub の details）が無い | 長いログや補足を畳めない。エンジニアの記事で定番 | richText の doc に details（attrs.summary、中は何でも）。HTML は `<details><summary>`、Markdown は GitHub でそのまま畳める `<details>` の形（Zenn の `:::details` は GitHub で出ないので採らない） |
-| 数式と Mermaid の図が書けない | 技術記事で必須。画像に焼くしかない | `math` mark と `mathBlock` node（Markdown は `$…$` `$$…$$`）。codeBlock の language が mermaid なら HTML は `data-diagram`。描画は KaTeX / Mermaid をサイト側で |
-| タスクリストが無い | 手順や進捗を本文に書けない | listItem の attrs.checked。Markdown は `- [ ]` `- [x]` |
-| 動画を直接置けない（oEmbed だけ） | 短い動画のために YouTube に上げる | `video` node（assetId、caption、poster）。AssetRules に mime ごとの上限（動画は大きめ）。容量はプランの枠に乗る。変換はしない。長い物は embed に |
+| 数式と Mermaid の図が書けない | 技術記事で必須。画像に焼くしかない | `math` mark と `mathBlock` node（Markdown は `$…$` と `$$` の行、text の `$` は `\$`）。codeBlock の language が mermaid なら HTML の pre に `data-diagram`。描画は KaTeX / Mermaid をサイト側で（2026-09-08） |
+| タスクリストが無い | 手順や進捗を本文に書けない | listItem の attrs.checked。HTML は `li` の `data-checked`、Markdown は `- [ ]` `- [x]`（`1. [ ]` も GFM 通り往復）（2026-09-08） |
+| 動画を直接置けない（oEmbed だけ） | 短い動画のために YouTube に上げる | `video` node（assetId、caption、poster）。HTML は `figure > video[controls]`、Markdown は `@[video](asset:ID "caption"){poster=asset:ID}`。AssetRules は mp4 / webm を 200 MB まで（画像は 20 MB のまま）。容量はプランの枠に乗る。変換はしない。長い物は embed に（2026-09-08） |
 | 画像の拡大表示が無い | 小さい画像を読めない | バックエンドは width / height を持っているので無し。サイト側の lightbox |
 | 本文に別の entry を差し込めない（参照はフィールドの外側だけ） | 記事カードや共通の注意書きを本文に置けない | `entryEmbed` node（entryId）。impact と参照展開に乗せる。差分と MCP の後に単独で計画 |

@@ -4,12 +4,16 @@
 /// 形: `{ type: "doc", content: [node] }`。node は `{ type, attrs?, content?, marks?, text? }`。
 /// 許すノードとマークはホワイトリストで、知らない物は invalid にする（後から足すのは易しく、外すのは既存の entry が壊れる）。
 ///
-/// HTML には class を付けない。サイト側が `.prose h2` のように親で当てる。種類の区別が要る所（callout / embed / gallery / linkCard / codeBlock の fileName）は data 属性。
+/// HTML には class を付けない。サイト側が `.prose h2` のように親で当てる。種類の区別が要る所（callout / embed / gallery / linkCard / codeBlock の fileName と mermaid / 数式 / タスクの checked）は data 属性。
 ///
 /// ノードの一覧:
-/// - container: paragraph / heading(level, id) / bulletList / orderedList / listItem / blockquote / codeBlock(language, fileName, highlightLines) /
+/// - container: paragraph / heading(level, id) / bulletList / orderedList / listItem(checked) / blockquote / codeBlock(language, fileName, highlightLines) /
 ///   table / tableRow / tableCell / tableHeader / callout(kind) / gallery(columns。中は image だけ) / details(summary)
-/// - leaf: text(marks) / hardBreak / horizontalRule / image(assetId, alt, caption, width, height) / embed(url) / linkCard(url)
+/// - leaf: text(marks) / hardBreak / horizontalRule / image(assetId, alt, caption, width, height) / embed(url) / linkCard(url) /
+///   mathBlock(tex) / video(assetId, caption, poster)
+/// - mark: bold / italic / strike / underline / code / link(href | entryId) / math（text が TeX。他のマークと混ぜない）
+///
+/// 数式は TeX のまま持ち、HTML は data-math の span / div（描画は KaTeX をサイト側で）。codeBlock の language が mermaid なら pre に data-diagram（描画は Mermaid をサイト側で）。
 ///
 mod RichText {
 
@@ -20,8 +24,11 @@ mod RichText {
         "paragraph" :: "heading" :: "bulletList" :: "orderedList" :: "listItem" :: "blockquote" :: "codeBlock" ::
         "table" :: "tableRow" :: "tableCell" :: "tableHeader" :: "callout" :: "gallery" :: "details" :: Nil
 
-    /// 子を持たないノード。image は attrs.assetId で asset を、embed は attrs.url で外部の動画や投稿を、linkCard は attrs.url で任意のページを指す。
-    pub def leafNodes(): List[String] = "text" :: "hardBreak" :: "horizontalRule" :: "image" :: "embed" :: "linkCard" :: Nil
+    /// 子を持たないノード。image と video は attrs.assetId で asset を、embed は attrs.url で外部の動画や投稿を、linkCard は attrs.url で任意のページを指す。mathBlock は attrs.tex。
+    pub def leafNodes(): List[String] = "text" :: "hardBreak" :: "horizontalRule" :: "image" :: "embed" :: "linkCard" :: "mathBlock" :: "video" :: Nil
+
+    /// codeBlock の language のうち、図として描く物。HTML の pre に data-diagram が付く。
+    pub def diagramLanguage(): String = "mermaid"
 
     /// gallery の attrs.columns の下限。attrs.columns が無い時の値でもある。
     pub def minGalleryColumns(): Int32 = 2
@@ -29,8 +36,8 @@ mod RichText {
     /// gallery の attrs.columns の上限。
     pub def maxGalleryColumns(): Int32 = 4
 
-    /// text に付けられるマーク。link は attrs.href（外部）か attrs.entryId（この CMS の entry）。
-    pub def markNames(): List[String] = "bold" :: "italic" :: "strike" :: "underline" :: "code" :: "link" :: Nil
+    /// text に付けられるマーク。link は attrs.href（外部）か attrs.entryId（この CMS の entry）。math は text を TeX として持つ。
+    pub def markNames(): List[String] = "bold" :: "italic" :: "strike" :: "underline" :: "code" :: "link" :: "math" :: Nil
 
     /// callout の種類。html では data-kind に出る。
     pub def calloutKinds(): List[String] = "note" :: "tip" :: "warning" :: Nil
@@ -97,6 +104,9 @@ mod RichText {
             case Some("gallery") => checkGallery(path, fields)
             case Some("linkCard") => checkLinkCard(path, fields)
             case Some("details") => checkDetails(path, fields) ::: checkChildren(path, fields)
+            case Some("listItem") => checkListItem(path, fields) ::: checkChildren(path, fields)
+            case Some("mathBlock") => checkMathBlock(path, fields)
+            case Some("video") => checkVideo(path, fields)
             case Some(name) if List.memberOf(name, containerNodes()) => checkChildren(path, fields)
             case Some(name) if List.memberOf(name, leafNodes()) => Nil
             case Some(name) => Violation.Violation(path, "知らないノード '${name}' です（${List.join(", ", containerNodes() ::: leafNodes())}）") :: Nil
@@ -104,13 +114,20 @@ mod RichText {
         case _ => Violation.Violation(path, "ノードはオブジェクトにしてください") :: Nil
     }
 
-    /// text ノード。text は文字列、marks は許可リストの物だけ。
+    /// text ノード。text は文字列、marks は許可リストの物だけ。math が付く text は TeX なので空でなく、他のマークと混ぜない。
     def checkText(path: String, fields: Map[String, Json]): List[Violation] =
         let textCheck = match Map.get("text", fields) |> Option.flatMap(EntryValue.asString) {
             case Some(_) => Nil
             case None    => Violation.Violation(path, "text ノードには文字列の text が要ります") :: Nil
         };
-        textCheck ::: (marksOf(fields) |> List.zipWithIndex |> List.flatMap(match (index, mark) -> checkMark("${path}.marks[${index}]", mark)))
+        let mathCheck = match (hasMathMark(fields), List.length(marksOf(fields)), Map.get("text", fields) |> Option.flatMap(EntryValue.asString) |> Option.map(String.trim)) {
+            case (false, _, _)       => Nil
+            case (true, 1, Some(tex)) if String.nonEmpty(tex) => Nil
+            case _                   => Violation.Violation(path, "math の text は空でない TeX にし、他のマークと混ぜないでください") :: Nil
+        };
+        textCheck ::: mathCheck ::: (marksOf(fields) |> List.zipWithIndex |> List.flatMap(match (index, mark) -> checkMark("${path}.marks[${index}]", mark)))
+
+    def hasMathMark(fields: Map[String, Json]): Bool = marksOf(fields) |> List.exists(mark -> typeOf(mark) == Some("math"))
 
     /// link は href（http(s) / mailto）か entryId（entry の id）のどちらか 1 つ。
     def checkMark(path: String, mark: Map[String, Json]): List[Violation] = match typeOf(mark) {
@@ -192,6 +209,29 @@ mod RichText {
         case _ => Violation.Violation(path, "details の attrs.summary は空でない文字列にしてください") :: Nil
     }
 
+    /// listItem。attrs.checked は任意で、あれば Bool（タスクリストの項目）。
+    def checkListItem(path: String, fields: Map[String, Json]): List[Violation] = match Map.get("checked", attrs(fields)) {
+        case None                => Nil
+        case Some(Json.JBool(_)) => Nil
+        case Some(_)             => Violation.Violation(path, "listItem の attrs.checked は true / false にしてください") :: Nil
+    }
+
+    /// mathBlock。attrs.tex は空でない文字列。
+    def checkMathBlock(path: String, fields: Map[String, Json]): List[Violation] = match attrString("tex", fields) {
+        case Some(tex) if String.nonEmpty(String.trim(tex)) => Nil
+        case _ => Violation.Violation(path, "mathBlock の attrs.tex は空でない TeX にしてください") :: Nil
+    }
+
+    /// video ノード。attrs.assetId は asset の id。caption は任意の文字列、poster は任意で asset の id。
+    def checkVideo(path: String, fields: Map[String, Json]): List[Violation] =
+        let assetIdCheck = match attrString("assetId", fields) |> Option.flatMap(AssetId.parse) {
+            case Some(_) => Nil
+            case None    => Violation.Violation(path, "video の attrs.assetId は asset の id にしてください") :: Nil
+        };
+        assetIdCheck
+            ::: checkOptionalString(path, "caption", _ -> true, "video の attrs.caption は文字列にしてください", fields)
+            ::: checkOptionalString(path, "poster", poster -> Option.nonEmpty(AssetId.parse(poster)), "video の attrs.poster は asset の id にしてください", fields)
+
     /// embed ノード。attrs.url が知っている提供元の形でなければ止める（任意の iframe は通さない）。
     def checkEmbed(path: String, fields: Map[String, Json]): List[Violation] = match attrString("url", fields) |> Option.flatMap(embedOf) {
         case Some(_) => Nil
@@ -248,10 +288,17 @@ mod RichText {
     // ---- 取り出し ----
 
     ///
-    /// image が指す asset の id。重複を除く。規則に合わない物は捨てる（検査が先に止める）。
+    /// image と video が指す asset の id（video は poster も）。重複を除く。規則に合わない物は捨てる（検査が先に止める）。
     ///
     pub def assetIds(doc: Json): List[AssetId] =
-        nodes(doc) |> List.filter(fields -> typeOf(fields) == Some("image")) |> List.filterMap(attrString("assetId")) |> List.filterMap(AssetId.parse) |> List.distinct
+        nodes(doc) |> List.flatMap(nodeAssetIds) |> List.filterMap(AssetId.parse) |> List.distinct
+
+    /// 1 ノードが指す asset の id の文字列。
+    def nodeAssetIds(fields: Map[String, Json]): List[String] = match typeOf(fields) {
+        case Some("image") => attrString("assetId", fields) |> Option.toList
+        case Some("video") => (attrString("assetId", fields) |> Option.toList) ::: (attrString("poster", fields) |> Option.toList)
+        case _             => Nil
+    }
 
     ///
     /// link が指す entry の id。重複を除く。
@@ -305,6 +352,7 @@ mod RichText {
             case Some("gallery")   => (children(fields) |> List.filterMap(captionOf) |> List.map(caption -> caption ++ "\n") |> List.join(""))
             case Some("linkCard")  => (attrString("url", fields) |> Option.getWithDefault("")) ++ "\n"
             case Some("details")   => (attrString("summary", fields) |> Option.getWithDefault("")) ++ "\n" ++ childrenText(fields)
+            case Some("mathBlock") => (attrString("tex", fields) |> Option.getWithDefault("")) ++ "\n"
             case Some(name) if List.memberOf(name, containerNodes()) => childrenText(fields) ++ "\n"
             case _                 => childrenText(fields)
         }
@@ -362,7 +410,7 @@ mod RichText {
     // ---- HTML ----
 
     ///
-    /// HTML にする。images は image の asset id → 配信 URL と寸法。無い asset の image は出さない。文字は全部エスケープする。
+    /// HTML にする。images は image と video（poster も）の asset id → 配信 URL と寸法。無い asset の image / video は出さない。文字は全部エスケープする。
     /// 見出しには headings と同じ id が付く。空の段落は出さない。
     /// 外部リンクは `target="_blank" rel="noopener noreferrer"`、entry へのリンクは `href="#entry:{id}" data-entry-id`
     /// （サイトが slug に置き換える。json 側の entryId と同じ値）。
@@ -381,13 +429,16 @@ mod RichText {
                     "<h${level}${id}>${inner()}</h${level}>"
                 case Some("bulletList")     => "<ul>${inner()}</ul>"
                 case Some("orderedList")    => "<ol>${inner()}</ol>"
-                case Some("listItem")       => "<li>${inner()}</li>"
+                case Some("listItem")       =>
+                    let checked = Map.get("checked", attrs(fields)) |> Option.flatMap(EntryValue.asBool) |> Option.map(found -> " data-checked=\"${found}\"") |> Option.getWithDefault("");
+                    "<li${checked}>${inner()}</li>"
                 case Some("blockquote")     => "<blockquote>${inner()}</blockquote>"
                 case Some("codeBlock")      =>
                     let language = attrString("language", fields) |> Option.filter(isLanguage) |> Option.map(found -> " class=\"language-${found}\"") |> Option.getWithDefault("");
+                    let diagram = attrString("language", fields) |> Option.filter(found -> found == diagramLanguage()) |> Option.map(found -> " data-diagram=\"${found}\"") |> Option.getWithDefault("");
                     let fileName = attrString("fileName", fields) |> Option.filter(isFileName) |> Option.map(found -> " data-file-name=\"${escape(found)}\"") |> Option.getWithDefault("");
                     let highlightLines = attrString("highlightLines", fields) |> Option.filter(isHighlightLines) |> Option.map(found -> " data-highlight-lines=\"${found}\"") |> Option.getWithDefault("");
-                    "<pre${fileName}${highlightLines}><code${language}>${inner()}</code></pre>"
+                    "<pre${diagram}${fileName}${highlightLines}><code${language}>${inner()}</code></pre>"
                 case Some("table")          => "<table>${inner()}</table>"
                 case Some("tableRow")       => "<tr>${inner()}</tr>"
                 case Some("tableCell")      => "<td>${inner()}</td>"
@@ -400,6 +451,8 @@ mod RichText {
                 case Some("gallery")        => galleryHtml(images, fields)
                 case Some("linkCard")       => linkCardHtml(fields)
                 case Some("details")        => "<details><summary>${escape(attrString("summary", fields) |> Option.getWithDefault(""))}</summary>${inner()}</details>"
+                case Some("mathBlock")      => "<div data-math=\"block\">${escape(attrString("tex", fields) |> Option.getWithDefault(""))}</div>"
+                case Some("video")          => videoHtml(images, fields)
                 case _                      => inner()
             }
         case _ => ""
@@ -423,6 +476,17 @@ mod RichText {
             let img = "<img src=\"${escape(image#url)}\" alt=\"${escape(attrString("alt", fields) |> Option.getWithDefault(""))}\"${size}>";
             (img, attrString("caption", fields) |> Option.filter(String.nonEmpty) |> Option.map(escape))
         })
+
+    /// video。figure の中の video。src は asset の URL、poster は poster の asset の URL（無ければ属性ごと出ない）。asset が無ければ出ない。
+    /// 変換はしないので、寸法は付けない。
+    def videoHtml(images: Map[AssetId, ImageRef], fields: Map[String, Json]): String =
+        match attrString("assetId", fields) |> Option.flatMap(AssetId.parse) |> Option.flatMap(id -> Map.get(id, images)) {
+            case Some(source) =>
+                let poster = attrString("poster", fields) |> Option.flatMap(AssetId.parse) |> Option.flatMap(id -> Map.get(id, images)) |> Option.map(found -> " poster=\"${escape(found#url)}\"") |> Option.getWithDefault("");
+                let caption = attrString("caption", fields) |> Option.filter(String.nonEmpty) |> Option.map(found -> "<figcaption>${escape(found)}</figcaption>") |> Option.getWithDefault("");
+                "<figure><video controls src=\"${escape(source#url)}\"${poster}></video>${caption}</figure>"
+            case None => ""
+        }
 
     /// gallery。data-gallery に columns。中の image は並べる箱になるので caption が無くても figure。
     def galleryHtml(images: Map[AssetId, ImageRef], fields: Map[String, Json]): String =
@@ -459,6 +523,7 @@ mod RichText {
             case Some("strike")    => "<s>${acc}</s>"
             case Some("underline") => "<u>${acc}</u>"
             case Some("code")      => "<code>${acc}</code>"
+            case Some("math")      => "<span data-math=\"inline\">${acc}</span>"
             case Some("link")      => match (attrString("href", mark), attrString("entryId", mark) |> Option.flatMap(EntryId.parse)) {
                 case (Some(href), _) if isSafeHref(href) => "<a href=\"${escape(href)}\" target=\"_blank\" rel=\"noopener noreferrer\">${acc}</a>"
                 case (_, Some(entryId)) => "<a href=\"#entry:${EntryId.text(entryId)}\" data-entry-id=\"${EntryId.text(entryId)}\">${acc}</a>"

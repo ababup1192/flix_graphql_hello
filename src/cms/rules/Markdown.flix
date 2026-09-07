@@ -5,7 +5,9 @@
 /// gallery は 1 行に image を空白区切りで 2 つ以上（枚数と違う columns は行末に `{columns=N}`）、embed と linkCard は URL だけの段落（提供元が判れば embed）、
 /// codeBlock は ```` ```言語:ファイル名 {1,3-5} ````、details は `<details><summary>…</summary>` から `</details>` の行まで、
 /// entry へのリンクは `[text](entry:ID)`、underline は `<u>…</u>`。入れ子は 2 空白、番号は 1 から振り直す。
-/// 読む時は少し広く受け（`*` の箇条書き、`1)`、`***`、`__` と `*`、行末 2 空白、`![caption](asset:ID)`、summary の無い `<details>`）、
+/// 数式は `$…$`（math マーク。TeX はそのまま）と `$$` の行で囲む mathBlock、text の `$` は `\$`。タスクリストは `- [ ]` `- [x]`（orderedList でも `1. [ ]`）。
+/// video は `@[video](asset:ID "caption"){poster=asset:ID}`。Mermaid は language が mermaid の codeBlock で、Markdown では普通のフェンス。
+/// 読む時は少し広く受け（`*` の箇条書き、`1)`、`***`、`__` と `*`、行末 2 空白、`![caption](asset:ID)`、summary の無い `<details>`、`- [X]`）、
 /// 読めない物は段落の text に落として必ず RichText.validate に通る doc を返す。
 ///
 /// WhyNot: Java の Markdown ライブラリを使わないのは、方言（asset: / entry: / alerts / {#id}）を完全に握るためと、依存を増やさないため。
@@ -20,8 +22,8 @@ mod Markdown {
     enum Block {
         case Paragraph(List[Inline])
         case Heading(Int32, Option[String], List[Inline])
-        case BulletList(List[List[Block]])
-        case OrderedList(List[List[Block]])
+        case BulletList(List[ListItem])
+        case OrderedList(List[ListItem])
         case Blockquote(List[Block])
         case CodeBlock(CodeInfo, String)
         case Table(List[List[Cell]])
@@ -32,6 +34,18 @@ mod Markdown {
         case Embed(String)
         case LinkCard(String)
         case Details(String, List[Block])
+        case MathBlock(String)
+        case Video(Clip)
+    }
+
+    /// リストの 1 項目。(タスクなら済みか, 中身)。checked が無ければ普通の項目。
+    enum ListItem {
+        case ListItem(Option[Bool], List[Block])
+    }
+
+    /// video 1 つ。(asset の id, caption, poster の asset の id)。
+    enum Clip {
+        case Clip(String, Option[String], Option[String])
     }
 
     /// codeBlock のフェンスに書く物。(言語, ファイル名, 強調する行)。
@@ -73,6 +87,7 @@ mod Markdown {
         case Underline
         case Code
         case Link(LinkTarget)
+        case Math
     }
 
     /// link の先。外部の URL か、この CMS の entry。
@@ -112,6 +127,8 @@ mod Markdown {
         case Some("embed")          => attrString("url", fields) |> Option.map(Block.Embed)
         case Some("linkCard")       => attrString("url", fields) |> Option.map(Block.LinkCard)
         case Some("details")        => Some(Block.Details(attrString("summary", fields) |> Option.filter(String.nonEmpty) |> Option.getWithDefault(defaultSummary()), blocksOf(children(fields))))
+        case Some("mathBlock")      => attrString("tex", fields) |> Option.map(Block.MathBlock)
+        case Some("video")          => attrString("assetId", fields) |> Option.map(assetId -> Block.Video(Clip.Clip(assetId, attrString("caption", fields) |> Option.filter(String.nonEmpty), attrString("poster", fields))))
         case _                      => None
     })
 
@@ -121,8 +138,9 @@ mod Markdown {
     def imageSizeOf(fields: Map[String, Json]): Option[(Int32, Int32)] =
         attrInt("width", fields) |> Option.flatMap(width -> attrInt("height", fields) |> Option.map(height -> (width, height)))
 
-    def listItemsOf(fields: Map[String, Json]): List[List[Block]] =
-        children(fields) |> List.filterMap(objectFields) |> List.filter(item -> typeOf(item) == Some("listItem")) |> List.map(item -> blocksOf(children(item)))
+    def listItemsOf(fields: Map[String, Json]): List[ListItem] =
+        children(fields) |> List.filterMap(objectFields) |> List.filter(item -> typeOf(item) == Some("listItem"))
+            |> List.map(item -> ListItem.ListItem(Map.get("checked", attrs(item)) |> Option.flatMap(EntryValue.asBool), blocksOf(children(item))))
 
     def rowOf(node: Json): Option[List[Cell]] =
         objectFields(node) |> Option.filter(fields -> typeOf(fields) == Some("tableRow")) |> Option.map(fields -> children(fields) |> List.filterMap(cellOf))
@@ -148,6 +166,7 @@ mod Markdown {
         case Some("underline") => Some(Mark.Underline)
         case Some("code")      => Some(Mark.Code)
         case Some("link")      => linkTargetOf(mark) |> Option.map(Mark.Link)
+        case Some("math")      => Some(Mark.Math)
         case _                 => None
     }
 
@@ -191,7 +210,16 @@ mod Markdown {
         case Block.Embed(url)                      => leafNode("embed", ("url", Json.JString(url)) :: Nil)
         case Block.LinkCard(url)                   => leafNode("linkCard", ("url", Json.JString(url)) :: Nil)
         case Block.Details(summary, blocks)        => objectNode("details", ("summary", Json.JString(summary)) :: Nil, blocks |> List.map(blockJson))
+        case Block.MathBlock(tex)                  => leafNode("mathBlock", ("tex", Json.JString(tex)) :: Nil)
+        case Block.Video(clip)                     => clipJson(clip)
     }
+
+    def clipJson(clip: Clip): Json =
+        let Clip.Clip(assetId, caption, poster) = clip;
+        leafNode("video",
+            (("assetId", Json.JString(assetId)) :: Nil)
+                ::: (caption |> Option.map(found -> ("caption", Json.JString(found))) |> Option.toList)
+                ::: (poster |> Option.map(found -> ("poster", Json.JString(found))) |> Option.toList))
 
     def codeInfoAttrs(info: CodeInfo): List[(String, Json)] =
         let CodeInfo.CodeInfo(language, fileName, highlightLines) = info;
@@ -207,7 +235,9 @@ mod Markdown {
                 ::: (caption |> Option.map(found -> ("caption", Json.JString(found))) |> Option.toList)
                 ::: (size |> Option.map(match (width, height) -> ("width", intJson(width)) :: ("height", intJson(height)) :: Nil) |> Option.getWithDefault(Nil)))
 
-    def listItemJson(blocks: List[Block]): Json = objectNode("listItem", Nil, blocks |> List.map(blockJson))
+    def listItemJson(item: ListItem): Json =
+        let ListItem.ListItem(checked, blocks) = item;
+        objectNode("listItem", checked |> Option.map(found -> ("checked", Json.JBool(found))) |> Option.toList, blocks |> List.map(blockJson))
 
     def cellJson(cell: Cell): Json =
         let Cell.Cell(isHeader, blocks) = cell;
@@ -226,6 +256,7 @@ mod Markdown {
         case Mark.Code                            => leafNode("code", Nil)
         case Mark.Link(LinkTarget.Href(href))     => leafNode("link", ("href", Json.JString(href)) :: Nil)
         case Mark.Link(LinkTarget.Entry(entryId)) => leafNode("link", ("entryId", Json.JString(entryId)) :: Nil)
+        case Mark.Math                            => leafNode("math", Nil)
     }
 
     /// 子を持つノード。content は空でも付ける（doc と空の段落の形）。attrs は空なら付けない。
@@ -265,7 +296,14 @@ mod Markdown {
         case Block.Embed(url)                    => Some(url)
         case Block.LinkCard(url)                 => Some(url)
         case Block.Details(summary, blocks)      => Some(("<details><summary>${summary}</summary>" :: (Some(renderBlocks(blocks)) |> Option.filter(String.nonEmpty) |> Option.toList) ::: ("</details>" :: Nil)) |> List.join("\n\n"))
+        case Block.MathBlock(tex)                => Some("$$\n${tex}\n$$")
+        case Block.Video(clip)                   => Some(renderClip(clip))
     }
+
+    /// `@[video](asset:ID "caption"){poster=asset:ID}`。caption と poster は無ければ書かない。
+    def renderClip(clip: Clip): String =
+        let Clip.Clip(assetId, caption, poster) = clip;
+        "@[video](asset:${assetId}${caption |> Option.map(found -> " \"${escapeTitle(found)}\"") |> Option.getWithDefault("")})${poster |> Option.map(found -> "{poster=asset:${found}}") |> Option.getWithDefault("")}"
 
     /// `![alt](asset:ID "caption"){width=W height=H}`。caption は title の位置。alt だけの時は空の title を書く（title が無い形は caption と読むため）。
     def renderPicture(picture: Picture): String =
@@ -285,12 +323,14 @@ mod Markdown {
         let suffix = if (columns == defaultColumns(pictures)) "" else " {columns=${columns}}";
         (pictures |> List.map(renderPicture) |> List.join(" ")) ++ suffix
 
-    /// リストの 1 項目。1 行目に印、2 行目からは 2 空白。入れ子のリストの前は空行を挟まない。
-    def renderListItem(marker: String, blocks: List[Block]): String =
+    /// リストの 1 項目。1 行目に印（タスクなら `[ ]` / `[x]` も）、2 行目からは 2 空白。入れ子のリストの前は空行を挟まない。
+    def renderListItem(marker: String, item: ListItem): String =
+        let ListItem.ListItem(checked, blocks) = item;
+        let taskMarker = marker ++ (checked |> Option.map(found -> if (found) "[x] " else "[ ] ") |> Option.getWithDefault(""));
         let lines = blocks |> List.filterMap(block -> renderBlock(block) |> Option.map(text -> (isList(block), text))) |> joinItemBlocks |> String.splitOn(substr = "\n");
         match lines {
-            case first :: rest => (String.trimRight(marker ++ first) :: (rest |> List.map(line -> if (String.isEmpty(line)) "" else "  ${line}"))) |> List.join("\n")
-            case Nil           => String.trimRight(marker)
+            case first :: rest => (String.trimRight(taskMarker ++ first) :: (rest |> List.map(line -> if (String.isEmpty(line)) "" else "  ${line}"))) |> List.join("\n")
+            case Nil           => String.trimRight(taskMarker)
         }
 
     def joinItemBlocks(rendered: List[(Bool, String)]): String =
@@ -344,6 +384,7 @@ mod Markdown {
     def renderGroup(breakText: String, group: (Option[Mark], List[Inline])): String = match group {
         case (None, members)            => members |> List.map(renderPlain(breakText)) |> List.join("")
         case (Some(Mark.Code), members) => "`${members |> List.map(rawText) |> List.join("")}`"
+        case (Some(Mark.Math), members) => "$${members |> List.map(rawText) |> List.join("")}$"
         case (Some(mark), members)      => "${openMark(mark)}${renderInlines(breakText, members |> List.map(dropHeadMark))}${closeMark(mark)}"
     }
 
@@ -374,6 +415,7 @@ mod Markdown {
         case Mark.Underline => "<u>"
         case Mark.Code      => "`"
         case Mark.Link(_)   => "["
+        case Mark.Math      => "$"
     }
 
     def closeMark(mark: Mark): String = match mark {
@@ -384,16 +426,17 @@ mod Markdown {
         case Mark.Code                            => "`"
         case Mark.Link(LinkTarget.Href(href))     => "](${href})"
         case Mark.Link(LinkTarget.Entry(entryId)) => "](entry:${entryId})"
+        case Mark.Math                            => "$"
     }
 
     ///
-    /// text の中で Markdown の記号になる文字（* _ [ ] ` \ # | < > ~）を \ で逃がす。読む時に戻る。
+    /// text の中で Markdown の記号になる文字（* _ [ ] ` \ # | < > ~ $）を \ で逃がす。読む時に戻る。
     ///
     def escape(text: String): String =
         text |> String.toList |> List.map(c -> if (isMarkdownSpecial(c)) "\\${c}" else Char.toString(c)) |> List.join("")
 
     def isMarkdownSpecial(c: Char): Bool =
-        c == '*' or c == '_' or c == '[' or c == ']' or c == '`' or c == '\\' or c == '#' or c == '|' or c == '<' or c == '>' or c == '~'
+        c == '*' or c == '_' or c == '[' or c == ']' or c == '`' or c == '\\' or c == '#' or c == '|' or c == '<' or c == '>' or c == '~' or c == '$'
 
     ///
     /// 段落の各行が箇条書き・番号・罫線に見えないようにする（`- a` → `\- a`、`1. a` → `1\. a`、`---` → `\---`）。
@@ -423,6 +466,7 @@ mod Markdown {
     enum LineKind {
         case Blank
         case Fence(Int32, CodeInfo)
+        case MathFence
         case DetailsOpen(String)
         case DetailsClose
         case HeadingLine(Int32, String)
@@ -449,6 +493,7 @@ mod Markdown {
     def parseOne(kind: LineKind, line: String, rest: List[String]): (Option[Block], List[String]) = match kind {
         case LineKind.Blank                    => (None, rest)
         case LineKind.Fence(length, info)      => parseFence(length, info, rest)
+        case LineKind.MathFence                => parseMathFence(rest)
         case LineKind.DetailsOpen(summary)     => parseDetails(summary, rest)
         case LineKind.DetailsClose             => (None, rest)
         case LineKind.HeadingLine(level, text) => (Some(parseHeading(level, text)), rest)
@@ -460,7 +505,7 @@ mod Markdown {
     }
 
     def lineKind(line: String): LineKind =
-        List#{ blankKind, fenceKind, detailsOpenKind, detailsCloseKind, headingKind, ruleKind, quoteKind, bulletKind, orderedKind }
+        List#{ blankKind, fenceKind, mathFenceKind, detailsOpenKind, detailsCloseKind, headingKind, ruleKind, quoteKind, bulletKind, orderedKind }
             |> List.findMap(classify -> classify(line))
             |> Option.getWithDefault(LineKind.Plain)
 
@@ -475,6 +520,10 @@ mod Markdown {
                 Some(highlightLines) |> Option.filter(RichText.isHighlightLines))))
         case _ => None
     }
+
+    /// `$$` だけの行。
+    def mathFenceKind(line: String): Option[LineKind] =
+        if (String.isMatch(regex = "^\\s{0,3}\\$\\$\\s*$", line)) Some(LineKind.MathFence) else None
 
     /// `<details><summary>…</summary>`。summary が無いか空なら「詳細」。
     def detailsOpenKind(line: String): Option[LineKind] = match captures("^\\s{0,3}<details>\\s*(?:<summary>(.*?)</summary>)?\\s*$", line) {
@@ -533,6 +582,11 @@ mod Markdown {
         let (body, after) = List.span(line -> not closes(line), rest);
         (Some(Block.CodeBlock(info, List.join("\n", body))), List.drop(1, after))
 
+    /// `$$` から閉じる `$$` まで。閉じなければ末尾まで。中身が空なら何も作らない（validate が空の TeX を通さないため）。
+    def parseMathFence(rest: List[String]): (Option[Block], List[String]) =
+        let (body, after) = List.span(line -> Option.isEmpty(mathFenceKind(line)), rest);
+        (Some(List.join("\n", body)) |> Option.filter(tex -> String.nonEmpty(String.trim(tex))) |> Option.map(Block.MathBlock), List.drop(1, after))
+
     /// `<details>` の行から `</details>` の行まで。中身は普通のブロック。閉じなければ末尾まで。
     def parseDetails(summary: String, rest: List[String]): (Option[Block], List[String]) =
         let (body, after) = List.span(line -> Option.isEmpty(detailsCloseKind(line)), rest);
@@ -565,19 +619,26 @@ mod Markdown {
         case _           => None
     }
 
-    /// 同じ種類の印が続く間の項目。項目の中身は印の後ろと、2 空白以上で始まる続きの行（空行を挟んでよい）。
+    /// 同じ種類の印が続く間の項目。項目の中身は印の後ろと、2 空白以上で始まる続きの行（空行を挟んでよい）。印の直後の `[ ]` / `[x]` はタスク。
     def parseList(isBullet: Bool, lines: List[String]): (Option[Block], List[String]) =
         let (items, after) = parseListItems(isBullet, lines, Nil);
         (Some(if (isBullet) Block.BulletList(items) else Block.OrderedList(items)), after)
 
-    def parseListItems(isBullet: Bool, lines: List[String], acc: List[List[Block]]): (List[List[Block]], List[String]) = match lines {
+    def parseListItems(isBullet: Bool, lines: List[String], acc: List[ListItem]): (List[ListItem], List[String]) = match lines {
         case line :: rest => match markerRest(isBullet, line) {
             case Some(first) =>
                 let (continuation, after) = List.span(line2 -> isBlank(line2) or leadingSpaces(line2) >= 2, rest);
-                parseListItems(isBullet, after, parseBlocks(first :: dedent(continuation)) :: acc)
+                let (checked, firstBody) = taskMarker(first);
+                parseListItems(isBullet, after, ListItem.ListItem(checked, parseBlocks(firstBody :: dedent(continuation))) :: acc)
             case None => (List.reverse(acc), lines)
         }
         case Nil => (List.reverse(acc), Nil)
+    }
+
+    /// `[ ] 本文` / `[x] 本文` / `[X] 本文` なら (済みか, 本文)。後ろに何も無い `[ ]` はタスクにしない（文字のまま）。
+    def taskMarker(first: String): (Option[Bool], String) = match captures("^\\[( |x|X)\\] +(\\S.*)$", first) {
+        case box :: body :: Nil => (Some(box != " "), body)
+        case _                  => (None, first)
     }
 
     def markerRest(isBullet: Bool, line: String): Option[String] =
@@ -640,7 +701,7 @@ mod Markdown {
     }
 
     def paragraphBlock(text: String): Block =
-        List#{ picturesBlock, urlBlock } |> List.findMap(parse -> parse(text)) |> Option.getWithDefault(Block.Paragraph(parseInlines(text)))
+        List#{ picturesBlock, clipBlock, urlBlock } |> List.findMap(parse -> parse(text)) |> Option.getWithDefault(Block.Paragraph(parseInlines(text)))
 
     /// image だけの段落。1 つなら image、空白区切りで 2 つ以上なら gallery（行末の `{columns=N}` は 2 〜 4 に丸める）。文字が混ざれば None。
     def picturesBlock(text: String): Option[Block] =
@@ -681,6 +742,14 @@ mod Markdown {
             case _ => None
         }
 
+    /// `@[video](asset:ID "caption"){poster=asset:ID}` だけの段落。
+    def clipBlock(text: String): Option[Block] =
+        match captures("^@\\[video\\]\\(asset:([A-Za-z0-9_-]{1,64})( \"((?:[^\"\\\\]|\\\\.)*)\")?\\)(?:\\{poster=asset:([A-Za-z0-9_-]{1,64})\\})?$", text) {
+            case assetId :: _ :: title :: poster :: Nil =>
+                Some(Block.Video(Clip.Clip(assetId, Some(unescape(title)) |> Option.filter(String.nonEmpty), Some(poster) |> Option.filter(String.nonEmpty))))
+            case _ => None
+        }
+
     /// URL だけの段落。提供元が判れば embed、他は linkCard。
     def urlBlock(text: String): Option[Block] =
         if (String.isMatch(regex = "^https?://\\S+$", text))
@@ -716,6 +785,7 @@ mod Markdown {
     def step(marks: List[Mark], text: String, pos: Int32): Step = match String.charAt(pos, text) {
         case '\\' => backslashStep(text, pos)
         case '`'  => codeStep(marks, text, pos)
+        case '$'  => mathStep(marks, text, pos)
         case '<'  => angleStep(marks, text, pos)
         case '['  => linkStep(marks, text, pos)
         case ' '  => spaceStep(text, pos)
@@ -740,6 +810,18 @@ mod Markdown {
             case Some(end) => Step.Nested(Inline.Text(marks ::: (Mark.Code :: Nil), String.slice(start = pos + 1, end = end, text)) :: Nil, end + 1)
             case None      => Step.Literal('`', pos + 1)
         }
+
+    /// `$tex$`。中は解釈しない。閉じが無い（`\$` は閉じでない）か中身が空なら `$` の文字。
+    def mathStep(marks: List[Mark], text: String, pos: Int32): Step =
+        match findMathCloser(text, pos + 1) |> Option.filter(end -> end > pos + 1) {
+            case Some(end) => Step.Nested(Inline.Text(marks ::: (Mark.Math :: Nil), String.slice(start = pos + 1, end = end, text)) :: Nil, end + 1)
+            case None      => Step.Literal('$', pos + 1)
+        }
+
+    /// `\` の付かない次の `$` の位置。
+    def findMathCloser(text: String, offset: Int32): Option[Int32] =
+        String.indexOfLeftWithOffset(substr = "$", offset = offset, text) |> Option.flatMap(index ->
+            if (String.nth(index - 1, text) == Some('\\')) findMathCloser(text, index + 1) else Some(index))
 
     /// `<u>…</u>` と `<br>`。
     def angleStep(marks: List[Mark], text: String, pos: Int32): Step =

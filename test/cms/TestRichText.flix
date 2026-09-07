@@ -1,6 +1,7 @@
 ///
 /// richText の規則。ホワイトリストの検査、asset の取り出し、平文と HTML。
-/// 本文の穴を塞ぐノード（gallery / image の alt / linkCard / codeBlock の fileName と highlightLines / details）もここ。
+/// 本文の穴を塞ぐノード（gallery / image の alt / linkCard / codeBlock の fileName と highlightLines / details）と、
+/// 数式（math / mathBlock）・Mermaid・タスクリスト（listItem の checked）・動画（video）もここ。
 ///
 mod TestRichText {
 
@@ -60,7 +61,7 @@ mod TestRichText {
         Assert.assertEq(
             expected = List#{
                 ("fields.body", "richText は { type: \"doc\", content: [...] } の形にしてください"),
-                ("fields.body.content[0]", "知らないノード 'iframe' です（paragraph, heading, bulletList, orderedList, listItem, blockquote, codeBlock, table, tableRow, tableCell, tableHeader, callout, gallery, details, text, hardBreak, horizontalRule, image, embed, linkCard）"),
+                ("fields.body.content[0]", "知らないノード 'iframe' です（paragraph, heading, bulletList, orderedList, listItem, blockquote, codeBlock, table, tableRow, tableCell, tableHeader, callout, gallery, details, text, hardBreak, horizontalRule, image, embed, linkCard, mathBlock, video）"),
                 ("fields.body.content[1].content[0].marks[0]", "link は attrs.href（http(s):// か mailto:）か attrs.entryId（entry の id）のどちらか 1 つにしてください"),
                 ("fields.body.content[2]", "heading の attrs.level は 1 〜 4 にしてください"),
                 ("fields.body.content[3]", "image の attrs.assetId は asset の id にしてください")
@@ -369,5 +370,101 @@ mod TestRichText {
         Assert.assertEq(
             expected = (List#{ (2, "A", "h-1"), (3, "B", "h-2") }, "<h2 id=\"h-1\">A</h2><details><summary>補足</summary><h3 id=\"h-2\">B</h3></details>"),
             (RichText.headings(doc) |> List.map(heading -> (heading#level, heading#text, heading#id)), RichText.toHtml(Map.empty(), doc)))
+
+    // ---- 数式 / Mermaid / タスクリスト / 動画 ----
+
+    /// math マークだけの text。TeX はそのまま。
+    def mathText(tex: String): Json = CmsTestKit.richText(List#{ CmsTestKit.richMark("math", Nil) }, tex)
+
+    def mathBlock(attrs: List[(String, Json)]): Json = CmsTestKit.richLeaf("mathBlock", attrs)
+
+    def listItemWith(checked: Option[Json], content: List[Json]): Json =
+        CmsTestKit.richNode("listItem", checked |> Option.map(found -> ("checked", found)) |> Option.toList, content)
+
+    def video(attrs: List[(String, Json)]): Json = CmsTestKit.richLeaf("video", attrs)
+
+    def paragraphOf(text: Json): Json = node("paragraph", List#{ text })
+
+    /// math は TeX が空か他のマークと混ざれば止まる。mathBlock は attrs.tex が無いか空なら止まる。
+    /// listItem の attrs.checked は Bool だけ。video の attrs.assetId と poster は asset の id の形。
+    @Test
+    def testValidateSecondWave(): Unit \ Assert =
+        let cases = List#{
+            (paragraphOf(mathText("a^2")),                                                                              true),
+            (paragraphOf(mathText("")),                                                                                 false),
+            (paragraphOf(CmsTestKit.richText(List#{ CmsTestKit.richMark("math", Nil), mark("bold") }, "x")),           false),
+            (mathBlock(List#{ ("tex", Json.JString("E=mc^2")) }),                                                       true),
+            (mathBlock(Nil),                                                                                            false),
+            (mathBlock(List#{ ("tex", Json.JString("  ")) }),                                                           false),
+            (node("bulletList", List#{ listItemWith(Some(Json.JBool(true)), List#{ paragraphOf(text("a")) }) }),        true),
+            (node("bulletList", List#{ listItemWith(Some(Json.JBool(false)), List#{ paragraphOf(text("a")) }) }),       true),
+            (node("bulletList", List#{ listItemWith(Some(Json.JString("true")), List#{ paragraphOf(text("a")) }) }),    false),
+            (video(List#{ ("assetId", Json.JString("asset001")) }),                                                     true),
+            (video(List#{ ("assetId", Json.JString("asset001")), ("caption", Json.JString("動画")), ("poster", Json.JString("asset002")) }), true),
+            (video(List#{ ("assetId", Json.JString("not an id!")) }),                                                   false),
+            (video(List#{ ("assetId", Json.JString("asset001")), ("poster", Json.JString("bad!")) }),                   false),
+            (video(Nil),                                                                                                false)
+        };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (block, _) -> isValidDoc(block)))
+
+    /// math は data-math="inline" の span、mathBlock は data-math="block" の div。TeX はエスケープする。
+    @Test
+    def testToHtmlMath(): Unit \ Assert =
+        let doc = node("doc", List#{ node("paragraph", List#{ text("和は "), mathText("a<b") }), mathBlock(List#{ ("tex", Json.JString("x<y")) }) });
+        Assert.assertEq(
+            expected = "<p>和は <span data-math=\"inline\">a&lt;b</span></p><div data-math=\"block\">x&lt;y</div>",
+            RichText.toHtml(Map.empty(), doc))
+
+    /// language が mermaid の codeBlock は pre に data-diagram が付く。他の言語には付かない。
+    @Test
+    def testToHtmlMermaid(): Unit \ Assert =
+        let doc = node("doc", List#{
+            codeBlockWith(List#{ ("language", Json.JString("mermaid")) }, "graph TD;\nA-->B"),
+            codeBlockWith(List#{ ("language", Json.JString("ts")) }, "x")
+        });
+        Assert.assertEq(
+            expected = "<pre data-diagram=\"mermaid\"><code class=\"language-mermaid\">graph TD;\nA--&gt;B</code></pre><pre><code class=\"language-ts\">x</code></pre>",
+            RichText.toHtml(Map.empty(), doc))
+
+    /// listItem の checked は li の data-checked。無ければ属性無し。
+    @Test
+    def testToHtmlTaskList(): Unit \ Assert =
+        let doc = node("doc", List#{ node("bulletList", List#{
+            listItemWith(Some(Json.JBool(true)), List#{ paragraphOf(text("a")) }),
+            listItemWith(Some(Json.JBool(false)), List#{ paragraphOf(text("b")) }),
+            listItemWith(None, List#{ paragraphOf(text("c")) })
+        }) });
+        Assert.assertEq(
+            expected = "<ul><li data-checked=\"true\"><p>a</p></li><li data-checked=\"false\"><p>b</p></li><li><p>c</p></li></ul>",
+            RichText.toHtml(Map.empty(), doc))
+
+    /// video は figure の中の video。src と poster は渡した asset の URL、caption は figcaption。asset が無ければ出ず、poster の asset が無ければ poster だけ出ない。
+    @Test
+    def testToHtmlVideo(): Unit \ Assert =
+        let images = Map#{ AssetId.AssetId("asset001") => { url = "v.mp4", width = None, height = None }, AssetId.AssetId("asset002") => { url = "p.jpg", width = Some(640), height = Some(480) } };
+        let doc = node("doc", List#{
+            video(List#{ ("assetId", Json.JString("asset001")), ("caption", Json.JString("<動画>")), ("poster", Json.JString("asset002")) }),
+            video(List#{ ("assetId", Json.JString("asset001")) }),
+            video(List#{ ("assetId", Json.JString("asset009")) }),
+            video(List#{ ("assetId", Json.JString("asset001")), ("poster", Json.JString("asset009")) })
+        });
+        Assert.assertEq(
+            expected = "<figure><video controls src=\"v.mp4\" poster=\"p.jpg\"></video><figcaption>&lt;動画&gt;</figcaption></figure>"
+                ++ "<figure><video controls src=\"v.mp4\"></video></figure>"
+                ++ "<figure><video controls src=\"v.mp4\"></video></figure>",
+            RichText.toHtml(images, doc))
+
+    /// 平文では math と mathBlock の TeX がそのまま出る。
+    @Test
+    def testToTextMath(): Unit \ Assert =
+        let doc = node("doc", List#{ node("paragraph", List#{ text("和は "), mathText("a^2") }), mathBlock(List#{ ("tex", Json.JString("E=mc^2")) }) });
+        Assert.assertEq(expected = "和は a^2\nE=mc^2", RichText.toText(doc))
+
+    /// assetIds は video の assetId と poster の両方を拾う。重複は 1 つ。
+    @Test
+    def testAssetIdsVideo(): Unit \ Assert =
+        Assert.assertEq(
+            expected = List#{ "asset001", "asset002" },
+            RichText.assetIds(node("doc", List#{ video(List#{ ("assetId", Json.JString("asset001")), ("poster", Json.JString("asset002")) }), image("asset001", "") })) |> List.map(AssetId.text))
 
 }

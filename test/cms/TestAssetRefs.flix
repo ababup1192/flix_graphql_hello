@@ -1,5 +1,5 @@
 ///
-/// entry の中身から asset の参照を取り出す。ASSET の単数・配列、RICH_TEXT の image と gallery の中の image、OBJECT の中。
+/// entry の中身から asset の参照を取り出す。ASSET の単数・配列、RICH_TEXT の image と gallery の中の image と video（poster も）、OBJECT の中。
 ///
 mod TestAssetRefs {
 
@@ -8,10 +8,13 @@ mod TestAssetRefs {
     def image(assetId: String): Json =
         Json.JObject(Map#{ "type" => Json.JString("image"), "attrs" => Json.JObject(Map#{ "assetId" => Json.JString(assetId) }) })
 
+    def video(assetId: String, poster: String): Json =
+        Json.JObject(Map#{ "type" => Json.JString("video"), "attrs" => Json.JObject(Map#{ "assetId" => Json.JString(assetId), "poster" => Json.JString(poster) }) })
+
     ///
     ///   cover: ASSET            = "a1"
     ///   gallery: ASSET (many)   = ["a2", "bad id!", "a1"]
-    ///   body: RICH_TEXT         = doc [ image a3, gallery [ image a5, image a3 ] ]
+    ///   body: RICH_TEXT         = doc [ image a3, gallery [ image a5, image a3 ], video a6 (poster a7) ]
     ///   related: OBJECT { thumb: ASSET = "a4" }
     ///
     @Test
@@ -27,9 +30,10 @@ mod TestAssetRefs {
             ("gallery", Json.JArray(Vector#{ Json.JString("a2"), Json.JString("bad id!"), Json.JString("a1") })),
             ("body", Json.JObject(Map#{ "type" => Json.JString("doc"), "content" => Json.JArray(Vector#{
                 image("a3"),
-                Json.JObject(Map#{ "type" => Json.JString("gallery"), "content" => Json.JArray(Vector#{ image("a5"), image("a3") }) }) }) })),
+                Json.JObject(Map#{ "type" => Json.JString("gallery"), "content" => Json.JArray(Vector#{ image("a5"), image("a3") }) }),
+                video("a6", "a7") }) })),
             ("related", Json.JObject(Map#{ "thumb" => Json.JString("a4") }))
         });
-        Assert.assertEq(expected = List#{ "a1", "a2", "a3", "a5", "a4" }, AssetRefs.extract(fields, data) |> List.map(AssetId.text))
+        Assert.assertEq(expected = List#{ "a1", "a2", "a3", "a5", "a6", "a7", "a4" }, AssetRefs.extract(fields, data) |> List.map(AssetId.text))
 
 }
