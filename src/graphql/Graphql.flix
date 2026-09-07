@@ -96,13 +96,21 @@ import graphql.analysis.MaxQueryDepthInstrumentation
     pub def maxQueryDepth(): Int32 = 15
 
     ///
+    /// 組み立て済みのエンジンで 1 リクエストを実行する。MCP やテストのように「エンジンを持っている側」はこれを直に呼ぶ。
+    ///
+    /// WhyNot: `Graphql` effect をやめてこの関数（executor）を値で渡さないのは、handler が Main でもテストでも 1 段で
+    /// 入れ子の問題が無く、値にしても多相化の手間が同じで得が無いため。
+    ///
+    pub def executeWith(engine: Engine, request: GraphqlRequest, context: Context): GraphqlResponse \ IO =
+        let Engine.Engine(graphql) = engine;
+        toResponse(graphql.execute(toExecutionInput(request, context)).toSpecification())
+
+    ///
     /// 組み立て済みのエンジンで `Graphql` effect を本物の実行に置き換えるハンドラ。
     ///
     pub def runWithEngine(engine: Engine, f: Unit -> a \ ef): a \ (ef - Graphql) + IO =
-        let Engine.Engine(graphql) = engine;
         run f() with handler Graphql {
-            def execute(request, context, resume) =
-                resume(toResponse(graphql.execute(toExecutionInput(request, context)).toSpecification()))
+            def execute(request, context, resume) = resume(executeWith(engine, request, context))
         }
 
     ///

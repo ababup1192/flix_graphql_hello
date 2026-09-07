@@ -111,7 +111,7 @@ mod Accounts {
     /// ユーザーが触れるプロジェクトと役割。直接の membership に加え、owner である組織の全プロジェクト（owner として）。
     /// 同じプロジェクトが両方にあれば高い方の役割。
     ///
-    pub def projectsOf(userId: UserId): List[ProjectMembership] \ DbRead + DbErr =
+    pub def projectsOf(userId: UserId): List[ProjectMembership] \ DbRead =
         let direct = AuthQueries.listMembershipsOfUser(UserId.toInt64(userId))
             |> List.filterMap(row -> Role.parse(row#role) |> Option.map(role -> { target = AuthRows.toProject(row), role = role }));
         let owned = organizationsOf(userId) |> List.filter(org -> org#role == OrgRole.Owner)
@@ -127,12 +127,12 @@ mod Accounts {
     ///
     /// 自分。人でなければ None。
     ///
-    pub def me(): Option[Me] \ DbRead + DbErr + Session = match Session.current() {
+    pub def me(): Option[Me] \ DbRead + Session = match Session.current() {
         case Actor.User(id, _, roles, login) => meOf(id, Authz.effectiveRoles(login, roles))
         case _                               => None
     }
 
-    def meOf(id: UserId, roles: List[Role]): Option[Me] \ DbRead + DbErr =
+    def meOf(id: UserId, roles: List[Role]): Option[Me] \ DbRead =
         AuthQueries.findUserById(UserId.toInt64(id)) |> Option.map(row ->
             { user = AuthRows.toUser(row), roles = roles, organizations = organizationsOf(id), projects = projectsOf(id) })
 

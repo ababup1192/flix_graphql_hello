@@ -21,7 +21,7 @@ mod DbRunner {
     /// 印付き（projectId があれば RLS の印）の遅延 Tx で thunk を走らせる。一時的な失敗は 3 回まで再試行し、
     /// 業務エラーは ROLLBACK の上で Ok(Err(failure)) として返す。
     ///
-    pub def transact(pool: Pool, projectId: Option[ProjectId], thunk: Unit -> a \ ef): Result[DbFailure, Result[CmsFailure, a]] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, CmsErr}) + IO =
+    pub def transact(pool: Pool, projectId: Option[ProjectId], thunk: Unit -> a \ ef): Result[DbFailure, Result[CmsFailure, a]] \ (ef - {Db, CmsErr}) + IO =
         let stash = Ref.fresh(Static, None);
         let outcome = DbError.runWithFailure(() -> Retry.withRetry(3, () -> {
             let inTx = () -> match CmsErr.runWithResult(thunk) {

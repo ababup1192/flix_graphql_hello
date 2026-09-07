@@ -6,14 +6,14 @@ mod Members {
     ///
     /// 今のプロジェクトのメンバー。
     ///
-    pub def list(): List[Member] \ DbRead + DbErr + CmsErr + Tenant + Session =
+    pub def list(): List[Member] \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ManageMembers);
         AuthQueries.listMembers(Tenant.currentId()) |> List.map(AuthRows.toMember)
 
     ///
     /// 今のプロジェクトの招待。
     ///
-    pub def invitations(): List[Invitation] \ DbRead + DbErr + CmsErr + Tenant + Session =
+    pub def invitations(): List[Invitation] \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ManageMembers);
         AuthQueries.listInvitations(Tenant.currentId()) |> List.map(AuthRows.toInvitation)
 
@@ -131,7 +131,7 @@ mod Organizations {
     ///
     /// 組織のメンバー。owner だけが見られる（member と人でない主体には空）。read の PAT でも読める。
     ///
-    pub def members(orgId: OrgId): List[OrganizationMember] \ DbRead + DbErr + Session =
+    pub def members(orgId: OrgId): List[OrganizationMember] \ DbRead + Session =
         if (Session.currentUserForRead() |> Option.exists(user -> isOwner(user, orgId)))
             AuthQueries.listOrgMembers(OrgId.toInt64(orgId)) |> List.map(AuthRows.toOrganizationMember)
         else Nil
@@ -180,7 +180,7 @@ mod Organizations {
     ///
     /// 組織の下のプロジェクト。member なら見られる（人でない主体には空）。read の PAT でも読める。
     ///
-    pub def projects(orgId: OrgId): List[Project] \ DbRead + DbErr + Session =
+    pub def projects(orgId: OrgId): List[Project] \ DbRead + Session =
         if (Session.currentUserForRead() |> Option.exists(user -> Option.nonEmpty(roleOf(user, orgId)))) Projects.listOfOrg(orgId) else Nil
 
 }

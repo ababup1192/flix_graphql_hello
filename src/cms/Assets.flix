@@ -66,13 +66,13 @@ mod Assets {
     ///
     /// id で 1 つ。無ければ None。他のプロジェクトの物も None。
     ///
-    pub def find(id: AssetId): Option[Asset] \ DbRead + DbErr + Tenant =
+    pub def find(id: AssetId): Option[Asset] \ DbRead + Tenant =
         AssetsQueries.findAsset({ id = AssetId.text(id), projectId = Tenant.currentId() }) |> Option.map(AssetRows.toAsset)
 
     ///
     /// id の並びで引く。無い物は落ちる。順は問わない。
     ///
-    pub def findMany(ids: List[AssetId]): List[Asset] \ DbRead + DbErr + Tenant = match ids {
+    pub def findMany(ids: List[AssetId]): List[Asset] \ DbRead + Tenant = match ids {
         case Nil => Nil
         case _   => AssetsQueries.findAssets({ ids = ids |> List.map(AssetId.text), projectId = Tenant.currentId() }) |> List.map(AssetRows.toAsset)
     }
@@ -80,7 +80,7 @@ mod Assets {
     ///
     /// 一覧。新しい順。
     ///
-    pub def list(first: Int32, skip: Int32): AssetPage \ DbRead + DbErr + Tenant + CmsErr + Session =
+    pub def list(first: Int32, skip: Int32): AssetPage \ DbRead + Tenant + CmsErr + Session =
         Session.require(Permission.ReadDraft);
         {
             assets = AssetsQueries.listAssets({ projectId = Tenant.currentId(), limit = Int32.toInt64(first), offset = Int32.toInt64(skip) }) |> List.map(AssetRows.toAsset),
@@ -88,7 +88,7 @@ mod Assets {
         }
 
     /// 1 つ。無ければ notFound。
-    def get(id: AssetId): Asset \ DbRead + DbErr + CmsErr + Tenant =
+    def get(id: AssetId): Asset \ DbRead + CmsErr + Tenant =
         find(id) |> CmsErr.orNotFound(Entity.Asset, AssetId.text(id))
 
     /// ストレージの失敗は業務エラーとして返す（DB の失敗ではないので DbErr にしない）。

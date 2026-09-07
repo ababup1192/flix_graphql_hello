@@ -113,7 +113,10 @@ pub type alias Clip = { playback = Playback, name = String, volume = Float64 }
   3. **文脈の暗黙の引数**: 呼び出し列の深い所で読む「今の〜」で、全関数の引数に通すと汚れる（`Tenant` / `Session`）
   - 「型に意図が出る」「強制力が付く」だけでは理由にしない。effect の和が伸びるほど取り回しが悪くなる。
     値を読むだけの物（設定、状態のまとめ）はレコードで渡す
-  - effect の和が 5 つを超える署名は alias にし、alias は「共通 + 差分」で組む（`AdminEff` = 共通 + `ObjectStore` のように）
+  - 差し替え（2）に当たっても、入力が起動時に固定で読む所が浅い（引数が 1 本しか増えない）なら、effect でなく関数のレコードで渡す（`Health`）
+  - Runner の alias は sqlfx の alias + 差分で組む（`AdminEff = Db + CmsErr + IdGen + …`、`ContentEff = DbRead + …`）。
+    alias を撒かない: alias を def の署名に置いて部分使用すると、誤りの位置が alias の定義行に飛んでどの関数か分からなくなる。
+    ドメイン（src/cms）の署名はその関数が使う effect をそのまま `+` で書く
   - 非再開の effect（基準 1）を `withLazyTx` のような「後始末が要る物」の外で受けると後始末が飛ぶ（接続が漏れた実例あり）。
     必ず内側で受ける（`DbRunner.transact`）
 - **エフェクトはすぐに `run` せず、呼び出し元へ伝播させること**

@@ -42,7 +42,7 @@ mod PersonalTokens {
     ///
     /// 自分の PAT の一覧。人でなければ空。
     ///
-    pub def list(): List[PersonalAccessToken] \ DbRead + DbErr + Session =
+    pub def list(): List[PersonalAccessToken] \ DbRead + Session =
         Session.currentUserForRead()
             |> Option.map(user -> AuthQueries.listPersonalTokens(UserId.toInt64(user)) |> List.map(AuthRows.toPersonalAccessToken))
             |> Option.getWithDefault(Nil)

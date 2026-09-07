@@ -27,7 +27,7 @@ mod Schedules {
     ///
     /// 今のプロジェクトの予約。新しい順。entryId を渡せばその entry の物だけ。
     ///
-    pub def list(entryId: Option[EntryId], first: Int32): List[Schedule] \ DbRead + DbErr + CmsErr + Tenant + Session =
+    pub def list(entryId: Option[EntryId], first: Int32): List[Schedule] \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ReadDraft);
         let limit = Int32.toInt64(first);
         match entryId {
@@ -35,7 +35,7 @@ mod Schedules {
             case None     => SchedulesQueries.listSchedules({ projectId = Tenant.currentId(), limit = limit }) |> List.map(ScheduleRows.toSchedule)
         }
 
-    def find(id: String): Schedule \ DbRead + DbErr + CmsErr + Tenant =
+    def find(id: String): Schedule \ DbRead + CmsErr + Tenant =
         SchedulesQueries.findSchedule({ id = id, projectId = Tenant.currentId() }) |> Option.map(ScheduleRows.toSchedule) |> CmsErr.orNotFound(Entity.Schedule, id)
 
 }

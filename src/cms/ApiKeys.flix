@@ -68,7 +68,7 @@ mod ApiKeys {
     ///
     /// 今のプロジェクトの鍵の一覧。
     ///
-    pub def list(): List[ApiKey] \ DbRead + DbErr + CmsErr + Tenant + Session =
+    pub def list(): List[ApiKey] \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ManageApiKeys);
         AuthQueries.listApiKeys(Tenant.currentId()) |> List.map(AuthRows.toApiKey)
 

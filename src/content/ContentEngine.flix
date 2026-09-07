@@ -59,7 +59,7 @@ mod ContentEngine {
     ///
     /// プールから接続を借りて thunk を 1 つの遅延 Tx で走らせ、DbFailure を label 付きの文字列にする。一時的な失敗は Runner と同じく再試行する。
     ///
-    def read(pool: Pool, projectId: ProjectId, label: String, thunk: Unit -> a \ ef): Result[String, a] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr}) + IO =
+    def read(pool: Pool, projectId: ProjectId, label: String, thunk: Unit -> a \ ef): Result[String, a] \ (ef - Db) + IO =
         DbRunner.retrying(() -> TenantTx.withLazyTx(pool, projectId, thunk)) |> Result.mapErr(failure -> "${label}: ${failure}")
 
 }

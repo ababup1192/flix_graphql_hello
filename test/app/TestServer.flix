@@ -8,7 +8,7 @@
 mod TestServer {
 
     def handle(request: HttpRequest): HttpResponse \ Graphql =
-        HealthFake.runWithOk(() -> Server.handle(Server.defaultConfig(), Credential.Missing, request))
+        Server.handle(Server.defaultConfig(), HealthFake.ok(), Credential.Missing, request)
 
     ///
     /// POST /graphql に JSON ボディを載せたリクエスト。
@@ -131,8 +131,8 @@ mod TestServer {
     @Test
     def testServerGetCacheControl(): Unit \ Assert =
         let cached = { cacheMaxAge = Some(60) | Server.defaultConfig() };
-        let headerOf = (config, credential) -> GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() ->
-            Server.handle(config, credential, { version = "HTTP/1.1", method = "GET", path = "/graphql?query=%7B%20x%20%7D", headers = Nil, body = "" })))#headers
+        let headerOf = (config, credential) -> GraphqlFake.runWithEcho(() ->
+            Server.handle(config, HealthFake.ok(), credential, { version = "HTTP/1.1", method = "GET", path = "/graphql?query=%7B%20x%20%7D", headers = Nil, body = "" }))#headers
             |> Http.findHeader("Cache-Control");
         Assert.assertEq(
             expected = (Some("public, max-age=60, s-maxage=60, stale-while-revalidate=60"), Some("private, no-store"), Some("private, no-store")),
@@ -178,17 +178,17 @@ mod TestServer {
     @Test
     def testServerHealthOk(): Unit \ Assert =
         Assert.assertEq(expected = ((200, Ok(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str("dev"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }) }))), 200),
-            GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> {
-                let response = Server.handle(Server.defaultConfig(), Credential.Missing, { version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" });
+            GraphqlFake.runWithEcho(() -> {
+                let response = handle({ version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" });
                 ((response#status, JsonValue.parse(response#body)),
-                 Server.handle(Server.defaultConfig(), Credential.Missing, { version = "HTTP/1.1", method = "GET", path = "/health?probe=1", headers = Nil, body = "" })#status)
-            })))
+                 handle({ version = "HTTP/1.1", method = "GET", path = "/health?probe=1", headers = Nil, body = "" })#status)
+            }))
 
     /// DB に届かなければ 503 で、理由を db に入れる。
     @Test
     def testServerHealthFailure(): Unit \ Assert =
-        let response = GraphqlFake.runWithEcho(() -> HealthFake.runWithFailure("connection refused", () ->
-            Server.handle(Server.defaultConfig(), Credential.Missing, { version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" })));
+        let response = GraphqlFake.runWithEcho(() ->
+            Server.handle(Server.defaultConfig(), HealthFake.failing("connection refused"), Credential.Missing, { version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" }));
         Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }) }))),
             (response#status, JsonValue.parse(response#body)))
 
@@ -204,13 +204,13 @@ mod TestServer {
     @Test
     def testServerCorsHeadersOnGraphql(): Unit \ Assert =
         Assert.assertEq(expected = ("Access-Control-Allow-Origin", "https://admin.example.com") :: ("Vary", "Origin") :: Nil,
-            GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(adminConfig(), Credential.Missing, fromAdmin("POST", "/graphql"))))#headers)
+            GraphqlFake.runWithEcho(() -> Server.handle(adminConfig(), HealthFake.ok(), Credential.Missing, fromAdmin("POST", "/graphql")))#headers)
 
-    /// preflight は 204 で、Graphql も Health も呼ばずに返る（偽ハンドラの応答がボディに現れない）。
+    /// preflight は 204 で、Graphql を呼ばずに返る（偽ハンドラの応答がボディに現れない）。
     /// Allow-Origin は 1 回だけ付く（preflight と withHeaders で二重にならない）。
     @Test
     def testServerPreflight(): Unit \ Assert =
-        let response = GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(adminConfig(), Credential.Missing, fromAdmin("OPTIONS", "/graphql"))));
+        let response = GraphqlFake.runWithEcho(() -> Server.handle(adminConfig(), HealthFake.ok(), Credential.Missing, fromAdmin("OPTIONS", "/graphql")));
         Assert.assertEq(expected = (204, "", true, 1),
             (response#status, response#body,
              List.memberOf(("Access-Control-Allow-Methods", "POST, GET, OPTIONS"), response#headers),
@@ -226,7 +226,7 @@ mod TestServer {
     @Test
     def testServerPreflightOnlyOnKnownPaths(): Unit \ Assert =
         let responses = List#{"/graphql", "/health", "/p/shop/admin/graphql", "/nope"} |> List.map(path ->
-            GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(adminConfig(), Credential.Missing, fromAdmin("OPTIONS", path)))));
+            GraphqlFake.runWithEcho(() -> Server.handle(adminConfig(), HealthFake.ok(), Credential.Missing, fromAdmin("OPTIONS", path))));
         Assert.assertEq(expected = (List#{204, 204, 204, 404}, List#{true, true, true, true}),
             (responses |> List.map(response -> response#status),
              responses |> List.map(response -> List.memberOf(("Access-Control-Allow-Origin", "https://admin.example.com"), response#headers))))
@@ -241,7 +241,7 @@ mod TestServer {
                 "POST /graphql", "GET /graphql", "POST /admin/graphql", "GET /admin/graphql", "POST /account/graphql", "GET /health", "POST /jobs/tick",
                 "POST /p/{projectSlug}/graphql", "GET /p/{projectSlug}/graphql", "POST /p/{projectSlug}/admin/graphql", "GET /p/{projectSlug}/admin/graphql",
                 "GET /p/{projectSlug}/health", "POST /p/{projectSlug}/jobs/tick" },
-            Server.routes(Server.defaultConfig()) |> Router.withProjectPrefix |> Router.describeAll)
+            Server.routes(Server.defaultConfig(), HealthFake.ok()) |> Router.withProjectPrefix |> Router.describeAll)
 
     /// /p/{プロジェクト slug} 付きのパスも同じ handler に届く。空のプロジェクト slug（/p//graphql）や /p/ だけは 404。
     @Test
@@ -266,7 +266,7 @@ mod TestServer {
     /// projectSlug の params: /p/ があればそちらが勝ち、無ければ Host から、base 未設定なら空。
     @Test
     def testServerProjectSlugParam(): Unit \ Assert =
-        let table = Server.routes(Server.defaultConfig()) |> Router.withProjectPrefix;
+        let table = Server.routes(Server.defaultConfig(), HealthFake.ok()) |> Router.withProjectPrefix;
         let slugOf = (baseDomain, path, host) ->
             Server.wrapProjectFromHost(baseDomain, Server.dispatch(table, (_, routeRequest) ->
                 { status = 200, headers = Nil, body = Map.get(Router.projectSlugParam(), routeRequest#params) |> Option.getWithDefault("") }))
@@ -283,7 +283,7 @@ mod TestServer {
         let request = token -> { version = "HTTP/1.1", method = "POST", path = "/jobs/tick", headers = ("X-Jobs-Token", token) :: Nil, body = "" };
         let closed = Server.defaultConfig();
         let opened = { jobsToken = Some("secret") | Server.defaultConfig() };
-        let call = (config, token) -> GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(config, Credential.Missing, request(token))));
+        let call = (config, token) -> GraphqlFake.runWithEcho(() -> Server.handle(config, HealthFake.ok(), Credential.Missing, request(token)));
         Assert.assertEq(expected = (404, 403, 200, "{\"failures\":[],\"status\":\"ok\"}"),
             (call(closed, "secret")#status, call(opened, "wrong")#status, call(opened, "secret")#status, call(opened, "secret")#body))
 

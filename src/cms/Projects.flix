@@ -18,13 +18,13 @@ mod Projects {
     ///
     /// プロジェクトの見え方。無いプロジェクトは private 扱い（存在を教えない）。
     ///
-    pub def visibilityOf(id: ProjectId): Visibility \ DbRead + DbErr =
+    pub def visibilityOf(id: ProjectId): Visibility \ DbRead =
         find(id) |> Option.map(found -> found#visibility) |> Option.getWithDefault(Visibility.Private)
 
     ///
     /// 組織の下のプロジェクト。
     ///
-    pub def listOfOrg(orgId: OrgId): List[Project] \ DbRead + DbErr =
+    pub def listOfOrg(orgId: OrgId): List[Project] \ DbRead =
         AuthQueries.listProjectsOfOrg(OrgId.toInt64(orgId)) |> List.map(AuthRows.toProject)
 
     ///

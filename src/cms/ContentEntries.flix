@@ -155,7 +155,7 @@ mod ContentEntries {
     /// 公開できるかを書き込まずに答える（dry-run）。違反を全部集め、未公開の参照先も返す。
     /// unique の検査はロックを取らない（参考値。押した瞬間の競合は publish 本体が止める）。
     ///
-    pub def publishReport(id: EntryId): PublishReport \ DbRead + DbErr + CmsErr + Tenant + Session =
+    pub def publishReport(id: EntryId): PublishReport \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ReadDraft);
         let existing = get(id);
         let owner = ContentTypes.get(existing#typeId);
@@ -164,7 +164,7 @@ mod ContentEntries {
     ///
     /// 公開の検査。lock なら unique の値ごとに advisory lock を取る（本番の publish）。
     ///
-    def reportOf(lock: Bool, owner: ContentType, existing: Entry, data: EntryData): PublishReport \ DbRead + DbErr + Tenant =
+    def reportOf(lock: Bool, owner: ContentType, existing: Entry, data: EntryData): PublishReport \ DbRead + Tenant =
         let key = EntryId.text(existing#id);
         let missing = EntriesQueries.missingTargets({ fromEntryId = key, projectId = Tenant.currentId() }) |> List.filterMap(EntryRows.toTargetId);
         let pending = EntriesQueries.unpublishedTargets({ fromEntryId = key, projectId = Tenant.currentId() }) |> List.filterMap(EntryRows.toTargetId) |> List.filter(target -> not List.memberOf(target, missing)) |> List.sort;
@@ -178,7 +178,7 @@ mod ContentEntries {
     ///
     /// 操作の影響。取り下げ・削除で壊れる参照元（公開の中身。削除なら下書きも）と、公開で一緒に動く未公開の参照先（再帰）。
     ///
-    pub def impact(id: EntryId, action: ImpactAction): Impact \ DbRead + DbErr + CmsErr + Tenant + Session =
+    pub def impact(id: EntryId, action: ImpactAction): Impact \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ReadDraft);
         discard get(id);
         match action {
@@ -188,7 +188,7 @@ mod ContentEntries {
         }
 
     /// stage の中身でこの entry を参照している物。参照元は下書きの中身で返す。
-    def referrers(id: EntryId, stage: Stage): List[Referrer] \ DbRead + DbErr + CmsErr + Tenant =
+    def referrers(id: EntryId, stage: Stage): List[Referrer] \ DbRead + CmsErr + Tenant =
         EntriesQueries.referrerLinks({ toEntryId = EntryId.text(id), stage = EntryRows.stageToDb(stage), projectId = Tenant.currentId() })
             |> List.filterMap(row -> EntryId.parse(row#fromEntryId) |> Option.flatMap(lookup) |> Option.map(entry ->
                 { entry = entry, via = ContentTypes.getField(FieldId.FieldId(row#fieldId))#apiId, stage = stage }))
@@ -203,7 +203,7 @@ mod ContentEntries {
     ///
     /// 中身が指す asset が全部このプロジェクトにあって ready か。無い・pending の物は公開できない（配信 URL が空になる）。
     ///
-    def assetViolations(owner: ContentType, data: EntryData): List[Violation] \ DbRead + DbErr + Tenant =
+    def assetViolations(owner: ContentType, data: EntryData): List[Violation] \ DbRead + Tenant =
         let referenced = AssetRefs.extract(owner#fields, data);
         let ready = Assets.findMany(referenced) |> List.filter(asset -> asset#status == AssetStatus.Ready) |> List.map(asset -> asset#id);
         referenced |> List.filter(id -> not List.memberOf(id, ready))

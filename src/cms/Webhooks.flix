@@ -12,7 +12,7 @@ mod Webhooks {
     ///
     /// 今のプロジェクトの Webhook。
     ///
-    pub def list(): List[Webhook] \ DbRead + DbErr + CmsErr + Tenant + Session =
+    pub def list(): List[Webhook] \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ManageProject);
         WebhooksQueries.listWebhooks(Tenant.currentId()) |> List.map(WebhookRows.toWebhook)
 
@@ -51,7 +51,7 @@ mod Webhooks {
     ///
     /// 配信の記録。新しい順。
     ///
-    pub def deliveries(publicId: String, first: Int32): List[WebhookDelivery] \ DbRead + DbErr + CmsErr + Tenant + Session =
+    pub def deliveries(publicId: String, first: Int32): List[WebhookDelivery] \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ManageProject);
         let webhook = find(publicId);
         WebhooksQueries.listDeliveries({ webhookId = webhook#id, projectId = Tenant.currentId(), limit = Int32.toInt64(first) })
@@ -77,7 +77,7 @@ mod Webhooks {
     ///
     /// entry の出来事の payload。中身は持たず、id と型だけ（受け手はコンテンツ API で読む）。
     ///
-    pub def entryPayload(event: WebhookEvent, entryId: EntryId, typeApiId: ApiId): Json \ DbRead + DbErr + Tenant =
+    pub def entryPayload(event: WebhookEvent, entryId: EntryId, typeApiId: ApiId): Json \ DbRead + Tenant =
         Json.JObject(Map#{
             "event"   => Json.JString(WebhookEvent.text(event)),
             "project" => Json.JString(projectSlug()),
@@ -87,7 +87,7 @@ mod Webhooks {
     ///
     /// 型の変更の payload。
     ///
-    pub def schemaPayload(typeApiId: ApiId): Json \ DbRead + DbErr + Tenant =
+    pub def schemaPayload(typeApiId: ApiId): Json \ DbRead + Tenant =
         Json.JObject(Map#{
             "event"   => Json.JString(WebhookEvent.text(WebhookEvent.SchemaChanged)),
             "project" => Json.JString(projectSlug()),
@@ -95,11 +95,11 @@ mod Webhooks {
         })
 
     /// payload に入れる今のプロジェクトのプロジェクト slug。
-    def projectSlug(): String \ DbRead + DbErr + Tenant =
+    def projectSlug(): String \ DbRead + Tenant =
         Projects.find(Tenant.current()) |> Option.map(found -> ProjectSlug.text(found#slug)) |> Option.getWithDefault("")
 
     /// 外向きの id で 1 つ。無ければ notFound。
-    def find(publicId: String): Webhook \ DbRead + DbErr + CmsErr + Tenant =
+    def find(publicId: String): Webhook \ DbRead + CmsErr + Tenant =
         WebhooksQueries.findWebhookByPublicId({ publicId = publicId, projectId = Tenant.currentId() }) |> Option.map(WebhookRows.toWebhook) |> CmsErr.orNotFound(Entity.Webhook, publicId)
 
     /// 名前・url の形・出来事の有無。

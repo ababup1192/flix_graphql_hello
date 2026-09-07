@@ -16,7 +16,7 @@ mod TestErrorCodesPg {
     /// 1 回問い合わせて errors[0].extensions を返す。エラーが無ければ Null。
     def extensionsOf(engine: Graphql.Engine, credential: Credential, queryText: String): Value \ IO =
         GraphqlTestKit.firstErrorField("extensions",
-            Graphql.runWithEngine(engine, () -> Graphql.execute(GraphqlTestKit.queryOnly(queryText), Context.withCredential(credential))))
+            Graphql.executeWith(engine, GraphqlTestKit.queryOnly(queryText), Context.withCredential(credential)))
 
     /// 組めないのはテストの前提が壊れている。
     def engineOf(schema: Schema): Graphql.Engine \ IO = match Graphql.buildEngine(schema) {

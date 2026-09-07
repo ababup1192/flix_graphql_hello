@@ -1,7 +1,7 @@
 ///
 /// コンテンツ API のリゾルバが使う効果の和。読むだけ。書く関数を呼べばコンパイルで落ちる。
 ///
-pub type alias ContentEff = {SqlRead, TransientDbErr, DbErr, CmsErr, Tenant, Session, ObjectStore}
+pub type alias ContentEff = DbRead + CmsErr + Tenant + Session + ObjectStore
 
 ///
 /// コンテンツ API の Runner。読むだけなので Tx は要らないが、フィールド単位で接続を借り直さないよう
@@ -31,7 +31,7 @@ mod ContentRunner {
     ///
     /// private なプロジェクトは、鍵か役割を持つ人しか読めない。
     ///
-    def guardVisibility(projectId: ProjectId, actor: Actor): Unit \ DbRead + DbErr + CmsErr =
+    def guardVisibility(projectId: ProjectId, actor: Actor): Unit \ DbRead + CmsErr =
         match (Projects.visibilityOf(projectId), actor) {
             case (Visibility.Public, _)                => ()
             case (Visibility.Private, Actor.Anonymous) => CmsErr.invalid(Violation.Violation("auth", "このプロジェクトは非公開です。API キーを X-Api-Key で渡してください") :: Nil)

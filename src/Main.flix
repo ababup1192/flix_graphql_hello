@@ -56,13 +56,13 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
             region rc {
             BackgroundJobs.installShutdownHook(jobs);
             if (jobsOn) spawn BackgroundJobs.runForever(pool, jobs) @ rc else println("jobs: CMS_JOBS=off なのでプロセス内のワーカーは回しません（POST /jobs/tick か別の worker で回してください）");
+            let maxConnections = Sys.Env.getVar("CMS_MAX_CONNECTIONS") |> Option.flatMap(Int32.fromString) |> Option.filter(n -> n > 0) |> Option.getWithDefault(256);
+            let listener = HttpServer.open({ bind = bind, maxConnections = maxConnections | HttpServer.defaultConfig() });
             let runtime = {
                 pool = pool, deps = deps, jwks = jwks, baseDomain = baseDomain, defaultProject = defaultProject,
                 accountEngine = accountEngine, adminEngines = adminEngines, engineCache = engineCache,
-                config = config, routes = Server.routes(config) |> Router.withProjectPrefix };
-            let maxConnections = Sys.Env.getVar("CMS_MAX_CONNECTIONS") |> Option.flatMap(Int32.fromString) |> Option.filter(n -> n > 0) |> Option.getWithDefault(256);
-            let listener = HttpServer.open({ bind = bind, maxConnections = maxConnections | HttpServer.defaultConfig() });
-            HttpServer.listen(listener, request -> Health.runWithPool(pool, jobs, listener, () -> dispatch(runtime, request)))
+                config = config, routes = Server.routes(config, Health.ofPool(pool, jobs, listener)) |> Router.withProjectPrefix };
+            HttpServer.listen(listener, request -> dispatch(runtime, request))
             }
     }
 
@@ -72,13 +72,13 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
 type alias Runtime = {
     pool = Pool, deps = Deps, jwks = TokenVerifier.JwksCache, baseDomain = Option[String], defaultProject = Option[ProjectId],
     accountEngine = Graphql.Engine, adminEngines = AdminEngine.Cache, engineCache = ContentEngine.Cache,
-    config = ServerConfig, routes = List[Route[{Graphql, Health}]] }
+    config = ServerConfig, routes = List[Route[{Graphql, IO}]] }
 
 ///
 /// 1 リクエストを middleware（CORS → Host のプロジェクト → 身元）を通してルート表で振り分け、行の engine に合わせてエンジンを入れて実行する。
 /// 404 / 405 / 503 も CORS を通る。
 ///
-def dispatch(runtime: Runtime, request: HttpRequest): HttpResponse \ {IO, Health} =
+def dispatch(runtime: Runtime, request: HttpRequest): HttpResponse \ IO =
     let pipeline =
         Cors.wrap(runtime#config#cors, Router.allowedMethods(runtime#routes),
             Server.wrapProjectFromHost(runtime#baseDomain,
@@ -93,7 +93,7 @@ def dispatch(runtime: Runtime, request: HttpRequest): HttpResponse \ {IO, Health
 /// WhyNot: エンジンの要らない道（/health、/jobs/tick）でエンジンを組まないのは、型定義が壊れた時に死活監視まで 503 になり、
 /// プロジェクトの SELECT が余分に走るため。
 ///
-def runRoute(runtime: Runtime, found: Route[{Graphql, Health}], routeRequest: RouteRequest): HttpResponse \ {IO, Health} =
+def runRoute(runtime: Runtime, found: Route[{Graphql, IO}], routeRequest: RouteRequest): HttpResponse \ IO =
     let execute = () -> (found#handle)(routeRequest);
     match found#engine {
         case None                 => Graphql.runWithoutEngine(execute)

@@ -15,7 +15,7 @@ mod GraphqlTestKit {
     ///
     pub def executeOnce(schema: Schema, request: GraphqlRequest): Result[String, GraphqlResponse] \ IO =
         Graphql.buildEngine(schema)
-            |> Result.map(engine -> Graphql.runWithEngine(engine, () -> Graphql.execute(request, Context.anonymous())))
+            |> Result.map(engine -> Graphql.executeWith(engine, request, Context.anonymous()))
 
     ///
     /// variables 付きのリクエスト（operationName は無し）。
@@ -45,7 +45,7 @@ mod GraphqlTestKit {
     /// 身元付きでエンジンに問い合わせる。
     ///
     pub def askEngineWith(engine: Graphql.Engine, context: Context, queryText: String): (Value, Option[String]) \ IO =
-        Graphql.runWithEngine(engine, () -> Graphql.execute(queryOnly(queryText), context)) |> summarize
+        Graphql.executeWith(engine, queryOnly(queryText), context) |> summarize
 
     ///
     /// 身元付きでスキーマに問い合わせる。

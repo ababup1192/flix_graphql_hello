@@ -2,7 +2,7 @@
 /// Account API のリゾルバが使う効果の和。DB の読み書き、CMS の業務エラー、主体、時計。Tenant が無いのが管理 API との違いで、
 /// プロジェクトのユースケース（型に Tenant が付く）はここから呼べない。
 ///
-pub type alias AccountEff = {SqlRead, SqlWrite, TransientDbErr, DbErr, CmsErr, IdGen, Session, Time.Clock.Clock}
+pub type alias AccountEff = Db + CmsErr + IdGen + Session + Time.Clock.Clock
 
 ///
 /// Account API の Runner。リゾルバ 1 つを「最初の SQL で借りる接続 1 本・Tx 1 つ」に包み、身元から主体を決め、失敗を GraphQL のエラーに写す。

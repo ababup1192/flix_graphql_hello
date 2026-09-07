@@ -10,7 +10,7 @@ pub type alias ServerConfig = { cors = CorsConfig, version = String, jobsToken =
 
 ///
 /// HTTP リクエストを GraphQL の実行と死活監視に橋渡しするルーティング。ルートは `routes` の表で持つ。
-/// ソケットも graphql-java も JDBC も触らず、`Graphql` と `Health` の effect だけに依存する。
+/// ソケットも graphql-java も JDBC も触らず、`Graphql` effect と、渡された `Health`（死活の値を読む関数の束）だけに依存する。
 ///
 mod Server {
 
@@ -28,27 +28,27 @@ mod Server {
     /// - GET /health: DB に届けば 200、届かなければ 503。jobs にワーカーの最終実行時刻と待ち・失敗の件数（数えられなければ -1）
     /// - POST /jobs/tick: 外部トリガー。X-Jobs-Token が設定と一致すればワーカーを 1 周回す（無ければ 404）
     ///
-    pub def routes(config: ServerConfig): List[Route[{Graphql, Health}]] =
+    pub def routes(config: ServerConfig, health: Health[ef]): List[Route[{Graphql, ef}]] =
         Router.route(Method.Post, "/graphql",         Some(Engine.Content), widen(executeBody)) ::
         Router.route(Method.Get,  "/graphql",         Some(Engine.Content), widen(executeQueryString(config#cacheMaxAge))) ::
         Router.route(Method.Post, "/admin/graphql",   Some(Engine.Admin),   widen(executeBody)) ::
         Router.route(Method.Get,  "/admin/graphql",   Some(Engine.Admin),   widen(executeQueryString(None))) ::
         Router.route(Method.Post, "/account/graphql", Some(Engine.Account), widen(executeBody)) ::
-        Router.route(Method.Get,  "/health",          None,                 widen(health(config#version))) ::
-        Router.route(Method.Post, "/jobs/tick",       None,                 widen(jobsTick(config#jobsToken))) :: Nil
+        Router.route(Method.Get,  "/health",          None,                 widen(healthRoute(config#version, health))) ::
+        Router.route(Method.Post, "/jobs/tick",       None,                 widen(jobsTick(config#jobsToken, health))) :: Nil
 
     ///
-    /// 行の handler を表全体の effect に広げる。行ごとの handler は自分の effect（Graphql だけ、Health だけ）を宣言したままにする。
+    /// 行の handler を表全体の effect に広げる。行ごとの handler は自分の effect（Graphql だけ、Health の ef だけ）を宣言したままにする。
     ///
     def widen(handle: RouteRequest -> HttpResponse \ ef1): RouteRequest -> HttpResponse \ ef1 + ef2 =
         routeRequest -> checked_ecast(handle(routeRequest))
 
     ///
-    /// リクエストを 1 つ処理する。エンジンは呼ぶ側が入れておく（表の engine は見ない）。
+    /// リクエストを 1 つ処理する。エンジンは呼ぶ側が入れておく（表の engine は見ない）。health は /health と /jobs/tick が読む値。
     /// 表に無いパスは 404、パスはあるがメソッドが違えば 405 と Allow、OPTIONS は preflight。許したオリジンからのリクエストには CORS ヘッダを足す。
     ///
-    pub def handle(config: ServerConfig, credential: Credential, request: HttpRequest): HttpResponse \ {Graphql, Health} =
-        let table = routes(config) |> Router.withProjectPrefix;
+    pub def handle(config: ServerConfig, health: Health[ef], credential: Credential, request: HttpRequest): HttpResponse \ {Graphql, ef} =
+        let table = routes(config, health) |> Router.withProjectPrefix;
         let pipeline = Cors.wrap(config#cors, Router.allowedMethods(table), dispatch(table, (found, routeRequest) -> (found#handle)(routeRequest)));
         pipeline({ request = request, params = Map.empty(), credential = credential })
 
@@ -113,9 +113,9 @@ mod Server {
     ///
     /// GET /health。DB に届けば {"status": "ok", "version": "...", "jobs": {"lastTickAt": ...}, "connections": {"active": 1, "max": 256}}、届かなければ 503 で理由を付ける。
     ///
-    def health(version: String, _routeRequest: RouteRequest): HttpResponse \ Health =
-        let summary = Health.jobsSummary();
-        let connected = Health.connections();
+    def healthRoute(version: String, health: Health[ef], _routeRequest: RouteRequest): HttpResponse \ ef =
+        let summary = (health#jobsSummary)();
+        let connected = (health#connections)();
         let connections = Value.Obj(Map#{ "active" => Value.Int(connected#active), "max" => Value.Int(connected#max) });
         let jobs = Value.Obj(Map#{
             "lastTickAt" => summary#lastTickAt |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null),
@@ -123,7 +123,7 @@ mod Server {
             "failedSchedules" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedSchedules)),
             "pendingDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#pendingDeliveries)),
             "failedDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedDeliveries)) });
-        match Health.checkDb() {
+        match (health#checkDb)() {
             case Ok(())       => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str(version), "jobs" => jobs, "connections" => connections })) }
             case Err(message) => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str(version), "db" => Value.Str(message), "jobs" => jobs, "connections" => connections })) }
         }
@@ -131,14 +131,14 @@ mod Server {
     ///
     /// POST /jobs/tick。トークンが設定されていなければ 404（存在を見せない）、違えば 403、合えば 1 周回して失敗の説明を返す。
     ///
-    def jobsTick(jobsToken: Option[String], routeRequest: RouteRequest): HttpResponse \ Health =
+    def jobsTick(jobsToken: Option[String], health: Health[ef], routeRequest: RouteRequest): HttpResponse \ ef =
         let given = Http.findHeader("X-Jobs-Token", routeRequest#request#headers);
         match jobsToken {
             case None => errorResponse(404, Nil, "not found")
             case Some(expected) =>
                 if (given != Some(expected)) errorResponse(403, Nil, "X-Jobs-Token が違います")
                 else {
-                    let failures = Health.runJobs();
+                    let failures = (health#runJobs)();
                     { status = if (List.isEmpty(failures)) 200 else 500, headers = Nil,
                       body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str(if (List.isEmpty(failures)) "ok" else "error"), "failures" => Value.List(failures |> List.map(Value.Str)) })) }
                 }
