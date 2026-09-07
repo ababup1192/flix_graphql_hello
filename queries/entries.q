@@ -2,12 +2,12 @@
 
 // 列を足す時は listEntries / findEntryByStage / listEntriesByStage / findEntriesByStage の 4 か所（EntryRows.toEntry が受ける形）
 // ゴミ箱の物も含めて id があるか。createEntry の重複検査用（PK はゴミ箱の行とも衝突する）
-query entryExists(id: String) -> one {
-    SELECT id FROM entries WHERE id = :id
+query entryExists(id: String, projectId: Int64) -> one {
+    SELECT id FROM entries WHERE id = :id AND project_id = :projectId
 }
 
-query countEntriesOfType(typeId: Int64) -> one {
-    SELECT count(*)::bigint AS total FROM entries WHERE type_id = :typeId AND deleted_at IS NULL
+query countEntriesOfType(typeId: Int64, projectId: Int64) -> one {
+    SELECT count(*)::bigint AS total FROM entries WHERE type_id = :typeId AND project_id = :projectId AND deleted_at IS NULL
 }
 
 query insertEntry(id: String, typeId: Int64, projectId: Int64) -> exec {
@@ -15,17 +15,17 @@ query insertEntry(id: String, typeId: Int64, projectId: Int64) -> exec {
 }
 
 // 楽観ロック。version が合う時だけ進める。影響行数 0 なら誰かが先に進めた
-query bumpEntryVersion(id: String, expected: Int32) -> exec {
+query bumpEntryVersion(id: String, expected: Int32, projectId: Int64) -> exec {
     UPDATE entries SET version = version + 1, updated_at = now()
-    WHERE id = :id AND version = :expected AND deleted_at IS NULL
+    WHERE id = :id AND project_id = :projectId AND version = :expected AND deleted_at IS NULL
 }
 
-query softDeleteEntry(id: String) -> exec {
-    UPDATE entries SET deleted_at = now() WHERE id = :id AND deleted_at IS NULL
+query softDeleteEntry(id: String, projectId: Int64) -> exec {
+    UPDATE entries SET deleted_at = now() WHERE id = :id AND project_id = :projectId AND deleted_at IS NULL
 }
 
-query purgeDeletedEntries(typeId: Int64) -> exec {
-    DELETE FROM entries WHERE type_id = :typeId AND deleted_at IS NOT NULL
+query purgeDeletedEntries(typeId: Int64, projectId: Int64) -> exec {
+    DELETE FROM entries WHERE type_id = :typeId AND project_id = :projectId AND deleted_at IS NOT NULL
 }
 
 query upsertContent(entryId: String, stage: String, data: Json) -> exec {
@@ -65,13 +65,13 @@ query countEntriesByStage(typeId: Int64, stage: String, projectId: Int64) -> one
 
 // ---- 公開 ----
 
-query markPublished(id: String) -> exec {
-    UPDATE entries SET stage = 'published', published_at = now(), updated_at = now() WHERE id = :id AND deleted_at IS NULL
+query markPublished(id: String, projectId: Int64) -> exec {
+    UPDATE entries SET stage = 'published', published_at = now(), updated_at = now() WHERE id = :id AND project_id = :projectId AND deleted_at IS NULL
 }
 
 // 公開中の行だけ触る（未公開の entry に取り下げを送っても updated_at を動かさない）
-query markUnpublished(id: String) -> exec {
-    UPDATE entries SET stage = 'draft', published_at = NULL, updated_at = now() WHERE id = :id AND stage = 'published' AND deleted_at IS NULL
+query markUnpublished(id: String, projectId: Int64) -> exec {
+    UPDATE entries SET stage = 'draft', published_at = NULL, updated_at = now() WHERE id = :id AND project_id = :projectId AND stage = 'published' AND deleted_at IS NULL
 }
 
 query deleteContent(entryId: String, stage: String) -> exec {
@@ -88,30 +88,29 @@ query lockUniqueValue(typeId: Int64, fieldId: Int64, value: Json) -> one {
 }
 
 // 公開中でその値を持つ entry（1 つ）
-query findUniqueHolder(typeId: Int64, apiId: String, value: Json) -> one {
+query findUniqueHolder(typeId: Int64, apiId: String, value: Json, projectId: Int64) -> one {
     SELECT e.id
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'published'
-    WHERE e.type_id = :typeId AND e.deleted_at IS NULL AND c.data -> :apiId = :value
+    WHERE e.type_id = :typeId AND e.project_id = :projectId AND e.deleted_at IS NULL AND c.data -> :apiId = :value
     ORDER BY e.id LIMIT 1
 }
 
 // ---- 版 ----
 
-query insertVersion(entryId: String, version: Int32, data: Json, author: String, reason: String) -> one {
-    INSERT INTO entry_versions (entry_id, version, data, author, reason) VALUES (:entryId, :version, :data, :author, :reason)
+query insertVersion(projectId: Int64, entryId: String, version: Int32, data: Json, author: String, reason: String) -> one {
+    INSERT INTO entry_versions (project_id, entry_id, version, data, author, reason) VALUES (:projectId, :entryId, :version, :data, :author, :reason)
     RETURNING id
 }
 
-query listVersions(entryId: String) -> many {
-    SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE entry_id = :entryId ORDER BY id DESC
+query listVersions(entryId: String, projectId: Int64) -> many {
+    SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE entry_id = :entryId AND project_id = :projectId ORDER BY id DESC
 }
 
 query findVersion(id: Int64, projectId: Int64) -> one {
-    SELECT v.id, v.entry_id, v.version, v.data, v.author, v.reason, v.created_at
-    FROM entry_versions AS v
-    JOIN entries AS e ON e.id = v.entry_id AND e.project_id = :projectId
-    WHERE v.id = :id
+    SELECT id, entry_id, version, data, author, reason, created_at
+    FROM entry_versions
+    WHERE id = :id AND project_id = :projectId
 }
 
 // ---- 参照 ----
@@ -124,43 +123,43 @@ query findEntriesByStage(ids: List[String], stage: String, projectId: Int64) -> 
     WHERE e.id = ANY(:ids) AND e.project_id = :projectId AND e.deleted_at IS NULL
 }
 
-query deleteLinks(fromEntryId: String, stage: String) -> exec {
-    DELETE FROM entry_links WHERE from_entry_id = :fromEntryId AND stage = :stage
+query deleteLinks(fromEntryId: String, stage: String, projectId: Int64) -> exec {
+    DELETE FROM entry_links WHERE from_entry_id = :fromEntryId AND stage = :stage AND project_id = :projectId
 }
 
-query insertLink(fromEntryId: String, stage: String, fieldId: Int64, toEntryId: String, position: Int32) -> exec {
-    INSERT INTO entry_links (from_entry_id, stage, field_id, to_entry_id, position) VALUES (:fromEntryId, :stage, :fieldId, :toEntryId, :position)
+query insertLink(projectId: Int64, fromEntryId: String, stage: String, fieldId: Int64, toEntryId: String, position: Int32) -> exec {
+    INSERT INTO entry_links (project_id, from_entry_id, stage, field_id, to_entry_id, position) VALUES (:projectId, :fromEntryId, :stage, :fieldId, :toEntryId, :position)
 }
 
 // 下書きが参照している entry のうち、公開されていない物（ゴミ箱の物と無い物を含む）
-query unpublishedTargets(fromEntryId: String) -> many {
+query unpublishedTargets(fromEntryId: String, projectId: Int64) -> many {
     SELECT DISTINCT l.to_entry_id
     FROM entry_links AS l
     LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL AND e.stage = 'published'
-    WHERE l.from_entry_id = :fromEntryId AND l.stage = 'draft' AND e.id IS NULL
+    WHERE l.from_entry_id = :fromEntryId AND l.project_id = :projectId AND l.stage = 'draft' AND e.id IS NULL
 }
 
 // 下書きが参照している entry のうち、無い物（ゴミ箱の物と、消えた物）
-query missingTargets(fromEntryId: String) -> many {
+query missingTargets(fromEntryId: String, projectId: Int64) -> many {
     SELECT DISTINCT l.to_entry_id
     FROM entry_links AS l
     LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL
-    WHERE l.from_entry_id = :fromEntryId AND l.stage = 'draft' AND e.id IS NULL
+    WHERE l.from_entry_id = :fromEntryId AND l.project_id = :projectId AND l.stage = 'draft' AND e.id IS NULL
 }
 
 // この entry を stage の中身で参照している entry と、どのフィールドで参照しているか（影響の見える化用）
-query referrerLinks(toEntryId: String, stage: String) -> many {
+query referrerLinks(toEntryId: String, stage: String, projectId: Int64) -> many {
     SELECT DISTINCT l.from_entry_id, l.field_id
     FROM entry_links AS l
     JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL
-    WHERE l.to_entry_id = :toEntryId AND l.stage = :stage
+    WHERE l.to_entry_id = :toEntryId AND l.project_id = :projectId AND l.stage = :stage
     ORDER BY l.from_entry_id, l.field_id
 }
 
 // この entry を公開側で参照している entry（取り下げ・削除の防止用）
-query publishedReferrers(toEntryId: String) -> many {
+query publishedReferrers(toEntryId: String, projectId: Int64) -> many {
     SELECT DISTINCT l.from_entry_id
     FROM entry_links AS l
     JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL
-    WHERE l.to_entry_id = :toEntryId AND l.stage = 'published'
+    WHERE l.to_entry_id = :toEntryId AND l.project_id = :projectId AND l.stage = 'published'
 }

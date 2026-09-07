@@ -27,7 +27,7 @@ mod AccountMeResolvers {
 
     pub def resolvers(): GeneratedAccount.MeResolvers[AccountEff] =
         {
-            id            = (_context, source) -> Ok(AccountMapping.idOfUser(source#user#id)),
+            id            = (_context, source) -> Ok(AccountMapping.idOfPublic(source#user#publicId)),
             email         = (_context, source) -> Ok(source#user#email),
             name          = (_context, source) -> Ok(source#user#name),
             organizations = (_context, source) -> Ok(source#organizations),
@@ -40,7 +40,7 @@ mod AccountOrganizationResolvers {
 
     pub def resolvers(): GeneratedAccount.OrganizationResolvers[AccountEff] =
         {
-            id       = (_context, source) -> Ok(AccountMapping.idOfOrg(source#id)),
+            id       = (_context, source) -> Ok(AccountMapping.idOfPublic(source#publicId)),
             name     = (_context, source) -> Ok(source#name),
             members  = (_context, source) -> Ok(Organizations.members(source#id)),
             projects = (_context, source) -> Ok(Organizations.projects(source#id))
@@ -52,7 +52,7 @@ mod AccountOrganizationMemberResolvers {
 
     pub def resolvers(): GeneratedAccount.OrganizationMemberResolvers[AccountEff] =
         {
-            userId = (_context, source) -> Ok(AccountMapping.idOfUser(source#userId)),
+            userId = (_context, source) -> Ok(AccountMapping.idOfPublic(source#publicId)),
             email  = (_context, source) -> Ok(source#email),
             name   = (_context, source) -> Ok(source#name),
             role   = (_context, source) -> Ok(AccountMapping.orgRoleToGql(source#role))
@@ -74,7 +74,7 @@ mod AccountProjectResolvers {
 
     pub def resolvers(): GeneratedAccount.ProjectResolvers[AccountEff] =
         {
-            id         = (_context, source) -> Ok(AccountMapping.idOfProject(source#id)),
+            id         = (_context, source) -> Ok(AccountMapping.idOfPublic(source#publicId)),
             slug       = (_context, source) -> Ok(ProjectSlug.text(source#slug)),
             name       = (_context, source) -> Ok(source#name),
             visibility = (_context, source) -> Ok(AccountMapping.visibilityToGql(source#visibility))

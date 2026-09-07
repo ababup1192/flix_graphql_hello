@@ -19,6 +19,7 @@ mod ApiKeysTable {
     pub def scope(): Fragment.Col[ApiKeysTable, String, Fragment.NotNull] = Fragment.Col.Col("scope", SqlValue.Str)
     pub def createdAt(): Fragment.Col[ApiKeysTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("created_at", SqlValue.ofTimestamp)
     pub def revokedAt(): Fragment.Col[ApiKeysTable, Timestamp.Timestamp, Fragment.Nullable] = Fragment.Col.Col("revoked_at", SqlValue.ofTimestamp)
+    pub def publicId(): Fragment.Col[ApiKeysTable, String, Fragment.NotNull] = Fragment.Col.Col("public_id", SqlValue.Str)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
@@ -30,6 +31,8 @@ mod ApiKeysTable {
         case ScopeCheck
         /// api_keys_project_id_fkey (foreign key)
         case ProjectIdFkey
+        /// api_keys_public_id_key (unique)
+        case PublicIdKey
     }
 
     ///
@@ -47,12 +50,14 @@ mod ApiKeysTable {
         case Constraint.KeyHashKey => DbErr.uniqueViolation("api_keys_key_hash_key")
         case Constraint.ScopeCheck => DbErr.checkViolation("api_keys_scope_check")
         case Constraint.ProjectIdFkey => DbErr.foreignKeyViolation("api_keys_project_id_fkey")
+        case Constraint.PublicIdKey => DbErr.uniqueViolation("api_keys_public_id_key")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
         case "api_keys_key_hash_key" => Some(Constraint.KeyHashKey)
         case "api_keys_scope_check" => Some(Constraint.ScopeCheck)
         case "api_keys_project_id_fkey" => Some(Constraint.ProjectIdFkey)
+        case "api_keys_public_id_key" => Some(Constraint.PublicIdKey)
         case _ => None
     }
 
@@ -143,6 +148,7 @@ mod ContentFieldsTable {
     pub def position(): Fragment.Col[ContentFieldsTable, Int32, Fragment.NotNull] = Fragment.Col.Col("position", SqlValue.Int32)
     pub def targetTypeId(): Fragment.Col[ContentFieldsTable, Int64, Fragment.Nullable] = Fragment.Col.Col("target_type_id", SqlValue.Int64)
     pub def parentFieldId(): Fragment.Col[ContentFieldsTable, Int64, Fragment.Nullable] = Fragment.Col.Col("parent_field_id", SqlValue.Int64)
+    pub def projectId(): Fragment.Col[ContentFieldsTable, Int64, Fragment.NotNull] = Fragment.Col.Col("project_id", SqlValue.Int64)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
@@ -158,6 +164,8 @@ mod ContentFieldsTable {
         case ParentFieldIdFkey
         /// content_fields_kind_check (check)
         case KindCheck
+        /// content_fields_project_id_fkey (foreign key)
+        case ProjectIdFkey
     }
 
     ///
@@ -177,6 +185,7 @@ mod ContentFieldsTable {
         case Constraint.TargetTypeIdFkey => DbErr.foreignKeyViolation("content_fields_target_type_id_fkey")
         case Constraint.ParentFieldIdFkey => DbErr.foreignKeyViolation("content_fields_parent_field_id_fkey")
         case Constraint.KindCheck => DbErr.checkViolation("content_fields_kind_check")
+        case Constraint.ProjectIdFkey => DbErr.foreignKeyViolation("content_fields_project_id_fkey")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
@@ -185,6 +194,7 @@ mod ContentFieldsTable {
         case "content_fields_target_type_id_fkey" => Some(Constraint.TargetTypeIdFkey)
         case "content_fields_parent_field_id_fkey" => Some(Constraint.ParentFieldIdFkey)
         case "content_fields_kind_check" => Some(Constraint.KindCheck)
+        case "content_fields_project_id_fkey" => Some(Constraint.ProjectIdFkey)
         case _ => None
     }
 
@@ -375,6 +385,7 @@ mod EntryLinksTable {
     pub def fieldId(): Fragment.Col[EntryLinksTable, Int64, Fragment.NotNull] = Fragment.Col.Col("field_id", SqlValue.Int64)
     pub def toEntryId(): Fragment.Col[EntryLinksTable, String, Fragment.NotNull] = Fragment.Col.Col("to_entry_id", SqlValue.Str)
     pub def position(): Fragment.Col[EntryLinksTable, Int32, Fragment.NotNull] = Fragment.Col.Col("position", SqlValue.Int32)
+    pub def projectId(): Fragment.Col[EntryLinksTable, Int64, Fragment.NotNull] = Fragment.Col.Col("project_id", SqlValue.Int64)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
@@ -386,6 +397,8 @@ mod EntryLinksTable {
         case FieldFkey
         /// entry_links_stage_check (check)
         case StageCheck
+        /// entry_links_project_id_fkey (foreign key)
+        case ProjectIdFkey
     }
 
     ///
@@ -403,12 +416,14 @@ mod EntryLinksTable {
         case Constraint.FromFkey => DbErr.foreignKeyViolation("entry_links_from_fkey")
         case Constraint.FieldFkey => DbErr.foreignKeyViolation("entry_links_field_fkey")
         case Constraint.StageCheck => DbErr.checkViolation("entry_links_stage_check")
+        case Constraint.ProjectIdFkey => DbErr.foreignKeyViolation("entry_links_project_id_fkey")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
         case "entry_links_from_fkey" => Some(Constraint.FromFkey)
         case "entry_links_field_fkey" => Some(Constraint.FieldFkey)
         case "entry_links_stage_check" => Some(Constraint.StageCheck)
+        case "entry_links_project_id_fkey" => Some(Constraint.ProjectIdFkey)
         case _ => None
     }
 
@@ -432,6 +447,7 @@ mod EntryVersionsTable {
     pub def author(): Fragment.Col[EntryVersionsTable, String, Fragment.NotNull] = Fragment.Col.Col("author", SqlValue.Str)
     pub def reason(): Fragment.Col[EntryVersionsTable, String, Fragment.NotNull] = Fragment.Col.Col("reason", SqlValue.Str)
     pub def createdAt(): Fragment.Col[EntryVersionsTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("created_at", SqlValue.ofTimestamp)
+    pub def projectId(): Fragment.Col[EntryVersionsTable, Int64, Fragment.NotNull] = Fragment.Col.Col("project_id", SqlValue.Int64)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
@@ -441,6 +457,8 @@ mod EntryVersionsTable {
         case EntryIdFkey
         /// entry_versions_reason_check (check)
         case ReasonCheck
+        /// entry_versions_project_id_fkey (foreign key)
+        case ProjectIdFkey
     }
 
     ///
@@ -457,11 +475,13 @@ mod EntryVersionsTable {
     pub def raiseConstraint(constraint: Constraint): a \ DbErr = match constraint {
         case Constraint.EntryIdFkey => DbErr.foreignKeyViolation("entry_versions_entry_id_fkey")
         case Constraint.ReasonCheck => DbErr.checkViolation("entry_versions_reason_check")
+        case Constraint.ProjectIdFkey => DbErr.foreignKeyViolation("entry_versions_project_id_fkey")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
         case "entry_versions_entry_id_fkey" => Some(Constraint.EntryIdFkey)
         case "entry_versions_reason_check" => Some(Constraint.ReasonCheck)
+        case "entry_versions_project_id_fkey" => Some(Constraint.ProjectIdFkey)
         case _ => None
     }
 
@@ -484,6 +504,7 @@ mod InvitationsTable {
     pub def role(): Fragment.Col[InvitationsTable, String, Fragment.NotNull] = Fragment.Col.Col("role", SqlValue.Str)
     pub def invitedBy(): Fragment.Col[InvitationsTable, Int64, Fragment.NotNull] = Fragment.Col.Col("invited_by", SqlValue.Int64)
     pub def createdAt(): Fragment.Col[InvitationsTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("created_at", SqlValue.ofTimestamp)
+    pub def publicId(): Fragment.Col[InvitationsTable, String, Fragment.NotNull] = Fragment.Col.Col("public_id", SqlValue.Str)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
@@ -497,6 +518,8 @@ mod InvitationsTable {
         case ProjectIdFkey
         /// invitations_invited_by_fkey (foreign key)
         case InvitedByFkey
+        /// invitations_public_id_key (unique)
+        case PublicIdKey
     }
 
     ///
@@ -515,6 +538,7 @@ mod InvitationsTable {
         case Constraint.RoleCheck => DbErr.checkViolation("invitations_role_check")
         case Constraint.ProjectIdFkey => DbErr.foreignKeyViolation("invitations_project_id_fkey")
         case Constraint.InvitedByFkey => DbErr.foreignKeyViolation("invitations_invited_by_fkey")
+        case Constraint.PublicIdKey => DbErr.uniqueViolation("invitations_public_id_key")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
@@ -522,6 +546,7 @@ mod InvitationsTable {
         case "invitations_role_check" => Some(Constraint.RoleCheck)
         case "invitations_project_id_fkey" => Some(Constraint.ProjectIdFkey)
         case "invitations_invited_by_fkey" => Some(Constraint.InvitedByFkey)
+        case "invitations_public_id_key" => Some(Constraint.PublicIdKey)
         case _ => None
     }
 
@@ -649,6 +674,35 @@ mod OrganizationsTable {
     pub def id(): Fragment.Col[OrganizationsTable, Int64, Fragment.NotNull] = Fragment.Col.Col("id", SqlValue.Int64)
     pub def name(): Fragment.Col[OrganizationsTable, String, Fragment.NotNull] = Fragment.Col.Col("name", SqlValue.Str)
     pub def createdAt(): Fragment.Col[OrganizationsTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("created_at", SqlValue.ofTimestamp)
+    pub def publicId(): Fragment.Col[OrganizationsTable, String, Fragment.NotNull] = Fragment.Col.Col("public_id", SqlValue.Str)
+
+    ///
+    /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
+    ///
+    pub enum Constraint with Eq, Order, ToString {
+        /// organizations_public_id_key (unique)
+        case PublicIdKey
+    }
+
+    ///
+    /// このテーブルへの書き込みを、制約違反を `translate` で翻訳しながら実行する。
+    /// translate は thunk と同じ型の値を返すか、業務エラーのエフェクトを投げる。翻訳しない case は `raiseConstraint`。
+    /// enum に無い名前の違反と、制約違反以外の DbErr はそのまま上へ。Tx の外で呼ぶ（違反で abort した Tx に COMMIT を出さない）。
+    ///
+    pub def onConstraint(translate: Constraint -> a \ ef1, thunk: Unit -> a \ ef2): a \ ef1 + ef2 + {TransientDbErr, DbErr} =
+        DbError.onConstraintWith(constraintOf, translate, thunk)
+
+    ///
+    /// 翻訳しない制約を元の DbErr に戻す。`onConstraint` に渡す関数の中で使う。
+    ///
+    pub def raiseConstraint(constraint: Constraint): a \ DbErr = match constraint {
+        case Constraint.PublicIdKey => DbErr.uniqueViolation("organizations_public_id_key")
+    }
+
+    def constraintOf(name: String): Option[Constraint] = match name {
+        case "organizations_public_id_key" => Some(Constraint.PublicIdKey)
+        case _ => None
+    }
 
 }
 
@@ -669,6 +723,7 @@ mod ProjectsTable {
     pub def createdAt(): Fragment.Col[ProjectsTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("created_at", SqlValue.ofTimestamp)
     pub def orgId(): Fragment.Col[ProjectsTable, Int64, Fragment.NotNull] = Fragment.Col.Col("org_id", SqlValue.Int64)
     pub def visibility(): Fragment.Col[ProjectsTable, String, Fragment.NotNull] = Fragment.Col.Col("visibility", SqlValue.Str)
+    pub def publicId(): Fragment.Col[ProjectsTable, String, Fragment.NotNull] = Fragment.Col.Col("public_id", SqlValue.Str)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
@@ -680,6 +735,8 @@ mod ProjectsTable {
         case OrgIdFkey
         /// projects_visibility_check (check)
         case VisibilityCheck
+        /// projects_public_id_key (unique)
+        case PublicIdKey
     }
 
     ///
@@ -697,12 +754,14 @@ mod ProjectsTable {
         case Constraint.SlugKey => DbErr.uniqueViolation("projects_slug_key")
         case Constraint.OrgIdFkey => DbErr.foreignKeyViolation("projects_org_id_fkey")
         case Constraint.VisibilityCheck => DbErr.checkViolation("projects_visibility_check")
+        case Constraint.PublicIdKey => DbErr.uniqueViolation("projects_public_id_key")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
         case "projects_slug_key" => Some(Constraint.SlugKey)
         case "projects_org_id_fkey" => Some(Constraint.OrgIdFkey)
         case "projects_visibility_check" => Some(Constraint.VisibilityCheck)
+        case "projects_public_id_key" => Some(Constraint.PublicIdKey)
         case _ => None
     }
 
@@ -725,6 +784,7 @@ mod UsersTable {
     pub def email(): Fragment.Col[UsersTable, String, Fragment.NotNull] = Fragment.Col.Col("email", SqlValue.Str)
     pub def name(): Fragment.Col[UsersTable, String, Fragment.NotNull] = Fragment.Col.Col("name", SqlValue.Str)
     pub def createdAt(): Fragment.Col[UsersTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("created_at", SqlValue.ofTimestamp)
+    pub def publicId(): Fragment.Col[UsersTable, String, Fragment.NotNull] = Fragment.Col.Col("public_id", SqlValue.Str)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
@@ -732,6 +792,8 @@ mod UsersTable {
     pub enum Constraint with Eq, Order, ToString {
         /// users_issuer_subject_key (unique)
         case IssuerSubjectKey
+        /// users_public_id_key (unique)
+        case PublicIdKey
     }
 
     ///
@@ -747,10 +809,12 @@ mod UsersTable {
     ///
     pub def raiseConstraint(constraint: Constraint): a \ DbErr = match constraint {
         case Constraint.IssuerSubjectKey => DbErr.uniqueViolation("users_issuer_subject_key")
+        case Constraint.PublicIdKey => DbErr.uniqueViolation("users_public_id_key")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
         case "users_issuer_subject_key" => Some(Constraint.IssuerSubjectKey)
+        case "users_public_id_key" => Some(Constraint.PublicIdKey)
         case _ => None
     }
 

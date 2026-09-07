@@ -7,7 +7,7 @@ mod ContentFieldsQueries {
     ///
     /// 生成元 content_fields.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -1947595877
+    pub def sourceHash(): Int32 = 25632589
 
     ///
     /// listAllFields の 1 行。
@@ -32,10 +32,10 @@ mod ContentFieldsQueries {
         ) yield { id = id, typeId = typeId, parentFieldId = parentFieldId, apiId = apiId, name = name, kind = kind, isMany = isMany, isRequired = isRequired, isUnique = isUnique, isLocalized = isLocalized, targetTypeId = targetTypeId, config = config, position = position }
 
     ///
-    /// listAllFields: SELECT f.id, f.type_id, f.parent_field_id, f.api_id, f.name, f.kind, f.is_many, f.is_required, f.is_unique, f.is_localized, f.target_type_id, f.config, f.position FROM content_fields AS f JOIN content_types AS t ON t.id = f.type_id WHERE t.project_id = $1 ORDER BY f.type_id, f.position, f.id
+    /// listAllFields: SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position FROM content_fields WHERE project_id = $1 ORDER BY type_id, position, id
     ///
     pub def listAllFields(projectId: Int64): List[ListAllFieldsRow] \ DbRead =
-        let sql = "SELECT f.id, f.type_id, f.parent_field_id, f.api_id, f.name, f.kind, f.is_many, f.is_required, f.is_unique, f.is_localized, f.target_type_id, f.config, f.position\n    FROM content_fields AS f\n    JOIN content_types AS t ON t.id = f.type_id\n    WHERE t.project_id = $1 ORDER BY f.type_id, f.position, f.id";
+        let sql = "SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position\n    FROM content_fields\n    WHERE project_id = $1 ORDER BY type_id, position, id";
         let params = List#{SqlValue.Int64(projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listAllFieldsDecoder(), sql, params))
 
@@ -62,11 +62,11 @@ mod ContentFieldsQueries {
         ) yield { id = id, typeId = typeId, parentFieldId = parentFieldId, apiId = apiId, name = name, kind = kind, isMany = isMany, isRequired = isRequired, isUnique = isUnique, isLocalized = isLocalized, targetTypeId = targetTypeId, config = config, position = position }
 
     ///
-    /// listFieldsOfType: SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position FROM content_fields WHERE type_id = $1 ORDER BY position, id
+    /// listFieldsOfType: SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position FROM content_fields WHERE type_id = $1 AND project_id = $2 ORDER BY position, id
     ///
-    pub def listFieldsOfType(typeId: Int64): List[ListFieldsOfTypeRow] \ DbRead =
-        let sql = "SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position\n    FROM content_fields WHERE type_id = $1 ORDER BY position, id";
-        let params = List#{SqlValue.Int64(typeId)};
+    pub def listFieldsOfType(args: { typeId = Int64, projectId = Int64 }): List[ListFieldsOfTypeRow] \ DbRead =
+        let sql = "SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position\n    FROM content_fields WHERE type_id = $1 AND project_id = $2 ORDER BY position, id";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listFieldsOfTypeDecoder(), sql, params))
 
     ///
@@ -92,10 +92,10 @@ mod ContentFieldsQueries {
         ) yield { id = id, typeId = typeId, parentFieldId = parentFieldId, apiId = apiId, name = name, kind = kind, isMany = isMany, isRequired = isRequired, isUnique = isUnique, isLocalized = isLocalized, targetTypeId = targetTypeId, config = config, position = position }
 
     ///
-    /// findField: SELECT f.id, f.type_id, f.parent_field_id, f.api_id, f.name, f.kind, f.is_many, f.is_required, f.is_unique, f.is_localized, f.target_type_id, f.config, f.position FROM content_fields AS f JOIN content_types AS t ON t.id = f.type_id WHERE f.id = $1 AND t.project_id = $2
+    /// findField: SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position FROM content_fields WHERE id = $1 AND project_id = $2
     ///
     pub def findField(args: { id = Int64, projectId = Int64 }): Option[FindFieldRow] \ DbRead =
-        let sql = "SELECT f.id, f.type_id, f.parent_field_id, f.api_id, f.name, f.kind, f.is_many, f.is_required, f.is_unique, f.is_localized, f.target_type_id, f.config, f.position\n    FROM content_fields AS f\n    JOIN content_types AS t ON t.id = f.type_id\n    WHERE f.id = $1 AND t.project_id = $2";
+        let sql = "SELECT id, type_id, parent_field_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, target_type_id, config, position\n    FROM content_fields\n    WHERE id = $1 AND project_id = $2";
         let params = List#{SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findFieldDecoder(), sql, params))
 
@@ -110,55 +110,55 @@ mod ContentFieldsQueries {
         ) yield { id = id }
 
     ///
-    /// insertField: INSERT INTO content_fields (type_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, config, position) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id
+    /// insertField: INSERT INTO content_fields (project_id, type_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, config, position) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id
     ///
-    pub def insertField(args: { typeId = Int64, apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, config = Util.Json.Json, position = Int32 }): Option[InsertFieldRow] \ DbWrite =
-        let sql = "INSERT INTO content_fields (type_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, config, position)\n    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n    RETURNING id";
-        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Str(args#apiId), SqlValue.Str(args#name), SqlValue.Str(args#kind), SqlValue.Bool(args#isMany), SqlValue.Bool(args#isRequired), SqlValue.Bool(args#isUnique), SqlValue.Bool(args#isLocalized), SqlValue.ofJson(args#config), SqlValue.Int32(args#position)};
+    pub def insertField(args: { projectId = Int64, typeId = Int64, apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, config = Util.Json.Json, position = Int32 }): Option[InsertFieldRow] \ DbWrite =
+        let sql = "INSERT INTO content_fields (project_id, type_id, api_id, name, kind, is_many, is_required, is_unique, is_localized, config, position)\n    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n    RETURNING id";
+        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Int64(args#typeId), SqlValue.Str(args#apiId), SqlValue.Str(args#name), SqlValue.Str(args#kind), SqlValue.Bool(args#isMany), SqlValue.Bool(args#isRequired), SqlValue.Bool(args#isUnique), SqlValue.Bool(args#isLocalized), SqlValue.ofJson(args#config), SqlValue.Int32(args#position)};
         RawSql.runWithAllow(() -> Sql.executeReturningOneAs(insertFieldDecoder(), sql, params))
 
     ///
-    /// setFieldTarget: UPDATE content_fields SET target_type_id = $1 WHERE id = $2
+    /// setFieldTarget: UPDATE content_fields SET target_type_id = $1 WHERE id = $2 AND project_id = $3
     ///
-    pub def setFieldTarget(args: { id = Int64, targetTypeId = Int64 }): Int32 \ DbWrite =
-        let sql = "UPDATE content_fields SET target_type_id = $1 WHERE id = $2";
-        let params = List#{SqlValue.Int64(args#targetTypeId), SqlValue.Int64(args#id)};
+    pub def setFieldTarget(args: { id = Int64, targetTypeId = Int64, projectId = Int64 }): Int32 \ DbWrite =
+        let sql = "UPDATE content_fields SET target_type_id = $1 WHERE id = $2 AND project_id = $3";
+        let params = List#{SqlValue.Int64(args#targetTypeId), SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
-    /// setFieldParent: UPDATE content_fields SET parent_field_id = $1 WHERE id = $2
+    /// setFieldParent: UPDATE content_fields SET parent_field_id = $1 WHERE id = $2 AND project_id = $3
     ///
-    pub def setFieldParent(args: { id = Int64, parentFieldId = Int64 }): Int32 \ DbWrite =
-        let sql = "UPDATE content_fields SET parent_field_id = $1 WHERE id = $2";
-        let params = List#{SqlValue.Int64(args#parentFieldId), SqlValue.Int64(args#id)};
+    pub def setFieldParent(args: { id = Int64, parentFieldId = Int64, projectId = Int64 }): Int32 \ DbWrite =
+        let sql = "UPDATE content_fields SET parent_field_id = $1 WHERE id = $2 AND project_id = $3";
+        let params = List#{SqlValue.Int64(args#parentFieldId), SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
-    /// updateField: UPDATE content_fields SET  WHERE id = $1
+    /// updateField: UPDATE content_fields SET  WHERE id = $1 AND project_id = $2
     ///
-    pub def updateField(id: Int64, changes: Fragment.Changes[ContentFieldsTable.ContentFieldsTable]): Int32 \ DbWrite =
+    pub def updateField(args: { id = Int64, projectId = Int64 }, changes: Fragment.Changes[ContentFieldsTable.ContentFieldsTable]): Int32 \ DbWrite =
         if (Fragment.isEmptyChanges(changes)) 0 else {
-            let params0 = List#{SqlValue.Int64(id)};
+            let params0 = List#{SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
             let (changesSql, params1) = Fragment.appendChanges(changes, params0);
-            let sql = "UPDATE content_fields SET " + changesSql + " WHERE id = $1";
+            let sql = "UPDATE content_fields SET " + changesSql + " WHERE id = $1 AND project_id = $2";
             let params = params1;
             RawSql.runWithAllow(() -> Sql.execute(sql, params))
         }
 
     ///
-    /// setFieldPosition: UPDATE content_fields SET position = $1 WHERE id = $2
+    /// setFieldPosition: UPDATE content_fields SET position = $1 WHERE id = $2 AND project_id = $3
     ///
-    pub def setFieldPosition(args: { id = Int64, position = Int32 }): Int32 \ DbWrite =
-        let sql = "UPDATE content_fields SET position = $1 WHERE id = $2";
-        let params = List#{SqlValue.Int32(args#position), SqlValue.Int64(args#id)};
+    pub def setFieldPosition(args: { id = Int64, position = Int32, projectId = Int64 }): Int32 \ DbWrite =
+        let sql = "UPDATE content_fields SET position = $1 WHERE id = $2 AND project_id = $3";
+        let params = List#{SqlValue.Int32(args#position), SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
-    /// deleteField: DELETE FROM content_fields WHERE id = $1
+    /// deleteField: DELETE FROM content_fields WHERE id = $1 AND project_id = $2
     ///
-    pub def deleteField(id: Int64): Int32 \ DbWrite =
-        let sql = "DELETE FROM content_fields WHERE id = $1";
-        let params = List#{SqlValue.Int64(id)};
+    pub def deleteField(args: { id = Int64, projectId = Int64 }): Int32 \ DbWrite =
+        let sql = "DELETE FROM content_fields WHERE id = $1 AND project_id = $2";
+        let params = List#{SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
@@ -172,11 +172,11 @@ mod ContentFieldsQueries {
         ) yield { next = next }
 
     ///
-    /// nextFieldPosition: SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE type_id = $1 AND parent_field_id IS NULL
+    /// nextFieldPosition: SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE type_id = $1 AND project_id = $2 AND parent_field_id IS NULL
     ///
-    pub def nextFieldPosition(typeId: Int64): Option[NextFieldPositionRow] \ DbRead =
-        let sql = "SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE type_id = $1 AND parent_field_id IS NULL";
-        let params = List#{SqlValue.Int64(typeId)};
+    pub def nextFieldPosition(args: { typeId = Int64, projectId = Int64 }): Option[NextFieldPositionRow] \ DbRead =
+        let sql = "SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE type_id = $1 AND project_id = $2 AND parent_field_id IS NULL";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(nextFieldPositionDecoder(), sql, params))
 
     ///
@@ -190,11 +190,11 @@ mod ContentFieldsQueries {
         ) yield { next = next }
 
     ///
-    /// nextChildPosition: SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE parent_field_id = $1
+    /// nextChildPosition: SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE parent_field_id = $1 AND project_id = $2
     ///
-    pub def nextChildPosition(parentFieldId: Int64): Option[NextChildPositionRow] \ DbRead =
-        let sql = "SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE parent_field_id = $1";
-        let params = List#{SqlValue.Int64(parentFieldId)};
+    pub def nextChildPosition(args: { parentFieldId = Int64, projectId = Int64 }): Option[NextChildPositionRow] \ DbRead =
+        let sql = "SELECT coalesce(max(position) + 1, 0)::int AS next FROM content_fields WHERE parent_field_id = $1 AND project_id = $2";
+        let params = List#{SqlValue.Int64(args#parentFieldId), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(nextChildPositionDecoder(), sql, params))
 
     ///
@@ -208,11 +208,11 @@ mod ContentFieldsQueries {
         ) yield { total = total }
 
     ///
-    /// countFieldsTargeting: SELECT count(*)::bigint AS total FROM content_fields WHERE target_type_id = $1
+    /// countFieldsTargeting: SELECT count(*)::bigint AS total FROM content_fields WHERE target_type_id = $1 AND project_id = $2
     ///
-    pub def countFieldsTargeting(typeId: Int64): Option[CountFieldsTargetingRow] \ DbRead =
-        let sql = "SELECT count(*)::bigint AS total FROM content_fields WHERE target_type_id = $1";
-        let params = List#{SqlValue.Int64(typeId)};
+    pub def countFieldsTargeting(args: { typeId = Int64, projectId = Int64 }): Option[CountFieldsTargetingRow] \ DbRead =
+        let sql = "SELECT count(*)::bigint AS total FROM content_fields WHERE target_type_id = $1 AND project_id = $2";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(countFieldsTargetingDecoder(), sql, params))
 
 }

@@ -7,7 +7,7 @@ mod ContentTypesQueries {
     ///
     /// 生成元 content_types.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -1859738683
+    pub def sourceHash(): Int32 = -183989845
 
     ///
     /// listContentTypes の 1 行。
@@ -106,31 +106,31 @@ mod ContentTypesQueries {
         RawSql.runWithAllow(() -> Sql.executeReturningOneAs(insertContentTypeDecoder(), sql, params))
 
     ///
-    /// updateContentType: UPDATE content_types SET updated_at = now(),  WHERE id = $1
+    /// updateContentType: UPDATE content_types SET updated_at = now(),  WHERE id = $1 AND project_id = $2
     ///
-    pub def updateContentType(id: Int64, changes: Fragment.Changes[ContentTypesTable.ContentTypesTable]): Int32 \ DbWrite =
+    pub def updateContentType(args: { id = Int64, projectId = Int64 }, changes: Fragment.Changes[ContentTypesTable.ContentTypesTable]): Int32 \ DbWrite =
         if (Fragment.isEmptyChanges(changes)) 0 else {
-            let params0 = List#{SqlValue.Int64(id)};
+            let params0 = List#{SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
             let (changesSql, params1) = Fragment.appendChanges(changes, params0);
-            let sql = "UPDATE content_types SET updated_at = now(), " + changesSql + " WHERE id = $1";
+            let sql = "UPDATE content_types SET updated_at = now(), " + changesSql + " WHERE id = $1 AND project_id = $2";
             let params = params1;
             RawSql.runWithAllow(() -> Sql.execute(sql, params))
         }
 
     ///
-    /// touchContentType: UPDATE content_types SET updated_at = now() WHERE id = $1
+    /// touchContentType: UPDATE content_types SET updated_at = now() WHERE id = $1 AND project_id = $2
     ///
-    pub def touchContentType(id: Int64): Int32 \ DbWrite =
-        let sql = "UPDATE content_types SET updated_at = now() WHERE id = $1";
-        let params = List#{SqlValue.Int64(id)};
+    pub def touchContentType(args: { id = Int64, projectId = Int64 }): Int32 \ DbWrite =
+        let sql = "UPDATE content_types SET updated_at = now() WHERE id = $1 AND project_id = $2";
+        let params = List#{SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
-    /// deleteContentType: DELETE FROM content_types WHERE id = $1
+    /// deleteContentType: DELETE FROM content_types WHERE id = $1 AND project_id = $2
     ///
-    pub def deleteContentType(id: Int64): Int32 \ DbWrite =
-        let sql = "DELETE FROM content_types WHERE id = $1";
-        let params = List#{SqlValue.Int64(id)};
+    pub def deleteContentType(args: { id = Int64, projectId = Int64 }): Int32 \ DbWrite =
+        let sql = "DELETE FROM content_types WHERE id = $1 AND project_id = $2";
+        let params = List#{SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///

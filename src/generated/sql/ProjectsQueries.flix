@@ -7,49 +7,51 @@ mod ProjectsQueries {
     ///
     /// 生成元 projects.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -1621279645
+    pub def sourceHash(): Int32 = -1795930603
 
     ///
     /// findProjectBySlug の 1 行。
     ///
-    pub type alias FindProjectBySlugRow = { id = Int64, slug = String, name = String, orgId = Int64, visibility = String }
+    pub type alias FindProjectBySlugRow = { id = Int64, publicId = String, slug = String, name = String, orgId = Int64, visibility = String }
 
     def findProjectBySlugDecoder(): Decoder[FindProjectBySlugRow] =
         forA (
             id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
             slug <- Decoder.str("slug");
             name <- Decoder.str("name");
             orgId <- Decoder.int64("org_id");
             visibility <- Decoder.str("visibility")
-        ) yield { id = id, slug = slug, name = name, orgId = orgId, visibility = visibility }
+        ) yield { id = id, publicId = publicId, slug = slug, name = name, orgId = orgId, visibility = visibility }
 
     ///
-    /// findProjectBySlug: SELECT id, slug, name, org_id, visibility FROM projects WHERE slug = $1
+    /// findProjectBySlug: SELECT id, public_id, slug, name, org_id, visibility FROM projects WHERE slug = $1
     ///
     pub def findProjectBySlug(slug: String): Option[FindProjectBySlugRow] \ DbRead =
-        let sql = "SELECT id, slug, name, org_id, visibility FROM projects WHERE slug = $1";
+        let sql = "SELECT id, public_id, slug, name, org_id, visibility FROM projects WHERE slug = $1";
         let params = List#{SqlValue.Str(slug)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findProjectBySlugDecoder(), sql, params))
 
     ///
     /// listProjects の 1 行。
     ///
-    pub type alias ListProjectsRow = { id = Int64, slug = String, name = String, orgId = Int64, visibility = String }
+    pub type alias ListProjectsRow = { id = Int64, publicId = String, slug = String, name = String, orgId = Int64, visibility = String }
 
     def listProjectsDecoder(): Decoder[ListProjectsRow] =
         forA (
             id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
             slug <- Decoder.str("slug");
             name <- Decoder.str("name");
             orgId <- Decoder.int64("org_id");
             visibility <- Decoder.str("visibility")
-        ) yield { id = id, slug = slug, name = name, orgId = orgId, visibility = visibility }
+        ) yield { id = id, publicId = publicId, slug = slug, name = name, orgId = orgId, visibility = visibility }
 
     ///
-    /// listProjects: SELECT id, slug, name, org_id, visibility FROM projects ORDER BY id
+    /// listProjects: SELECT id, public_id, slug, name, org_id, visibility FROM projects ORDER BY id
     ///
     pub def listProjects(): List[ListProjectsRow] \ DbRead =
-        let sql = "SELECT id, slug, name, org_id, visibility FROM projects ORDER BY id";
+        let sql = "SELECT id, public_id, slug, name, org_id, visibility FROM projects ORDER BY id";
         let params = Nil;
         RawSql.runWithAllow(() -> Sql.fetchAs(listProjectsDecoder(), sql, params))
 
@@ -64,11 +66,11 @@ mod ProjectsQueries {
         ) yield { id = id }
 
     ///
-    /// insertProject: INSERT INTO projects (org_id, slug, name) VALUES ($1, $2, $3) RETURNING id
+    /// insertProject: INSERT INTO projects (public_id, org_id, slug, name) VALUES ($1, $2, $3, $4) RETURNING id
     ///
-    pub def insertProject(args: { orgId = Int64, slug = String, name = String }): Option[InsertProjectRow] \ DbWrite =
-        let sql = "INSERT INTO projects (org_id, slug, name) VALUES ($1, $2, $3) RETURNING id";
-        let params = List#{SqlValue.Int64(args#orgId), SqlValue.Str(args#slug), SqlValue.Str(args#name)};
+    pub def insertProject(args: { publicId = String, orgId = Int64, slug = String, name = String }): Option[InsertProjectRow] \ DbWrite =
+        let sql = "INSERT INTO projects (public_id, org_id, slug, name) VALUES ($1, $2, $3, $4) RETURNING id";
+        let params = List#{SqlValue.Str(args#publicId), SqlValue.Int64(args#orgId), SqlValue.Str(args#slug), SqlValue.Str(args#name)};
         RawSql.runWithAllow(() -> Sql.executeReturningOneAs(insertProjectDecoder(), sql, params))
 
 }

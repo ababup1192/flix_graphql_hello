@@ -12,16 +12,17 @@ mod Accounts {
     ///
     /// 本人からユーザー。無ければ作り、email / name が変わっていれば更新する。招待と bootstrap もここで処理する。
     ///
-    pub def resolveUser(bootstrap: Bootstrap, principal: Principal): User \ Db =
+    pub def resolveUser(bootstrap: Bootstrap, principal: Principal): User \ Db + IdGen =
         let user = match AuthQueries.findUserByIdentity({ issuer = principal#issuer, subject = principal#subject }) {
             case Some(row) =>
                 if (row#email != principal#email or row#name != principal#name)
                     discard AuthQueries.updateUserProfile({ id = row#id, email = principal#email, name = principal#name })
                 else ();
-                { id = UserId.UserId(row#id), issuer = row#issuer, subject = row#subject, email = principal#email, name = principal#name }
+                { id = UserId.UserId(row#id), publicId = row#publicId, issuer = row#issuer, subject = row#subject, email = principal#email, name = principal#name }
             case None =>
-                let id = AuthQueries.insertUser({ issuer = principal#issuer, subject = principal#subject, email = principal#email, name = principal#name }) |> Rows.expectId;
-                { id = UserId.UserId(id), issuer = principal#issuer, subject = principal#subject, email = principal#email, name = principal#name }
+                let publicId = IdGen.freshPublicId();
+                let id = AuthQueries.insertUser({ publicId = publicId, issuer = principal#issuer, subject = principal#subject, email = principal#email, name = principal#name }) |> Rows.expectId;
+                { id = UserId.UserId(id), publicId = publicId, issuer = principal#issuer, subject = principal#subject, email = principal#email, name = principal#name }
         };
         acceptInvitations(user);
         bootstrapOwner(bootstrap, user);
@@ -70,16 +71,25 @@ mod Accounts {
     pub def findByEmail(email: String): Option[User] \ DbRead + CmsErr =
         match AuthQueries.listUsersByEmail(String.toLowerCase(String.trim(email))) {
             case Nil        => None
-            case row :: Nil => Some({ id = UserId.UserId(row#id), issuer = row#issuer, subject = row#subject, email = row#email, name = row#name })
+            case row :: Nil => Some(fromRow(row))
             case _          => CmsErr.invalid(Violation.Violation("email", "'${email}' のユーザーが複数います。発行元を 1 つにしてください") :: Nil)
         }
+
+    ///
+    /// 外向きの id で 1 人。無ければ None。
+    ///
+    pub def findByPublicId(publicId: String): Option[User] \ DbRead =
+        AuthQueries.findUserByPublicId(publicId) |> Option.map(fromRow)
+
+    def fromRow(row: { id = Int64, publicId = String, issuer = String, subject = String, email = String, name = String | r }): User =
+        { id = UserId.UserId(row#id), publicId = row#publicId, issuer = row#issuer, subject = row#subject, email = row#email, name = row#name }
 
     ///
     /// ユーザーが属する組織と役割。
     ///
     pub def organizationsOf(userId: UserId): List[OrganizationMembership] \ DbRead =
         AuthQueries.listOrganizationsOfUser(UserId.toInt64(userId))
-            |> List.filterMap(row -> OrgRole.parse(row#role) |> Option.map(role -> { organization = { id = OrgId.OrgId(row#id), name = row#name }, role = role }))
+            |> List.filterMap(row -> OrgRole.parse(row#role) |> Option.map(role -> { organization = { id = OrgId.OrgId(row#id), publicId = row#publicId, name = row#name }, role = role }))
 
     ///
     /// ユーザーが触れるプロジェクトと役割。直接の membership に加え、owner である組織の全プロジェクト（owner として）。
@@ -87,7 +97,7 @@ mod Accounts {
     ///
     pub def projectsOf(userId: UserId): List[ProjectMembership] \ DbRead + DbErr =
         let direct = AuthQueries.listMembershipsOfUser(UserId.toInt64(userId))
-            |> List.filterMap(row -> Role.parse(row#role) |> Option.map(role -> { target = Projects.fromRow(row#id, row#slug, row#name, row#visibility), role = role }));
+            |> List.filterMap(row -> Role.parse(row#role) |> Option.map(role -> { target = Projects.fromRow(row), role = role }));
         let owned = organizationsOf(userId) |> List.filter(org -> org#role == OrgRole.Owner)
             |> List.flatMap(org -> Projects.listOfOrg(org#organization#id) |> List.map(target -> { target = target, role = Role.Owner }));
         (direct ::: owned)
@@ -104,8 +114,7 @@ mod Accounts {
     pub def me(): Option[Me] \ DbRead + DbErr + Session = match Session.current() {
         case Actor.User(id, _, roles) =>
             AuthQueries.findUserById(UserId.toInt64(id)) |> Option.map(row ->
-                { user = { id = id, issuer = row#issuer, subject = row#subject, email = row#email, name = row#name },
-                  roles = roles, organizations = organizationsOf(id), projects = projectsOf(id) })
+                { user = fromRow(row), roles = roles, organizations = organizationsOf(id), projects = projectsOf(id) })
         case _ => None
     }
 

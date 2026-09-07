@@ -3,20 +3,25 @@
 // ---- users ----
 
 query findUserByIdentity(issuer: String, subject: String) -> one {
-    SELECT id, issuer, subject, email, name FROM users WHERE issuer = :issuer AND subject = :subject
+    SELECT id, public_id, issuer, subject, email, name FROM users WHERE issuer = :issuer AND subject = :subject
 }
 
 query findUserById(id: Int64) -> one {
-    SELECT id, issuer, subject, email, name FROM users WHERE id = :id
+    SELECT id, public_id, issuer, subject, email, name FROM users WHERE id = :id
+}
+
+// 外向きの id（GraphQL の ID）から
+query findUserByPublicId(publicId: String) -> one {
+    SELECT id, public_id, issuer, subject, email, name FROM users WHERE public_id = :publicId
 }
 
 // email で引く。email は発行元をまたいで一意ではないので複数ありうる
 query listUsersByEmail(email: String) -> many {
-    SELECT id, issuer, subject, email, name FROM users WHERE email = :email ORDER BY id
+    SELECT id, public_id, issuer, subject, email, name FROM users WHERE email = :email ORDER BY id
 }
 
-query insertUser(issuer: String, subject: String, email: String, name: String) -> one {
-    INSERT INTO users (issuer, subject, email, name) VALUES (:issuer, :subject, :email, :name) RETURNING id
+query insertUser(publicId: String, issuer: String, subject: String, email: String, name: String) -> one {
+    INSERT INTO users (public_id, issuer, subject, email, name) VALUES (:publicId, :issuer, :subject, :email, :name) RETURNING id
 }
 
 query updateUserProfile(id: Int64, email: String, name: String) -> exec {
@@ -26,16 +31,20 @@ query updateUserProfile(id: Int64, email: String, name: String) -> exec {
 // ---- organizations ----
 
 query findOrganization(id: Int64) -> one {
-    SELECT id, name FROM organizations WHERE id = :id
+    SELECT id, public_id, name FROM organizations WHERE id = :id
 }
 
-query insertOrganization(name: String) -> one {
-    INSERT INTO organizations (name) VALUES (:name) RETURNING id
+query findOrganizationByPublicId(publicId: String) -> one {
+    SELECT id, public_id, name FROM organizations WHERE public_id = :publicId
+}
+
+query insertOrganization(publicId: String, name: String) -> one {
+    INSERT INTO organizations (public_id, name) VALUES (:publicId, :name) RETURNING id
 }
 
 // ユーザーが属する組織と役割
 query listOrganizationsOfUser(userId: Int64) -> many {
-    SELECT o.id, o.name, m.role
+    SELECT o.id, o.public_id, o.name, m.role
     FROM org_members AS m JOIN organizations AS o ON o.id = m.org_id
     WHERE m.user_id = :userId ORDER BY o.id
 }
@@ -50,7 +59,7 @@ query countOrgOwners(orgId: Int64) -> one {
 
 // 組織のメンバー
 query listOrgMembers(orgId: Int64) -> many {
-    SELECT u.id, u.email, u.name, m.role
+    SELECT u.id, u.public_id, u.email, u.name, m.role
     FROM org_members AS m JOIN users AS u ON u.id = m.user_id
     WHERE m.org_id = :orgId ORDER BY u.id
 }
@@ -71,7 +80,7 @@ query findProjectOrg(projectId: Int64) -> one {
 }
 
 query listProjectsOfOrg(orgId: Int64) -> many {
-    SELECT id, slug, name, visibility FROM projects WHERE org_id = :orgId ORDER BY id
+    SELECT id, public_id, slug, name, visibility FROM projects WHERE org_id = :orgId ORDER BY id
 }
 
 query updateProjectVisibility(projectId: Int64, visibility: String) -> exec {
@@ -86,14 +95,15 @@ query findMembership(userId: Int64, projectId: Int64) -> one {
 }
 
 // ユーザーが役割を持つプロジェクト（組織の owner として持つ物は Authz が足す）
+// unscoped: 自分のプロジェクト一覧はプロジェクトを跨いで引く（ログイン後の切り替え候補）
 query listMembershipsOfUser(userId: Int64) -> many {
-    SELECT p.id, p.slug, p.name, p.visibility, m.role
+    SELECT p.id, p.public_id, p.slug, p.name, p.visibility, m.role
     FROM memberships AS m JOIN projects AS p ON p.id = m.project_id
     WHERE m.user_id = :userId ORDER BY p.id
 }
 
 query listMembers(projectId: Int64) -> many {
-    SELECT u.id, u.email, u.name, m.role
+    SELECT u.id, u.public_id, u.email, u.name, m.role
     FROM memberships AS m JOIN users AS u ON u.id = m.user_id
     WHERE m.project_id = :projectId ORDER BY u.id
 }
@@ -113,39 +123,47 @@ query countProjectOwners(projectId: Int64) -> one {
 
 // ---- invitations ----
 
-query upsertInvitation(projectId: Int64, email: String, role: String, invitedBy: Int64) -> exec {
-    INSERT INTO invitations (project_id, email, role, invited_by) VALUES (:projectId, :email, :role, :invitedBy)
+// 同じ email に 2 度招待したら役割を上書きし、public_id は最初の物を残す
+query upsertInvitation(publicId: String, projectId: Int64, email: String, role: String, invitedBy: Int64) -> exec {
+    INSERT INTO invitations (public_id, project_id, email, role, invited_by) VALUES (:publicId, :projectId, :email, :role, :invitedBy)
     ON CONFLICT (project_id, email) DO UPDATE SET role = EXCLUDED.role, invited_by = EXCLUDED.invited_by
 }
 
 query listInvitations(projectId: Int64) -> many {
-    SELECT id, email, role, created_at FROM invitations WHERE project_id = :projectId ORDER BY id
+    SELECT id, public_id, email, role, created_at FROM invitations WHERE project_id = :projectId ORDER BY id
 }
 
 // この email 宛の招待（初回ログインで memberships に写す）
+// unscoped: 招待の受け入れはログイン時にプロジェクトを跨いで行う
 query listInvitationsForEmail(email: String) -> many {
     SELECT id, project_id, role FROM invitations WHERE email = :email
 }
 
+// unscoped: 受け入れた招待を消す時はプロジェクトを跨ぐ（listInvitationsForEmail で引いた id だけを渡す）
 query deleteInvitation(id: Int64) -> exec {
     DELETE FROM invitations WHERE id = :id
 }
 
+query deleteInvitationByPublicId(publicId: String, projectId: Int64) -> exec {
+    DELETE FROM invitations WHERE public_id = :publicId AND project_id = :projectId
+}
+
 // ---- api_keys ----
 
-query insertApiKey(projectId: Int64, name: String, keyHash: String, pepperId: String, scope: String) -> one {
-    INSERT INTO api_keys (project_id, name, key_hash, pepper_id, scope) VALUES (:projectId, :name, :keyHash, :pepperId, :scope) RETURNING id
+query insertApiKey(publicId: String, projectId: Int64, name: String, keyHash: String, pepperId: String, scope: String) -> one {
+    INSERT INTO api_keys (public_id, project_id, name, key_hash, pepper_id, scope) VALUES (:publicId, :projectId, :name, :keyHash, :pepperId, :scope) RETURNING id
 }
 
 // hash で引く。プロジェクトの一致は呼ぶ側が確かめる（鍵がプロジェクトを決めない）
+// unscoped: 鍵はプロジェクトを知らないので hash で引き、呼ぶ側が project_id を照合する
 query findApiKeyByHash(keyHash: String) -> one {
     SELECT id, project_id, name, scope, revoked_at FROM api_keys WHERE key_hash = :keyHash
 }
 
 query listApiKeys(projectId: Int64) -> many {
-    SELECT id, name, scope, created_at, revoked_at FROM api_keys WHERE project_id = :projectId ORDER BY id
+    SELECT id, public_id, name, scope, created_at, revoked_at FROM api_keys WHERE project_id = :projectId ORDER BY id
 }
 
-query revokeApiKey(id: Int64, projectId: Int64) -> exec {
-    UPDATE api_keys SET revoked_at = now() WHERE id = :id AND project_id = :projectId AND revoked_at IS NULL
+query revokeApiKey(publicId: String, projectId: Int64) -> exec {
+    UPDATE api_keys SET revoked_at = now() WHERE public_id = :publicId AND project_id = :projectId AND revoked_at IS NULL
 }

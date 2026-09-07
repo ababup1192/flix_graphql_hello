@@ -132,8 +132,9 @@ mod ContentTypeRows {
     ///
     /// insertField の引数。target と parent は後追いの UPDATE（setFieldTarget / setFieldParent）で入れる。
     ///
-    pub def fieldInsert(typeId: TypeId, position: Int32, draft: FieldDraft): { typeId = Int64, apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, config = Json, position = Int32 } =
+    pub def fieldInsert(typeId: TypeId, position: Int32, draft: FieldDraft): { projectId = Int64, typeId = Int64, apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, config = Json, position = Int32 } \ Tenant =
         {
+            projectId   = Tenant.currentId(),
             typeId      = TypeId.toInt64(typeId),
             apiId       = ApiId.text(draft#apiId),
             name        = draft#name,

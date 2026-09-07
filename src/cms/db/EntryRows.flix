@@ -79,8 +79,8 @@ mod EntryRows {
     ///
     /// insertVersion の引数。今の下書きをそのまま積む。
     ///
-    pub def versionInsert(entry: Entry, author: String, reason: VersionReason): { entryId = String, version = Int32, data = Json, author = String, reason = String } =
-        { entryId = EntryId.text(entry#id), version = entry#version, data = dataToJson(entry#data), author = author, reason = reasonToDb(reason) }
+    pub def versionInsert(entry: Entry, author: String, reason: VersionReason): { projectId = Int64, entryId = String, version = Int32, data = Json, author = String, reason = String } \ Tenant =
+        { projectId = Tenant.currentId(), entryId = EntryId.text(entry#id), version = entry#version, data = dataToJson(entry#data), author = author, reason = reasonToDb(reason) }
 
     ///
     /// entry_versions の行から EntryVersion を組む。

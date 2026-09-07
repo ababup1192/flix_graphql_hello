@@ -18,16 +18,17 @@ mod ApiKeys {
         Session.require(Permission.ManageApiKeys);
         CmsErr.raiseIfAny(if (String.isEmpty(String.trim(name))) Violation.Violation("name", "名前を付けてください") :: Nil else Nil);
         let key = prefix() ++ IdGen.freshSecret();
-        let id = AuthQueries.insertApiKey({ projectId = Tenant.currentId(), name = name, keyHash = hash(pepper, key), pepperId = pepper#pepperId, scope = ApiKeyScope.text(scope) }) |> Rows.expectId;
-        { id = id, name = name, scope = scope, key = key }
+        let publicId = IdGen.freshPublicId();
+        let id = AuthQueries.insertApiKey({ publicId = publicId, projectId = Tenant.currentId(), name = name, keyHash = hash(pepper, key), pepperId = pepper#pepperId, scope = ApiKeyScope.text(scope) }) |> Rows.expectId;
+        { id = id, publicId = publicId, name = name, scope = scope, key = key }
 
     ///
     /// 失効する。行は残す。
     ///
-    pub def revoke(id: Int64): Unit \ DbWrite + CmsErr + Tenant + Session =
+    pub def revoke(publicId: String): Unit \ DbWrite + CmsErr + Tenant + Session =
         Session.require(Permission.ManageApiKeys);
-        let changed = AuthQueries.revokeApiKey({ id = id, projectId = Tenant.currentId() });
-        if (changed == 0) CmsErr.notFound(Entity.ApiKey, Int64.toString(id)) else ()
+        let changed = AuthQueries.revokeApiKey({ publicId = publicId, projectId = Tenant.currentId() });
+        if (changed == 0) CmsErr.notFound(Entity.ApiKey, publicId) else ()
 
     ///
     /// 今のプロジェクトの鍵の一覧。
@@ -35,7 +36,7 @@ mod ApiKeys {
     pub def list(): List[ApiKey] \ DbRead + DbErr + CmsErr + Tenant + Session =
         Session.require(Permission.ManageApiKeys);
         AuthQueries.listApiKeys(Tenant.currentId()) |> List.map(row -> {
-            id = row#id, name = row#name,
+            id = row#id, publicId = row#publicId, name = row#name,
             scope = ApiKeyScope.parse(row#scope) |> Rows.orRaise("api_keys.scope", row#scope),
             createdAt = row#createdAt, revokedAt = row#revokedAt
         })

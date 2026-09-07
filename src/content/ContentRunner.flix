@@ -19,12 +19,12 @@ mod ContentRunner {
         let outcome = DbRunner.retrying(() ->
             CmsErr.runWithResult(() ->
                 Tenant.runWith(projectId, () ->
-                    Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () ->
+                    Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () -> IdGen.runWithRandom(() ->
                         Pool.withLazyTx(pool, () -> {
                             let actor = Deps.actorOf(deps, projectId, context#credential);
                             guardVisibility(projectId, actor);
                             Session.runWith(actor, f)
-                        })))))));
+                        }))))))));
         match outcome {
             case Err(failure)     => Err(DbRunner.failureMessage(failure))
             case Ok(Err(failure)) => Err(CmsErr.toMessage(failure))

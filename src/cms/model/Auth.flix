@@ -46,7 +46,12 @@ pub type alias Principal = { issuer = String, subject = String, email = String, 
 ///
 /// ユーザー。
 ///
-pub type alias User = { id = UserId, issuer = String, subject = String, email = String, name = String }
+pub type alias User = { id = UserId, publicId = String, issuer = String, subject = String, email = String, name = String }
+
+///
+/// 外向きの id（GraphQL の ID に出す乱数）。内部の主キーは連番なので外に出さない（存在する id と規模が推測できる）。
+/// 型は String のまま: 境界（AdminMapping / AccountMapping）で DB を引いて内部 id に戻すので、中では持ち回らない。
+///
 
 ///
 /// プロジェクトでの役割。上が下を含む（owner ⊃ editor ⊃ writer ⊃ viewer。包含は Authz の規則）。
@@ -200,7 +205,7 @@ mod Visibility {
 ///
 /// 組織。
 ///
-pub type alias Organization = { id = OrgId, name = String }
+pub type alias Organization = { id = OrgId, publicId = String, name = String }
 
 ///
 /// 自分が属する組織と役割。
@@ -210,7 +215,7 @@ pub type alias OrganizationMembership = { organization = Organization, role = Or
 ///
 /// プロジェクト（認証の文脈で見る形）。
 ///
-pub type alias Project = { id = ProjectId, slug = ProjectSlug, name = String, visibility = Visibility }
+pub type alias Project = { id = ProjectId, publicId = String, slug = ProjectSlug, name = String, visibility = Visibility }
 
 ///
 /// 自分が触れるプロジェクトと役割。
@@ -225,7 +230,7 @@ pub type alias Me = { user = User, roles = List[Role], organizations = List[Orga
 ///
 /// 組織のメンバー 1 人。
 ///
-pub type alias OrganizationMember = { userId = UserId, email = String, name = String, role = OrgRole }
+pub type alias OrganizationMember = { userId = UserId, publicId = String, email = String, name = String, role = OrgRole }
 
 ///
 /// 組織を誰が作れるか。クラウド版は Open（ログインした人なら誰でも）、セルフホストは Closed（既定の組織の owner だけ）にできる。
@@ -238,19 +243,19 @@ pub enum Signup with Eq, ToString {
 ///
 /// プロジェクトのメンバー 1 人。
 ///
-pub type alias Member = { userId = UserId, email = String, name = String, role = Role }
+pub type alias Member = { userId = UserId, publicId = String, email = String, name = String, role = Role }
 
 ///
 /// 招待 1 つ。
 ///
-pub type alias Invitation = { id = Int64, email = String, role = Role, createdAt = Timestamp.Timestamp }
+pub type alias Invitation = { id = Int64, publicId = String, email = String, role = Role, createdAt = Timestamp.Timestamp }
 
 ///
 /// API キーの 1 行。生の鍵は持たない。
 ///
-pub type alias ApiKey = { id = Int64, name = String, scope = ApiKeyScope, createdAt = Timestamp.Timestamp, revokedAt = Option[Timestamp.Timestamp] }
+pub type alias ApiKey = { id = Int64, publicId = String, name = String, scope = ApiKeyScope, createdAt = Timestamp.Timestamp, revokedAt = Option[Timestamp.Timestamp] }
 
 ///
 /// 発行した鍵。key はこの時だけ見える。
 ///
-pub type alias IssuedApiKey = { id = Int64, name = String, scope = ApiKeyScope, key = String }
+pub type alias IssuedApiKey = { id = Int64, publicId = String, name = String, scope = ApiKeyScope, key = String }

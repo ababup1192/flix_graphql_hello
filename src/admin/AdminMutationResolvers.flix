@@ -88,7 +88,7 @@ mod AdminMutationResolvers {
 
     /// Mutation.cancelInvitation。消した id を返す
     pub def cancelInvitation(): GeneratedAdmin.MutationCancelInvitationResolver[AdminEff] =
-        (_context, id) -> { Members.cancelInvitation(AdminMapping.number("id", id)); Ok(id) }
+        (_context, id) -> { Members.cancelInvitation(AdminMapping.publicIdOf(id)); Ok(id) }
 
     /// Mutation.changeMemberRole
     pub def changeMemberRole(): GeneratedAdmin.MutationChangeMemberRoleResolver[AdminEff] =
@@ -107,7 +107,7 @@ mod AdminMutationResolvers {
 
     /// Mutation.revokeApiKey。失効した id を返す
     pub def revokeApiKey(): GeneratedAdmin.MutationRevokeApiKeyResolver[AdminEff] =
-        (_context, id) -> { ApiKeys.revoke(AdminMapping.number("id", id)); Ok(id) }
+        (_context, id) -> { ApiKeys.revoke(AdminMapping.publicIdOf(id)); Ok(id) }
 
     /// type Mutation のリゾルバ一式
     pub def resolvers(deps: Deps): GeneratedAdmin.MutationResolvers[AdminEff] =

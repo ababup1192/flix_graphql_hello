@@ -89,7 +89,7 @@ mod ContentEntries {
         let owner = ContentTypes.get(typeId);
         CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data) ::: singletonViolations(owner));
         let id = given |> Option.getWithDefault(IdGen.freshEntryId());
-        let taken = EntriesQueries.entryExists(EntryId.text(id)) |> Option.nonEmpty;
+        let taken = EntriesQueries.entryExists({ id = EntryId.text(id), projectId = Tenant.currentId() }) |> Option.nonEmpty;
         CmsErr.raiseIfAny(if (taken) Violation.Violation("id", "'${id}' は既にあります（ゴミ箱の物を含む）") :: Nil else Nil);
         discard EntriesQueries.insertEntry({ id = EntryId.text(id), typeId = TypeId.toInt64(typeId), projectId = Tenant.currentId() });
         writeContent(id, Stage.Draft, owner, data);
@@ -111,8 +111,8 @@ mod ContentEntries {
         Session.require(Permission.WriteEntries);
         let existing = get(id);
         if (existing#stage == Stage.Published) discard unpublish(id) else ();
-        discard EntriesQueries.deleteLinks({ fromEntryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft) });
-        discard EntriesQueries.softDeleteEntry(EntryId.text(id))
+        discard EntriesQueries.deleteLinks({ fromEntryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft), projectId = Tenant.currentId() });
+        discard EntriesQueries.softDeleteEntry({ id = EntryId.text(id), projectId = Tenant.currentId() })
 
     // ---- 公開 ----
 
@@ -138,7 +138,7 @@ mod ContentEntries {
             CmsErr.raiseIfAny(pending |> List.map(dependency -> Violation.Violation("references", "参照先 '${dependency}' が未公開です（withDependencies: true で一緒に公開できます）")));
         writeContent(id, Stage.Published, owner, data);
         discard EntriesQueries.insertVersion(EntryRows.versionInsert(existing, author, VersionReason.Publish));
-        discard EntriesQueries.markPublished(EntryId.text(id));
+        discard EntriesQueries.markPublished({ id = EntryId.text(id), projectId = Tenant.currentId() });
         get(id)
 
     ///
@@ -156,8 +156,8 @@ mod ContentEntries {
     ///
     def reportOf(lock: Bool, owner: ContentType, existing: Entry, data: EntryData): PublishReport \ DbRead + DbErr + Tenant =
         let key = EntryId.text(existing#id);
-        let missing = EntriesQueries.missingTargets(key) |> List.filterMap(EntryRows.toTargetId);
-        let pending = EntriesQueries.unpublishedTargets(key) |> List.filterMap(EntryRows.toTargetId) |> List.filter(target -> not List.memberOf(target, missing)) |> List.sort;
+        let missing = EntriesQueries.missingTargets({ fromEntryId = key, projectId = Tenant.currentId() }) |> List.filterMap(EntryRows.toTargetId);
+        let pending = EntriesQueries.unpublishedTargets({ fromEntryId = key, projectId = Tenant.currentId() }) |> List.filterMap(EntryRows.toTargetId) |> List.filter(target -> not List.memberOf(target, missing)) |> List.sort;
         {
             violations = EntryValidation.publish(owner#fields, data) ::: uniqueViolations(lock, owner, existing)
                 ::: (missing |> List.map(target -> Violation.Violation("references", "参照先 '${target}' はありません（消されています）。参照を外してください")))
@@ -179,14 +179,14 @@ mod ContentEntries {
 
     /// stage の中身でこの entry を参照している物。参照元は下書きの中身で返す。
     def referrers(id: EntryId, stage: Stage): List[Referrer] \ DbRead + DbErr + CmsErr + Tenant =
-        EntriesQueries.referrerLinks({ toEntryId = EntryId.text(id), stage = EntryRows.stageToDb(stage) })
+        EntriesQueries.referrerLinks({ toEntryId = EntryId.text(id), stage = EntryRows.stageToDb(stage), projectId = Tenant.currentId() })
             |> List.filterMap(row -> EntryId.parse(row#fromEntryId) |> Option.flatMap(lookup) |> Option.map(entry ->
                 { entry = entry, via = ContentTypes.getField(FieldId.FieldId(row#fieldId))#apiId, stage = stage }))
 
     /// 未公開の参照先を深さ優先で集める（依存の順。直接の参照先は id 順。重複と循環は visited で止める）。
-    def dependenciesOf(visited: List[EntryId], id: EntryId): List[EntryId] \ DbRead =
-        let missing = EntriesQueries.missingTargets(EntryId.text(id)) |> List.filterMap(EntryRows.toTargetId);
-        let direct = EntriesQueries.unpublishedTargets(EntryId.text(id)) |> List.filterMap(EntryRows.toTargetId)
+    def dependenciesOf(visited: List[EntryId], id: EntryId): List[EntryId] \ DbRead + Tenant =
+        let missing = EntriesQueries.missingTargets({ fromEntryId = EntryId.text(id), projectId = Tenant.currentId() }) |> List.filterMap(EntryRows.toTargetId);
+        let direct = EntriesQueries.unpublishedTargets({ fromEntryId = EntryId.text(id), projectId = Tenant.currentId() }) |> List.filterMap(EntryRows.toTargetId)
             |> List.filter(target -> not List.memberOf(target, missing) and not List.memberOf(target, visited)) |> List.sort;
         List.foldLeft((acc, target) -> if (List.memberOf(target, acc)) acc else acc ::: (target :: dependenciesOf(visited ::: acc ::: (target :: Nil), target)), Nil, direct)
 
@@ -207,11 +207,11 @@ mod ContentEntries {
         let key = EntryId.text(id);
         let published = EntryRows.stageToDb(Stage.Published);
         discard get(id);
-        let referrers = EntriesQueries.publishedReferrers(key) |> List.map(EntryRows.referrerText) |> List.filter(referrer -> referrer != key);
+        let referrers = EntriesQueries.publishedReferrers({ toEntryId = key, projectId = Tenant.currentId() }) |> List.map(EntryRows.referrerText) |> List.filter(referrer -> referrer != key);
         CmsErr.raiseIfAny(referrers |> List.map(referrer -> Violation.Violation("references", "公開中の entry '${referrer}' が参照しています。先にそちらを取り下げるか、参照を外してください")));
-        discard EntriesQueries.deleteLinks({ fromEntryId = key, stage = published });
+        discard EntriesQueries.deleteLinks({ fromEntryId = key, stage = published, projectId = Tenant.currentId() });
         discard EntriesQueries.deleteContent({ entryId = key, stage = published });
-        discard EntriesQueries.markUnpublished(key);
+        discard EntriesQueries.markUnpublished({ id = key, projectId = Tenant.currentId() });
         get(id)
 
     // ---- 版 ----
@@ -219,9 +219,9 @@ mod ContentEntries {
     ///
     /// entry の版。新しい順。
     ///
-    pub def versions(id: EntryId): List[EntryVersion] \ DbRead + CmsErr + Session =
+    pub def versions(id: EntryId): List[EntryVersion] \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ReadDraft);
-        EntriesQueries.listVersions(EntryId.text(id)) |> List.map(EntryRows.toVersion)
+        EntriesQueries.listVersions({ entryId = EntryId.text(id), projectId = Tenant.currentId() }) |> List.map(EntryRows.toVersion)
 
     ///
     /// 今の下書きを版として積む。
@@ -254,7 +254,7 @@ mod ContentEntries {
         if (existing#version != expectedVersion) CmsErr.conflict(Entity.Entry, EntryId.text(id), existing#version) else ();
         CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data));
         writeContent(id, Stage.Draft, owner, data);
-        let advanced = EntriesQueries.bumpEntryVersion({ id = EntryId.text(id), expected = expectedVersion });
+        let advanced = EntriesQueries.bumpEntryVersion({ id = EntryId.text(id), expected = expectedVersion, projectId = Tenant.currentId() });
         // 0 行なら読んでから書くまでに誰かが進めた（またはゴミ箱に入った）。今の版は読み直して報告する
         if (advanced == 0) CmsErr.conflict(Entity.Entry, EntryId.text(id), get(id)#version) else ();
         get(id)
@@ -262,23 +262,23 @@ mod ContentEntries {
     ///
     /// singleton には entry を 1 件しか作れない（コンテンツ API が 1 件しか返さないので、2 件目は見えない物になる）。
     ///
-    def singletonViolations(owner: ContentType): List[Violation] \ DbRead = match owner#kind {
+    def singletonViolations(owner: ContentType): List[Violation] \ DbRead + Tenant = match owner#kind {
         case TypeKind.Collection => Nil
         case TypeKind.Singleton  =>
-            let count = EntriesQueries.countEntriesOfType(TypeId.toInt64(owner#id)) |> Rows.total;
+            let count = EntriesQueries.countEntriesOfType({ typeId = TypeId.toInt64(owner#id), projectId = Tenant.currentId() }) |> Rows.total;
             if (count == 0i64) Nil else Violation.Violation("typeId", "SINGLETON の型には entry を 1 件しか作れません") :: Nil
     }
 
     ///
     /// stage の中身を入れ、entry_links をその stage の分だけ入れ直す。
     ///
-    def writeContent(id: EntryId, stage: Stage, owner: ContentType, data: EntryData): Unit \ DbWrite =
+    def writeContent(id: EntryId, stage: Stage, owner: ContentType, data: EntryData): Unit \ DbWrite + Tenant =
         let key = EntryId.text(id);
         let stageText = EntryRows.stageToDb(stage);
         discard EntriesQueries.upsertContent({ entryId = key, stage = stageText, data = EntryRows.dataToJson(data) });
-        discard EntriesQueries.deleteLinks({ fromEntryId = key, stage = stageText });
+        discard EntriesQueries.deleteLinks({ fromEntryId = key, stage = stageText, projectId = Tenant.currentId() });
         EntryLinks.extract(owner#fields, data) |> List.forEach(link ->
-            discard EntriesQueries.insertLink({ fromEntryId = key, stage = stageText, fieldId = FieldId.toInt64(link#field#id), toEntryId = EntryId.text(link#target), position = link#position }))
+            discard EntriesQueries.insertLink({ projectId = Tenant.currentId(), fromEntryId = key, stage = stageText, fieldId = FieldId.toInt64(link#field#id), toEntryId = EntryId.text(link#target), position = link#position }))
 
     ///
     /// 参照先を同じ stage で 1 本の SELECT で先読みし、各 entry の linked に載せる。参照が無ければ SQL を出さない。
@@ -310,10 +310,10 @@ mod ContentEntries {
     /// 他の公開中の entry が同じ値を持っていれば違反。自分の値は構わない（再公開）。
     /// 検査の前に値ごとの advisory lock を取り、同じ値を同時に公開する Tx を直列にする（後の方が先の公開を見る）。
     ///
-    def uniqueViolations(lock: Bool, owner: ContentType, entry: Entry): List[Violation] \ DbRead =
+    def uniqueViolations(lock: Bool, owner: ContentType, entry: Entry): List[Violation] \ DbRead + Tenant =
         uniqueValues(owner, entry) |> List.filterMap(match (field, value) -> {
             if (lock) discard EntriesQueries.lockUniqueValue({ typeId = TypeId.toInt64(owner#id), fieldId = FieldId.toInt64(field#id), value = value }) else ();
-            EntriesQueries.findUniqueHolder({ typeId = TypeId.toInt64(owner#id), apiId = ApiId.text(field#apiId), value = value })
+            EntriesQueries.findUniqueHolder({ typeId = TypeId.toInt64(owner#id), apiId = ApiId.text(field#apiId), value = value, projectId = Tenant.currentId() })
                 |> Option.map(row -> row#id)
                 |> Option.filter(holder -> holder != EntryId.text(entry#id))
                 |> Option.map(holder -> Violation.Violation("fields.${field#apiId}", "'${scalarText(value)}' は公開中の entry '${holder}' が使っています"))

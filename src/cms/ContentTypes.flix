@@ -93,7 +93,7 @@ mod ContentTypes {
         };
         let others = listAll() |> List.filter(other -> other#id != id);
         CmsErr.raiseIfAny(typeNameViolations(others, names, existing#fields));
-        discard ContentTypesQueries.updateContentType(TypeId.toInt64(id), ContentTypeRows.typeChanges(changes));
+        discard ContentTypesQueries.updateContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() }, ContentTypeRows.typeChanges(changes));
         get(id)
 
     ///
@@ -103,13 +103,13 @@ mod ContentTypes {
     pub def delete(id: TypeId): Unit \ Db + CmsErr + Tenant + Session =
         Session.require(Permission.ManageTypes);
         discard get(id);
-        let remaining = EntriesQueries.countEntriesOfType(TypeId.toInt64(id)) |> Rows.total;
-        let referrers = ContentFieldsQueries.countFieldsTargeting(TypeId.toInt64(id)) |> Rows.total;
+        let remaining = EntriesQueries.countEntriesOfType({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() }) |> Rows.total;
+        let referrers = ContentFieldsQueries.countFieldsTargeting({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() }) |> Rows.total;
         CmsErr.raiseIfAny(
             (if (remaining == 0i64) Nil else Violation.Violation("id", "entry が ${remaining} 件あります。先に消してください") :: Nil)
             ::: (if (referrers == 0i64) Nil else Violation.Violation("id", "他の型の REFERENCE のフィールド ${referrers} 本が参照先にしています。先にそのフィールドを消してください") :: Nil));
-        discard EntriesQueries.purgeDeletedEntries(TypeId.toInt64(id));
-        discard ContentTypesQueries.deleteContentType(TypeId.toInt64(id))
+        discard EntriesQueries.purgeDeletedEntries({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() });
+        discard ContentTypesQueries.deleteContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() })
 
     // ---- フィールド ----
 
@@ -122,12 +122,12 @@ mod ContentTypes {
         let parent = draft#parent |> Option.map(parentId -> FieldTree.find(parentId, owner#fields) |> CmsErr.orNotFound(Entity.Field, "${parentId}"));
         CmsErr.raiseIfAny(validateDraft(takenApiIds(owner#fields, None), parent, draft) ::: targetTypeExists(draft#target) ::: fieldTypeNameViolations(owner, draft));
         let position = match draft#parent {
-            case Some(parentId) => ContentFieldsQueries.nextChildPosition(FieldId.toInt64(parentId)) |> Rows.nextPosition
-            case None           => ContentFieldsQueries.nextFieldPosition(TypeId.toInt64(typeId)) |> Rows.nextPosition
+            case Some(parentId) => ContentFieldsQueries.nextChildPosition({ parentFieldId = FieldId.toInt64(parentId), projectId = Tenant.currentId() }) |> Rows.nextPosition
+            case None           => ContentFieldsQueries.nextFieldPosition({ typeId = TypeId.toInt64(typeId), projectId = Tenant.currentId() }) |> Rows.nextPosition
         };
         let inserted = ContentFieldsQueries.insertField(ContentTypeRows.fieldInsert(typeId, position, draft)) |> Rows.expectId;
-        Option.forEach(target -> discard ContentFieldsQueries.setFieldTarget({ id = inserted, targetTypeId = TypeId.toInt64(target) }), draft#target);
-        Option.forEach(parentId -> discard ContentFieldsQueries.setFieldParent({ id = inserted, parentFieldId = FieldId.toInt64(parentId) }), draft#parent);
+        Option.forEach(target -> discard ContentFieldsQueries.setFieldTarget({ id = inserted, targetTypeId = TypeId.toInt64(target), projectId = Tenant.currentId() }), draft#target);
+        Option.forEach(parentId -> discard ContentFieldsQueries.setFieldParent({ id = inserted, parentFieldId = FieldId.toInt64(parentId), projectId = Tenant.currentId() }), draft#parent);
         touch(typeId);
         getField(FieldId.FieldId(inserted))
 
@@ -142,7 +142,7 @@ mod ContentTypes {
         let unique = changes#unique |> Option.getWithDefault(existing#unique);
         let required = changes#required |> Option.getWithDefault(existing#required);
         CmsErr.raiseIfAny(Naming.validateFlags(existing#kind, existing#many, unique) ::: Naming.validateChildFlags(Option.nonEmpty(existing#parent), required, unique) ::: Naming.validateConfig(taken, existing#kind, config));
-        discard ContentFieldsQueries.updateField(FieldId.toInt64(id), ContentTypeRows.fieldChanges(changes));
+        discard ContentFieldsQueries.updateField({ id = FieldId.toInt64(id), projectId = Tenant.currentId() }, ContentTypeRows.fieldChanges(changes));
         touch(existing#typeId);
         getField(id)
 
@@ -152,7 +152,7 @@ mod ContentTypes {
     pub def removeField(id: FieldId): Unit \ Db + CmsErr + Tenant + Session =
         Session.require(Permission.ManageTypes);
         let existing = getField(id);
-        discard ContentFieldsQueries.deleteField(FieldId.toInt64(id));
+        discard ContentFieldsQueries.deleteField({ id = FieldId.toInt64(id), projectId = Tenant.currentId() });
         touch(existing#typeId)
 
     ///
@@ -164,7 +164,7 @@ mod ContentTypes {
         let current = owner#fields |> List.map(field -> field#id) |> List.toSet;
         let sameSet = List.length(ids) == Set.size(current) and List.toSet(ids) == current;
         CmsErr.raiseIfAny(if (sameSet) Nil else Violation.Violation("ids", "最上位のフィールドの id を過不足なく、重複なく渡してください") :: Nil);
-        List.forEachWithIndex((index, id) -> discard ContentFieldsQueries.setFieldPosition({ id = FieldId.toInt64(id), position = index }), ids);
+        List.forEachWithIndex((index, id) -> discard ContentFieldsQueries.setFieldPosition({ id = FieldId.toInt64(id), position = index, projectId = Tenant.currentId() }), ids);
         touch(typeId);
         get(typeId)
 
@@ -222,13 +222,13 @@ mod ContentTypes {
     ///
     /// 型のフィールドの木。
     ///
-    def fieldsOf(typeId: TypeId): List[FieldDef] \ DbRead =
-        ContentFieldsQueries.listFieldsOfType(TypeId.toInt64(typeId)) |> List.map(ContentTypeRows.toFieldDef) |> FieldTree.build
+    def fieldsOf(typeId: TypeId): List[FieldDef] \ DbRead + Tenant =
+        ContentFieldsQueries.listFieldsOfType({ typeId = TypeId.toInt64(typeId), projectId = Tenant.currentId() }) |> List.map(ContentTypeRows.toFieldDef) |> FieldTree.build
 
     ///
     /// 型の updated_at を今にする。フィールドを触った時も型が変わった事にする。
     ///
-    def touch(typeId: TypeId): Unit \ DbWrite =
-        discard ContentTypesQueries.touchContentType(TypeId.toInt64(typeId))
+    def touch(typeId: TypeId): Unit \ DbWrite + Tenant =
+        discard ContentTypesQueries.touchContentType({ id = TypeId.toInt64(typeId), projectId = Tenant.currentId() })
 
 }

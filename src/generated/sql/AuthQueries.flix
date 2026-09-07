@@ -7,71 +7,97 @@ mod AuthQueries {
     ///
     /// 生成元 auth.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 1848985464
+    pub def sourceHash(): Int32 = -342105369
 
     ///
     /// findUserByIdentity の 1 行。
     ///
-    pub type alias FindUserByIdentityRow = { id = Int64, issuer = String, subject = String, email = String, name = String }
+    pub type alias FindUserByIdentityRow = { id = Int64, publicId = String, issuer = String, subject = String, email = String, name = String }
 
     def findUserByIdentityDecoder(): Decoder[FindUserByIdentityRow] =
         forA (
             id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
             issuer <- Decoder.str("issuer");
             subject <- Decoder.str("subject");
             email <- Decoder.str("email");
             name <- Decoder.str("name")
-        ) yield { id = id, issuer = issuer, subject = subject, email = email, name = name }
+        ) yield { id = id, publicId = publicId, issuer = issuer, subject = subject, email = email, name = name }
 
     ///
-    /// findUserByIdentity: SELECT id, issuer, subject, email, name FROM users WHERE issuer = $1 AND subject = $2
+    /// findUserByIdentity: SELECT id, public_id, issuer, subject, email, name FROM users WHERE issuer = $1 AND subject = $2
     ///
     pub def findUserByIdentity(args: { issuer = String, subject = String }): Option[FindUserByIdentityRow] \ DbRead =
-        let sql = "SELECT id, issuer, subject, email, name FROM users WHERE issuer = $1 AND subject = $2";
+        let sql = "SELECT id, public_id, issuer, subject, email, name FROM users WHERE issuer = $1 AND subject = $2";
         let params = List#{SqlValue.Str(args#issuer), SqlValue.Str(args#subject)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findUserByIdentityDecoder(), sql, params))
 
     ///
     /// findUserById の 1 行。
     ///
-    pub type alias FindUserByIdRow = { id = Int64, issuer = String, subject = String, email = String, name = String }
+    pub type alias FindUserByIdRow = { id = Int64, publicId = String, issuer = String, subject = String, email = String, name = String }
 
     def findUserByIdDecoder(): Decoder[FindUserByIdRow] =
         forA (
             id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
             issuer <- Decoder.str("issuer");
             subject <- Decoder.str("subject");
             email <- Decoder.str("email");
             name <- Decoder.str("name")
-        ) yield { id = id, issuer = issuer, subject = subject, email = email, name = name }
+        ) yield { id = id, publicId = publicId, issuer = issuer, subject = subject, email = email, name = name }
 
     ///
-    /// findUserById: SELECT id, issuer, subject, email, name FROM users WHERE id = $1
+    /// findUserById: SELECT id, public_id, issuer, subject, email, name FROM users WHERE id = $1
     ///
     pub def findUserById(id: Int64): Option[FindUserByIdRow] \ DbRead =
-        let sql = "SELECT id, issuer, subject, email, name FROM users WHERE id = $1";
+        let sql = "SELECT id, public_id, issuer, subject, email, name FROM users WHERE id = $1";
         let params = List#{SqlValue.Int64(id)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findUserByIdDecoder(), sql, params))
 
     ///
-    /// listUsersByEmail の 1 行。
+    /// findUserByPublicId の 1 行。
     ///
-    pub type alias ListUsersByEmailRow = { id = Int64, issuer = String, subject = String, email = String, name = String }
+    pub type alias FindUserByPublicIdRow = { id = Int64, publicId = String, issuer = String, subject = String, email = String, name = String }
 
-    def listUsersByEmailDecoder(): Decoder[ListUsersByEmailRow] =
+    def findUserByPublicIdDecoder(): Decoder[FindUserByPublicIdRow] =
         forA (
             id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
             issuer <- Decoder.str("issuer");
             subject <- Decoder.str("subject");
             email <- Decoder.str("email");
             name <- Decoder.str("name")
-        ) yield { id = id, issuer = issuer, subject = subject, email = email, name = name }
+        ) yield { id = id, publicId = publicId, issuer = issuer, subject = subject, email = email, name = name }
 
     ///
-    /// listUsersByEmail: SELECT id, issuer, subject, email, name FROM users WHERE email = $1 ORDER BY id
+    /// findUserByPublicId: SELECT id, public_id, issuer, subject, email, name FROM users WHERE public_id = $1
+    ///
+    pub def findUserByPublicId(publicId: String): Option[FindUserByPublicIdRow] \ DbRead =
+        let sql = "SELECT id, public_id, issuer, subject, email, name FROM users WHERE public_id = $1";
+        let params = List#{SqlValue.Str(publicId)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(findUserByPublicIdDecoder(), sql, params))
+
+    ///
+    /// listUsersByEmail の 1 行。
+    ///
+    pub type alias ListUsersByEmailRow = { id = Int64, publicId = String, issuer = String, subject = String, email = String, name = String }
+
+    def listUsersByEmailDecoder(): Decoder[ListUsersByEmailRow] =
+        forA (
+            id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
+            issuer <- Decoder.str("issuer");
+            subject <- Decoder.str("subject");
+            email <- Decoder.str("email");
+            name <- Decoder.str("name")
+        ) yield { id = id, publicId = publicId, issuer = issuer, subject = subject, email = email, name = name }
+
+    ///
+    /// listUsersByEmail: SELECT id, public_id, issuer, subject, email, name FROM users WHERE email = $1 ORDER BY id
     ///
     pub def listUsersByEmail(email: String): List[ListUsersByEmailRow] \ DbRead =
-        let sql = "SELECT id, issuer, subject, email, name FROM users WHERE email = $1 ORDER BY id";
+        let sql = "SELECT id, public_id, issuer, subject, email, name FROM users WHERE email = $1 ORDER BY id";
         let params = List#{SqlValue.Str(email)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listUsersByEmailDecoder(), sql, params))
 
@@ -86,11 +112,11 @@ mod AuthQueries {
         ) yield { id = id }
 
     ///
-    /// insertUser: INSERT INTO users (issuer, subject, email, name) VALUES ($1, $2, $3, $4) RETURNING id
+    /// insertUser: INSERT INTO users (public_id, issuer, subject, email, name) VALUES ($1, $2, $3, $4, $5) RETURNING id
     ///
-    pub def insertUser(args: { issuer = String, subject = String, email = String, name = String }): Option[InsertUserRow] \ DbWrite =
-        let sql = "INSERT INTO users (issuer, subject, email, name) VALUES ($1, $2, $3, $4) RETURNING id";
-        let params = List#{SqlValue.Str(args#issuer), SqlValue.Str(args#subject), SqlValue.Str(args#email), SqlValue.Str(args#name)};
+    pub def insertUser(args: { publicId = String, issuer = String, subject = String, email = String, name = String }): Option[InsertUserRow] \ DbWrite =
+        let sql = "INSERT INTO users (public_id, issuer, subject, email, name) VALUES ($1, $2, $3, $4, $5) RETURNING id";
+        let params = List#{SqlValue.Str(args#publicId), SqlValue.Str(args#issuer), SqlValue.Str(args#subject), SqlValue.Str(args#email), SqlValue.Str(args#name)};
         RawSql.runWithAllow(() -> Sql.executeReturningOneAs(insertUserDecoder(), sql, params))
 
     ///
@@ -104,21 +130,42 @@ mod AuthQueries {
     ///
     /// findOrganization の 1 行。
     ///
-    pub type alias FindOrganizationRow = { id = Int64, name = String }
+    pub type alias FindOrganizationRow = { id = Int64, publicId = String, name = String }
 
     def findOrganizationDecoder(): Decoder[FindOrganizationRow] =
         forA (
             id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
             name <- Decoder.str("name")
-        ) yield { id = id, name = name }
+        ) yield { id = id, publicId = publicId, name = name }
 
     ///
-    /// findOrganization: SELECT id, name FROM organizations WHERE id = $1
+    /// findOrganization: SELECT id, public_id, name FROM organizations WHERE id = $1
     ///
     pub def findOrganization(id: Int64): Option[FindOrganizationRow] \ DbRead =
-        let sql = "SELECT id, name FROM organizations WHERE id = $1";
+        let sql = "SELECT id, public_id, name FROM organizations WHERE id = $1";
         let params = List#{SqlValue.Int64(id)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findOrganizationDecoder(), sql, params))
+
+    ///
+    /// findOrganizationByPublicId の 1 行。
+    ///
+    pub type alias FindOrganizationByPublicIdRow = { id = Int64, publicId = String, name = String }
+
+    def findOrganizationByPublicIdDecoder(): Decoder[FindOrganizationByPublicIdRow] =
+        forA (
+            id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
+            name <- Decoder.str("name")
+        ) yield { id = id, publicId = publicId, name = name }
+
+    ///
+    /// findOrganizationByPublicId: SELECT id, public_id, name FROM organizations WHERE public_id = $1
+    ///
+    pub def findOrganizationByPublicId(publicId: String): Option[FindOrganizationByPublicIdRow] \ DbRead =
+        let sql = "SELECT id, public_id, name FROM organizations WHERE public_id = $1";
+        let params = List#{SqlValue.Str(publicId)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(findOrganizationByPublicIdDecoder(), sql, params))
 
     ///
     /// insertOrganization の 1 行。
@@ -131,30 +178,31 @@ mod AuthQueries {
         ) yield { id = id }
 
     ///
-    /// insertOrganization: INSERT INTO organizations (name) VALUES ($1) RETURNING id
+    /// insertOrganization: INSERT INTO organizations (public_id, name) VALUES ($1, $2) RETURNING id
     ///
-    pub def insertOrganization(name: String): Option[InsertOrganizationRow] \ DbWrite =
-        let sql = "INSERT INTO organizations (name) VALUES ($1) RETURNING id";
-        let params = List#{SqlValue.Str(name)};
+    pub def insertOrganization(args: { publicId = String, name = String }): Option[InsertOrganizationRow] \ DbWrite =
+        let sql = "INSERT INTO organizations (public_id, name) VALUES ($1, $2) RETURNING id";
+        let params = List#{SqlValue.Str(args#publicId), SqlValue.Str(args#name)};
         RawSql.runWithAllow(() -> Sql.executeReturningOneAs(insertOrganizationDecoder(), sql, params))
 
     ///
     /// listOrganizationsOfUser の 1 行。
     ///
-    pub type alias ListOrganizationsOfUserRow = { id = Int64, name = String, role = String }
+    pub type alias ListOrganizationsOfUserRow = { id = Int64, publicId = String, name = String, role = String }
 
     def listOrganizationsOfUserDecoder(): Decoder[ListOrganizationsOfUserRow] =
         forA (
             id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
             name <- Decoder.str("name");
             role <- Decoder.str("role")
-        ) yield { id = id, name = name, role = role }
+        ) yield { id = id, publicId = publicId, name = name, role = role }
 
     ///
-    /// listOrganizationsOfUser: SELECT o.id, o.name, m.role FROM org_members AS m JOIN organizations AS o ON o.id = m.org_id WHERE m.user_id = $1 ORDER BY o.id
+    /// listOrganizationsOfUser: SELECT o.id, o.public_id, o.name, m.role FROM org_members AS m JOIN organizations AS o ON o.id = m.org_id WHERE m.user_id = $1 ORDER BY o.id
     ///
     pub def listOrganizationsOfUser(userId: Int64): List[ListOrganizationsOfUserRow] \ DbRead =
-        let sql = "SELECT o.id, o.name, m.role\n    FROM org_members AS m JOIN organizations AS o ON o.id = m.org_id\n    WHERE m.user_id = $1 ORDER BY o.id";
+        let sql = "SELECT o.id, o.public_id, o.name, m.role\n    FROM org_members AS m JOIN organizations AS o ON o.id = m.org_id\n    WHERE m.user_id = $1 ORDER BY o.id";
         let params = List#{SqlValue.Int64(userId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listOrganizationsOfUserDecoder(), sql, params))
 
@@ -197,21 +245,22 @@ mod AuthQueries {
     ///
     /// listOrgMembers の 1 行。
     ///
-    pub type alias ListOrgMembersRow = { id = Int64, email = String, name = String, role = String }
+    pub type alias ListOrgMembersRow = { id = Int64, publicId = String, email = String, name = String, role = String }
 
     def listOrgMembersDecoder(): Decoder[ListOrgMembersRow] =
         forA (
             id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
             email <- Decoder.str("email");
             name <- Decoder.str("name");
             role <- Decoder.str("role")
-        ) yield { id = id, email = email, name = name, role = role }
+        ) yield { id = id, publicId = publicId, email = email, name = name, role = role }
 
     ///
-    /// listOrgMembers: SELECT u.id, u.email, u.name, m.role FROM org_members AS m JOIN users AS u ON u.id = m.user_id WHERE m.org_id = $1 ORDER BY u.id
+    /// listOrgMembers: SELECT u.id, u.public_id, u.email, u.name, m.role FROM org_members AS m JOIN users AS u ON u.id = m.user_id WHERE m.org_id = $1 ORDER BY u.id
     ///
     pub def listOrgMembers(orgId: Int64): List[ListOrgMembersRow] \ DbRead =
-        let sql = "SELECT u.id, u.email, u.name, m.role\n    FROM org_members AS m JOIN users AS u ON u.id = m.user_id\n    WHERE m.org_id = $1 ORDER BY u.id";
+        let sql = "SELECT u.id, u.public_id, u.email, u.name, m.role\n    FROM org_members AS m JOIN users AS u ON u.id = m.user_id\n    WHERE m.org_id = $1 ORDER BY u.id";
         let params = List#{SqlValue.Int64(orgId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listOrgMembersDecoder(), sql, params))
 
@@ -253,21 +302,22 @@ mod AuthQueries {
     ///
     /// listProjectsOfOrg の 1 行。
     ///
-    pub type alias ListProjectsOfOrgRow = { id = Int64, slug = String, name = String, visibility = String }
+    pub type alias ListProjectsOfOrgRow = { id = Int64, publicId = String, slug = String, name = String, visibility = String }
 
     def listProjectsOfOrgDecoder(): Decoder[ListProjectsOfOrgRow] =
         forA (
             id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
             slug <- Decoder.str("slug");
             name <- Decoder.str("name");
             visibility <- Decoder.str("visibility")
-        ) yield { id = id, slug = slug, name = name, visibility = visibility }
+        ) yield { id = id, publicId = publicId, slug = slug, name = name, visibility = visibility }
 
     ///
-    /// listProjectsOfOrg: SELECT id, slug, name, visibility FROM projects WHERE org_id = $1 ORDER BY id
+    /// listProjectsOfOrg: SELECT id, public_id, slug, name, visibility FROM projects WHERE org_id = $1 ORDER BY id
     ///
     pub def listProjectsOfOrg(orgId: Int64): List[ListProjectsOfOrgRow] \ DbRead =
-        let sql = "SELECT id, slug, name, visibility FROM projects WHERE org_id = $1 ORDER BY id";
+        let sql = "SELECT id, public_id, slug, name, visibility FROM projects WHERE org_id = $1 ORDER BY id";
         let params = List#{SqlValue.Int64(orgId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listProjectsOfOrgDecoder(), sql, params))
 
@@ -300,43 +350,45 @@ mod AuthQueries {
     ///
     /// listMembershipsOfUser の 1 行。
     ///
-    pub type alias ListMembershipsOfUserRow = { id = Int64, slug = String, name = String, visibility = String, role = String }
+    pub type alias ListMembershipsOfUserRow = { id = Int64, publicId = String, slug = String, name = String, visibility = String, role = String }
 
     def listMembershipsOfUserDecoder(): Decoder[ListMembershipsOfUserRow] =
         forA (
             id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
             slug <- Decoder.str("slug");
             name <- Decoder.str("name");
             visibility <- Decoder.str("visibility");
             role <- Decoder.str("role")
-        ) yield { id = id, slug = slug, name = name, visibility = visibility, role = role }
+        ) yield { id = id, publicId = publicId, slug = slug, name = name, visibility = visibility, role = role }
 
     ///
-    /// listMembershipsOfUser: SELECT p.id, p.slug, p.name, p.visibility, m.role FROM memberships AS m JOIN projects AS p ON p.id = m.project_id WHERE m.user_id = $1 ORDER BY p.id
+    /// listMembershipsOfUser: SELECT p.id, p.public_id, p.slug, p.name, p.visibility, m.role FROM memberships AS m JOIN projects AS p ON p.id = m.project_id WHERE m.user_id = $1 ORDER BY p.id
     ///
     pub def listMembershipsOfUser(userId: Int64): List[ListMembershipsOfUserRow] \ DbRead =
-        let sql = "SELECT p.id, p.slug, p.name, p.visibility, m.role\n    FROM memberships AS m JOIN projects AS p ON p.id = m.project_id\n    WHERE m.user_id = $1 ORDER BY p.id";
+        let sql = "SELECT p.id, p.public_id, p.slug, p.name, p.visibility, m.role\n    FROM memberships AS m JOIN projects AS p ON p.id = m.project_id\n    WHERE m.user_id = $1 ORDER BY p.id";
         let params = List#{SqlValue.Int64(userId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listMembershipsOfUserDecoder(), sql, params))
 
     ///
     /// listMembers の 1 行。
     ///
-    pub type alias ListMembersRow = { id = Int64, email = String, name = String, role = String }
+    pub type alias ListMembersRow = { id = Int64, publicId = String, email = String, name = String, role = String }
 
     def listMembersDecoder(): Decoder[ListMembersRow] =
         forA (
             id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
             email <- Decoder.str("email");
             name <- Decoder.str("name");
             role <- Decoder.str("role")
-        ) yield { id = id, email = email, name = name, role = role }
+        ) yield { id = id, publicId = publicId, email = email, name = name, role = role }
 
     ///
-    /// listMembers: SELECT u.id, u.email, u.name, m.role FROM memberships AS m JOIN users AS u ON u.id = m.user_id WHERE m.project_id = $1 ORDER BY u.id
+    /// listMembers: SELECT u.id, u.public_id, u.email, u.name, m.role FROM memberships AS m JOIN users AS u ON u.id = m.user_id WHERE m.project_id = $1 ORDER BY u.id
     ///
     pub def listMembers(projectId: Int64): List[ListMembersRow] \ DbRead =
-        let sql = "SELECT u.id, u.email, u.name, m.role\n    FROM memberships AS m JOIN users AS u ON u.id = m.user_id\n    WHERE m.project_id = $1 ORDER BY u.id";
+        let sql = "SELECT u.id, u.public_id, u.email, u.name, m.role\n    FROM memberships AS m JOIN users AS u ON u.id = m.user_id\n    WHERE m.project_id = $1 ORDER BY u.id";
         let params = List#{SqlValue.Int64(projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listMembersDecoder(), sql, params))
 
@@ -375,31 +427,32 @@ mod AuthQueries {
         RawSql.runWithAllow(() -> Sql.fetchOneAs(countProjectOwnersDecoder(), sql, params))
 
     ///
-    /// upsertInvitation: INSERT INTO invitations (project_id, email, role, invited_by) VALUES ($1, $2, $3, $4) ON CONFLICT (project_id, email) DO UPDATE SET role = EXCLUDED.role, invited_by = EXCLUDED.invited_by
+    /// upsertInvitation: INSERT INTO invitations (public_id, project_id, email, role, invited_by) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (project_id, email) DO UPDATE SET role = EXCLUDED.role, invited_by = EXCLUDED.invited_by
     ///
-    pub def upsertInvitation(args: { projectId = Int64, email = String, role = String, invitedBy = Int64 }): Int32 \ DbWrite =
-        let sql = "INSERT INTO invitations (project_id, email, role, invited_by) VALUES ($1, $2, $3, $4)\n    ON CONFLICT (project_id, email) DO UPDATE SET role = EXCLUDED.role, invited_by = EXCLUDED.invited_by";
-        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Str(args#email), SqlValue.Str(args#role), SqlValue.Int64(args#invitedBy)};
+    pub def upsertInvitation(args: { publicId = String, projectId = Int64, email = String, role = String, invitedBy = Int64 }): Int32 \ DbWrite =
+        let sql = "INSERT INTO invitations (public_id, project_id, email, role, invited_by) VALUES ($1, $2, $3, $4, $5)\n    ON CONFLICT (project_id, email) DO UPDATE SET role = EXCLUDED.role, invited_by = EXCLUDED.invited_by";
+        let params = List#{SqlValue.Str(args#publicId), SqlValue.Int64(args#projectId), SqlValue.Str(args#email), SqlValue.Str(args#role), SqlValue.Int64(args#invitedBy)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
     /// listInvitations の 1 行。
     ///
-    pub type alias ListInvitationsRow = { id = Int64, email = String, role = String, createdAt = Timestamp.Timestamp }
+    pub type alias ListInvitationsRow = { id = Int64, publicId = String, email = String, role = String, createdAt = Timestamp.Timestamp }
 
     def listInvitationsDecoder(): Decoder[ListInvitationsRow] =
         forA (
             id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
             email <- Decoder.str("email");
             role <- Decoder.str("role");
             createdAt <- Decoder.timestamp("created_at")
-        ) yield { id = id, email = email, role = role, createdAt = createdAt }
+        ) yield { id = id, publicId = publicId, email = email, role = role, createdAt = createdAt }
 
     ///
-    /// listInvitations: SELECT id, email, role, created_at FROM invitations WHERE project_id = $1 ORDER BY id
+    /// listInvitations: SELECT id, public_id, email, role, created_at FROM invitations WHERE project_id = $1 ORDER BY id
     ///
     pub def listInvitations(projectId: Int64): List[ListInvitationsRow] \ DbRead =
-        let sql = "SELECT id, email, role, created_at FROM invitations WHERE project_id = $1 ORDER BY id";
+        let sql = "SELECT id, public_id, email, role, created_at FROM invitations WHERE project_id = $1 ORDER BY id";
         let params = List#{SqlValue.Int64(projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listInvitationsDecoder(), sql, params))
 
@@ -432,6 +485,14 @@ mod AuthQueries {
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
+    /// deleteInvitationByPublicId: DELETE FROM invitations WHERE public_id = $1 AND project_id = $2
+    ///
+    pub def deleteInvitationByPublicId(args: { publicId = String, projectId = Int64 }): Int32 \ DbWrite =
+        let sql = "DELETE FROM invitations WHERE public_id = $1 AND project_id = $2";
+        let params = List#{SqlValue.Str(args#publicId), SqlValue.Int64(args#projectId)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
     /// insertApiKey の 1 行。
     ///
     pub type alias InsertApiKeyRow = { id = Int64 }
@@ -442,11 +503,11 @@ mod AuthQueries {
         ) yield { id = id }
 
     ///
-    /// insertApiKey: INSERT INTO api_keys (project_id, name, key_hash, pepper_id, scope) VALUES ($1, $2, $3, $4, $5) RETURNING id
+    /// insertApiKey: INSERT INTO api_keys (public_id, project_id, name, key_hash, pepper_id, scope) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
     ///
-    pub def insertApiKey(args: { projectId = Int64, name = String, keyHash = String, pepperId = String, scope = String }): Option[InsertApiKeyRow] \ DbWrite =
-        let sql = "INSERT INTO api_keys (project_id, name, key_hash, pepper_id, scope) VALUES ($1, $2, $3, $4, $5) RETURNING id";
-        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Str(args#name), SqlValue.Str(args#keyHash), SqlValue.Str(args#pepperId), SqlValue.Str(args#scope)};
+    pub def insertApiKey(args: { publicId = String, projectId = Int64, name = String, keyHash = String, pepperId = String, scope = String }): Option[InsertApiKeyRow] \ DbWrite =
+        let sql = "INSERT INTO api_keys (public_id, project_id, name, key_hash, pepper_id, scope) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id";
+        let params = List#{SqlValue.Str(args#publicId), SqlValue.Int64(args#projectId), SqlValue.Str(args#name), SqlValue.Str(args#keyHash), SqlValue.Str(args#pepperId), SqlValue.Str(args#scope)};
         RawSql.runWithAllow(() -> Sql.executeReturningOneAs(insertApiKeyDecoder(), sql, params))
 
     ///
@@ -474,31 +535,32 @@ mod AuthQueries {
     ///
     /// listApiKeys の 1 行。
     ///
-    pub type alias ListApiKeysRow = { id = Int64, name = String, scope = String, createdAt = Timestamp.Timestamp, revokedAt = Option[Timestamp.Timestamp] }
+    pub type alias ListApiKeysRow = { id = Int64, publicId = String, name = String, scope = String, createdAt = Timestamp.Timestamp, revokedAt = Option[Timestamp.Timestamp] }
 
     def listApiKeysDecoder(): Decoder[ListApiKeysRow] =
         forA (
             id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
             name <- Decoder.str("name");
             scope <- Decoder.str("scope");
             createdAt <- Decoder.timestamp("created_at");
             revokedAt <- Decoder.opt(Decoder.timestamp("revoked_at"))
-        ) yield { id = id, name = name, scope = scope, createdAt = createdAt, revokedAt = revokedAt }
+        ) yield { id = id, publicId = publicId, name = name, scope = scope, createdAt = createdAt, revokedAt = revokedAt }
 
     ///
-    /// listApiKeys: SELECT id, name, scope, created_at, revoked_at FROM api_keys WHERE project_id = $1 ORDER BY id
+    /// listApiKeys: SELECT id, public_id, name, scope, created_at, revoked_at FROM api_keys WHERE project_id = $1 ORDER BY id
     ///
     pub def listApiKeys(projectId: Int64): List[ListApiKeysRow] \ DbRead =
-        let sql = "SELECT id, name, scope, created_at, revoked_at FROM api_keys WHERE project_id = $1 ORDER BY id";
+        let sql = "SELECT id, public_id, name, scope, created_at, revoked_at FROM api_keys WHERE project_id = $1 ORDER BY id";
         let params = List#{SqlValue.Int64(projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listApiKeysDecoder(), sql, params))
 
     ///
-    /// revokeApiKey: UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND project_id = $2 AND revoked_at IS NULL
+    /// revokeApiKey: UPDATE api_keys SET revoked_at = now() WHERE public_id = $1 AND project_id = $2 AND revoked_at IS NULL
     ///
-    pub def revokeApiKey(args: { id = Int64, projectId = Int64 }): Int32 \ DbWrite =
-        let sql = "UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND project_id = $2 AND revoked_at IS NULL";
-        let params = List#{SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
+    pub def revokeApiKey(args: { publicId = String, projectId = Int64 }): Int32 \ DbWrite =
+        let sql = "UPDATE api_keys SET revoked_at = now() WHERE public_id = $1 AND project_id = $2 AND revoked_at IS NULL";
+        let params = List#{SqlValue.Str(args#publicId), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
 }

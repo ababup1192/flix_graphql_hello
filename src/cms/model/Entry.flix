@@ -200,6 +200,10 @@ pub eff IdGen {
     /// 新しい秘密（API キーの本体）。base64url の 43 文字（256 bit）。
     ///
     def freshSecret(): String
+    ///
+    /// 新しい外向きの id（users / organizations / projects / invitations / api_keys の public_id）。entry と同じ 12 文字。
+    ///
+    def freshPublicId(): String
 }
 
 mod IdGen {
@@ -218,6 +222,7 @@ mod IdGen {
             def freshEntryId(resume) = resume(EntryId.EntryId(randomText()))
             def freshAssetId(resume) = resume(AssetId.AssetId(randomText()))
             def freshSecret(resume) = resume(randomSecret())
+            def freshPublicId(resume) = resume(randomText())
         }
 
     /// SecureRandom の 32 バイトを base64url に。
@@ -235,10 +240,13 @@ mod IdGen {
     ///
     pub def runWithFixed(ids: List[EntryId], f: Unit -> a \ ef): a \ ef - IdGen = region rc {
         let remaining = Ref.fresh(rc, ids);
+        let issued = Ref.fresh(rc, 0);
         run f() with handler IdGen {
             def freshEntryId(resume) = resume(nextFixed(remaining))
             def freshAssetId(resume) = resume(AssetId.AssetId(EntryId.text(nextFixed(remaining))))
             def freshSecret(resume) = resume("secret-${EntryId.text(nextFixed(remaining))}")
+            // 外向きの id は決めた列を使わず連番にする。UNIQUE なので「尽きたら最後を繰り返す」では衝突する
+            def freshPublicId(resume) = { Ref.put(Ref.get(issued) + 1, issued); resume("pub-${Ref.get(issued)}") }
         }
     }
 

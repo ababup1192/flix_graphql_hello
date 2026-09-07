@@ -58,15 +58,18 @@ mod AdminMapping {
     ///
     /// ユーザー・組織・プロジェクトの id と GraphQL の ID。
     ///
-    pub def idOfUser(id: UserId): Id = Id.Id(Int64.toString(UserId.toInt64(id)))
+    /// 外向きの id（public_id）をそのまま ID に。内部の連番は出さない。
+    pub def idOfPublic(publicId: String): Id = Id.Id(publicId)
 
-    pub def idOfOrg(id: OrgId): Id = Id.Id(Int64.toString(OrgId.toInt64(id)))
+    /// ID（public_id）から内部の UserId。無ければ notFound。
+    pub def userId(argument: String, id: Id): UserId \ DbRead + CmsErr =
+        let Id.Id(publicId) = id;
+        Accounts.findByPublicId(publicId) |> Option.map(user -> user#id) |> CmsErr.orNotFound(Entity.Member, "${argument}=${publicId}")
 
-    pub def idOfProject(id: ProjectId): Id = Id.Id(Int64.toString(ProjectId.toInt64(id)))
-
-    pub def userId(argument: String, id: Id): UserId \ CmsErr = UserId.UserId(number(argument, id))
-
-    pub def orgId(argument: String, id: Id): OrgId \ CmsErr = OrgId.OrgId(number(argument, id))
+    /// ID（public_id）の中の文字列。
+    pub def publicIdOf(id: Id): String =
+        let Id.Id(text) = id;
+        text
 
     ///
     /// 役割・範囲・公開範囲の enum の写し。

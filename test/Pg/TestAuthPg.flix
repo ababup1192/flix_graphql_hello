@@ -85,7 +85,7 @@ mod TestAuthPg {
             let resolved = ApiKeys.resolve(pepper, issued#key, ProjectId.default());
             let otherProject = ApiKeys.resolve(pepper, issued#key, shop);
             let wrongKey = ApiKeys.resolve(pepper, "cms_nope", ProjectId.default());
-            runAs(owner, () -> ApiKeys.revoke(issued#id));
+            runAs(owner, () -> ApiKeys.revoke(issued#publicId));
             let afterRevoke = ApiKeys.resolve(pepper, issued#key, ProjectId.default());
             let listed = runAs(owner, () -> ApiKeys.list() |> List.map(key -> (key#name, Option.nonEmpty(key#revokedAt))));
             (String.startsWith(prefix = "cms_", issued#key), resolved, otherProject, wrongKey, afterRevoke, listed)

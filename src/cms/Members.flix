@@ -9,7 +9,7 @@ mod Members {
     pub def list(): List[Member] \ DbRead + DbErr + CmsErr + Tenant + Session =
         Session.require(Permission.ManageMembers);
         AuthQueries.listMembers(Tenant.currentId()) |> List.map(row ->
-            { userId = UserId.UserId(row#id), email = row#email, name = row#name, role = Role.parse(row#role) |> Rows.orRaise("memberships.role", row#role) })
+            { userId = UserId.UserId(row#id), publicId = row#publicId, email = row#email, name = row#name, role = Role.parse(row#role) |> Rows.orRaise("memberships.role", row#role) })
 
     ///
     /// 今のプロジェクトの招待。
@@ -17,7 +17,7 @@ mod Members {
     pub def invitations(): List[Invitation] \ DbRead + DbErr + CmsErr + Tenant + Session =
         Session.require(Permission.ManageMembers);
         AuthQueries.listInvitations(Tenant.currentId()) |> List.map(row ->
-            { id = row#id, email = row#email, role = Role.parse(row#role) |> Rows.orRaise("invitations.role", row#role), createdAt = row#createdAt })
+            { id = row#id, publicId = row#publicId, email = row#email, role = Role.parse(row#role) |> Rows.orRaise("invitations.role", row#role), createdAt = row#createdAt })
 
     ///
     /// email で招待する。既にユーザーがいれば membership を直接付け、いなければ招待として置く（初回ログインで写る）。
@@ -25,12 +25,12 @@ mod Members {
     /// WhyNot: email でユーザーを探して直接付けるのを「同じ発行元のユーザーだけ」に限らないのは、招待は owner の明示の操作で、
     /// 発行元は環境で 1 つに決まっているため。
     ///
-    pub def invite(email: String, role: Role): Invitation \ Db + CmsErr + Tenant + Session =
+    pub def invite(email: String, role: Role): Invitation \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageMembers);
         let normalized = String.toLowerCase(String.trim(email));
         CmsErr.raiseIfAny(if (String.isMatch(regex = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", normalized)) Nil else Violation.Violation("email", "'${email}' は email の形ではありません") :: Nil);
         let inviter = Session.currentUser();
-        discard AuthQueries.upsertInvitation({ projectId = Tenant.currentId(), email = normalized, role = Role.text(role), invitedBy = UserId.toInt64(inviter) });
+        discard AuthQueries.upsertInvitation({ publicId = IdGen.freshPublicId(), projectId = Tenant.currentId(), email = normalized, role = Role.text(role), invitedBy = UserId.toInt64(inviter) });
         invitations() |> List.find(invitation -> invitation#email == normalized) |> CmsErr.orNotFound(Entity.Invitation, normalized)
 
     ///
@@ -55,10 +55,10 @@ mod Members {
     ///
     /// 招待を取り消す。
     ///
-    pub def cancelInvitation(id: Int64): Unit \ Db + CmsErr + Tenant + Session =
+    pub def cancelInvitation(publicId: String): Unit \ DbWrite + CmsErr + Tenant + Session =
         Session.require(Permission.ManageMembers);
-        let known = AuthQueries.listInvitations(Tenant.currentId()) |> List.exists(row -> row#id == id);
-        if (known) discard AuthQueries.deleteInvitation(id) else CmsErr.notFound(Entity.Invitation, Int64.toString(id))
+        let deleted = AuthQueries.deleteInvitationByPublicId({ publicId = publicId, projectId = Tenant.currentId() });
+        if (deleted == 0) CmsErr.notFound(Entity.Invitation, publicId) else ()
 
     /// プロジェクトの owner が 1 人しかいなければ invalid。組織の owner は数えない（組織側で守る）。
     def guardLastOwner(): Unit \ DbRead + CmsErr + Tenant =
@@ -76,13 +76,14 @@ mod Organizations {
     ///
     /// 作る。人でなければ forbidden。Closed なら既定の組織の owner だけ（セルフホストで見知らぬ人に組織を作らせない）。
     ///
-    pub def create(signup: Signup, name: String): Organization \ Db + CmsErr + Session =
+    pub def create(signup: Signup, name: String): Organization \ Db + CmsErr + IdGen + Session =
         let user = Session.currentUser();
         if (signup == Signup.Closed and not isOwner(user, OrgId.default())) CmsErr.forbidden(Permission.ManageProject) else ();
         CmsErr.raiseIfAny(if (String.isEmpty(String.trim(name))) Violation.Violation("name", "名前を付けてください") :: Nil else Nil);
-        let id = AuthQueries.insertOrganization(name) |> Rows.expectId;
+        let publicId = IdGen.freshPublicId();
+        let id = AuthQueries.insertOrganization({ publicId = publicId, name = name }) |> Rows.expectId;
         discard AuthQueries.upsertOrgMember({ userId = UserId.toInt64(user), orgId = id, role = OrgRole.text(OrgRole.Owner) });
-        { id = OrgId.OrgId(id), name = name }
+        { id = OrgId.OrgId(id), publicId = publicId, name = name }
 
     ///
     /// 1 つ。自分が member でなければ None（存在も教えない）。
@@ -90,7 +91,13 @@ mod Organizations {
     pub def find(orgId: OrgId): Option[Organization] \ DbRead + CmsErr + Session =
         let user = Session.currentUser();
         if (Option.isEmpty(roleOf(user, orgId))) None
-        else AuthQueries.findOrganization(OrgId.toInt64(orgId)) |> Option.map(row -> { id = OrgId.OrgId(row#id), name = row#name })
+        else AuthQueries.findOrganization(OrgId.toInt64(orgId)) |> Option.map(row -> { id = OrgId.OrgId(row#id), publicId = row#publicId, name = row#name })
+
+    ///
+    /// 外向きの id から内部の id。無ければ notFound（member かどうかは呼ぶ先が見る）。
+    ///
+    pub def idOfPublic(publicId: String): OrgId \ DbRead + CmsErr =
+        AuthQueries.findOrganizationByPublicId(publicId) |> Option.map(row -> OrgId.OrgId(row#id)) |> CmsErr.orNotFound(Entity.Organization, publicId)
 
     ///
     /// 組織での役割。属していなければ None。
@@ -120,7 +127,7 @@ mod Organizations {
     pub def members(orgId: OrgId): List[OrganizationMember] \ DbRead + DbErr + CmsErr + Session =
         if (isOwner(Session.currentUser(), orgId))
             AuthQueries.listOrgMembers(OrgId.toInt64(orgId)) |> List.map(row ->
-                { userId = UserId.UserId(row#id), email = row#email, name = row#name, role = OrgRole.parse(row#role) |> Rows.orRaise("org_members.role", row#role) })
+                { userId = UserId.UserId(row#id), publicId = row#publicId, email = row#email, name = row#name, role = OrgRole.parse(row#role) |> Rows.orRaise("org_members.role", row#role) })
         else Nil
 
     ///
@@ -133,7 +140,7 @@ mod Organizations {
         requireOwner(orgId);
         let user = Accounts.findByEmail(email) |> CmsErr.orNotFound(Entity.Member, email);
         discard AuthQueries.upsertOrgMember({ userId = UserId.toInt64(user#id), orgId = OrgId.toInt64(orgId), role = OrgRole.text(role) });
-        { userId = user#id, email = user#email, name = user#name, role = role }
+        { userId = user#id, publicId = user#publicId, email = user#email, name = user#name, role = role }
 
     ///
     /// 組織にメンバーを足す（owner か member）。owner だけができる。bootstrap とテストが使う。
@@ -160,7 +167,7 @@ mod Organizations {
     ///
     /// 組織の下にプロジェクトを作る。owner だけ。
     ///
-    pub def createProject(orgId: OrgId, slug: ProjectSlug, name: String): Project \ Db + CmsErr + Session =
+    pub def createProject(orgId: OrgId, slug: ProjectSlug, name: String): Project \ Db + CmsErr + IdGen + Session =
         requireOwner(orgId);
         let id = Projects.create(orgId, slug, name);
         Projects.find(id) |> CmsErr.orNotFound(Entity.Organization, "${id}")

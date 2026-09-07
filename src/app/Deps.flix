@@ -25,7 +25,7 @@ mod Deps {
     /// - ApiKey: pepper があれば hash で引き、このプロジェクトの生きた鍵なら scope の主体。それ以外は Anonymous
     /// - Missing / Invalid: Anonymous
     ///
-    pub def actorOf(deps: Deps, projectId: ProjectId, credential: Credential): Actor \ Db = match credential {
+    pub def actorOf(deps: Deps, projectId: ProjectId, credential: Credential): Actor \ Db + IdGen = match credential {
         case Credential.Bearer(issuer, subject, email, name) =>
             let user = Accounts.resolveUser(deps#auth#bootstrap, { issuer = issuer, subject = subject, email = email, name = name });
             Accounts.actorFor(user, projectId)

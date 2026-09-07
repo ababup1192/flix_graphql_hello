@@ -23,16 +23,16 @@ query insertContentType(projectId: Int64, apiId: String, kind: String, name: Str
     RETURNING id
 }
 
-query updateContentType(id: Int64) -> exec with changes: Changes[content_types] {
-    UPDATE content_types SET updated_at = now(), {changes} WHERE id = :id
+query updateContentType(id: Int64, projectId: Int64) -> exec with changes: Changes[content_types] {
+    UPDATE content_types SET updated_at = now(), {changes} WHERE id = :id AND project_id = :projectId
 }
 
-query touchContentType(id: Int64) -> exec {
-    UPDATE content_types SET updated_at = now() WHERE id = :id
+query touchContentType(id: Int64, projectId: Int64) -> exec {
+    UPDATE content_types SET updated_at = now() WHERE id = :id AND project_id = :projectId
 }
 
-query deleteContentType(id: Int64) -> exec {
-    DELETE FROM content_types WHERE id = :id
+query deleteContentType(id: Int64, projectId: Int64) -> exec {
+    DELETE FROM content_types WHERE id = :id AND project_id = :projectId
 }
 
 // 型の定義が変わったかの目印。コンテンツ API のスキーマを組み直すかの判断に使う
