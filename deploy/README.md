@@ -16,7 +16,7 @@ curl -s localhost:8080/health # {"status":"ok","version":"..."}
 
 ## テナント分離（RLS）
 
-プロジェクトの中身の表（content_types / content_fields / entries / entry_versions / entry_links / assets）には PostgreSQL の RLS が掛かっている。
+プロジェクトの中身の表（content_types / content_fields / entries / entry_versions / entry_links / assets）と auth の表（memberships / invitations / api_keys）には PostgreSQL の RLS が掛かっている。
 リクエストの Tx の先頭で `app.project_id` の印を置き、policy はその印と一致する行しか見せない（印が無ければ 0 行）。
 `CMS_DB_APP_PASSWORD` を入れると所有者でないロール `cms_app` で繋ぎ、SQL インジェクションや生 SQL があっても他のプロジェクトの行は出ない。
 

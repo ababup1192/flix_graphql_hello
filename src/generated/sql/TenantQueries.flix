@@ -7,7 +7,7 @@ mod TenantQueries {
     ///
     /// 生成元 tenant.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -2123375808
+    pub def sourceHash(): Int32 = -1737371365
 
     ///
     /// stampProject の 1 行。
@@ -44,5 +44,24 @@ mod TenantQueries {
         let sql = "SELECT set_config('app.project_id', $1, false)::text AS applied";
         let params = List#{SqlValue.Str(projectId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(stampProjectSessionDecoder(), sql, params))
+
+    ///
+    /// stampUser の 1 行。
+    ///
+    pub type alias StampUserRow = { applied = Option[String], emailApplied = Option[String] }
+
+    def stampUserDecoder(): Decoder[StampUserRow] =
+        forA (
+            applied <- Decoder.opt(Decoder.str("applied"));
+            emailApplied <- Decoder.opt(Decoder.str("email_applied"))
+        ) yield { applied = applied, emailApplied = emailApplied }
+
+    ///
+    /// stampUser: SELECT set_config('app.user_id', $1, true)::text AS applied, set_config('app.email', $2, true)::text AS email_applied
+    ///
+    pub def stampUser(args: { userId = String, email = String }): Option[StampUserRow] \ DbRead =
+        let sql = "SELECT set_config('app.user_id', $1, true)::text AS applied, set_config('app.email', $2, true)::text AS email_applied";
+        let params = List#{SqlValue.Str(args#userId), SqlValue.Str(args#email)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(stampUserDecoder(), sql, params))
 
 }

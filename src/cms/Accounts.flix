@@ -24,6 +24,8 @@ mod Accounts {
                 let id = AuthQueries.insertUser({ publicId = publicId, issuer = principal#issuer, subject = principal#subject, email = principal#email, name = principal#name }) |> Rows.expectId;
                 { id = UserId.UserId(id), publicId = publicId, issuer = principal#issuer, subject = principal#subject, email = principal#email, name = principal#name }
         };
+        // RLS の印。以後この Tx では、自分の memberships と自分宛の invitations がプロジェクトを跨いで見える
+        discard TenantQueries.stampUser({ userId = "${user#id}", email = user#email });
         acceptInvitations(user);
         bootstrapOwner(bootstrap, user);
         user

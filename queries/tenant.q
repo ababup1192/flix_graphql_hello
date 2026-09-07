@@ -9,3 +9,8 @@ query stampProject(projectId: String) -> one {
 query stampProjectSession(projectId: String) -> one {
     SELECT set_config('app.project_id', :projectId, false)::text AS applied
 }
+
+// ログインした人の印。memberships / invitations の policy が「自分の行」を跨いで見せるのに使う（招待の受け入れ、自分のプロジェクト一覧）
+query stampUser(userId: String, email: String) -> one {
+    SELECT set_config('app.user_id', :userId, true)::text AS applied, set_config('app.email', :email, true)::text AS email_applied
+}

@@ -64,6 +64,60 @@ mod TestRlsPg {
             expected = Ok(guardedTables() |> List.map(table -> (table, true, 0i64, 0, 0, 0i64))),
             outcome)
 
+    def stampUser(userId: String, email: String): Unit \ DbRead + RawSql =
+        discard Sql.fetch("SELECT set_config('app.user_id', $1, false), set_config('app.email', $2, false)", SqlValue.Str(userId) :: SqlValue.Str(email) :: Nil)
+
+    /// (memberships, invitations, api_keys) の行数。
+    def countAuthRows(): (Int64, Int64, Int64) \ DbRead + RawSql + DbErr =
+        (countRows("memberships"), countRows("invitations"), countRows("api_keys"))
+
+    ///
+    /// auth の表。default と shop の両方に招待された a が初回ログインで両方の membership を持ち、b は default に招待だけ、鍵は各 1 つ。
+    ///
+    ///   印 = default            : memberships 1（a）、invitations 1（b）、api_keys 1
+    ///   印 = shop               : 1（a）、0、1
+    ///   印 無し + user = a      : 2（a の両方）、0（a 宛は受け入れ済み）、0
+    ///   印 無し + email = b     : 0、1（b 宛）、0
+    ///   印 無し                 : 0、0、0
+    ///
+    @Test
+    def testPgRlsGuardsAuthTables(): Unit \ {IO, Assert} =
+        let pepper = { pepperId = "test", secret = "test-pepper" };
+        let (shop, alice) = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1", "k2"}, () -> {
+            let bootstrap = { ownerEmail = Some("owner@test") };
+            let owner = Accounts.resolveUser(bootstrap, { issuer = "test", subject = "owner", email = "owner@test", name = "owner" });
+            let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
+            let asOwner = (projectId, thunk) -> PgTestSupport.asProject(projectId, () -> Session.runWith(Accounts.actorFor(owner, projectId), thunk));
+            asOwner(ProjectId.default(), () -> {
+                discard Members.invite("a@test.dev", Role.Editor);
+                discard Members.invite("b@test.dev", Role.Viewer);
+                discard ApiKeys.create(pepper, "default-key", ApiKeyScope.Read)
+            });
+            asOwner(shop, () -> {
+                discard Members.invite("a@test.dev", Role.Writer);
+                discard ApiKeys.create(pepper, "shop-key", ApiKeyScope.Read)
+            });
+            let alice = Accounts.resolveUser(bootstrap, { issuer = "test", subject = "a", email = "a@test.dev", name = "a" });
+            (shop, alice)
+        })) |> PgTestSupport.seededOrBug;
+        let outcome = DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(PgTestSupport.appConfig(), _ -> {
+            stampSession("${ProjectId.default()}");
+            let byDefault = countAuthRows();
+            stampSession("${shop}");
+            let byShop = countAuthRows();
+            stampSession("");
+            stampUser("${alice#id}", alice#email);
+            let byAlice = countAuthRows();
+            stampUser("", "b@test.dev");
+            let byBobEmail = countAuthRows();
+            stampUser("", "");
+            let unstamped = countAuthRows();
+            (byDefault, byShop, byAlice, byBobEmail, unstamped)
+        })));
+        Assert.assertEq(
+            expected = Ok(((1i64, 1i64, 1i64), (1i64, 0i64, 1i64), (2i64, 0i64, 0i64), (0i64, 1i64, 0i64), (0i64, 0i64, 0i64))),
+            outcome)
+
     ///
     /// 他のプロジェクトの project_id を持つ行は、default の印では入れられない（WITH CHECK）。
     /// 印の無い Tx（Account API と同じ）は、生成された query に project_id を明示しても 0 行。

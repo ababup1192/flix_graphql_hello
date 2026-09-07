@@ -19,7 +19,7 @@ Docker（起動時 migration、JSON ログ、/health の版）、deploy/ の com
 | 2 | 影響の見える化（`impact`）済み 2026-09-07。本文内のリンクも entry_links に載せた | 編集者 | 半日 | 取り下げ・削除で壊れる entry（フィールドの参照・本文内の `entryId` リンク・asset の使用先）と、一緒に動く物を返す。**microCMS には無い** |
 | 3 | 認証・組織・権限（2026-09-07 に実装済み。表、Authz の Datalog、JWT / JWKS、Session effect で既定拒否、me / メンバー / 招待 / 鍵、visibility、Host でプロジェクト slug、Account API `/account/graphql`、`CMS_DEFAULT_PROJECT` / `CMS_SIGNUP`） | 全員 | 1〜2 時間 | [auth-and-organizations.md](auth-and-organizations.md)。`TokenVerifier`（JWKS。最初は Cloudflare Access）、`Actor` effect、memberships、`me`、Host で slug、API キー。`Authz.can(actor, permission, resource)` は最初から resource を受け、`Authz.readFilter(actor)` は空を返す（後の属性ベース権限のため） |
 | 3b | テナント分離の三重化（2026-09-07 に実装済み）: RLS（中身の 6 表、Runner が Tx の先頭に印、`cms_app` ロール）と sqlfx `gen --scope project_id`（条件の無い query は生成失敗。書き忘れ 11 本を発見）。外向きの id は乱数の public_id | 全員 | 済み | [auth-and-organizations.md](auth-and-organizations.md) |
-| 3c | auth の表（memberships / invitations / api_keys）の RLS。ログイン処理がプロジェクトを跨ぐので `app.user_id` / `app.email` の印を足した policy | 全員 | 半日 | 3b の口（TenantTx）をそのまま使う |
+| 3c | auth の表（memberships / invitations / api_keys）の RLS（2026-09-07 に実装済み）。`Accounts.resolveUser` が `app.user_id` / `app.email` の印を置き、自分の行だけプロジェクトを跨いで見える | 全員 | 済み | migration 013、TestRlsPg |
 | 4 | Webhook | サイト運営者 | 30 分 | 公開・取り下げ・型の変更で URL を叩く。HMAC 署名、再試行、`schema.changed` |
 | 5 | プレビュー トークン | 編集者 | 半日 | HMAC 署名、期限付き、参照先も下書きで辿れる。`previewUrl` と組み合わせ |
 | 6 | 予約公開・公開停止予約 | 編集者 | 半日 | `publishAt` / `unpublishAt` と compose の cron サービス |

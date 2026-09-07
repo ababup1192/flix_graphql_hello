@@ -2,7 +2,8 @@
 
 状態: 2026-09-07 に実装（users / organizations / memberships / invitations / api_keys、Authz の Datalog、JWT の検証、`Session` effect、
 管理 API の `me` / メンバー / 招待 / 鍵、公開 API の visibility、Host ヘッダでプロジェクト slug、Account API、RLS と生成器の検査（三重化）、外向きの id は乱数の public_id）。
-まだ無い物: auth の表（memberships / invitations / api_keys）の RLS（`app.user_id` を足した policy が要る。[roadmap #3c](roadmap.md)）。
+auth の表（memberships / invitations / api_keys）も RLS 済み（migration 013）: `Accounts.resolveUser` が Tx に `app.user_id` / `app.email` の印を置き、
+自分の memberships と自分宛の invitations だけプロジェクトを跨いで見える。api_keys はプロジェクトの印だけ。
 
 言葉: **プロジェクト slug** は URL の `/p/{プロジェクト slug}/` と subdomain でプロジェクトを選ぶ人が読める名前（`ProjectSlug` 型。parse 済みしか作れない）。
 **プロジェクト id** は DB の主キー。**既定プロジェクト** はプロジェクト slug 無しの時に落ちる先（`CMS_DEFAULT_PROJECT`）。
