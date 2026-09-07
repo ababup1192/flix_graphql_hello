@@ -15,39 +15,63 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
         pool        <- openPool(connection);
         _           <- prepareMigrations(connection, Sys.Env.getVar("CMS_MIGRATE"));
         storage     <- StorageConfig.fromEnv();
-        adminEngines <- Ok(AdminEngine.create(storage));
+        auth        <- AuthConfig.fromEnv();
+        deps        <- Ok({ storage = storage, auth = auth });
+        adminEngines <- Ok(AdminEngine.create(deps));
         _           <- AdminEngine.current(adminEngines, pool, ProjectId.default())
-    ) yield (pool, adminEngines, storage);
+    ) yield (pool, adminEngines, deps);
     match started {
         case Err(message) => { println(message); Sys.Exit.exit(1) }
-        case Ok((pool, adminEngines, storage)) =>
+        case Ok((pool, adminEngines, deps)) =>
+            let jwks = TokenVerifier.createCache();
             let cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins };
             let version = Sys.Env.getVar("CMS_VERSION") |> Option.getWithDefault("dev");
             let contentConfig = { cors = cors, graphqlPath = "/graphql", version = version };
             let adminConfig = { cors = cors, graphqlPath = "/admin/graphql", version = version };
-            let engineCache = ContentEngine.create(storage);
+            let engineCache = ContentEngine.create(deps);
             // WhyNot: コンテンツ API を実行する時以外（/health、404、preflight、GET）でエンジンを組まないのは、型定義が壊れた時に
             // 死活監視や preflight まで 503 になり、404 ごとに目印の SELECT が走るため。GraphQL を実行しない道なので管理 API のエンジンで受ける
             HttpServer.listen(8080, request ->
                 Health.runWithPool(pool, () -> {
                     let (slug, path) = Server.splitProject(request#path);
                     let scoped = { path = path | request };
+                    let credential = credentialOf(deps#auth, jwks, request);
                     match resolveProject(pool, slug) {
                         case Err(message)      => Server.unavailable(message)
                         case Ok(None)          => Server.notFound("projectId '${slug |> Option.getWithDefault("")}' がありません")
                         case Ok(Some(projectId)) =>
                             if (Server.needsGraphqlEngine(contentConfig, scoped))
                                 match ContentEngine.current(engineCache, pool, projectId) {
-                                    case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(contentConfig, scoped))
+                                    case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(contentConfig, credential, scoped))
                                     case Err(message) => Server.unavailable(message)
                                 }
                             else
                                 match AdminEngine.current(adminEngines, pool, projectId) {
-                                    case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(adminConfig, scoped))
+                                    case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(adminConfig, credential, scoped))
                                     case Err(message) => Server.unavailable(message)
                                 }
                     }
                 }))
+    }
+
+///
+/// リクエストの身元。トークンのヘッダがあれば発行元で検証し、無ければ X-Api-Key、どちらも無ければ Missing。
+/// dev モードは X-Dev-User の email を信じる（AuthConfig が CMS_VERSION=dev の時にしか許さない）。
+///
+def credentialOf(auth: AuthConfig.AuthConfig, jwks: TokenVerifier.JwksCache, request: HttpRequest): Credential \ IO =
+    let verified = token -> match auth#mode {
+        case AuthConfig.Mode.Jwks(config) => Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> TokenVerifier.runWithJwks(config, jwks, () -> TokenVerifier.verify(token))))
+        case AuthConfig.Mode.Dev          => TokenVerifier.runDev(() -> TokenVerifier.verify(token))
+        case AuthConfig.Mode.Closed       => Err("管理 API は閉じています（CMS_AUTH=none）")
+    };
+    let headerName = match auth#mode { case AuthConfig.Mode.Dev => "X-Dev-User" case _ => auth#tokenHeader };
+    match (AuthConfig.tokenOf(headerName, request#headers), AuthConfig.apiKeyOf(request#headers)) {
+        case (Some(token), _) => match verified(token) {
+            case Ok(principal) => Credential.Bearer(principal#issuer, principal#subject, principal#email, principal#name)
+            case Err(reason)   => Credential.Invalid(reason)
+        }
+        case (None, Some(key)) => Credential.ApiKey(key)
+        case (None, None)      => Credential.Missing
     }
 
 ///

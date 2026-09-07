@@ -39,7 +39,22 @@ mod GraphqlTestKit {
     /// 組み立て済みのエンジンにクエリを 1 つ流し、(data, 先頭の errors[].message) にまとめる。
     ///
     pub def askEngine(engine: Graphql.Engine, queryText: String): (Value, Option[String]) \ IO =
-        Graphql.runWithEngine(engine, () -> Graphql.execute(queryOnly(queryText), Context.anonymous())) |> summarize
+        askEngineWith(engine, Context.anonymous(), queryText)
+
+    ///
+    /// 身元付きでエンジンに問い合わせる。
+    ///
+    pub def askEngineWith(engine: Graphql.Engine, context: Context, queryText: String): (Value, Option[String]) \ IO =
+        Graphql.runWithEngine(engine, () -> Graphql.execute(queryOnly(queryText), context)) |> summarize
+
+    ///
+    /// 身元付きでスキーマに問い合わせる。
+    ///
+    pub def askWith(schema: Schema, context: Context, queryText: String): (Value, Option[String]) \ IO =
+        match Graphql.buildEngine(schema) {
+            case Ok(engine)   => askEngineWith(engine, context, queryText)
+            case Err(message) => (Value.Null, Some(message))
+        }
 
     ///
     /// executeQuery が Err（エンジンが組めない）なのはテストの前提が壊れているので止める。
@@ -85,7 +100,7 @@ mod GraphqlTestKit {
     ///
     pub def appSchema(initial: Int32): Schema \ IO =
         let cell = new AtomicInteger(initial);
-        AppSchema.make(f -> CounterFake.runWithCell(cell, f))
+        AppSchema.make((_, f) -> CounterFake.runWithCell(cell, f))
 
     ///
     /// Query だけの、IO しか使わないスキーマ。

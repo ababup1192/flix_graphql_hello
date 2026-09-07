@@ -67,14 +67,14 @@ mod TestContentTypesPg {
     @Test
     def testPgAdminEngineRoundTrip(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
-            let created = GraphqlTestKit.ask(schema,
+            let created = PgTestSupport.askOwner(schema)(
                 "mutation { createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { id apiId singular plural kind fields { apiId } } }");
             let createdId = created |> fst |> Value.path(List#{"createContentType", "id"}) |> Value.asStr |> Option.getWithDefault("?");
-            let added = GraphqlTestKit.ask(schema,
+            let added = PgTestSupport.askOwner(schema)(
                 "mutation { addField(typeId: \"${createdId}\", input: { apiId: \"title\", name: \"題名\", kind: TEXT, required: true, config: { maxLength: 120 } }) { apiId kind required position config { maxLength sourceField } } }");
-            let listed = GraphqlTestKit.ask(schema, "{ contentTypes { apiId fields { apiId } } contentType(apiId: \"blogs\") { singular } }");
-            let invalid = GraphqlTestKit.ask(schema, "mutation { createContentType(input: { apiId: \"Bad Id\", name: \"x\" }) { id } }") |> snd;
-            let badId = GraphqlTestKit.ask(schema, "mutation { removeField(id: \"abc\") }") |> snd;
+            let listed = PgTestSupport.askOwner(schema)( "{ contentTypes { apiId fields { apiId } } contentType(apiId: \"blogs\") { singular } }");
+            let invalid = PgTestSupport.askOwner(schema)( "mutation { createContentType(input: { apiId: \"Bad Id\", name: \"x\" }) { id } }") |> snd;
+            let badId = PgTestSupport.askOwner(schema)( "mutation { removeField(id: \"abc\") }") |> snd;
             (createdId, created, added, listed, invalid, badId)
         });
         let (createdId, created, added, listed, invalid, badId) = outcome;

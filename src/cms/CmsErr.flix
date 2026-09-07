@@ -7,6 +7,10 @@ pub enum Entity with Eq, Order, ToString {
     case Entry
     case Version
     case Asset
+    case Member
+    case Invitation
+    case ApiKey
+    case Organization
 }
 
 ///
@@ -34,6 +38,11 @@ pub eff CmsErr {
     /// 楽観ロックに負けた。currentVersion は今の版。
     ///
     def conflict(entity: Entity, id: String, currentVersion: Int32): Void
+
+    ///
+    /// 権限が無い。permission は要求した操作。
+    ///
+    def forbidden(permission: Permission): Void
 }
 
 mod CmsErr {
@@ -45,6 +54,7 @@ mod CmsErr {
         case NotFound(Entity, String)
         case Invalid(List[Violation])
         case Conflict(Entity, String, Int32)
+        case Forbidden(Permission)
     }
 
     ///
@@ -57,6 +67,7 @@ mod CmsErr {
             def notFound(entity, id, _resume) = Err(CmsFailure.NotFound(entity, id))
             def invalid(violations, _resume) = Err(CmsFailure.Invalid(violations))
             def conflict(entity, id, version, _resume) = Err(CmsFailure.Conflict(entity, id, version))
+            def forbidden(permission, _resume) = Err(CmsFailure.Forbidden(permission))
         }
 
     ///
@@ -67,6 +78,7 @@ mod CmsErr {
         case CmsFailure.Invalid(violations) =>
             violations |> List.map(violation -> { let Violation.Violation(path, message) = violation; "${path}: ${message}" }) |> List.join("; ")
         case CmsFailure.Conflict(entity, id, version) => "${describe(entity)} '${id}' は他で更新されています（今の version は ${version}）。読み直してから保存してください"
+        case CmsFailure.Forbidden(permission) => "この操作（${Permission.text(permission)}）の権限がありません"
     }
 
     ///
@@ -91,6 +103,10 @@ mod CmsErr {
         case Entity.Entry       => "entry"
         case Entity.Version     => "version"
         case Entity.Asset       => "asset"
+        case Entity.Member      => "member"
+        case Entity.Invitation  => "invitation"
+        case Entity.ApiKey      => "api key"
+        case Entity.Organization => "organization"
     }
 
 }

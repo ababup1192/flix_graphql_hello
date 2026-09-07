@@ -26,17 +26,17 @@ mod Server {
     /// パスのクエリ文字列は無視する。許したオリジンからのリクエストには CORS ヘッダを足す。
     /// リクエストヘッダは Origin 以外まだ見ない。
     ///
-    pub def handle(config: ServerConfig, request: HttpRequest): HttpResponse \ {Graphql, Health} =
-        route(config, request) |> Cors.withHeaders(config#cors, request)
+    pub def handle(config: ServerConfig, credential: Credential, request: HttpRequest): HttpResponse \ {Graphql, Health} =
+        route(config, credential, request) |> Cors.withHeaders(config#cors, request)
 
     ///
     /// メソッドとパスで振り分ける。
     ///
-    def route(config: ServerConfig, request: HttpRequest): HttpResponse \ {Graphql, Health} =
+    def route(config: ServerConfig, credential: Credential, request: HttpRequest): HttpResponse \ {Graphql, Health} =
         match (request#method, pathOf(request#path)) {
             case ("OPTIONS", path) if path == config#graphqlPath or path == "/health" => Cors.preflight(config#cors, request)
             case ("POST", path) if path == config#graphqlPath =>
-                if (isJson(request)) executeBody(request#body) else errorResponse(415, Nil, "Content-Type: application/json で送ってください")
+                if (isJson(request)) executeBody(credential, request#body) else errorResponse(415, Nil, "Content-Type: application/json で送ってください")
             case (_, path) if path == config#graphqlPath      => errorResponse(405, ("Allow", "POST") :: Nil, "POST only")
             case ("GET", "/health")   => health(config#version)
             case (_, "/health")       => errorResponse(405, ("Allow", "GET") :: Nil, "GET only")
@@ -102,9 +102,9 @@ mod Server {
     ///
     /// JSON ボディを GraphqlRequest に読んで実行する。壊れた JSON・形の違うボディは 400。
     ///
-    def executeBody(body: String): HttpResponse \ Graphql =
+    def executeBody(credential: Credential, body: String): HttpResponse \ Graphql =
         match JsonValue.parse(body) |> Result.mapErr(message -> "invalid JSON: ${message}") |> Result.flatMap(toRequest) {
-            case Ok(request)  => { status = 200, headers = Nil, body = JsonValue.toJsonString(toValue(Graphql.execute(request, Context.anonymous()))) }
+            case Ok(request)  => { status = 200, headers = Nil, body = JsonValue.toJsonString(toValue(Graphql.execute(request, Context.withCredential(credential)))) }
             case Err(message) => errorResponse(400, Nil, message)
         }
 

@@ -196,11 +196,16 @@ pub eff IdGen {
     /// 新しい asset の id。entry と同じ形。
     ///
     def freshAssetId(): AssetId
+    ///
+    /// 新しい秘密（API キーの本体）。base64url の 43 文字（256 bit）。
+    ///
+    def freshSecret(): String
 }
 
 mod IdGen {
 
     import java.util.UUID
+    import java.security.SecureRandom
 
     ///
     /// UUID から作った 12 文字の id を振るハンドラ。
@@ -212,7 +217,14 @@ mod IdGen {
         run f() with handler IdGen {
             def freshEntryId(resume) = resume(EntryId.EntryId(randomText()))
             def freshAssetId(resume) = resume(AssetId.AssetId(randomText()))
+            def freshSecret(resume) = resume(randomSecret())
         }
+
+    /// SecureRandom の 32 バイトを base64url に。
+    def randomSecret(): String \ IO =
+        let bytes = Array.empty(Static, 32);
+        new SecureRandom().nextBytes(bytes);
+        Jwt.encodeBase64Url(Array.toVector(bytes))
 
     /// UUID から作った 12 文字。
     def randomText(): String \ IO =
@@ -226,6 +238,7 @@ mod IdGen {
         run f() with handler IdGen {
             def freshEntryId(resume) = resume(nextFixed(remaining))
             def freshAssetId(resume) = resume(AssetId.AssetId(EntryId.text(nextFixed(remaining))))
+            def freshSecret(resume) = resume("secret-${EntryId.text(nextFixed(remaining))}")
         }
     }
 

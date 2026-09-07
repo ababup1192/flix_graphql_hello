@@ -21,7 +21,7 @@ mod TestImpactPg {
     ///   b2 { title: "two", body: link → b3 }
     ///   b3 { title: "three" }
     ///
-    def seedGraph(): (EntryId, EntryId, EntryId, EntryId) \ Db + CmsErr + Tenant + IdGen =
+    def seedGraph(): (EntryId, EntryId, EntryId, EntryId) \ Db + CmsErr + Tenant + IdGen + Session =
         let profiles = ContentTypes.create(CmsTestKit.typeDraft("profiles", "書き手"));
         discard ContentTypes.addField(profiles#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
         let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
@@ -108,7 +108,7 @@ mod TestImpactPg {
     @Test
     def testPgImpactViaAdminApi(): Unit \ {IO, Assert} =
         let (check, impact) = PgTestSupport.withAdminApi(() -> CmsTestKit.withIds(Nil, () -> discard seedGraph()), (schema, _) -> {
-            let ask = GraphqlTestKit.ask(schema);
+            let ask = PgTestSupport.askOwner(schema);
             (ask("{ publishCheck(id: \"b1\") { ok violations { path message } unpublishedDependencies { id } } }"),
              ask("{ impact(id: \"b1\", action: PUBLISH) { breaks { via } cascades { id } } }"))
         });

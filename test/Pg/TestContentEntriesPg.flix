@@ -9,7 +9,7 @@ mod TestContentEntriesPg {
     ///
     /// blogs 型（title / views）を作って id を返す。
     ///
-    def blogsWithFields(): TypeId \ Db + CmsErr + Tenant =
+    def blogsWithFields(): TypeId \ Db + CmsErr + Tenant + Session =
         let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
         discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, { maxLength = Some(10) | FieldConfig.empty() }));
         discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("views", FieldKind.Number, FieldConfig.empty()));
@@ -102,14 +102,14 @@ mod TestContentEntriesPg {
     def testPgAdminEntryRoundTrip(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withAdminApi(blogsWithFields, (schema, blogs) -> {
             let typeId = "${blogs}";
-            let created = GraphqlTestKit.ask(schema,
+            let created = PgTestSupport.askOwner(schema)(
                 "mutation { createEntry(typeId: \"${typeId}\", id: \"e1\", fields: { title: \"hello\", views: 7 }) { id version stage fields } }");
-            let updated = GraphqlTestKit.ask(schema,
+            let updated = PgTestSupport.askOwner(schema)(
                 "mutation { updateEntry(id: \"e1\", expectedVersion: 1, fields: { views: null }) { version fields } }");
             let badKey = GraphqlTestKit.askRequest(schema, GraphqlTestKit.request(
                 "mutation($f: JSON!) { updateEntry(id: \"e1\", expectedVersion: 2, fields: $f) { version } }",
                 Map#{ "f" => Value.Obj(Map#{ "Bad Key" => Value.Int(1) }) })) |> snd;
-            let listed = GraphqlTestKit.ask(schema, "{ entries(typeId: \"${typeId}\") { totalCount nodes { id } } }");
+            let listed = PgTestSupport.askOwner(schema)( "{ entries(typeId: \"${typeId}\") { totalCount nodes { id } } }");
             (created, updated, badKey, listed)
         });
         Assert.assertEq(

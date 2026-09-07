@@ -44,6 +44,7 @@ mod Authz {
         case Actor.ApiKey(ApiKeyScope.ReadDraft) => permission == Permission.ReadDraft
         case Actor.ApiKey(ApiKeyScope.Read)      => false
         case Actor.Anonymous                     => false
+        case Actor.System                        => true
     }
 
     ///

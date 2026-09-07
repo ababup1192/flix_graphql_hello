@@ -7,9 +7,10 @@
 mod TestContentSchemaBuilder {
 
     def dryRunner(): Runner[ContentEff] =
-        f -> match DbError.runWithFailure(() -> Tenant.runWith(ProjectId.default(), () -> ObjectStore.runWithFake(Map.empty(), () -> DbTest.runWithRows(Nil, f)))) {
-            case Ok(result)   => result
-            case Err(failure) => Err("${failure}")
+        (_, f) -> match DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> ObjectStore.runWithFake(Map.empty(), () -> DbTest.runWithRows(Nil, f)))))) {
+            case Ok(Ok(result))   => result
+            case Ok(Err(failure)) => Err(CmsErr.toMessage(failure))
+            case Err(failure)     => Err("${failure}")
         }
 
     ///

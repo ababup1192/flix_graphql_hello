@@ -2,14 +2,37 @@
 /// リクエスト単位の情報。すべてのリゾルバに第 1 引数として届く。
 /// userId は認証済みならその ID（JWT 検証を入れるまでは None）。
 ///
-pub type alias Context = { userId = Option[String] }
+pub type alias Context = { userId = Option[String], credential = Credential }
+
+///
+/// リクエストが持ってきた身元。誰が確かめたかを区別する（Runner が DB の役割と突き合わせて主体にする）。
+///
+/// - Bearer(issuer, subject, email, name): 発行元の JWT を検証済みの本人
+/// - ApiKey(生の鍵): 公開 API の鍵。hash はここではしない
+/// - Missing: 何も付いていない（公開の読み取り、または未ログイン）
+/// - Invalid(理由): 付いていたが検証に落ちた。中身は含めない
+///
+pub enum Credential with Eq, Order, ToString {
+    case Bearer(String, String, String, String)
+    case ApiKey(String)
+    case Missing
+    case Invalid(String)
+}
 
 mod Context {
 
     ///
     /// 認証していない Context。JWT 検証を入れるまでは全リクエストがこれ。
     ///
-    pub def anonymous(): Context = { userId = None }
+    pub def anonymous(): Context = { userId = None, credential = Credential.Missing }
+
+    ///
+    /// 身元付きの context。userId は Bearer の email（版の author 等の表示に使う）。
+    ///
+    pub def withCredential(credential: Credential): Context = match credential {
+        case Credential.Bearer(_, _, email, _) => { userId = Some(email), credential = credential }
+        case _                                 => { userId = None, credential = credential }
+    }
 
 }
 
@@ -28,14 +51,14 @@ pub type alias FieldError = String
 /// WhyNot: `(Unit -> a \ ef) -> a \ IO` と書かないのは、型別名が自由な型変数 a を持てず、
 /// Flix に rank-2 型も無いため。戻り型を箱に固定すれば ef を多相のまま値として渡せる。
 ///
-pub type alias Runner[ef: Eff] = (Unit -> Result[FieldError, JavaValue.Boxed] \ ef + IO) -> Result[FieldError, JavaValue.Boxed] \ IO
+pub type alias Runner[ef: Eff] = Context -> (Unit -> Result[FieldError, JavaValue.Boxed] \ ef + IO) -> Result[FieldError, JavaValue.Boxed] \ IO
 
 mod Runner {
 
     ///
     /// IO しか使わないリゾルバ用。thunk をそのまま呼ぶ。
     ///
-    pub def io(): Runner[IO] = f -> f()
+    pub def io(): Runner[IO] = (_, f) -> f()
 
 }
 
@@ -406,11 +429,11 @@ mod Field {
         let Field.Field(inner) = field;
         {
             info  = { name = inner#name, args = inner#args, typeRef = (inner#typeRef)(runner), description = inner#description, deprecated = inner#deprecated },
-            fetch = (boxed, args) -> runner(() -> {
+            fetch = (boxed, args) -> {
                 let (_, untagged) = JavaValue.untag(boxed);
                 let (context, src): (Context, source) = JavaValue.unbox(untagged);
-                (inner#resolve)(context, src, args)
-            })
+                runner(context, () -> (inner#resolve)(context, src, args))
+            }
         }
 
 }

@@ -1,24 +1,48 @@
 ///
 /// コンテンツ API のリゾルバが使う効果の和。読むだけ。書く関数を呼べばコンパイルで落ちる。
 ///
-pub type alias ContentEff = {SqlRead, TransientDbErr, DbErr, Tenant, ObjectStore}
+pub type alias ContentEff = {SqlRead, TransientDbErr, DbErr, CmsErr, Tenant, Session, ObjectStore}
 
 ///
 /// コンテンツ API の Runner。読むだけなので Tx は要らないが、フィールド単位で接続を借り直さないよう
-/// withLazyTx で「最初の SQL で借りて最後に返す」にする。DbFailure を GraphQL のエラーに写す。
+/// withLazyTx で「最初の SQL で借りて最後に返す」にする。身元から主体を決め、private なプロジェクトは鍵の無い読み取りを止める。
 ///
 mod ContentRunner {
 
     ///
     /// プールから Runner を作る。
     ///
-    pub def make(pool: Pool, storage: Option[StorageConfig.StorageConfig], projectId: ProjectId): Runner[ContentEff] =
-        f -> runOne(pool, storage, projectId, f)
+    pub def make(pool: Pool, deps: Deps, projectId: ProjectId): Runner[ContentEff] =
+        (context, f) -> runOne(pool, deps, projectId, context, f)
 
-    def runOne(pool: Pool, storage: Option[StorageConfig.StorageConfig], projectId: ProjectId, f: Unit -> Result[FieldError, JavaValue.Boxed] \ ContentEff + IO): Result[FieldError, JavaValue.Boxed] \ IO =
-        match DbRunner.retrying(() -> Tenant.runWith(projectId, () -> Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(storage, () -> Pool.withLazyTx(pool, f)))))) {
-            case Err(failure) => Err(DbRunner.failureMessage(failure))
-            case Ok(result)   => result
+    def runOne(pool: Pool, deps: Deps, projectId: ProjectId, context: Context, f: Unit -> Result[FieldError, JavaValue.Boxed] \ ContentEff + IO): Result[FieldError, JavaValue.Boxed] \ IO =
+        let outcome = DbRunner.retrying(() ->
+            CmsErr.runWithResult(() ->
+                Tenant.runWith(projectId, () ->
+                    Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () ->
+                        Pool.withLazyTx(pool, () -> {
+                            let actor = Deps.actorOf(deps, projectId, context#credential);
+                            guardVisibility(projectId, actor);
+                            Session.runWith(actor, f)
+                        })))))));
+        match outcome {
+            case Err(failure)     => Err(DbRunner.failureMessage(failure))
+            case Ok(Err(failure)) => Err(CmsErr.toMessage(failure))
+            case Ok(Ok(result))   => result
+        }
+
+    ///
+    /// private なプロジェクトは、鍵か役割を持つ人しか読めない。
+    ///
+    def guardVisibility(projectId: ProjectId, actor: Actor): Unit \ DbRead + CmsErr =
+        let visibility = AuthQueries.findProjectOrg(ProjectId.toInt64(projectId))
+            |> Option.flatMap(row -> Visibility.parse(row#visibility))
+            |> Option.getWithDefault(Visibility.Private);
+        match (visibility, actor) {
+            case (Visibility.Public, _)                => ()
+            case (Visibility.Private, Actor.Anonymous) => CmsErr.invalid(Violation.Violation("auth", "このプロジェクトは非公開です。API キーを X-Api-Key で渡してください") :: Nil)
+            case (Visibility.Private, Actor.User(_, _, Nil)) => CmsErr.invalid(Violation.Violation("auth", "このプロジェクトのメンバーではありません") :: Nil)
+            case (Visibility.Private, _)               => ()
         }
 
 }

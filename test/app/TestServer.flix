@@ -8,7 +8,7 @@
 mod TestServer {
 
     def handle(request: HttpRequest): HttpResponse \ Graphql =
-        HealthFake.runWithOk(() -> Server.handle(Server.defaultConfig(), request))
+        HealthFake.runWithOk(() -> Server.handle(Server.defaultConfig(), Credential.Missing, request))
 
     ///
     /// POST /graphql に JSON ボディを載せたリクエスト。
@@ -137,16 +137,16 @@ mod TestServer {
     def testServerHealthOk(): Unit \ Assert =
         Assert.assertEq(expected = ((200, Ok(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str("dev") }))), 200),
             GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> {
-                let response = Server.handle(Server.defaultConfig(), { method = "GET", path = "/health", headers = Nil, body = "" });
+                let response = Server.handle(Server.defaultConfig(), Credential.Missing, { method = "GET", path = "/health", headers = Nil, body = "" });
                 ((response#status, JsonValue.parse(response#body)),
-                 Server.handle(Server.defaultConfig(), { method = "GET", path = "/health?probe=1", headers = Nil, body = "" })#status)
+                 Server.handle(Server.defaultConfig(), Credential.Missing, { method = "GET", path = "/health?probe=1", headers = Nil, body = "" })#status)
             })))
 
     /// DB に届かなければ 503 で、理由を db に入れる。
     @Test
     def testServerHealthFailure(): Unit \ Assert =
         let response = GraphqlFake.runWithEcho(() -> HealthFake.runWithFailure("connection refused", () ->
-            Server.handle(Server.defaultConfig(), { method = "GET", path = "/health", headers = Nil, body = "" })));
+            Server.handle(Server.defaultConfig(), Credential.Missing, { method = "GET", path = "/health", headers = Nil, body = "" })));
         Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused") }))),
             (response#status, JsonValue.parse(response#body)))
 
@@ -162,13 +162,13 @@ mod TestServer {
     @Test
     def testServerCorsHeadersOnGraphql(): Unit \ Assert =
         Assert.assertEq(expected = ("Access-Control-Allow-Origin", "https://admin.example.com") :: ("Vary", "Origin") :: Nil,
-            GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(adminConfig(), fromAdmin("POST", "/graphql"))))#headers)
+            GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(adminConfig(), Credential.Missing, fromAdmin("POST", "/graphql"))))#headers)
 
     /// preflight は 204 で、Graphql も Health も呼ばずに返る（偽ハンドラの応答がボディに現れない）。
     /// Allow-Origin は 1 回だけ付く（preflight と withHeaders で二重にならない）。
     @Test
     def testServerPreflight(): Unit \ Assert =
-        let response = GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(adminConfig(), fromAdmin("OPTIONS", "/graphql"))));
+        let response = GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(adminConfig(), Credential.Missing, fromAdmin("OPTIONS", "/graphql"))));
         Assert.assertEq(expected = (204, "", true, 1),
             (response#status, response#body,
              List.memberOf(("Access-Control-Allow-Methods", "GET, POST, OPTIONS"), response#headers),
@@ -194,7 +194,7 @@ mod TestServer {
     @Test
     def testServerPreflightOnlyOnKnownPaths(): Unit \ Assert =
         let statuses = List#{"/graphql", "/health", "/nope"} |> List.map(path ->
-            GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(adminConfig(), fromAdmin("OPTIONS", path))))#status);
+            GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(adminConfig(), Credential.Missing, fromAdmin("OPTIONS", path))))#status);
         Assert.assertEq(expected = List#{204, 204, 404}, statuses)
 
     /// パスの先頭の /p/{slug} を切り出す。無ければそのまま。slug が空なら切り出さない。

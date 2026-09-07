@@ -143,11 +143,14 @@ mod Permission {
 /// - user: 人。roles は今のプロジェクトで持つ役割（直接の membership と、組織の owner として持つ物）
 /// - apiKey: 鍵。scope は read か readDraft
 /// - anonymous: 公開 API をキー無しで読む人
+/// - system: サーバ自身の内部処理
 ///
 pub enum Actor with Eq, Order, ToString {
     case User(UserId, String, List[Role])
     case ApiKey(ApiKeyScope)
     case Anonymous
+    /// サーバ自身（エンジンの組み直しなど、リクエストの主体が無い内部の処理）。何でもできる
+    case System
 }
 
 ///

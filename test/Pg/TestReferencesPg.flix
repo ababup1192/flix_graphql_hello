@@ -8,7 +8,7 @@ mod TestReferencesPg {
     ///
     /// profiles（name）と blogs（title: required / category: select / profile: reference / tags: reference many）を作る。
     ///
-    def typesWithReferences(): (TypeId, TypeId, TypeId) \ Db + CmsErr + Tenant =
+    def typesWithReferences(): (TypeId, TypeId, TypeId) \ Db + CmsErr + Tenant + Session =
         let profiles = ContentTypes.create(CmsTestKit.typeDraft("profiles", "書き手"));
         discard ContentTypes.addField(profiles#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
         let tags = ContentTypes.create(CmsTestKit.typeDraft("tags", "タグ"));

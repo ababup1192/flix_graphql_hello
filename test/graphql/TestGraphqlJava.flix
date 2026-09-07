@@ -92,7 +92,7 @@ mod TestGraphqlJava {
         let schema = queryOnlySchema(field0("item", Out.obj(itemType), (_context, _root) -> Ok(())) :: Nil);
         Assert.assertEq(expected = Ok(Value.Obj(Map#{ "item" => Value.Obj(Map#{ "user" => Value.Str("u1") }) })),
             Graphql.buildEngine(schema)
-                |> Result.map(engine -> Graphql.runWithEngine(engine, () -> Graphql.execute(queryOnly("{ item { user } }"), { userId = Some("u1") })))
+                |> Result.map(engine -> Graphql.runWithEngine(engine, () -> Graphql.execute(queryOnly("{ item { user } }"), { userId = Some("u1"), credential = Credential.Missing })))
                 |> Result.map(response -> response#data))
 
     // ---- エラーの報告 ----
@@ -204,7 +204,7 @@ mod TestGraphqlJava {
         let root = objectType("Query", () ->
             field0("stored", Out.int32(), (_context, _root) -> CounterStore.load()) ::
             field0("pure", Out.int32(), (_context, _root) -> Ok(1)) :: Nil);
-        let schema = Schema.make(root, None, f -> CounterFake.runWithMemory(41, f));
+        let schema = Schema.make(root, None, (_, f) -> CounterFake.runWithMemory(41, f));
         Assert.assertEq(expected = Ok((Value.Obj(Map#{ "stored" => Value.Int(41), "pure" => Value.Int(1) }), None)),
             executeQuery(schema, "{ stored pure }"))
 

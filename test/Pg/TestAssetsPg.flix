@@ -65,7 +65,7 @@ mod TestAssetsPg {
     ///
     /// 戻り値はその 3 つの結果。
     ///
-    def seedPublished(): (Result[String, Unit], Result[String, Int32], Result[String, Unit]) \ Db + CmsErr + Tenant + ObjectStore + IO =
+    def seedPublished(): (Result[String, Unit], Result[String, Int32], Result[String, Unit]) \ Db + CmsErr + Tenant + ObjectStore + IO + Session =
         CmsTestKit.withIds(List#{"asset010"}, () -> {
             let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
             discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("cover", FieldKind.Asset, FieldConfig.empty()));

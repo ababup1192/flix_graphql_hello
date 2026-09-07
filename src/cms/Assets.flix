@@ -7,7 +7,8 @@ mod Assets {
     ///
     /// 申し込みを検査して pending の行を作り、置き先の署名付き URL を返す。
     ///
-    pub def createUpload(request: UploadRequest): Upload \ Db + CmsErr + IdGen + Tenant + ObjectStore =
+    pub def createUpload(request: UploadRequest): Upload \ Db + CmsErr + IdGen + Tenant + ObjectStore + Session =
+        Session.require(Permission.ManageAssets);
         CmsErr.raiseIfAny(AssetRules.validateUpload(request));
         let id = IdGen.freshAssetId();
         let key = "${Tenant.currentId()}/${AssetId.text(id)}/${AssetRules.safeFileName(request#fileName)}";
@@ -19,7 +20,8 @@ mod Assets {
     /// ブラウザが置いた後。ストレージに実在するかを HEAD で確かめ、その size と渡された寸法・alt で ready にする。
     /// 既に ready なら寸法と alt だけ上書きする（再送しても壊れない）。
     ///
-    pub def confirm(id: AssetId, details: AssetConfirm): Asset \ Db + CmsErr + Tenant + ObjectStore =
+    pub def confirm(id: AssetId, details: AssetConfirm): Asset \ Db + CmsErr + Tenant + ObjectStore + Session =
+        Session.require(Permission.ManageAssets);
         let asset = get(id);
         let size = ObjectStore.head(asset#key) |> orStorageErr;
         match size {
@@ -36,7 +38,8 @@ mod Assets {
     ///
     /// alt を変える。ファイルの差し替えは新しい asset を作る。
     ///
-    pub def updateAlt(id: AssetId, alt: String): Asset \ Db + CmsErr + Tenant =
+    pub def updateAlt(id: AssetId, alt: String): Asset \ Db + CmsErr + Tenant + Session =
+        Session.require(Permission.ManageAssets);
         discard get(id);
         discard AssetsQueries.updateAssetAlt({ id = AssetId.text(id), projectId = Tenant.currentId(), alt = alt });
         get(id)
@@ -45,7 +48,8 @@ mod Assets {
     /// 消す。entry（下書き・公開・richText の image を含む）が使っていれば invalid。
     /// ストレージの削除は DB の後で、失敗しても DB は消えたまま（孤児は掃除で拾う）。
     ///
-    pub def delete(id: AssetId): Unit \ Db + CmsErr + Tenant + ObjectStore =
+    pub def delete(id: AssetId): Unit \ Db + CmsErr + Tenant + ObjectStore + Session =
+        Session.require(Permission.ManageAssets);
         let asset = get(id);
         let holders = AssetsQueries.assetHolders({ projectId = Tenant.currentId(), assetId = AssetId.text(id) }) |> List.map(row -> row#id);
         CmsErr.raiseIfAny(if (List.isEmpty(holders)) Nil else Violation.Violation("id", "entry '${List.join("', '", holders)}' が使っています。先に外してください") :: Nil);
@@ -55,7 +59,8 @@ mod Assets {
     ///
     /// この asset を中身（下書き・公開・本文の image）に持つ entry の id。
     ///
-    pub def holders(id: AssetId): List[EntryId] \ DbRead + Tenant =
+    pub def holders(id: AssetId): List[EntryId] \ DbRead + Tenant + CmsErr + Session =
+        Session.require(Permission.ReadDraft);
         AssetsQueries.assetHolders({ projectId = Tenant.currentId(), assetId = AssetId.text(id) }) |> List.filterMap(row -> EntryId.parse(row#id))
 
     ///
@@ -75,7 +80,8 @@ mod Assets {
     ///
     /// 一覧。新しい順。
     ///
-    pub def list(first: Int32, skip: Int32): AssetPage \ DbRead + DbErr + Tenant =
+    pub def list(first: Int32, skip: Int32): AssetPage \ DbRead + DbErr + Tenant + CmsErr + Session =
+        Session.require(Permission.ReadDraft);
         {
             assets = AssetsQueries.listAssets({ projectId = Tenant.currentId(), limit = Int32.toInt64(first), offset = Int32.toInt64(skip) }) |> List.map(AssetRows.toAsset),
             totalCount = AssetsQueries.countAssets(Tenant.currentId()) |> Rows.total

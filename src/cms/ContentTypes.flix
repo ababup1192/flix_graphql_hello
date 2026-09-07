@@ -13,7 +13,12 @@ mod ContentTypes {
     ///
     /// 全 content type。apiId 順、フィールド付き。SQL は 2 本。
     ///
-    pub def list(): List[ContentType] \ DbRead + Tenant =
+    pub def list(): List[ContentType] \ DbRead + Tenant + CmsErr + Session =
+        Session.require(Permission.ReadDraft);
+        listAll()
+
+    /// 全 content type。権限は見ない（ユースケースの内部で使う）。
+    def listAll(): List[ContentType] \ DbRead + Tenant =
         let fieldsByType = ContentFieldsQueries.listAllFields(Tenant.currentId()) |> List.map(ContentTypeRows.toFieldDef) |> FieldTree.byType;
         ContentTypesQueries.listContentTypes(Tenant.currentId())
             |> List.map(row -> ContentTypeRows.toContentType(row, Map.getWithDefault(ContentTypeRows.typeIdOf(row), Nil, fieldsByType) |> FieldTree.build))
@@ -21,20 +26,26 @@ mod ContentTypes {
     ///
     /// id で 1 つ。無ければ None。
     ///
-    pub def find(id: TypeId): Option[ContentType] \ DbRead + Tenant =
+    pub def find(id: TypeId): Option[ContentType] \ DbRead + Tenant + CmsErr + Session =
+        Session.require(Permission.ReadDraft);
+        lookup(id)
+
+    /// id で 1 つ。権限は見ない（ユースケースの内部で使う）。
+    def lookup(id: TypeId): Option[ContentType] \ DbRead + Tenant =
         ContentTypesQueries.findContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() }) |> Option.map(row -> ContentTypeRows.toContentType(row, fieldsOf(id)))
 
     ///
     /// apiId で 1 つ。無ければ None。
     ///
-    pub def findByApiId(apiId: ApiId): Option[ContentType] \ DbRead + Tenant =
+    pub def findByApiId(apiId: ApiId): Option[ContentType] \ DbRead + Tenant + CmsErr + Session =
+        Session.require(Permission.ReadDraft);
         ContentTypesQueries.findContentTypeByApiId({ projectId = Tenant.currentId(), apiId = ApiId.text(apiId) }) |> Option.map(row -> ContentTypeRows.toContentType(row, fieldsOf(ContentTypeRows.typeIdOf(row))))
 
     ///
     /// id で 1 つ。無ければ notFound。
     ///
     pub def get(id: TypeId): ContentType \ DbRead + CmsErr + Tenant =
-        find(id) |> CmsErr.orNotFound(Entity.ContentType, "${id}")
+        lookup(id) |> CmsErr.orNotFound(Entity.ContentType, "${id}")
 
     ///
     /// フィールド 1 つ（children 付き）。無ければ notFound。
@@ -48,14 +59,15 @@ mod ContentTypes {
     ///
     /// content type を作る。singular / plural を省けば apiId から導く。名前の規則に合わなければ invalid。
     ///
-    pub def create(draft: ContentTypeDraft): ContentType \ Db + CmsErr + Tenant =
+    pub def create(draft: ContentTypeDraft): ContentType \ Db + CmsErr + Tenant + Session =
+        Session.require(Permission.ManageTypes);
         let names = {
             apiId    = draft#apiId,
             singular = draft#singular |> Option.getWithDefault(Naming.deriveSingular(draft#apiId)),
             plural   = draft#plural |> Option.getWithDefault(Naming.derivePlural(draft#apiId))
         };
         let derived = Option.isEmpty(draft#singular) and Option.isEmpty(draft#plural);
-        let others = list();
+        let others = listAll();
         CmsErr.raiseIfAny(typeNameViolations(others, names, Nil) |> List.map(violation -> if (derived) blameApiId(violation) else violation));
         let inserted = ContentTypesQueries.insertContentType({ +projectId = Tenant.currentId() | ContentTypeRows.typeInsert(names, draft) }) |> Rows.expectId;
         get(TypeId.TypeId(inserted))
@@ -71,14 +83,15 @@ mod ContentTypes {
     ///
     /// content type を直す。触った項目だけ UPDATE に出る。名前を変えるなら規則を検査する。
     ///
-    pub def update(id: TypeId, changes: ContentTypeChanges): ContentType \ Db + CmsErr + Tenant =
+    pub def update(id: TypeId, changes: ContentTypeChanges): ContentType \ Db + CmsErr + Tenant + Session =
+        Session.require(Permission.ManageTypes);
         let existing = get(id);
         let names = {
             apiId    = existing#apiId,
             singular = changes#singular |> Option.getWithDefault(existing#singular),
             plural   = changes#plural |> Option.getWithDefault(existing#plural)
         };
-        let others = list() |> List.filter(other -> other#id != id);
+        let others = listAll() |> List.filter(other -> other#id != id);
         CmsErr.raiseIfAny(typeNameViolations(others, names, existing#fields));
         discard ContentTypesQueries.updateContentType(TypeId.toInt64(id), ContentTypeRows.typeChanges(changes));
         get(id)
@@ -87,7 +100,8 @@ mod ContentTypes {
     /// content type をフィールドごと消す。無ければ notFound。entry が残っていれば、他の型から参照されていれば invalid。
     /// ゴミ箱の entry は型と一緒に消す（残すと型が消せない）。
     ///
-    pub def delete(id: TypeId): Unit \ Db + CmsErr + Tenant =
+    pub def delete(id: TypeId): Unit \ Db + CmsErr + Tenant + Session =
+        Session.require(Permission.ManageTypes);
         discard get(id);
         let remaining = EntriesQueries.countEntriesOfType(TypeId.toInt64(id)) |> Rows.total;
         let referrers = ContentFieldsQueries.countFieldsTargeting(TypeId.toInt64(id)) |> Rows.total;
@@ -102,7 +116,8 @@ mod ContentTypes {
     ///
     /// フィールドを末尾に足す。apiId の規則と config の組み合わせを検査する。parent があればその子（object の子か blocks の variant）になる。
     ///
-    pub def addField(typeId: TypeId, draft: FieldDraft): FieldDef \ Db + CmsErr + Tenant =
+    pub def addField(typeId: TypeId, draft: FieldDraft): FieldDef \ Db + CmsErr + Tenant + Session =
+        Session.require(Permission.ManageTypes);
         let owner = get(typeId);
         let parent = draft#parent |> Option.map(parentId -> FieldTree.find(parentId, owner#fields) |> CmsErr.orNotFound(Entity.Field, "${parentId}"));
         CmsErr.raiseIfAny(validateDraft(takenApiIds(owner#fields, None), parent, draft) ::: targetTypeExists(draft#target) ::: fieldTypeNameViolations(owner, draft));
@@ -119,7 +134,8 @@ mod ContentTypes {
     ///
     /// フィールドを直す。触った項目だけ UPDATE に出る。config は丸ごと置き換える。
     ///
-    pub def updateField(id: FieldId, changes: FieldChanges): FieldDef \ Db + CmsErr + Tenant =
+    pub def updateField(id: FieldId, changes: FieldChanges): FieldDef \ Db + CmsErr + Tenant + Session =
+        Session.require(Permission.ManageTypes);
         let existing = getField(id);
         let taken = takenApiIds(fieldsOf(existing#typeId), Some(id));
         let config = changes#config |> Option.getWithDefault(existing#config);
@@ -133,7 +149,8 @@ mod ContentTypes {
     ///
     /// フィールドを消す。無ければ notFound。
     ///
-    pub def removeField(id: FieldId): Unit \ Db + CmsErr + Tenant =
+    pub def removeField(id: FieldId): Unit \ Db + CmsErr + Tenant + Session =
+        Session.require(Permission.ManageTypes);
         let existing = getField(id);
         discard ContentFieldsQueries.deleteField(FieldId.toInt64(id));
         touch(existing#typeId)
@@ -141,7 +158,8 @@ mod ContentTypes {
     ///
     /// ids の順に並べ直す。最上位のフィールドを過不足なく渡さなければ invalid。object / blocks の子は対象外。
     ///
-    pub def reorderFields(typeId: TypeId, ids: List[FieldId]): ContentType \ Db + CmsErr + Tenant =
+    pub def reorderFields(typeId: TypeId, ids: List[FieldId]): ContentType \ Db + CmsErr + Tenant + Session =
+        Session.require(Permission.ManageTypes);
         let owner = get(typeId);
         let current = owner#fields |> List.map(field -> field#id) |> List.toSet;
         let sameSet = List.length(ids) == Set.size(current) and List.toSet(ids) == current;
@@ -167,7 +185,7 @@ mod ContentTypes {
     /// 参照先の型が DB にある事（kind と target の組み合わせは Naming.validateTarget）。
     ///
     def targetTypeExists(target: Option[TypeId]): List[Violation] \ DbRead + Tenant = match target {
-        case Some(typeId) => if (Option.isEmpty(find(typeId))) Violation.Violation("targetTypeId", "型 '${typeId}' がありません") :: Nil else Nil
+        case Some(typeId) => if (Option.isEmpty(lookup(typeId))) Violation.Violation("targetTypeId", "型 '${typeId}' がありません") :: Nil else Nil
         case None         => Nil
     }
 
@@ -178,7 +196,7 @@ mod ContentTypes {
         let ancestors = draft#parent |> Option.flatMap(parentId -> FieldTree.ancestors(parentId, owner#fields)) |> Option.getWithDefault(Nil);
         let prefix = ancestors |> List.foldLeft((acc, ancestor) -> Naming.nestedTypeName(acc, ancestor#apiId), TypeName.text(owner#singular));
         let asField = { id = FieldId.FieldId(0i64), typeId = owner#id, apiId = draft#apiId, name = draft#name, kind = draft#kind, many = draft#many, required = draft#required, unique = draft#unique, localized = draft#localized, target = draft#target, parent = draft#parent, children = Children.none(), config = draft#config, position = 0 };
-        Naming.validateFieldTypeNames(List.flatMap(schemaTypeNamesOf, list()), prefix, asField)
+        Naming.validateFieldTypeNames(List.flatMap(schemaTypeNamesOf, listAll()), prefix, asField)
 
     ///
     /// 型の名前の検査。名前の規則（既存の型との衝突）に通ってから、生える型名との衝突を見る（apiId が重なっていれば型名も重なるので、同じ原因を二度言わない）。

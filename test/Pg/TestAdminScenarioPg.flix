@@ -10,7 +10,7 @@ mod TestAdminScenarioPg {
     @Test
     def testPgAdminScenario(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
-            let ask = GraphqlTestKit.ask(schema);
+            let ask = PgTestSupport.askOwner(schema);
             let typeId = ask("mutation { createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { id } }") |> fst |> Value.path(List#{"createContentType", "id"}) |> Value.asStr |> Option.getWithDefault("?");
             let titleId = ask("mutation { addField(typeId: \"${typeId}\", input: { apiId: \"title\", name: \"題名\", kind: TEXT, required: true }) { id } }") |> fst |> Value.path(List#{"addField", "id"}) |> Value.asStr |> Option.getWithDefault("?");
             discard ask("mutation { addField(typeId: \"${typeId}\", input: { apiId: \"body\", name: \"本文\", kind: TEXT_AREA }) { id } }");
