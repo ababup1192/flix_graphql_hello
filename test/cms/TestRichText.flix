@@ -67,6 +67,37 @@ mod TestRichText {
             (RichText.validate("fields.body", node("paragraph", Nil)) ::: RichText.validate("fields.body", bad))
                 |> List.map(violation -> { let Violation.Violation(path, message) = violation; (path, message) }))
 
+    /// link の href は http(s) と mailto だけ。javascript: / data: は大文字でも通らず、相対パスと # も通らない。
+    @Test
+    def testIsSafeHref(): Unit \ Assert =
+        let cases = List#{
+            ("https://example.com/",   true),
+            ("http://example.com/",    true),
+            ("mailto:a@example.com",   true),
+            ("javascript:alert(1)",    false),
+            ("JAVASCRIPT:alert(1)",    false),
+            ("data:text/html,x",       false),
+            ("/docs/intro",            false),
+            ("#top",                   false),
+            ("",                       false)
+        };
+        Assert.assertEq(expected = cases, cases |> List.map(match (href, _) -> (href, RichText.isSafeHref(href))))
+
+    /// 見出しの id は英数字と _ - の 1 〜 64 文字。64 文字は通り、65 文字と空と記号は通らない。
+    @Test
+    def testIsHeadingId(): Unit \ Assert =
+        let cases = List#{ (String.repeat(64, "a"), true), (String.repeat(65, "a"), false), ("intro_1-a", true), ("", false), ("見出し", false), ("a b", false) };
+        Assert.assertEq(expected = cases, cases |> List.map(match (id, _) -> (id, RichText.isHeadingId(id))))
+
+    /// heading の level は 1 〜 maxHeadingLevel。0 と maxHeadingLevel + 1 は止まり、1 と maxHeadingLevel は通る。
+    @Test
+    def testHeadingLevelBounds(): Unit \ Assert =
+        let heading = level -> nodeWith("heading", List#{("level", CmsTestKit.intJson(level))}, Nil);
+        let doc = node("doc", List#{ heading(0), heading(1), heading(RichText.maxHeadingLevel()), heading(RichText.maxHeadingLevel() + 1) });
+        Assert.assertEq(
+            expected = List#{ "fields.body.content[0]", "fields.body.content[3]" },
+            CmsTestKit.violationPaths(RichText.validate("fields.body", doc)))
+
     // ---- 取り出し ----
 
     /// image の assetId を集める。重複は 1 つ。

@@ -252,7 +252,7 @@ mod IdGen {
         UUID.randomUUID().toString() |> String.replace(src = "-", dst = "") |> String.takeLeft(12)
 
     ///
-    /// 決めた id を順に返すハンドラ。尽きたら最後の物を繰り返す。
+    /// 決めた id を順に返すハンドラ。尽きたら止まる（渡した並びより多く作るのはテストの誤り）。
     ///
     pub def runWithFixed(ids: List[EntryId], f: Unit -> a \ ef): a \ ef - IdGen = region rc {
         let remaining = Ref.fresh(rc, ids);
@@ -270,10 +270,13 @@ mod IdGen {
         }
     }
 
-    /// 決めた id の次。尽きたら最後の物を繰り返す。
+    /// 決めた id の次。
+    ///
+    /// WhyNot: 尽きた時に最後の物を繰り返したり固定の id を返したりしないのは、黙って同じ id が入ると UNIQUE で落ちるか
+    /// 別の entry を指してしまい、原因の分からない失敗になるため。足りないのはテストの誤りなので止める
     def nextFixed(remaining: Ref[List[EntryId], r]): EntryId \ r = match Ref.get(remaining) {
-        case head :: tail => { Ref.put(if (List.isEmpty(tail)) head :: Nil else tail, remaining); head }
-        case Nil          => EntryId.EntryId("fixed")
+        case head :: tail => { Ref.put(tail, remaining); head }
+        case Nil          => bug!("決めた id が足りない（withIds に渡した並びより多く id を作っている。テストの誤り）")
     }
 
 }

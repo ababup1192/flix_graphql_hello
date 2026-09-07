@@ -90,7 +90,11 @@ mod ContentEntries {
         let owner = ContentTypes.get(typeId);
         let data = EntryValidation.normalize(owner#fields, given);
         CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data) ::: singletonViolations(owner));
-        let id = givenId |> Option.getWithDefault(IdGen.freshEntryId());
+        // WhyNot: Option.getWithDefault(IdGen.freshEntryId()) にしないのは、引数が先に評価されて id を渡した時も 1 つ消費するため
+        let id = match givenId {
+            case Some(chosen) => chosen
+            case None        => IdGen.freshEntryId()
+        };
         let taken = EntriesQueries.entryExists({ id = EntryId.text(id), projectId = Tenant.currentId() }) |> Option.nonEmpty;
         CmsErr.raiseIfAny(if (taken) Violation.Violation("id", "'${id}' は既にあります（ゴミ箱の物を含む）") :: Nil else Nil);
         discard EntriesQueries.insertEntry({ id = EntryId.text(id), typeId = TypeId.toInt64(typeId), projectId = Tenant.currentId() });

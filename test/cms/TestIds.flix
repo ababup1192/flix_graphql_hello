@@ -42,3 +42,14 @@ def testFixedIdsAreDistinct(): Unit \ Assert =
     let (ulids, publicIds) = IdGen.runWithFixed(Nil, () -> (List#{IdGen.freshUlid(), IdGen.freshUlid(), IdGen.freshUlid()}, List#{IdGen.freshPublicId(), IdGen.freshPublicId()}));
     Assert.assertEq(expected = (3, true, List#{26, 26, 26}, 2),
         (List.toSet(ulids) |> Set.size, List.sort(ulids) == ulids, List.map(String.length, ulids), List.toSet(publicIds) |> Set.size))
+
+/// 決めた id は渡した順に使われ、entry / asset / secret は同じ並びを消費する。
+@Test
+def testFixedIdsInOrder(): Unit \ Assert =
+    Assert.assertEq(expected = ("a1", "a2", "secret-a3"),
+        IdGen.runWithFixed(CmsTestKit.entryIds(List#{"a1", "a2", "a3"}), () -> {
+            let first = EntryId.text(IdGen.freshEntryId());
+            let second = AssetId.text(IdGen.freshAssetId());
+            let third = IdGen.freshSecret();
+            (first, second, third)
+        }))

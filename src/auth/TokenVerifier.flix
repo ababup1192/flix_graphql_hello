@@ -1,5 +1,5 @@
 ///
-/// トークンから本人（Principal）を得る境界。本番は発行元の JWKS で JWT を検証し、テストは固定の答え、
+/// トークンから本人（Principal）を得る境界。本番は発行元の JWKS で JWT を検証し、
 /// 手元の開発は `X-Dev-User` の値をそのまま人として扱う（起動時の条件でしか有効にならない）。
 ///
 pub eff TokenVerifier {
@@ -52,14 +52,6 @@ mod TokenVerifier {
     pub def runWithJwks(config: Config, cache: JwksCache, f: Unit -> a \ ef): a \ (ef - TokenVerifier) + { Http, Clock, IO } =
         run f() with handler TokenVerifier {
             def verify(token, resume) = resume(verifyWithJwks(config, cache, token))
-        }
-
-    ///
-    /// 決めた答えを返す handler（テスト用）。
-    ///
-    pub def runWithFixed(answer: String -> Result[String, Principal], f: Unit -> a \ ef): a \ ef - TokenVerifier =
-        run f() with handler TokenVerifier {
-            def verify(token, resume) = resume(answer(token))
         }
 
     ///

@@ -124,6 +124,41 @@ mod TestNaming {
              CmsTestKit.violationPaths(Naming.validateConfig(Nil, FieldKind.Text, { integer = Some(true) | base })),
              CmsTestKit.violationPaths(Naming.validateConfig(Nil, FieldKind.Number, { min = Some(0.0), max = Some(100.0), integer = Some(true) | base }))))
 
+    /// 予約名の表。Entry が持つ apiId、コンテンツ API が持つ型名、型ごとに生える接尾辞で終わる型名は、どれも使えない。
+    @Test
+    def testNamingReservedNames(): Unit \ Assert =
+        let fieldRows = Naming.reservedFieldApiIds() |> List.map(name -> (name, List#{"apiId"}));
+        let typeRows = Naming.reservedTypeNames() |> List.map(name -> (name, List#{"singular"}));
+        let suffixRows = Naming.reservedSuffixes() |> List.map(suffix -> ("Blog" + suffix, List#{"singular"}));
+        Assert.assertEq(
+            expected = fieldRows ::: typeRows ::: suffixRows,
+            (fieldRows |> List.map(match (name, _) -> (name, CmsTestKit.violationPaths(Naming.validateFieldApiId(Nil, CmsTestKit.apiId(name))))))
+            ::: ((typeRows ::: suffixRows) |> List.map(match (name, _) -> (name, CmsTestKit.violationPaths(Naming.validateType(Nil, CmsTestKit.names("items", name, "items")))))))
+
+    /// 表示名は空と空白だけが invalid。日本語は通る。
+    @Test
+    def testNamingValidateName(): Unit \ Assert =
+        let cases = List#{ ("", List#{"name"}), ("   ", List#{"name"}), ("\t\n", List#{"name"}), ("記事", Nil), ("a", Nil) };
+        Assert.assertEq(expected = cases, cases |> List.map(match (text, _) -> (text, CmsTestKit.violationPaths(Naming.validateName("name", text)))))
+
+    /// 参照先は REFERENCE に要り、REFERENCE 以外には付けられない。
+    @Test
+    def testNamingValidateTarget(): Unit \ Assert =
+        let target = Some(TypeId.TypeId(2i64));
+        let cases = List#{
+            ((FieldKind.Reference, None),   List#{"targetTypeId"}),
+            ((FieldKind.Reference, target), Nil),
+            ((FieldKind.Text, target),      List#{"targetTypeId"}),
+            ((FieldKind.Text, None),        Nil)
+        };
+        Assert.assertEq(expected = cases, cases |> List.map(match ((kind, given), _) -> ((kind, given), CmsTestKit.violationPaths(Naming.validateTarget(kind, given)))))
+
+    /// 選択肢の綴りは UPPER_SNAKE。小文字・数字始まり・空・ハイフンは通らない。
+    @Test
+    def testNamingIsEnumValue(): Unit \ Assert =
+        let cases = List#{ ("NEWS", true), ("NEWS_2", true), ("A", true), ("news", false), ("2ND", false), ("", false), ("NEWS-2", false), ("_NEWS", false) };
+        Assert.assertEq(expected = cases, cases |> List.map(match (text, _) -> (text, Naming.isEnumValue(text))))
+
     // ---- 生える型名 ----
 
     ///

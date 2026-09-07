@@ -24,6 +24,20 @@ mod TestAssetRules {
             AssetRules.validateUpload({ fileName = "a.pdf", mime = "application/pdf", size = 0i64 })
                 |> List.map(violation -> { let Violation.Violation(path, _) = violation; path }))
 
+    /// size は上限ちょうどまで置け、1 バイト超えると落ちる。
+    @Test
+    def testMaxSizeBoundary(): Unit \ Assert =
+        let cases = List#{ (AssetRules.maxSize(), Nil), (AssetRules.maxSize() + 1i64, List#{"size"}) };
+        Assert.assertEq(expected = cases,
+            cases |> List.map(match (size, _) -> (size, CmsTestKit.violationPaths(AssetRules.validateUpload({ fileName = "a.png", mime = "image/png", size = size })))))
+
+    /// mime は許可リストの綴りそのまま。SVG は置けず、大文字の綴りも通らない。
+    @Test
+    def testMimeIsExactMatch(): Unit \ Assert =
+        let cases = List#{ ("image/png", Nil), ("image/svg+xml", List#{"mime"}), ("IMAGE/PNG", List#{"mime"}), ("image/png; charset=binary", List#{"mime"}) };
+        Assert.assertEq(expected = cases,
+            cases |> List.map(match (mime, _) -> (mime, CmsTestKit.violationPaths(AssetRules.validateUpload({ fileName = "a.png", mime = mime, size = 1i64 })))))
+
     /// パスの区切りより後ろだけ取り、空白は -、URL で困る文字は落とし、日本語は残す。
     @Test
     def testSafeFileName(): Unit \ Assert =

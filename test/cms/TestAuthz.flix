@@ -72,6 +72,43 @@ mod TestAuthz {
              Authz.capToViewer(Nil),
              Authz.effectiveRoles(Login.PersonalToken(PatScope.Write), Role.Owner :: Nil)))
 
+    def allPermissions(): List[Permission] =
+        List#{ Permission.ReadDraft, Permission.WriteEntries, Permission.PublishEntries, Permission.ManageTypes,
+               Permission.ManageAssets, Permission.ManageMembers, Permission.ManageApiKeys, Permission.ManageProject }
+
+    /// 主体がこの対象に対してできる操作の名前（allPermissions の順）。
+    def granted(actor: Actor, resource: Authz.Resource): List[String] =
+        allPermissions() |> List.filter(permission -> Authz.can(actor, permission, resource)) |> List.map(Permission.text)
+
+    def patUser(scope: PatScope, roles: List[Role]): Actor = Actor.User(UserId.UserId(1i64), "a@example.com", roles, Login.PersonalToken(scope))
+
+    /// 主体 × 権限の表。System は全部、Anonymous と read の鍵は何も、readDraft の鍵は下書きを読むだけ、
+    /// write の鍵は役割の範囲で管理以外、プレビューはその entry の readDraft だけ、write の PAT は本人の役割、read の PAT は viewer。
+    @Test
+    def testActorPermissionTable(): Unit \ Assert =
+        let any = Authz.anyResource();
+        let e1 = CmsTestKit.entryId("e1");
+        let editorPermissions = List#{ "readDraft", "writeEntries", "publishEntries", "manageTypes", "manageAssets" };
+        let rows = List#{
+            ("system",                  Actor.System,                                           any,                        allPermissions() |> List.map(Permission.text)),
+            ("anonymous",               Actor.Anonymous,                                        any,                        Nil),
+            ("apiKey read",             Actor.ApiKey("site", ApiKeyScope.Read),                 any,                        Nil),
+            ("apiKey readDraft",        Actor.ApiKey("site", ApiKeyScope.ReadDraft),            any,                        List#{ "readDraft" }),
+            ("apiKey write viewer",     Actor.ApiKey("ci", ApiKeyScope.Write(Role.Viewer)),     any,                        List#{ "readDraft" }),
+            ("apiKey write owner",      Actor.ApiKey("ci", ApiKeyScope.Write(Role.Owner)),      any,                        editorPermissions),
+            ("preview own entry",       Actor.Preview(e1),                                      Authz.entryResource(e1),    List#{ "readDraft" }),
+            ("preview other entry",     Actor.Preview(e1),                                      Authz.entryResource(CmsTestKit.entryId("e2")), Nil),
+            ("preview without entry",   Actor.Preview(e1),                                      any,                        Nil),
+            ("pat write viewer",        patUser(PatScope.Write, Role.Viewer :: Nil),            any,                        List#{ "readDraft" }),
+            ("pat write writer",        patUser(PatScope.Write, Role.Writer :: Nil),            any,                        List#{ "readDraft", "writeEntries" }),
+            ("pat write editor",        patUser(PatScope.Write, Role.Editor :: Nil),            any,                        editorPermissions),
+            ("pat read owner",          patUser(PatScope.Read, Role.Owner :: Nil),              any,                        List#{ "readDraft" }),
+            ("pat read without roles",  patUser(PatScope.Read, Nil),                            any,                        Nil)
+        };
+        Assert.assertEq(
+            expected = rows |> List.map(match (label, _, _, permissions) -> (label, permissions)),
+            rows |> List.map(match (label, actor, resource, _) -> (label, granted(actor, resource))))
+
     /// 役割の並びの一番高い物。空なら None。
     @Test
     def testHighestRole(): Unit \ Assert =

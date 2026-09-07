@@ -98,6 +98,36 @@ mod TestEntryValidation {
             (CmsTestKit.violationPaths(EntryValidation.draft(validationFields(), CmsTestKit.entryData(List#{("title", Json.JString(emoji10))}))),
              CmsTestKit.violationPaths(EntryValidation.draft(validationFields(), CmsTestKit.entryData(List#{("title", Json.JString(emoji10 + "a"))})))))
 
+    /// TEXT_AREA / SLUG は文字列で maxLength を見て、ASSET は asset の id の形だけ通る。文字列でない値と規則外の id は落ちる。
+    @Test
+    def testEntryValidationTextAreaSlugAsset(): Unit \ Assert =
+        let fields = { config = { maxLength = Some(5) | FieldConfig.empty() } | CmsTestKit.fieldDef("summary", FieldKind.TextArea) } ::
+                     CmsTestKit.fieldDef("slug", FieldKind.Slug) ::
+                     CmsTestKit.fieldDef("cover", FieldKind.Asset) :: Nil;
+        let ok = CmsTestKit.entryData(List#{("summary", Json.JString("abcde")), ("slug", Json.JString("hello-world")), ("cover", Json.JString("asset001"))});
+        let bad = CmsTestKit.entryData(List#{("summary", Json.JString("abcdef")), ("slug", CmsTestKit.intJson(1)), ("cover", Json.JString("not an id!"))});
+        let wrongShape = CmsTestKit.entryData(List#{("summary", CmsTestKit.intJson(1)), ("cover", CmsTestKit.intJson(1))});
+        Assert.assertEq(expected = (Nil, List#{"fields.cover", "fields.slug", "fields.summary"}, List#{"fields.cover", "fields.summary"}),
+            (CmsTestKit.violationPaths(EntryValidation.draft(fields, ok)),
+             CmsTestKit.violationPaths(EntryValidation.draft(fields, bad)) |> List.sort,
+             CmsTestKit.violationPaths(EntryValidation.draft(fields, wrongShape)) |> List.sort))
+
+    /// min / max はちょうどの値を含む。min と max ちょうどは通り、少しでも外れると落ちる。
+    @Test
+    def testEntryValidationNumberBounds(): Unit \ Assert =
+        let fields = { config = { min = Some(0.0), max = Some(100.0) | FieldConfig.empty() } | CmsTestKit.fieldDef("views", FieldKind.Number) } :: Nil;
+        let cases = List#{ (0.0, Nil), (100.0, Nil), (-0.5, List#{"fields.views"}), (100.5, List#{"fields.views"}) };
+        Assert.assertEq(expected = cases,
+            cases |> List.map(match (x, _) -> (x, CmsTestKit.violationPaths(EntryValidation.draft(fields, CmsTestKit.entryData(List#{("views", CmsTestKit.floatJson(x))}))))))
+
+    /// maxLength は日本語も 1 文字 1 と数える（UTF-8 のバイト数ではない）。10 文字は通り、11 文字で落ちる。
+    @Test
+    def testEntryValidationMaxLengthCountsJapaneseChars(): Unit \ Assert =
+        let japanese10 = "あいうえおかきくけこ";
+        Assert.assertEq(expected = (Nil, List#{"fields.title"}),
+            (CmsTestKit.violationPaths(EntryValidation.draft(validationFields(), CmsTestKit.entryData(List#{("title", Json.JString(japanese10))}))),
+             CmsTestKit.violationPaths(EntryValidation.draft(validationFields(), CmsTestKit.entryData(List#{("title", Json.JString(japanese10 + "さ"))})))))
+
     /// 入れ子の規則外のキーは黙って落とさず違反にする（Object の中も、Blocks の variant の中も）。
     @Test
     def testEntryValidationNestedBadKeys(): Unit \ Assert =
