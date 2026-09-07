@@ -172,14 +172,25 @@ mod ContentSchemaBuilder {
     def richTextType(): ObjectType[Util.Json.Json, ContentEff] =
         Schema.objectType("RichText", () ->
             Schema.field0("json", Out.json(), (_context, doc) -> Ok(JsonValue.fromJson(doc))) ::
-            Schema.field0("html", Out.string(), (_context, doc) -> Ok(RichText.toHtml(assetUrls(doc), doc))) ::
-            Schema.field0("text", Out.string(), (_context, doc) -> Ok(RichText.toText(doc))) :: Nil)
-            |> ObjectType.withDescription("構造化した本文。json は ProseMirror の doc、html はその描画、text は平文")
+            Schema.field0("html", Out.string(), (_context, doc) -> Ok(RichText.toHtml(imageRefs(doc), doc))) ::
+            Schema.field0("text", Out.string(), (_context, doc) -> Ok(RichText.toText(doc))) ::
+            Schema.field0("headings", Out.list(Out.obj(headingType())), (_context, doc) -> Ok(RichText.headings(doc))) :: Nil)
+            |> ObjectType.withDescription("構造化した本文。json は ProseMirror の doc、html はその描画（見出しに id 付き）、text は平文、headings は目次用")
 
-    def assetUrls(doc: Util.Json.Json): Map[AssetId, String] \ ContentEff =
+    ///
+    /// `Heading { level text id }`。id は html の見出しと同じ。
+    ///
+    def headingType(): ObjectType[RichText.Heading, ContentEff] =
+        Schema.objectType("Heading", () ->
+            Schema.field0("level", Out.int32(), (_context, heading) -> Ok(heading#level)) ::
+            Schema.field0("text", Out.string(), (_context, heading) -> Ok(heading#text)) ::
+            Schema.field0("id", Out.string(), (_context, heading) -> Ok(heading#id)) :: Nil)
+            |> ObjectType.withDescription("本文の見出し。id は html の見出しに付いた物と同じ")
+
+    def imageRefs(doc: Util.Json.Json): Map[AssetId, RichText.ImageRef] \ ContentEff =
         Assets.findMany(RichText.assetIds(doc))
             |> List.filter(asset -> asset#status == AssetStatus.Ready)
-            |> List.map(asset -> (asset#id, ObjectStore.publicUrl(asset#key)))
+            |> List.map(asset -> (asset#id, { url = ObjectStore.publicUrl(asset#key), width = asset#width, height = asset#height }))
             |> List.toMap
 
     ///

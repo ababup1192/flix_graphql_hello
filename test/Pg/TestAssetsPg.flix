@@ -94,11 +94,11 @@ mod TestAssetsPg {
     @Test
     def testPgAssetInContentApi(): Unit \ {IO, Assert} =
         let fetched = PgTestSupport.withContentApi(() -> discard seedPublished(), ask ->
-            ask("{ blog(id: \"b1\") { cover { url width } body { html text } } }"));
+            ask("{ blog(id: \"b1\") { cover { url width } body { html text headings { level text id } } } }"));
         Assert.assertEq(
             expected = (Value.Obj(Map#{ "blog" => Value.Obj(Map#{
                 "cover" => Value.Obj(Map#{ "url" => Value.Str("http://127.0.0.1:9000/cms/1/asset010/cover.png"), "width" => Value.Int(640) }),
-                "body" => Value.Obj(Map#{ "html" => Value.Str("<p>本文</p><img src=\"http://127.0.0.1:9000/cms/1/asset010/cover.png\" alt=\"表紙\">"), "text" => Value.Str("本文") })
+                "body" => Value.Obj(Map#{ "html" => Value.Str("<p>本文</p><img src=\"http://127.0.0.1:9000/cms/1/asset010/cover.png\" alt=\"表紙\" width=\"640\" height=\"480\">"), "text" => Value.Str("本文"), "headings" => Value.List(Nil) })
             }) }), None),
             fetched)
 

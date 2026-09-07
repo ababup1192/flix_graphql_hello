@@ -22,6 +22,20 @@ mod RichText {
     pub def maxHeadingLevel(): Int32 = 4
 
     ///
+    /// 見出し 1 つ。目次用。
+    ///
+    /// - level: 1 〜 4
+    /// - text: 見出しの平文
+    /// - id: html の見出しに付く id と同じ。doc の attrs.id があればそれ、無ければ出現順の `h-1`, `h-2`, ...
+    ///
+    pub type alias Heading = { level = Int32, text = String, id = String }
+
+    ///
+    /// html の image に埋める asset の情報。
+    ///
+    pub type alias ImageRef = { url = String, width = Option[Int32], height = Option[Int32] }
+
+    ///
     /// doc の形か（type が "doc" のオブジェクト）。中身までは見ない。
     ///
     pub def isDoc(json: Json): Bool = match json {
@@ -50,6 +64,7 @@ mod RichText {
             case None => Violation.Violation(path, "ノードに type がありません") :: Nil
             case Some("text") => checkText(path, fields)
             case Some("heading") => checkHeading(path, fields) ::: checkChildren(path, fields)
+            case Some("codeBlock") => checkCodeBlock(path, fields) ::: checkChildren(path, fields)
             case Some("image") => checkImage(path, fields)
             case Some(name) if List.memberOf(name, containerNodes()) => checkChildren(path, fields)
             case Some(name) if List.memberOf(name, leafNodes()) => Nil
@@ -76,10 +91,31 @@ mod RichText {
         case None => Violation.Violation(path, "マークに type がありません") :: Nil
     }
 
-    def checkHeading(path: String, fields: Map[String, Json]): List[Violation] = match attrInt("level", fields) {
-        case Some(level) if level >= 1 and level <= maxHeadingLevel() => Nil
-        case _ => Violation.Violation(path, "heading の attrs.level は 1 〜 ${maxHeadingLevel()} にしてください") :: Nil
+    /// heading。level は範囲内、attrs.id は任意で、あれば英数字と `_ -`。
+    def checkHeading(path: String, fields: Map[String, Json]): List[Violation] =
+        let levelCheck = match attrInt("level", fields) {
+            case Some(level) if level >= 1 and level <= maxHeadingLevel() => Nil
+            case _ => Violation.Violation(path, "heading の attrs.level は 1 〜 ${maxHeadingLevel()} にしてください") :: Nil
+        };
+        let idCheck = match Map.get("id", attrs(fields)) {
+            case None => Nil
+            case Some(Json.JString(id)) if isHeadingId(id) => Nil
+            case Some(_) => Violation.Violation(path, "heading の attrs.id は英数字と _ - を 1 〜 64 文字にしてください") :: Nil
+        };
+        levelCheck ::: idCheck
+
+    /// codeBlock。attrs.language は任意で、あれば小文字英数字と `+ # -`。
+    def checkCodeBlock(path: String, fields: Map[String, Json]): List[Violation] = match Map.get("language", attrs(fields)) {
+        case None => Nil
+        case Some(Json.JString(language)) if isLanguage(language) => Nil
+        case Some(_) => Violation.Violation(path, "codeBlock の attrs.language は小文字英数字と + # - を 1 〜 32 文字にしてください") :: Nil
     }
+
+    /// 見出しの id に許す形。
+    pub def isHeadingId(id: String): Bool = String.isMatch(regex = "^[A-Za-z0-9_-]{1,64}$", id)
+
+    /// コードの言語名に許す形（ts / c++ / c# / objective-c）。
+    pub def isLanguage(language: String): Bool = String.isMatch(regex = "^[a-z0-9+#-]{1,32}$", language)
 
     /// image ノード。attrs.assetId は asset の id。alt は任意の文字列。
     def checkImage(path: String, fields: Map[String, Json]): List[Violation] = match attrString("assetId", fields) |> Option.flatMap(AssetId.parse) {
@@ -98,6 +134,40 @@ mod RichText {
     ///
     pub def assetIds(doc: Json): List[AssetId] =
         nodes(doc) |> List.filter(fields -> typeOf(fields) == Some("image")) |> List.filterMap(attrString("assetId")) |> List.filterMap(AssetId.parse) |> List.distinct
+
+    ///
+    /// 見出しの一覧。出現順。id は html の見出しと同じ。
+    ///
+    pub def headings(doc: Json): List[Heading] =
+        nodes(withHeadingIds(doc))
+            |> List.filter(fields -> typeOf(fields) == Some("heading"))
+            |> List.map(fields -> {
+                level = attrInt("level", fields) |> Option.getWithDefault(1),
+                text = childrenText(fields) |> String.trim,
+                id = attrString("id", fields) |> Option.getWithDefault("")
+            })
+
+    ///
+    /// attrs.id の無い heading に出現順の `h-N` を入れた doc。html と headings が同じ id を見るための前処理。
+    ///
+    def withHeadingIds(doc: Json): Json = fst(numberHeadings(1, doc))
+
+    /// ノードとその子に id を入れる。次に使う番号を一緒に返す。
+    def numberHeadings(next: Int32, node: Json): (Json, Int32) = match node {
+        case Json.JObject(fields) =>
+            let (numbered, afterSelf) =
+                if (typeOf(fields) == Some("heading") and Option.isEmpty(attrString("id", fields)))
+                    (Map.insert("attrs", Json.JObject(Map.insert("id", Json.JString("h-${next}"), attrs(fields))), fields), next + 1)
+                else (fields, next);
+            let (childrenNumbered, afterChildren) = List.foldLeft((state, child) -> {
+                let (acc, counter) = state;
+                let (done, following) = numberHeadings(counter, child);
+                (done :: acc, following)
+            }, (Nil, afterSelf), children(numbered));
+            let content = childrenNumbered |> List.reverse |> List.toVector |> Json.JArray;
+            (Json.JObject(if (List.isEmpty(children(numbered))) numbered else Map.insert("content", content, numbered)), afterChildren)
+        case other => (other, next)
+    }
 
     ///
     /// 平文。text を繋ぎ、ブロックの終わりと hardBreak で改行する。検索と一覧の抜粋用。
@@ -120,22 +190,28 @@ mod RichText {
     // ---- HTML ----
 
     ///
-    /// HTML にする。urls は image の asset id → 配信 URL。無い asset の image は出さない。文字は全部エスケープする。
+    /// HTML にする。images は image の asset id → 配信 URL と寸法。無い asset の image は出さない。文字は全部エスケープする。
+    /// 見出しには headings と同じ id が付く。class は付けない（サイト側が `.prose h2` のように親で当てる）。
     ///
-    pub def toHtml(urls: Map[AssetId, String], doc: Json): String = htmlOf(urls, doc)
+    pub def toHtml(images: Map[AssetId, ImageRef], doc: Json): String = htmlOf(images, withHeadingIds(doc))
 
-    def htmlOf(urls: Map[AssetId, String], node: Json): String = match node {
+    def htmlOf(urls: Map[AssetId, ImageRef], node: Json): String = match node {
         case Json.JObject(fields) =>
             let inner = () -> children(fields) |> List.map(htmlOf(urls)) |> List.join("");
             match typeOf(fields) {
                 case Some("text")           => applyMarks(marksOf(fields), escape(Map.get("text", fields) |> Option.flatMap(EntryValue.asString) |> Option.getWithDefault("")))
                 case Some("paragraph")      => "<p>${inner()}</p>"
-                case Some("heading")        => { let level = attrInt("level", fields) |> Option.getWithDefault(1); "<h${level}>${inner()}</h${level}>" }
+                case Some("heading")        =>
+                    let level = attrInt("level", fields) |> Option.getWithDefault(1);
+                    let id = attrString("id", fields) |> Option.map(found -> " id=\"${escape(found)}\"") |> Option.getWithDefault("");
+                    "<h${level}${id}>${inner()}</h${level}>"
                 case Some("bulletList")     => "<ul>${inner()}</ul>"
                 case Some("orderedList")    => "<ol>${inner()}</ol>"
                 case Some("listItem")       => "<li>${inner()}</li>"
                 case Some("blockquote")     => "<blockquote>${inner()}</blockquote>"
-                case Some("codeBlock")      => "<pre><code>${inner()}</code></pre>"
+                case Some("codeBlock")      =>
+                    let language = attrString("language", fields) |> Option.filter(isLanguage) |> Option.map(found -> " class=\"language-${found}\"") |> Option.getWithDefault("");
+                    "<pre><code${language}>${inner()}</code></pre>"
                 case Some("horizontalRule") => "<hr>"
                 case Some("hardBreak")      => "<br>"
                 case Some("image")          => imageHtml(urls, fields)
@@ -144,10 +220,15 @@ mod RichText {
         case _ => ""
     }
 
-    def imageHtml(urls: Map[AssetId, String], fields: Map[String, Json]): String =
-        match attrString("assetId", fields) |> Option.flatMap(AssetId.parse) |> Option.flatMap(id -> Map.get(id, urls)) {
-            case Some(url) => "<img src=\"${escape(url)}\" alt=\"${escape(attrString("alt", fields) |> Option.getWithDefault(""))}\">"
-            case None      => ""
+    def imageHtml(images: Map[AssetId, ImageRef], fields: Map[String, Json]): String =
+        match attrString("assetId", fields) |> Option.flatMap(AssetId.parse) |> Option.flatMap(id -> Map.get(id, images)) {
+            case Some(image) =>
+                let size = match (image#width, image#height) {
+                    case (Some(width), Some(height)) => " width=\"${width}\" height=\"${height}\""
+                    case _                           => ""
+                };
+                "<img src=\"${escape(image#url)}\" alt=\"${escape(attrString("alt", fields) |> Option.getWithDefault(""))}\"${size}>"
+            case None => ""
         }
 
     /// マークを外側から順に巻く（先頭のマークが一番外）。

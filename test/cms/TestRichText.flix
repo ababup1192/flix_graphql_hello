@@ -87,13 +87,43 @@ mod TestRichText {
     /// マークはタグに、文字はエスケープ、image は渡した URL で、無い asset の image は出ない。
     @Test
     def testToHtml(): Unit \ Assert =
-        let urls = Map#{ AssetId.AssetId("asset001") => "https://cdn.example/1/asset001/写真.png" };
+        let images = Map#{ AssetId.AssetId("asset001") => { url = "https://cdn.example/1/asset001/写真.png", width = Some(640), height = Some(480) } };
         Assert.assertEq(
-            expected = "<h2>見出し</h2>"
+            expected = "<h2 id=\"h-1\">見出し</h2>"
                 ++ "<p><strong>a</strong><a href=\"https://example.com/?a=1&amp;b=2\" rel=\"noopener\">&lt;b&gt;</a></p>"
-                ++ "<img src=\"https://cdn.example/1/asset001/写真.png\" alt=\"写真\">"
+                ++ "<img src=\"https://cdn.example/1/asset001/写真.png\" alt=\"写真\" width=\"640\" height=\"480\">"
                 ++ "<ul><li><p>x<br>y</p></li></ul>",
-            RichText.toHtml(urls, sample()))
+            RichText.toHtml(images, sample()))
+
+    /// 見出しの一覧。attrs.id があればそれ、無ければ出現順の h-N（id 付きの物は番号を消費しない）。html の id と同じ。
+    ///
+    ///   doc
+    ///   ├ heading(2) "A"            → h-1
+    ///   ├ heading(3, id: "intro") "B" → intro
+    ///   └ blockquote ─ heading(2) "C" → h-2
+    @Test
+    def testHeadings(): Unit \ Assert =
+        let doc = node("doc", List#{
+            nodeWith("heading", List#{("level", CmsTestKit.intJson(2))}, List#{text("A")}),
+            nodeWith("heading", List#{("level", CmsTestKit.intJson(3)), ("id", Json.JString("intro"))}, List#{text("B")}),
+            node("blockquote", List#{nodeWith("heading", List#{("level", CmsTestKit.intJson(2))}, List#{text("C")})})
+        });
+        Assert.assertEq(
+            expected = (List#{ (2, "A", "h-1"), (3, "B", "intro"), (2, "C", "h-2") },
+                        "<h2 id=\"h-1\">A</h2><h3 id=\"intro\">B</h3><blockquote><h2 id=\"h-2\">C</h2></blockquote>"),
+            (RichText.headings(doc) |> List.map(heading -> (heading#level, heading#text, heading#id)), RichText.toHtml(Map.empty(), doc)))
+
+    /// codeBlock の language は class に出る。規則外の id と language は検査で止まる。
+    @Test
+    def testCodeBlockLanguageAndBadAttrs(): Unit \ Assert =
+        let code = node("doc", List#{ nodeWith("codeBlock", List#{("language", Json.JString("ts"))}, List#{text("let x = 1")}) });
+        let bad = node("doc", List#{
+            nodeWith("heading", List#{("level", CmsTestKit.intJson(1)), ("id", Json.JString("見出し"))}, Nil),
+            nodeWith("codeBlock", List#{("language", Json.JString("C++"))}, Nil)
+        });
+        Assert.assertEq(
+            expected = ("<pre><code class=\"language-ts\">let x = 1</code></pre>", List#{ "fields.body.content[0]", "fields.body.content[1]" }),
+            (RichText.toHtml(Map.empty(), code), RichText.validate("fields.body", bad) |> List.map(violation -> { let Violation.Violation(path, _) = violation; path })))
 
     /// asset が無ければ image は空。マークは先頭が一番外。
     @Test
