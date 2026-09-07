@@ -114,15 +114,20 @@ mod HttpServer {
     ///
     /// WhyNot: パスをそのまま出さないのは、改行などの制御文字が入っていると偽のログ行を作れてしまうため（log injection）。
     /// JSON の escape で改行は割れないが、端末のエスケープシーケンスは通るので制御文字ごと落とす。
+    /// クエリ文字列を落とすのは、プレビューのトークンや GET の query がログ基盤に残らないようにするため。
     ///
     pub def logLine(method: String, path: String, status: Int32, elapsedMs: Int64): String \ IO =
         JsonValue.toJsonString(Value.Obj(Map#{
             "time" => Value.Str(Instant.now().toString()),
             "method" => Value.Str(method),
-            "path" => Value.Str(String.replaceMatches(regex = "\\p{Cntrl}", to = "", path)),
+            "path" => Value.Str(path |> withoutQuery |> String.replaceMatches(regex = "\\p{Cntrl}", to = "")),
             "status" => Value.Int(status),
             "ms" => Value.Int(Int64.clampToInt32(min = 0, max = Int32.maxValue(), elapsedMs))
         }))
+
+    /// `?` より後ろを落とす。
+    def withoutQuery(path: String): String =
+        String.splitOn(substr = "?", path) |> List.head |> Option.getWithDefault(path)
 
     ///
     /// リクエスト行・ヘッダ・ボディを読んで HttpRequest にする。

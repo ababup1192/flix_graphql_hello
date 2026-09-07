@@ -14,7 +14,7 @@ mod TestServer {
     /// POST /graphql に JSON ボディを載せたリクエスト。
     ///
     def postGraphql(body: String): HttpRequest =
-        { method = "POST", path = "/graphql", headers = Nil, body = body }
+        { method = "POST", path = "/graphql", headers = ("Content-Type", "application/json; charset=utf-8") :: Nil, body = body }
 
     ///
     /// 管理画面のオリジンから来たリクエスト。
@@ -122,6 +122,15 @@ mod TestServer {
             GraphqlFake.runWithEcho(() -> handle({ method = "POST", path = "/", headers = Nil, body = "" }))#body |> JsonValue.parse)
 
     // ---- GET /health ----
+
+    /// Content-Type が application/json でない POST は 415（form の text/plain で届く CSRF を preflight に倒す）。無くても 415。
+    @Test
+    def testServerRejectsNonJsonContentType(): Unit \ Assert =
+        let statusOf = request -> GraphqlFake.runWithEcho(() -> handle(request))#status;
+        Assert.assertEq(expected = (415, 415, 200),
+            (statusOf({ method = "POST", path = "/graphql", headers = ("Content-Type", "text/plain") :: Nil, body = "{\"query\":\"{ x }\"}" }),
+             statusOf({ method = "POST", path = "/graphql", headers = Nil, body = "{\"query\":\"{ x }\"}" }),
+             statusOf({ method = "POST", path = "/graphql", headers = ("content-type", "APPLICATION/JSON") :: Nil, body = "{\"query\":\"{ x }\"}" })))
 
     /// DB に届けば 200 と {"status": "ok"}。クエリ文字列が付いていても同じ。
     @Test

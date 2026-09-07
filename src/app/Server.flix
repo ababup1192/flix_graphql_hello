@@ -35,7 +35,8 @@ mod Server {
     def route(config: ServerConfig, request: HttpRequest): HttpResponse \ {Graphql, Health} =
         match (request#method, pathOf(request#path)) {
             case ("OPTIONS", path) if path == config#graphqlPath or path == "/health" => Cors.preflight(config#cors, request)
-            case ("POST", path) if path == config#graphqlPath => executeBody(request#body)
+            case ("POST", path) if path == config#graphqlPath =>
+                if (isJson(request)) executeBody(request#body) else errorResponse(415, Nil, "Content-Type: application/json で送ってください")
             case (_, path) if path == config#graphqlPath      => errorResponse(405, ("Allow", "POST") :: Nil, "POST only")
             case ("GET", "/health")   => health(config#version)
             case (_, "/health")       => errorResponse(405, ("Allow", "GET") :: Nil, "GET only")
@@ -72,9 +73,21 @@ mod Server {
         }
 
     ///
+    /// Content-Type が application/json か（大文字小文字と charset は問わない）。
+    ///
+    /// WhyNot: Content-Type を見ずに本文を実行しないのは、Cookie で認証する時に他サイトの form から text/plain で
+    /// POST されると preflight 無しで届き、被害者の Cookie 付きで mutation が通る（CSRF）ため。JSON を要求すれば必ず preflight が走る。
+    ///
+    pub def isJson(request: HttpRequest): Bool =
+        request#headers
+            |> List.find(match (name, _) -> String.toLowerCase(name) == "content-type")
+            |> Option.map(match (_, value) -> String.startsWith(prefix = "application/json", String.toLowerCase(String.trim(value))))
+            |> Option.getWithDefault(false)
+
+    ///
     /// パスからクエリ文字列を落とす（"/health?probe=1" → "/health"）。
     ///
-    def pathOf(path: String): String =
+    pub def pathOf(path: String): String =
         String.splitOn(substr = "?", path) |> List.head |> Option.getWithDefault(path)
 
     ///

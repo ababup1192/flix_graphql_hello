@@ -6,8 +6,11 @@ mod AssetRules {
     ///
     /// 置いてよい mime。画像と PDF だけ。動画は寸法の扱いを決めていないので入れない。
     ///
+    /// WhyNot: image/svg+xml を入れないのは、SVG がスクリプトを含められ、配信 URL を直接開かれると実行されるため。
+    /// 要る時はプロジェクトの設定で明示し、Content-Disposition: attachment で配る。
+    ///
     pub def allowedMimes(): List[String] =
-        List#{ "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/svg+xml", "application/pdf" }
+        List#{ "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "application/pdf" }
 
     /// 1 ファイルの上限。20 MB。
     pub def maxSize(): Int64 = 20i64 * 1024i64 * 1024i64

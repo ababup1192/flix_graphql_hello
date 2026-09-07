@@ -155,10 +155,10 @@ mod TestHttpServer {
             HttpServer.readRequest(inputOf("POST /graphql HTTP/1.1\r\nX-Long: " + repeatA(8192) + "\r\n\r\n")) |> Result.map(toTuple))
 
 
-    /// リクエストのログは 1 行 1 JSON。パスの制御文字（改行など）は落ち、time は ISO 8601 の UTC。
+    /// リクエストのログは 1 行 1 JSON。パスの制御文字（改行など）とクエリ文字列（トークンが入りうる）は落ち、time は ISO 8601 の UTC。
     @Test
     def testHttpServerLogLineIsJson(): Unit \ {IO, Assert} =
-        let line = HttpServer.logLine("GET", "/health\n{\"fake\":1}\u001b[31m", 200, 12i64);
+        let line = HttpServer.logLine("GET", "/health\n{\"fake\":1}\u001b[31m?token=secret", 200, 12i64);
         let parsed = JsonValue.parse(line) |> Result.map(value -> match value {
             case Value.Obj(fields) => (Map.get("method", fields), Map.get("path", fields), Map.get("status", fields), Map.get("ms", fields),
                                        Map.get("time", fields) |> Option.map(time -> match time { case Value.Str(text) => String.endsWith(suffix = "Z", text) case _ => false }))
