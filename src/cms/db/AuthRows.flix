@@ -36,14 +36,14 @@ mod AuthRows {
           createdAt = row#createdAt, expiresAt = row#expiresAt, lastUsedAt = row#lastUsedAt, revokedAt = row#revokedAt }
 
     ///
-    /// API キーの発行の入力を insertApiKey の行に。役割が無ければ ''（query が NULL にする）、期限が無ければ 0（query が NULL にする）。
+    /// API キーの発行の入力を insertApiKey の行に。scope の enum を列の組（scope と role）に開く。
     ///
     pub def toApiKeyInsert(draft: { publicId = String, projectId = Int64, name = String, keyHash = String, pepperId = String, scope = ApiKeyScope, expiresAt = Option[Timestamp.Timestamp] }):
-            { publicId = String, projectId = Int64, name = String, keyHash = String, pepperId = String, scope = String, role = String, expiresAtMillis = Int64 } =
+            { publicId = String, projectId = Int64, name = String, keyHash = String, pepperId = String, scope = String, role = Option[String], expiresAt = Option[Timestamp.Timestamp] } =
         { publicId = draft#publicId, projectId = draft#projectId, name = draft#name, keyHash = draft#keyHash, pepperId = draft#pepperId,
           scope = ApiKeyScope.text(draft#scope),
-          role = ApiKeyScope.roleOf(draft#scope) |> Option.map(Role.text) |> Option.getWithDefault(""),
-          expiresAtMillis = draft#expiresAt |> Option.map(Timestamp.toEpochMillis) |> Option.getWithDefault(0i64) }
+          role = ApiKeyScope.roleOf(draft#scope) |> Option.map(Role.text),
+          expiresAt = draft#expiresAt }
 
     /// scope 列と role 列の組から。組が合わなければ DB の壊れ。
     pub def toApiKeyScope(row: { scope = String, role = Option[String] | r }): ApiKeyScope \ DbErr =

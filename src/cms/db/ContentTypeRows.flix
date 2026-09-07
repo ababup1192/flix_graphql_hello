@@ -163,6 +163,9 @@ mod ContentTypeRows {
     ///
     /// content_types.preview_url は NOT NULL で、無しは空文字。INSERT と読みで対にする（UPDATE は渡された文字列をそのまま置く。消すなら ""）。
     ///
+    /// WhyNot: api_keys のように列を NULL 可にして `Option` の引数で渡さないのは、空文字が URL として意味を持たず、
+    /// 値と「無し」を取り違えようが無いため。api_keys の期限を直したのは、epoch 0 が正しい日時でもあり得たから。
+    ///
     def previewUrlToDb(url: Option[String]): String = url |> Option.getWithDefault("")
 
     def previewUrlFromDb(text: String): Option[String] = if (text == "") None else Some(text)

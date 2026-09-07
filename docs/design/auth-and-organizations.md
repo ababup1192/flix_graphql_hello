@@ -137,7 +137,7 @@ api_keys       (id, project_id, name, key_hash, scope: read | readDraft, created
 ### テナント分離の三重化
 
 1. 型: `Tenant` effect の未使用はコンパイルで落ちる（済み）
-2. 生成器（済み、sqlfx 0.1.3）: `gen --scope project_id` で、`project_id` 列を持つ表を触る query に列の名前が無ければ生成を失敗させる。
+2. 生成器（済み、sqlfx 0.2.0）: `gen --scope project_id` で、`project_id` 列を持つ表を触る query に列の名前が無ければ生成を失敗させる。
    意図して跨ぐ query は `// unscoped: 理由`。`projectId` は呼ぶ側が渡す（sqlfx が CMS の effect を知らないため。RLS が受け止める）
 3. DB（済み、migration 012）: 中身の 6 表に ENABLE / FORCE と policy `project_id = nullif(current_setting('app.project_id', true), '')::bigint`（USING と WITH CHECK）。
    印は Runner が `TenantTx.withLazyTx`（sqlfx の `Pool.withLazyTxAfterBegin`）で BEGIN の直後に `set_config('app.project_id', $1, true)` を流す。

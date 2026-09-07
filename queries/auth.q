@@ -150,10 +150,10 @@ query deleteInvitationByPublicId(publicId: String, projectId: Int64) -> exec {
 
 // ---- api_keys ----
 
-// role は write の鍵だけ（空なら NULL）。expiresAtMillis は 0 なら期限無し
-query insertApiKey(publicId: String, projectId: Int64, name: String, keyHash: String, pepperId: String, scope: String, role: String, expiresAtMillis: Int64) -> one {
+// role は write の鍵だけ。expiresAt が無ければ期限無し
+query insertApiKey(publicId: String, projectId: Int64, name: String, keyHash: String, pepperId: String, scope: String, role: Option[String], expiresAt: Option[Timestamp]) -> one {
     INSERT INTO api_keys (public_id, project_id, name, key_hash, pepper_id, scope, role, expires_at)
-    VALUES (:publicId, :projectId, :name, :keyHash, :pepperId, :scope, nullif(:role, ''), to_timestamp(nullif(:expiresAtMillis, 0) / 1000.0))
+    VALUES (:publicId, :projectId, :name, :keyHash, :pepperId, :scope, :role, :expiresAt)
     RETURNING id
 }
 
