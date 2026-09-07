@@ -29,5 +29,5 @@ fi
 
 # WhyNot: --Xsubeffecting=lambdas を外さないのは、これが無いと effect 無しのラムダを
 # `\ IO` の関数型に渡せず、GraphQL の純粋なリゾルバ全部に checked_ecast が要るため。
-# experimental なフラグなので、消えたら checked_ecast を規約に戻す（docs/design/typed-schema.md）。
+# experimental なフラグなので、消えたら checked_ecast を規約に戻す。
 exec "$JAVA_CMD" -Xss32m -jar "$FLIX_JAR" "$@" --Xsubeffecting=lambdas
