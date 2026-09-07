@@ -9,7 +9,7 @@ mod TestMicrocmsPg {
 
     /// 9 つの API を読む。エンドポイント名は apiId に写る（"insidesales-category-keywords" → insidesalesCategoryKeywords）。写せない種類は無い。
     @Test
-    def testMicrocmsSchemaParses(): Unit \ {IO, Assert, Fs.FileRead} =
+    def testPgMicrocmsSchemaParses(): Unit \ {IO, Assert, Fs.FileRead} =
         Assert.assertEq(
             expected = (9, List#{"blogs", "categories", "insidesaleServices", "insidesalesCategoryKeywords", "insidesalesCategory", "insidesalesFeature", "insidesalesIssue", "profiles", "tags"}, Nil),
             (List.length(apis()), apis() |> List.map(api -> ApiId.text(api#apiId)), apis() |> List.flatMap(MicrocmsSchema.unsupported)))
@@ -19,7 +19,7 @@ mod TestMicrocmsPg {
     /// 本文の見出しが読め、repeater は BLOCKS として variant（blockType）ごとの中身を持つ。
     ///
     @Test
-    def testMicrocmsImportAndRead(): Unit \ {IO, Assert, Fs.FileRead} =
+    def testPgMicrocmsImportAndRead(): Unit \ {IO, Assert, Fs.FileRead} =
         let loaded = apis();
         let seed = () -> {
             let types = MicrocmsImport.importSchema(loaded);
@@ -27,12 +27,12 @@ mod TestMicrocmsPg {
             (Map.size(types), created |> Map.valuesOf |> List.map(List.length) |> List.sum)
         };
         let (blog, services, blocks, summary) = PgTestSupport.withContentApiAndPool(seed, (pool, ask) -> {
-            let summary = PgTestSupport.mutate(pool, () -> List.length(ContentTypes.list())) |> PgTestSupport.seededOrBug;
-            let blocks = PgTestSupport.mutate(pool, () ->
+            let summary = PgTestSupport.mutateOrBug(pool, () -> List.length(ContentTypes.list()));
+            let blocks = PgTestSupport.mutateOrBug(pool, () ->
                 ContentTypes.findByApiId(CmsTestKit.apiId("insidesaleServices"))
                     |> Option.flatMap(owner -> ContentEntries.list(owner#id, { search = "", first = 1, skip = 0 })#entries |> List.head)
                     |> Option.flatMap(entry -> Map.get(CmsTestKit.apiId("implementationCases"), entry#data))
-                    |> Option.map(Util.Json.toCompactString)) |> PgTestSupport.seededOrBug;
+                    |> Option.map(Util.Json.toCompactString));
             (ask("{ blogs(where: { title_eq: \"タイトル 1\" }) { totalCount nodes { title memberOnly thumbnail { alt } profile { name } tags { tag } theFirstPart { title } content { headings { level text } } } } }"),
              ask("{ insidesaleServices(where: { name_eq: \"名前 2\" }) { nodes { name sortOrder logo { alt } blogs { title } } } }"),
              blocks, summary)

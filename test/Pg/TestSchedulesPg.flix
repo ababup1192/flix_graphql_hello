@@ -17,11 +17,11 @@ mod TestSchedulesPg {
         discard ContentEntries.create(blogs#id, None, CmsTestKit.entryData(Nil))
 
     def statusOf(pool: Pool, id: String): (ScheduleStatus, String) \ IO =
-        PgTestSupport.mutate(pool, () -> Schedules.list(None, 50)) |> PgTestSupport.seededOrBug
+        PgTestSupport.mutateOrBug(pool, () -> Schedules.list(None, 50))
             |> List.find(schedule -> schedule#id == id) |> Option.map(schedule -> (schedule#status, schedule#lastError)) |> Option.getWithDefault((ScheduleStatus.Cancelled, "?"))
 
     def stageOf(pool: Pool, id: String): Stage \ IO =
-        PgTestSupport.mutate(pool, () -> ContentEntries.find(CmsTestKit.entryId(id))) |> PgTestSupport.seededOrBug |> Option.map(entry -> entry#stage) |> Option.getWithDefault(Stage.Draft)
+        PgTestSupport.mutateOrBug(pool, () -> ContentEntries.find(CmsTestKit.entryId(id))) |> Option.map(entry -> entry#stage) |> Option.getWithDefault(Stage.Draft)
 
     ///
     /// 過去の時刻の publish は tick で公開され done。required が欠けた entry は failed に理由。未来の物は拾われない。
@@ -38,7 +38,7 @@ mod TestSchedulesPg {
             }));
             let firstTick = Scheduler.tick(pool);
             let afterPublish = (statusOf(pool, okId), statusOf(pool, badId), statusOf(pool, laterId), stageOf(pool, "e1"));
-            let unpublishId = PgTestSupport.mutate(pool, () -> Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Unpublish, past(), false)#id) |> PgTestSupport.seededOrBug;
+            let unpublishId = PgTestSupport.mutateOrBug(pool, () -> Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Unpublish, past(), false)#id);
             let secondTick = Scheduler.tick(pool);
             (firstTick, afterPublish, statusOf(pool, laterId), secondTick, statusOf(pool, unpublishId), stageOf(pool, "e1"))
         });
@@ -62,10 +62,10 @@ mod TestSchedulesPg {
                 seedEntries();
                 Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Publish, past(), false)#id
             }));
-            let cancelled = PgTestSupport.mutate(pool, () -> Schedules.cancel(id)) |> PgTestSupport.seededOrBug |> (schedule -> schedule#status);
-            let cancelAgainRejected = PgTestSupport.mutate(pool, () -> CmsTestKit.failureMessage(() -> Schedules.cancel(id))) |> PgTestSupport.seededOrBug |> Result.isErr;
+            let cancelled = PgTestSupport.mutateOrBug(pool, () -> Schedules.cancel(id)) |> (schedule -> schedule#status);
+            let cancelAgainRejected = PgTestSupport.mutateOrBug(pool, () -> CmsTestKit.failureMessage(() -> Schedules.cancel(id))) |> Result.isErr;
             // 落ちた事にする: 新しい予約を running のまま 1 時間前に拾った形にする
-            let stuckId = PgTestSupport.mutate(pool, () -> Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Publish, past(), false)#id) |> PgTestSupport.seededOrBug;
+            let stuckId = PgTestSupport.mutateOrBug(pool, () -> Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Publish, past(), false)#id);
             discard PgTestSupport.executeSql("UPDATE scheduled_actions SET status = 'running', claimed_at = now() - interval '1 hour' WHERE id = $1", SqlValue.Str(stuckId) :: Nil);
             let untouched = Scheduler.tick(pool);
             let beforeRecovery = statusOf(pool, stuckId);
@@ -145,7 +145,7 @@ mod TestSchedulesPg {
             });
             let aloneTick = Scheduler.tick(pool);
             let alone = (statusOf(pool, aloneId), stageOf(pool, "b1"), stageOf(pool, "p1"));
-            let togetherId = PgTestSupport.mutate(pool, () -> Schedules.schedule(CmsTestKit.entryId("b1"), ScheduleAction.Publish, past(), true)#id) |> PgTestSupport.seededOrBug;
+            let togetherId = PgTestSupport.mutateOrBug(pool, () -> Schedules.schedule(CmsTestKit.entryId("b1"), ScheduleAction.Publish, past(), true)#id);
             let togetherTick = Scheduler.tick(pool);
             (aloneTick, alone, togetherTick, statusOf(pool, togetherId), stageOf(pool, "b1"), stageOf(pool, "p1"))
         });

@@ -22,11 +22,6 @@ mod TestServerAuthPg {
         let response = Graphql.runWithEngine(engine, () -> Server.handle(config, HealthFake.ok(), credentialOf(request), request));
         (response#status, JsonValue.parse(response#body) |> Result.getWithDefault(Value.Null))
 
-    def engineOf(schema: Schema): Graphql.Engine \ IO = match Graphql.buildEngine(schema) {
-        case Ok(engine)   => engine
-        case Err(message) => bug!("engine: ${message}")
-    }
-
     ///
     /// owner が PAT と WRITE / EDITOR の鍵を発行し、HTTP のヘッダで
     ///   Authorization: Bearer cmspat_... → createContentType が通る
@@ -43,10 +38,10 @@ mod TestServerAuthPg {
             let admin = AdminSchema.make(deps, AdminRunner.make(pool, deps, ProjectId.default()));
             let account = AccountSchema.make(deps, AccountRunner.make(pool, deps));
             let owner = PgTestSupport.askOwner(admin);
-            let accountOwner = queryText -> GraphqlTestKit.askWith(account, Context.withCredential(PgTestSupport.ownerCredential()), queryText);
+            let accountOwner = PgTestSupport.askAs(account, PgTestSupport.ownerCredential());
             let token = GraphqlTestKit.stringAt(List#{"createPersonalAccessToken", "token"}, accountOwner("mutation { createPersonalAccessToken(name: \"cli\", scope: WRITE) { token } }"));
             let key = GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, owner("mutation { createApiKey(name: \"ci\", scope: WRITE, role: EDITOR) { key } }"));
-            let engine = engineOf(admin);
+            let engine = GraphqlTestKit.engineOrBug(admin);
             let viaPat = handle(engine, post(("Authorization", "Bearer ${token}") :: Nil, "mutation { createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { id apiId } }"));
             let typeId = Value.path(List#{"data", "createContentType", "id"}, snd(viaPat)) |> Value.asStr |> Option.getWithDefault("");
             let viaLowercase = handle(engine, post(("authorization", "bearer ${token}") :: Nil, "{ me { email } }"));
@@ -56,8 +51,8 @@ mod TestServerAuthPg {
             (fst(viaPat), Value.path(List#{"data", "createContentType", "apiId"}, snd(viaPat)),
              Value.path(List#{"data", "me", "email"}, snd(viaLowercase)),
              fst(viaKey), Value.path(List#{"data", "createEntry", "stage"}, snd(viaKey)),
-             Value.path(List#{"errors"}, snd(anonymous)) |> firstMessage,
-             Value.path(List#{"errors"}, snd(badBearer)) |> firstMessage)
+             firstErrorMessage(snd(anonymous)),
+             firstErrorMessage(snd(badBearer)))
         });
         Assert.assertEq(
             expected = (
@@ -68,8 +63,8 @@ mod TestServerAuthPg {
                 Some("認証に失敗しました: JWT は無し")),
             outcome)
 
-    /// errors[0].message。
-    def firstMessage(errors: Value): Option[String] = match errors {
+    /// HTTP の応答の body の errors[0].message。errors が無ければ None。
+    def firstErrorMessage(body: Value): Option[String] = match Value.field("errors", body) {
         case Value.List(first :: _) => Value.field("message", first) |> Value.asStr
         case _                      => None
     }

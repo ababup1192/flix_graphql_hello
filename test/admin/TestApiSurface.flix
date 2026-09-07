@@ -16,9 +16,6 @@ mod TestApiSurface {
     /// リゾルバを呼ばない Runner（Account API）。
     def unusedAccountRunner(): Runner[AccountEff] = (_context, _f) -> Err(FieldError.internal("組み立てだけ"))
 
-    /// introspection の 1 件の name。
-    def nameOf(item: Value): String = Value.field("name", item) |> Value.asStr |> Option.getWithDefault("?")
-
     /// 配列。配列でなければテストの前提が壊れている。
     def items(value: Value): List[Value] = match value {
         case Value.List(found) => found
@@ -27,7 +24,7 @@ mod TestApiSurface {
 
     /// 1 つの object 型を "TypeName: field field ..."（SDL の並び）にする。
     def lineOf(objectType: Value): String =
-        "${nameOf(objectType)}: ${Value.field("fields", objectType) |> items |> List.map(nameOf) |> List.join(" ")}"
+        "${GraphqlTestKit.nameOf(objectType)}: ${Value.field("fields", objectType) |> items |> List.map(GraphqlTestKit.nameOf) |> List.join(" ")}"
 
     ///
     /// スキーマの object 型を型名で並べた "TypeName: field ..." の一覧。graphql-java が足す `__` の型は外す。
@@ -35,7 +32,7 @@ mod TestApiSurface {
     def surface(schema: Schema): List[String] \ IO =
         GraphqlTestKit.ask(schema, "{ __schema { types { name kind fields { name } } } }")
             |> GraphqlTestKit.listAt(List#{"__schema", "types"})
-            |> List.filter(found -> Value.field("kind", found) == Value.Str("OBJECT") and not String.startsWith(prefix = "__", nameOf(found)))
+            |> List.filter(found -> Value.field("kind", found) == Value.Str("OBJECT") and not String.startsWith(prefix = "__", GraphqlTestKit.nameOf(found)))
             |> List.map(lineOf)
             |> List.sort
 

@@ -47,7 +47,7 @@ mod TestRlsPg {
     ///
     @Test
     def testPgRlsGuardsEveryTable(): Unit \ {IO, Assert} =
-        let shop = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"t1", "e1", "a1", "w1"}, seedAllTables)) |> PgTestSupport.seededOrBug;
+        let shop = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"t1", "e1", "a1", "w1"}, seedAllTables));
         let outcome = DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(PgTestSupport.appConfig(), _ ->
             guardedTables() |> List.map(table -> {
                 stampSession("${ProjectId.default()}");
@@ -88,8 +88,8 @@ mod TestRlsPg {
     ///
     @Test
     def testPgRlsGuardsAuthTables(): Unit \ {IO, Assert} =
-        let pepper = { pepperId = "test", secret = "test-pepper" };
-        let (shop, alice, tokenHash) = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1", "k2", "p1"}, () -> {
+        let pepper = PgTestSupport.pepper();
+        let (shop, alice, tokenHash) = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"k1", "k2", "p1"}, () -> {
             let bootstrap = { ownerEmail = Some("owner@test") };
             let owner = Accounts.resolveUser(bootstrap, { issuer = "test", subject = "owner", email = "owner@test", name = "owner" });
             let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
@@ -106,7 +106,7 @@ mod TestRlsPg {
             let alice = Accounts.resolveUser(bootstrap, { issuer = "test", subject = "a", email = "a@test.dev", name = "a" });
             let pat = Session.runWith(Accounts.actorWithoutProject(alice, Login.Interactive), () -> PersonalTokens.issue(pepper, { name = "cli", scope = PatScope.Read, ttlDays = None }, 0i64));
             (shop, alice, SecretHash.hash(pepper, pat#token))
-        })) |> PgTestSupport.seededOrBug;
+        }));
         let outcome = DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(PgTestSupport.appConfig(), _ -> {
             stampSession("${ProjectId.default()}");
             let byDefault = countAuthRows();
@@ -133,7 +133,7 @@ mod TestRlsPg {
     ///
     @Test
     def testPgRlsBlocksCrossProjectWrites(): Unit \ {IO, Assert} =
-        let shop = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"t1", "e1", "a1", "w1"}, seedAllTables)) |> PgTestSupport.seededOrBug;
+        let shop = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"t1", "e1", "a1", "w1"}, seedAllTables));
         let crossInsert = DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(PgTestSupport.appConfig(), _ -> {
             stampSession("${ProjectId.default()}");
             Sql.execute("INSERT INTO content_types (project_id, api_id, kind, name, singular, plural) VALUES ($1, 'x', 'collection', 'x', 'X', 'Xs')", SqlValue.Int64(ProjectId.toInt64(shop)) :: Nil)

@@ -9,19 +9,6 @@
 ///
 mod TestAdminMutationsPg {
 
-    use Net.HttpRequest
-    use Net.HttpResponse
-
-    /// 応答の data から Int を取る。無ければ -1。
-    def intIn(path: List[String], response: (Value, Option[String])): Int32 =
-        Value.path(path, fst(response)) |> Value.asInt |> Option.getWithDefault(-1)
-
-    /// 応答の data から配列を取る。配列でなければ空。
-    def listIn(path: List[String], response: (Value, Option[String])): List[Value] = match Value.path(path, fst(response)) {
-        case Value.List(items) => items
-        case _                 => Nil
-    }
-
     /// 応答の errors の先頭を errors に積みつつ、そのまま返す ask。期待しないエラーは最後にまとめて見る。
     def recording(ask: String -> (Value, Option[String]) \ IO, errors: Ref[List[String], Static]): String -> (Value, Option[String]) \ IO =
         queryText -> {
@@ -29,13 +16,6 @@ mod TestAdminMutationsPg {
             Option.forEach(message -> Ref.put(message :: Ref.get(errors), errors), snd(response));
             response
         }
-
-    /// 署名付き URL へ置く。宣言した Content-Type で送る。成功なら status。
-    def putTo(url: String, mime: String, body: String): Result[String, Int32] \ IO =
-        Net.Http.runWithIO(() ->
-            Net.Http.send(HttpRequest.put(url, body) |> HttpRequest.withContentType(mime))
-                |> Result.map(HttpResponse.status)
-                |> Result.mapErr(err -> "${err}"))
 
     /// blogs 型を作り、title（required）と body を足す。戻り値は (typeId, titleId, bodyId)。
     def createBlogs(ask: String -> (Value, Option[String]) \ IO): (String, String, String) \ IO =
@@ -72,7 +52,7 @@ mod TestAdminMutationsPg {
             let webhooksListed = ask("{ webhooks { id name events active } }");
             let webhookUpdated = ask("mutation { updateWebhook(id: \"${webhookId}\", input: { name: \"site2\", url: \"https://example.com/hook2\", events: [SCHEMA_CHANGED, ENTRY_PUBLISHED], active: true }) { name url events active } }");
             let deliveries = ask("{ webhookDeliveries(webhookId: \"${webhookId}\") { id event status attempts nextAttemptAt lastStatus lastError createdAt deliveredAt } }");
-            let deliveryId = listIn(List#{"webhookDeliveries"}, deliveries) |> List.head |> Option.map(Value.field("id")) |> Option.flatMap(Value.asStr) |> Option.getWithDefault("");
+            let deliveryId = GraphqlTestKit.listAt(List#{"webhookDeliveries"}, deliveries) |> List.head |> Option.map(Value.field("id")) |> Option.flatMap(Value.asStr) |> Option.getWithDefault("");
             let redelivered = ask("mutation { redeliverWebhook(deliveryId: \"${deliveryId}\") { id event status attempts } }");
             let webhookDeleted = ask("mutation { deleteWebhook(id: \"${webhookId}\") }");
             let typeDeleted = ask("mutation { deleteContentType(id: \"${typeId}\") }");
@@ -88,7 +68,7 @@ mod TestAdminMutationsPg {
              ((GraphqlTestKit.valueAt(List#{"contentTypes"}, listed), GraphqlTestKit.valueAt(List#{"contentType"}, listed), GraphqlTestKit.stringAt(List#{"byApiId", "id"}, listed) == typeId),
              fst(webhooksListed) == Value.Obj(Map#{ "webhooks" => Value.List(Value.Obj(Map#{ "id" => Value.Str(webhookId), "name" => Value.Str("site"), "events" => Value.List(Value.Str("SCHEMA_CHANGED") :: Nil), "active" => Value.Bool(true) }) :: Nil) }),
              fst(webhookUpdated),
-             (List.length(listIn(List#{"webhookDeliveries"}, deliveries)), listIn(List#{"webhookDeliveries"}, deliveries) |> List.head |> Option.map(delivery -> (Value.field("event", delivery), Value.field("status", delivery), Value.field("attempts", delivery), Value.field("lastStatus", delivery), Value.field("deliveredAt", delivery)))),
+             (List.length(GraphqlTestKit.listAt(List#{"webhookDeliveries"}, deliveries)), GraphqlTestKit.listAt(List#{"webhookDeliveries"}, deliveries) |> List.head |> Option.map(delivery -> (Value.field("event", delivery), Value.field("status", delivery), Value.field("attempts", delivery), Value.field("lastStatus", delivery), Value.field("deliveredAt", delivery)))),
              fst(redelivered) == Value.Obj(Map#{ "redeliverWebhook" => Value.Obj(Map#{ "id" => Value.Str(deliveryId), "event" => Value.Str("SCHEMA_CHANGED"), "status" => Value.Str("PENDING"), "attempts" => Value.Int(0) }) }),
              GraphqlTestKit.stringAt(List#{"deleteWebhook"}, webhookDeleted) == webhookId,
              GraphqlTestKit.stringAt(List#{"deleteContentType"}, typeDeleted) == typeId,
@@ -133,7 +113,7 @@ mod TestAdminMutationsPg {
             let entryId = GraphqlTestKit.stringAt(List#{"createEntry", "id"}, created);
             let checked = ask("{ publishCheck(id: \"${entryId}\") { ok violations { path message } unpublishedDependencies { id } } impact(id: \"${entryId}\", action: PUBLISH) { breaks { via stage entry { id } } cascades { id } } }");
             let published = ask("mutation { publishEntry(id: \"${entryId}\") { version stage versions { reason author } } }");
-            let versionAfterPublish = intIn(List#{"publishEntry", "version"}, published);
+            let versionAfterPublish = GraphqlTestKit.intAt(List#{"publishEntry", "version"}, published);
             let updated = ask("mutation { updateEntry(id: \"${entryId}\", fields: { body: \"y\" }, expectedVersion: ${versionAfterPublish}) { version stage fields } }");
             let saved = ask("mutation { saveVersion(id: \"${entryId}\") { id version reason author fields createdAt } }");
             let versionId = GraphqlTestKit.stringAt(List#{"saveVersion", "id"}, saved);
@@ -207,7 +187,7 @@ mod TestAdminMutationsPg {
             let ask = recording(PgTestSupport.askOwner(schema), errors);
             let upload = ask("mutation { createUploadUrl(input: { fileName: \"photo x.png\", mime: \"image/png\", size: 5 }) { asset { id status fileName mime size width alt } uploadUrl expiresInSeconds } }");
             let assetId = GraphqlTestKit.stringAt(List#{"createUploadUrl", "asset", "id"}, upload);
-            let putStatus = putTo(GraphqlTestKit.stringAt(List#{"createUploadUrl", "uploadUrl"}, upload), "image/png", "hello");
+            let putStatus = PgTestSupport.putTo(GraphqlTestKit.stringAt(List#{"createUploadUrl", "uploadUrl"}, upload), "image/png", "hello");
             let confirmed = ask("mutation { confirmAsset(id: \"${assetId}\", input: { width: 10, height: 20, alt: \"写真\" }) { status size width height alt url createdAt usedBy { id } } }");
             let altChanged = ask("mutation { updateAsset(id: \"${assetId}\", input: { alt: \"表紙\" }) { id alt } }");
             let listed = ask("{ assets { totalCount nodes { id } } asset(id: \"${assetId}\") { alt status } }");
@@ -281,7 +261,7 @@ mod TestAdminMutationsPg {
              (GraphqlTestKit.valueAt(List#{"createApiKey", "name"}, issued), GraphqlTestKit.valueAt(List#{"createApiKey", "scope"}, issued), String.startsWith(prefix = "cms_", GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, issued))),
              fst(keys) == Value.Obj(Map#{ "apiKeys" => Value.List(Value.Obj(Map#{ "id" => Value.Str(keyId), "name" => Value.Str("site"), "scope" => Value.Str("READ"), "revokedAt" => Value.Null }) :: Nil) }),
              GraphqlTestKit.stringAt(List#{"revokeApiKey"}, revoked) == keyId,
-             listIn(List#{"apiKeys"}, keysAfter) |> List.map(key -> (Value.field("name", key), Value.field("revokedAt", key) != Value.Null)))
+             GraphqlTestKit.listAt(List#{"apiKeys"}, keysAfter) |> List.map(key -> (Value.field("name", key), Value.field("revokedAt", key) != Value.Null)))
         });
         Assert.assertEq(
             expected = ((

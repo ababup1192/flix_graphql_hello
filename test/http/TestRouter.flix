@@ -55,8 +55,9 @@ mod TestRouter {
     /// / で始まらない、空の区切り（// と末尾の /）、括弧の片方だけ・空の名前、同じ名前の Param は Err。
     @Test
     def testRouterParsePatternRejects(): Unit \ Assert =
-        Assert.assertEq(expected = List#{false, false, false, false, false, false, false},
-            List#{"graphql", "//x", "/x/", "/{}", "/{a", "/{a}b", "/{a}/{a}"} |> List.map(text -> Router.parsePattern(text) |> Result.isOk))
+        let rejected = List#{"graphql", "//x", "/x/", "/{}", "/{a", "/{a}b", "/{a}/{a}"};
+        Assert.assertEq(expected = rejected |> List.map(text -> (text, false)),
+            rejected |> List.map(text -> (text, Router.parsePattern(text) |> Result.isOk)))
 
     /// describe は parsePattern と往復する。
     @Test

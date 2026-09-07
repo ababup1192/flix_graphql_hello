@@ -10,10 +10,6 @@ mod TestAuthPg {
 
     def principal(subject: String, email: String): Principal = { issuer = "test", subject = subject, email = email, name = subject }
 
-    /// その人として今のプロジェクトで走らせる。
-    def runAs(user: User, f: Unit -> a \ ef): a \ (ef - Session) + DbRead + Tenant =
-        Session.runWith(Accounts.actorFor(user, Tenant.current(), Login.Interactive), f)
-
     ///
     /// bootstrap の email の初回ログインは既定の組織の owner になり、既定のプロジェクトの owner として振る舞える。
     /// 2 人目は何も持たない（組織にも属さない）。
@@ -21,9 +17,9 @@ mod TestAuthPg {
     @Test
     def testPgBootstrapOwner(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
-            let owner = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
+            let owner = PgTestSupport.ownerUser();
             let stranger = Accounts.resolveUser(bootstrap(), principal("u-2", "someone@test"));
-            let again = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
+            let again = PgTestSupport.ownerUser();
             (Accounts.actorFor(owner, ProjectId.default(), Login.Interactive) == Actor.User(owner#id, "owner@test", Role.Owner :: Nil, Login.Interactive),
              Accounts.actorFor(stranger, ProjectId.default(), Login.Interactive) == Actor.User(stranger#id, "someone@test", Nil, Login.Interactive),
              again#id == owner#id,
@@ -38,8 +34,7 @@ mod TestAuthPg {
     @Test
     def testPgInvitationsAndRoles(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
-            let owner = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
-            runAs(owner, () -> {
+            PgTestSupport.asOwner(() -> {
                 discard Members.invite("Viewer@Test.dev", Role.Viewer);
                 discard Members.invite("writer@test.dev", Role.Writer);
                 discard Members.invite("editor@test.dev", Role.Editor);
@@ -49,16 +44,16 @@ mod TestAuthPg {
             let viewer = Accounts.resolveUser(bootstrap(), principal("u-v", "viewer@test.dev"));
             let writer = Accounts.resolveUser(bootstrap(), principal("u-w", "writer@test.dev"));
             let editor = Accounts.resolveUser(bootstrap(), principal("u-e", "editor@test.dev"));
-            let blogs = runAs(owner, () -> ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事")));
-            discard runAs(owner, () -> ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty())));
-            let viewerCreatesType = runAs(viewer, () -> CmsTestKit.failureMessage(() -> ContentTypes.create(CmsTestKit.typeDraft("x", "x"))));
-            let viewerReads = runAs(viewer, () -> List.length(ContentTypes.list()));
-            let entry = runAs(writer, () -> ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi"))})));
-            let writerPublishes = runAs(writer, () -> CmsTestKit.failureMessage(() -> ContentEntries.publish(entry#id, "writer", false)));
-            let editorPublishes = runAs(editor, () -> ContentEntries.publish(entry#id, "editor", false))#stage;
-            let invitationsLeft = runAs(owner, () -> List.length(Members.invitations()));
-            let members = runAs(owner, () -> Members.list() |> List.map(member -> (member#email, member#role)) |> List.sort);
-            let lastOwner = runAs(owner, () -> CmsTestKit.failureMessage(() -> Members.remove(second#id)));
+            let blogs = PgTestSupport.asOwner(() -> ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事")));
+            discard PgTestSupport.asOwner(() -> ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty())));
+            let viewerCreatesType = PgTestSupport.runAs(viewer, () -> CmsTestKit.failureMessage(() -> ContentTypes.create(CmsTestKit.typeDraft("x", "x"))));
+            let viewerReads = PgTestSupport.runAs(viewer, () -> List.length(ContentTypes.list()));
+            let entry = PgTestSupport.runAs(writer, () -> ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi"))})));
+            let writerPublishes = PgTestSupport.runAs(writer, () -> CmsTestKit.failureMessage(() -> ContentEntries.publish(entry#id, "writer", false)));
+            let editorPublishes = PgTestSupport.runAs(editor, () -> ContentEntries.publish(entry#id, "editor", false))#stage;
+            let invitationsLeft = PgTestSupport.asOwner(() -> List.length(Members.invitations()));
+            let members = PgTestSupport.asOwner(() -> Members.list() |> List.map(member -> (member#email, member#role)) |> List.sort);
+            let lastOwner = PgTestSupport.asOwner(() -> CmsTestKit.failureMessage(() -> Members.remove(second#id)));
             (viewerCreatesType, viewerReads, writerPublishes, editorPublishes, invitationsLeft, members, lastOwner)
         }));
         Assert.assertEq(
@@ -77,18 +72,17 @@ mod TestAuthPg {
     ///
     @Test
     def testPgApiKeys(): Unit \ {IO, Assert} =
-        let pepper = { pepperId = "test", secret = "test-pepper" };
+        let pepper = PgTestSupport.pepper();
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1", "k2"}, () -> {
-            let owner = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
             let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
-            let issued = runAs(owner, () -> ApiKeys.create(pepper, readKey("site"), 0i64));
+            let issued = PgTestSupport.asOwner(() -> ApiKeys.create(pepper, readKey("site"), 0i64));
             let scopeOf = found -> found |> Option.map(key -> key#scope);
             let resolved = ApiKeys.resolve(pepper, issued#key, ProjectId.default(), 0i64) |> scopeOf;
             let otherProject = ApiKeys.resolve(pepper, issued#key, shop, 0i64) |> scopeOf;
             let wrongKey = ApiKeys.resolve(pepper, "cms_nope", ProjectId.default(), 0i64) |> scopeOf;
-            runAs(owner, () -> ApiKeys.revoke(issued#publicId));
+            PgTestSupport.asOwner(() -> ApiKeys.revoke(issued#publicId));
             let afterRevoke = ApiKeys.resolve(pepper, issued#key, ProjectId.default(), 0i64) |> scopeOf;
-            let listed = runAs(owner, () -> ApiKeys.list() |> List.map(key -> (key#name, Option.nonEmpty(key#revokedAt))));
+            let listed = PgTestSupport.asOwner(() -> ApiKeys.list() |> List.map(key -> (key#name, Option.nonEmpty(key#revokedAt))));
             (String.startsWith(prefix = "cms_", issued#key), resolved, otherProject, wrongKey, afterRevoke, listed)
         }));
         Assert.assertEq(
@@ -130,28 +124,24 @@ mod TestAuthPg {
     ///
     @Test
     def testPgContentApiVisibility(): Unit \ {IO, Assert} =
-        let pepper = { pepperId = "test", secret = "test-pepper" };
+        let pepper = PgTestSupport.pepper();
         let seed = () -> CmsTestKit.withIds(List#{"e1", "k1"}, () -> {
-            let owner = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
             let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
             discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             let entry = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("e1")), CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
             discard ContentEntries.publish(entry#id, "tester", false);
-            runAs(owner, () -> ApiKeys.create(pepper, readKey("site"), 0i64))#key
+            PgTestSupport.asOwner(() -> ApiKeys.create(pepper, readKey("site"), 0i64))#key
         });
         let (publicRead, anonymousDraft, ownerDraft, privateAnonymous, privateWithKey) = PgTestSupport.withContentApiAndPool(seed, (pool, askOwner) -> {
-            let cache = ContentEngine.create(PgTestSupport.deps());
-            let engine = match ContentEngine.current(cache, pool, ProjectId.default()) { case Ok(found) => found case Err(message) => bug!(message) };
+            let engine = PgTestSupport.contentEngine(pool);
             let anonymous = queryText -> GraphqlTestKit.askEngineWith(engine, Context.anonymous(), queryText);
             let publicRead = anonymous("{ blogs { totalCount } }");
             let anonymousDraft = anonymous("{ blogs(stage: DRAFT) { totalCount } }") |> snd;
             let ownerDraft = askOwner("{ blogs(stage: DRAFT) { totalCount } }");
             discard PgTestSupport.mutate(pool, () -> AuthQueries.updateProjectVisibility({ projectId = ProjectId.toInt64(ProjectId.default()), visibility = "private" }));
             let privateAnonymous = anonymous("{ blogs { totalCount } }") |> snd;
-            let key = match PgTestSupport.mutate(pool, () -> CmsTestKit.withIds(List#{"k9"}, () -> {
-                let owner = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
-                runAs(owner, () -> ApiKeys.create(pepper, readKey("site2"), 0i64))#key
-            })) { case Ok(Ok(found)) => found case other => bug!("${other}") };
+            let key = PgTestSupport.mutateOrBug(pool, () -> CmsTestKit.withIds(List#{"k9"}, () ->
+                PgTestSupport.asOwner(() -> ApiKeys.create(pepper, readKey("site2"), 0i64))#key));
             let privateWithKey = GraphqlTestKit.askEngineWith(engine, Context.withCredential(Credential.ApiKey(key)), "{ blogs { totalCount } }");
             (publicRead, anonymousDraft, ownerDraft, privateAnonymous, privateWithKey)
         });

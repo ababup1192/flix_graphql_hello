@@ -83,11 +83,30 @@ mod GraphqlTestKit {
         Value.path(path, fst(response))
 
     ///
+    /// ask の応答の data から path の Int（version など）を取る。無ければ -1。
+    ///
+    pub def intAt(path: List[String], response: (Value, Option[String])): Int32 =
+        valueAt(path, response) |> Value.asInt |> Option.getWithDefault(-1)
+
+    ///
     /// ask の応答の data の path にある配列。配列でなければテストの前提が壊れている。
     ///
     pub def listAt(path: List[String], response: (Value, Option[String])): List[Value] = match valueAt(path, response) {
         case Value.List(items) => items
         case other             => bug!("${List.join(".", path)} は配列ではありません: ${other}")
+    }
+
+    ///
+    /// 一覧の 1 件（object）の "name"。無ければ空。
+    ///
+    pub def nameOf(item: Value): String = Value.field("name", item) |> Value.asStr |> Option.getWithDefault("")
+
+    ///
+    /// スキーマからエンジンを組む。組めないのはテストの前提が壊れている。
+    ///
+    pub def engineOrBug(schema: Schema): Graphql.Engine \ IO = match Graphql.buildEngine(schema) {
+        case Ok(engine)   => engine
+        case Err(message) => bug!("engine: ${message}")
     }
 
     ///

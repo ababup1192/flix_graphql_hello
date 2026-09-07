@@ -6,8 +6,6 @@ mod TestPreviewPg {
 
     use Util.Json.Json
 
-    def pepper(): SecretHash.Pepper = { pepperId = "test", secret = "test-pepper" }
-
     /// 2100 年を「今」として発行する（検証は本物の時計で、期限はその 1 時間後なので切れない）。
     def farFuture(): Int64 = 4_102_444_800_000i64
 
@@ -18,12 +16,11 @@ mod TestPreviewPg {
             discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             let first = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("draft one"))}));
             discard ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("draft two"))}));
-            PreviewTokens.issue(pepper(), first#id, { ttlSeconds = 3600i64, nowMillis = farFuture() })
+            PreviewTokens.issue(PgTestSupport.pepper(), first#id, { ttlSeconds = 3600i64, nowMillis = farFuture() })
         });
         let (own, other, listing, published, tampered, url) = PgTestSupport.withContentApiAndPool(seed, (pool, _) -> {
-            let issued = PgTestSupport.mutate(pool, () -> PreviewTokens.issue(pepper(), CmsTestKit.entryId("e1"), { ttlSeconds = 3600i64, nowMillis = farFuture() })) |> PgTestSupport.seededOrBug;
-            let cache = ContentEngine.create(PgTestSupport.deps());
-            let engine = match ContentEngine.current(cache, pool, ProjectId.default()) { case Ok(found) => found case Err(message) => bug!(message) };
+            let issued = PgTestSupport.mutateOrBug(pool, () -> PreviewTokens.issue(PgTestSupport.pepper(), CmsTestKit.entryId("e1"), { ttlSeconds = 3600i64, nowMillis = farFuture() }));
+            let engine = PgTestSupport.contentEngine(pool);
             let asPreview = queryText -> GraphqlTestKit.askEngineWith(engine, Context.withCredential(Credential.Preview(issued#token)), queryText);
             let asTampered = queryText -> GraphqlTestKit.askEngineWith(engine, Context.withCredential(Credential.Preview(issued#token + "x")), queryText);
             (asPreview("{ blog(id: \"e1\", stage: DRAFT) { id title } }"),

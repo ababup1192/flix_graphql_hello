@@ -99,6 +99,11 @@ mod CmsTestKit {
         Session.runWith(Actor.System, () -> IdGen.runWithFixed(Nil, body))
 
     ///
+    /// テスト用の pepper。API キー・PAT・プレビュートークンの hash と署名に使う。
+    ///
+    pub def pepper(): SecretHash.Pepper = { pepperId = "test", secret = "test-pepper" }
+
+    ///
     /// 誤りのパスだけ取り出す（メッセージの文言はテストしない）。
     ///
     pub def violationPaths(violations: List[Violation]): List[String] =

@@ -3,16 +3,7 @@
 ///
 mod TestAccountPg {
 
-    def bearer(subject: String, email: String): Credential = Credential.Bearer("test", subject, email, subject)
-
-    def asUser(schema: Schema, credential: Credential): String -> (Value, Option[String]) \ IO =
-        queryText -> GraphqlTestKit.askWith(schema, Context.withCredential(credential), queryText)
-
     def obj(fields: List[(String, Value)]): Value = Value.Obj(List.toMap(fields))
-
-    /// 応答の data から id の文字列を取る（"createOrganization" → "id" など）。テストは連番の値を知らず、返ってきた物をそのまま次に渡す。
-    def idIn(path: List[String], response: (Value, Option[String])): String =
-        List.foldLeft((value, name) -> Value.field(name, value), fst(response), path) |> Value.asStr |> Option.getWithDefault("")
 
     ///
     /// 登録したての人（どのプロジェクトにも属さない）が組織を作り、その下にプロジェクトを作ると、me に owner として出る。
@@ -21,10 +12,10 @@ mod TestAccountPg {
     @Test
     def testPgAccountCreateOrganizationAndProject(): Unit \ {IO, Assert} =
         let (before, created, createdProject, badSlug, reserved, after) = PgTestSupport.withAccountApi(() -> (), (schema, _) -> {
-            let ask = asUser(schema, bearer("alice", "alice@example.com"));
+            let ask = PgTestSupport.askAs(schema, PgTestSupport.bearer("alice", "alice@example.com"));
             let before = ask("{ me { email organizations { role } projects { role } } }");
             let created = ask("mutation { createOrganization(name: \"Acme\") { id name } }");
-            let orgId = idIn(List#{"createOrganization", "id"}, created);
+            let orgId = GraphqlTestKit.stringAt(List#{"createOrganization", "id"}, created);
             let createdProject = ask("mutation { createProject(orgId: \"${orgId}\", slug: \"blog\", name: \"Blog\") { slug name visibility } }");
             let badSlug = ask("mutation { createProject(orgId: \"${orgId}\", slug: \"Blog\", name: \"x\") { id } }") |> snd;
             let reserved = ask("mutation { createProject(orgId: \"${orgId}\", slug: \"account\", name: \"x\") { id } }") |> snd;
@@ -50,13 +41,13 @@ mod TestAccountPg {
     @Test
     def testPgAccountOrganizationMembers(): Unit \ {IO, Assert} =
         let (added, members, memberAdds, outsiderSees, memberSees, lastOwner, removed) = PgTestSupport.withAccountApi(() -> (), (schema, _) -> {
-            let alice = asUser(schema, bearer("alice", "alice@example.com"));
-            let bob = asUser(schema, bearer("bob", "bob@example.com"));
-            let carol = asUser(schema, bearer("carol", "carol@example.com"));
-            let bobId = idIn(List#{"me", "id"}, bob("{ me { id } }"));
-            let aliceId = idIn(List#{"me", "id"}, alice("{ me { id } }"));
+            let alice = PgTestSupport.askAs(schema, PgTestSupport.bearer("alice", "alice@example.com"));
+            let bob = PgTestSupport.askAs(schema, PgTestSupport.bearer("bob", "bob@example.com"));
+            let carol = PgTestSupport.askAs(schema, PgTestSupport.bearer("carol", "carol@example.com"));
+            let bobId = GraphqlTestKit.stringAt(List#{"me", "id"}, bob("{ me { id } }"));
+            let aliceId = GraphqlTestKit.stringAt(List#{"me", "id"}, alice("{ me { id } }"));
             discard carol("{ me { id } }");
-            let orgId = idIn(List#{"createOrganization", "id"}, alice("mutation { createOrganization(name: \"Acme\") { id } }"));
+            let orgId = GraphqlTestKit.stringAt(List#{"createOrganization", "id"}, alice("mutation { createOrganization(name: \"Acme\") { id } }"));
             let added = alice("mutation { addOrganizationMember(orgId: \"${orgId}\", email: \"Bob@Example.com\", role: MEMBER) { email role } }");
             let members = alice("{ organization(id: \"${orgId}\") { members { email role } } }");
             let memberAdds = bob("mutation { addOrganizationMember(orgId: \"${orgId}\", email: \"carol@example.com\", role: MEMBER) { email } }") |> snd;
@@ -85,8 +76,8 @@ mod TestAccountPg {
     @Test
     def testPgAccountRequiresLogin(): Unit \ {IO, Assert} =
         let (anonymousMe, anonymousCreate, withKey) = PgTestSupport.withAccountApi(() -> (), (schema, _) -> {
-            let anonymous = asUser(schema, Credential.Missing);
-            let keyed = asUser(schema, Credential.ApiKey("cms_whatever"));
+            let anonymous = PgTestSupport.askAs(schema, Credential.Missing);
+            let keyed = PgTestSupport.askAs(schema, Credential.ApiKey("cms_whatever"));
             (anonymous("{ me { email } }"),
              anonymous("mutation { createOrganization(name: \"x\") { id } }") |> snd,
              keyed("{ me { email } }") |> snd)

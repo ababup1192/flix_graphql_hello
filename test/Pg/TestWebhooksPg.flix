@@ -43,7 +43,7 @@ mod TestWebhooksPg {
                 issued
             }));
             let webhookId = issued#webhook#publicId;
-            let listDeliveries = () -> PgTestSupport.mutate(pool, () -> Webhooks.deliveries(webhookId, 20)) |> PgTestSupport.seededOrBug;
+            let listDeliveries = () -> PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(webhookId, 20));
             let queued = listDeliveries() |> List.map(delivery -> (delivery#event, delivery#status, delivery#attempts));
             let received = Ref.fresh(Static, Nil);
             let firstTick = tickWith(500, received, pool);
@@ -58,21 +58,34 @@ mod TestWebhooksPg {
                 header("X-Cms-Signature", req) == WebhookDispatcher.signature(issued#secret, { timestamp = header("X-Cms-Timestamp", req), body = HttpRequest.body(req) |> Option.getWithDefault("") }));
             let lastEvent = lastRequest |> Option.map(req -> (header("X-Cms-Event", req), header("X-Cms-Delivery", req) == oldest, HttpRequest.url(req)));
             let bodyMentionsProject = lastRequest |> Option.flatMap(HttpRequest.body) |> Option.map(body -> String.contains(substr = "\"project\":\"default\"", body) and String.contains(substr = "\"type\":\"blogs\"", body));
-            (queued, firstTick, afterFailure, secondTick, thirdTick, redelivered, signatureMatches, lastEvent, bodyMentionsProject, List.length(Ref.get(received)))
+            List#{
+                PgTestSupport.named("queued", queued),
+                PgTestSupport.named("firstTick", firstTick),
+                PgTestSupport.named("afterFailure", afterFailure),
+                PgTestSupport.named("secondTick", secondTick),
+                PgTestSupport.named("thirdTick", thirdTick),
+                PgTestSupport.named("redelivered", redelivered),
+                PgTestSupport.named("signatureMatches", signatureMatches),
+                PgTestSupport.named("lastEvent", lastEvent),
+                PgTestSupport.named("bodyMentionsProject", bodyMentionsProject),
+                PgTestSupport.named("requestCount", List.length(Ref.get(received)))
+            }
         });
+        let tick = (count: Int32) -> (Ok(count): Result[String, Int32]);
         Assert.assertEq(
-            expected = (
-                List#{ (WebhookEvent.EntryUnpublished, DeliveryStatus.Pending, 0), (WebhookEvent.EntryPublished, DeliveryStatus.Pending, 0),
-                       (WebhookEvent.SchemaChanged, DeliveryStatus.Pending, 0), (WebhookEvent.SchemaChanged, DeliveryStatus.Pending, 0) },
-                Ok(1),
-                List#{ (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 1, 500) },
-                Ok(0),
-                Ok(4),
-                Some((DeliveryStatus.Delivered, 2, 200, true)),
-                Some(true),
-                Some(("entry.unpublished", false, "https://example.com/hook")),
-                Some(true),
-                5),
+            expected = List#{
+                PgTestSupport.named("queued", List#{ (WebhookEvent.EntryUnpublished, DeliveryStatus.Pending, 0), (WebhookEvent.EntryPublished, DeliveryStatus.Pending, 0),
+                                                     (WebhookEvent.SchemaChanged, DeliveryStatus.Pending, 0), (WebhookEvent.SchemaChanged, DeliveryStatus.Pending, 0) }),
+                PgTestSupport.named("firstTick", tick(1)),
+                PgTestSupport.named("afterFailure", List#{ (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 1, 500) }),
+                PgTestSupport.named("secondTick", tick(0)),
+                PgTestSupport.named("thirdTick", tick(4)),
+                PgTestSupport.named("redelivered", Some((DeliveryStatus.Delivered, 2, 200, true))),
+                PgTestSupport.named("signatureMatches", Some(true)),
+                PgTestSupport.named("lastEvent", Some(("entry.unpublished", false, "https://example.com/hook"))),
+                PgTestSupport.named("bodyMentionsProject", Some(true)),
+                PgTestSupport.named("requestCount", 5)
+            },
             outcome)
 
     ///
@@ -134,14 +147,14 @@ mod TestWebhooksPg {
                 issued
             }));
             let received = Ref.fresh(Static, Nil);
-            let deliveryId = PgTestSupport.mutate(pool, () -> Webhooks.deliveries(issued#webhook#publicId, 1)) |> PgTestSupport.seededOrBug |> List.head |> Option.map(delivery -> delivery#id) |> Option.getWithDefault("?");
+            let deliveryId = PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(issued#webhook#publicId, 1)) |> List.head |> Option.map(delivery -> delivery#id) |> Option.getWithDefault("?");
             let attempt = () -> {
                 discard tickWith(500, received, pool);
                 discard PgTestSupport.mutate(pool, () -> Webhooks.redeliver(deliveryId))
             };
             List.forEach(_ -> attempt(), List.range(0, 4));
             discard tickWith(500, received, pool);
-            let delivery = PgTestSupport.mutate(pool, () -> Webhooks.deliveries(issued#webhook#publicId, 1)) |> PgTestSupport.seededOrBug |> List.head;
+            let delivery = PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(issued#webhook#publicId, 1)) |> List.head;
             (delivery |> Option.map(found -> (found#status, found#attempts, found#lastStatus, found#lastError)), List.length(Ref.get(received)))
         });
         Assert.assertEq(expected = (Some((DeliveryStatus.Failed, 5, 500, "HTTP 500")), 5), outcome)
@@ -186,7 +199,7 @@ mod TestWebhooksPg {
                 issued
             }));
             let received = Ref.fresh(Static, Nil);
-            let deliveries = () -> PgTestSupport.mutate(pool, () -> Webhooks.deliveries(issued#webhook#publicId, 10)) |> PgTestSupport.seededOrBug |> List.reverse;
+            let deliveries = () -> PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(issued#webhook#publicId, 10)) |> List.reverse;
             let ids = deliveries() |> List.map(delivery -> delivery#id);
             let first = tickWith(500, received, pool);
             let afterFirst = deliveries() |> List.map(delivery -> delivery#attempts);

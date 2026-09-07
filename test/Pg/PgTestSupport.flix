@@ -1,5 +1,6 @@
 ///
-/// 実 PG のテストで共有する部品: 接続設定、migrations の当て直し、接続の開閉。
+/// 実 PG のテストで共有する部品: 接続設定、migrations の当て直し、接続の開閉、身元（owner / Bearer / pepper）、
+/// スキーマとエンジンの組み立て、プール越しの Tx、名前付きの比較。
 ///
 mod PgTestSupport {
 
@@ -79,6 +80,55 @@ mod PgTestSupport {
         Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() -> withStorage(() -> DbRunner.transact(pool, Some(ProjectId.default()), thunk)))))
 
     ///
+    /// mutate の結果を取り出す。失敗するのはテストの前提が壊れているので止める。
+    ///
+    pub def mutateOrBug(pool: Pool, thunk: Unit -> a \ ef): a \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, CmsErr, IdGen, Tenant, Session, ObjectStore}) + IO =
+        mutate(pool, thunk) |> seededOrBug
+
+    ///
+    /// テスト用の pepper（CmsTestKit と同じ物）。
+    ///
+    pub def pepper(): SecretHash.Pepper = CmsTestKit.pepper()
+
+    ///
+    /// ログインの JWT の身元。name は subject と同じ。
+    ///
+    pub def bearer(subject: String, email: String): Credential = Credential.Bearer("test", subject, email, subject)
+
+    ///
+    /// bootstrap の owner（owner@test）の users の行。初回の問い合わせで作られ、既定の組織の owner になる。
+    ///
+    pub def ownerUser(): User \ Db + IdGen =
+        Accounts.resolveUser({ ownerEmail = Some("owner@test") }, { issuer = "test", subject = "owner", email = "owner@test", name = "owner" })
+
+    ///
+    /// その人（ログインの JWT）として今のプロジェクトで走らせる。
+    ///
+    pub def runAs(user: User, thunk: Unit -> a \ ef): a \ (ef - Session) + DbRead + Tenant =
+        Session.runWith(Accounts.actorFor(user, Tenant.current(), Login.Interactive), thunk)
+
+    ///
+    /// bootstrap の owner（ログインの JWT）として今のプロジェクトで走らせる。
+    ///
+    pub def asOwner(thunk: Unit -> a \ ef): a \ (ef - Session) + Db + IdGen + Tenant =
+        runAs(ownerUser(), thunk)
+
+    ///
+    /// 署名付き URL へ置く。宣言した Content-Type で送る。成功なら status。
+    ///
+    pub def putTo(url: String, mime: String, body: String): Result[String, Int32] \ IO =
+        Net.Http.runWithIO(() ->
+            Net.Http.send(Net.HttpRequest.put(url, body) |> Net.HttpRequest.withContentType(mime))
+                |> Result.map(Net.HttpResponse.status)
+                |> Result.mapErr(err -> "${err}"))
+
+    ///
+    /// 期待値と観測した値を (名前, 文字にした値) にする。型の違う値を 1 つの List に並べて比べ、落ちた時にどの名前が違うか読めるようにする。
+    /// 期待値の側も同じ関数で作るので、比べる相手は同じ型の値の ToString。
+    ///
+    pub def named(name: String, value: a): (String, String) with ToString[a] = (name, "${value}")
+
+    ///
     /// アプリ用のロール（cms_app）の接続設定。API のテストはこれで繋ぎ、RLS 越しに動く事を確かめる。
     ///
     /// WhyNot: 所有者（docker の POSTGRES_USER）で繋がないのは、superuser は FORCE でも RLS を素通りし、
@@ -131,10 +181,16 @@ mod PgTestSupport {
     pub def ownerCredential(): Credential = Credential.Bearer("test", "owner", "owner@test", "Owner")
 
     ///
+    /// この身元でスキーマ（管理 API / Account API）に問い合わせる ask。
+    ///
+    pub def askAs(schema: Schema, credential: Credential): String -> (Value, Option[String]) \ IO =
+        queryText -> GraphqlTestKit.askWith(schema, Context.withCredential(credential), queryText)
+
+    ///
     /// owner として管理 API に問い合わせる。
     ///
     pub def askOwner(schema: Schema): String -> (Value, Option[String]) \ IO =
-        queryText -> GraphqlTestKit.askWith(schema, Context.withCredential(ownerCredential()), queryText)
+        askAs(schema, ownerCredential())
 
     ///
     /// テーブルを作り直して seed を当て、コンテンツ API に問い合わせる ask を body に渡す。エンジンは定義から組み直す（目印を毎回見る）。
@@ -155,10 +211,16 @@ mod PgTestSupport {
     ///
     /// 今の定義のエンジン。組めないのはテストの前提が壊れている。
     ///
-    def engineOrBug(cache: ContentEngine.Cache, pool: Pool): Graphql.Engine \ IO = match ContentEngine.current(cache, pool, ProjectId.default()) {
+    pub def engineOrBug(cache: ContentEngine.Cache, pool: Pool): Graphql.Engine \ IO = match ContentEngine.current(cache, pool, ProjectId.default()) {
         case Ok(engine)   => engine
         case Err(message) => bug!("engine: ${message}")
     }
+
+    ///
+    /// 既定のプロジェクトのコンテンツ API のエンジンを、新しい cache で今の定義から組む。
+    ///
+    pub def contentEngine(pool: Pool): Graphql.Engine \ IO =
+        engineOrBug(ContentEngine.create(deps()), pool)
 
     ///
     /// 所有者の接続で生 SQL を 1 本流し、影響した行数を返す。行の時刻や状態を直接ずらすテスト用。失敗はテストの前提が壊れている。
@@ -178,7 +240,7 @@ mod PgTestSupport {
         case Err(failure) => bug!("sql: ${failure}")
     }
 
-    pub def seededOrBug(result: Result[DbFailure, Result[CmsErr.CmsFailure, b]]): b = match result {
+    def seededOrBug(result: Result[DbFailure, Result[CmsErr.CmsFailure, b]]): b = match result {
         case Ok(Ok(seeded))  => seeded
         case Ok(Err(failure)) => bug!("seed: ${CmsErr.toMessage(failure)}")
         case Err(failure)    => bug!("seed: ${failure}")

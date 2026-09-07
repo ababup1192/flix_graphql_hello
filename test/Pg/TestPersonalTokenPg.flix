@@ -5,32 +5,20 @@
 ///
 mod TestPersonalTokenPg {
 
-    def pepper(): SecretHash.Pepper = { pepperId = "test", secret = "test-pepper" }
-
-    def bearer(subject: String, email: String): Credential = Credential.Bearer("test", subject, email, subject)
-
     /// 管理 API と Account API の両方の Schema。同じプールと依存で組む。
     def schemas(pool: Pool): (Schema, Schema) \ IO =
         let deps = PgTestSupport.deps();
         (AdminSchema.make(deps, AdminRunner.make(pool, deps, ProjectId.default())), AccountSchema.make(deps, AccountRunner.make(pool, deps)))
 
-    def ask(schema: Schema, credential: Credential): String -> (Value, Option[String]) \ IO =
-        queryText -> GraphqlTestKit.askWith(schema, Context.withCredential(credential), queryText)
-
     /// Account API でこの名前と scope の PAT を発行し、生のトークンを返す。
     def issueVia(account: String -> (Value, Option[String]) \ IO, name: String, scope: String): String \ IO =
         GraphqlTestKit.stringAt(List#{"createPersonalAccessToken", "token"}, account("mutation { createPersonalAccessToken(name: \"${name}\", scope: ${scope}) { token } }"))
 
-    /// personalAccessTokens の一覧を (name, scope, lastUsedAt が付いたか, revokedAt) にして name で並べる。
+    /// personalAccessTokens の一覧を name で並べ、(name, scope, lastUsedAt が付いたか, revokedAt) にする。
     def tokensUsed(response: (Value, Option[String])): List[(String, Value, Bool, Value)] =
         GraphqlTestKit.listAt(List#{"me", "personalAccessTokens"}, response)
-            |> List.map(item -> (nameOf(item), Value.field("scope", item), Value.field("lastUsedAt", item) != Value.Null, Value.field("revokedAt", item)))
-            |> List.sortBy(fst4)
-
-    def fst4(item: (a, b, c, d)): a = { let (first, _, _, _) = item; first }
-
-    /// 一覧の 1 件の name。無ければ空。
-    def nameOf(item: Value): String = Value.field("name", item) |> Value.asStr |> Option.getWithDefault("")
+            |> List.sortBy(GraphqlTestKit.nameOf)
+            |> List.map(item -> (GraphqlTestKit.nameOf(item), Value.field("scope", item), Value.field("lastUsedAt", item) != Value.Null, Value.field("revokedAt", item)))
 
     /// me.organizations の先頭の組織の id。無ければテストの前提が壊れている。
     def firstOrganizationId(response: (Value, Option[String])): String = match GraphqlTestKit.listAt(List#{"me", "organizations"}, response) {
@@ -51,36 +39,41 @@ mod TestPersonalTokenPg {
         let outcome = PgTestSupport.withPool(pool -> {
             PgTestSupport.seed(() -> ());
             let (admin, account) = schemas(pool);
-            let owner = ask(account, PgTestSupport.ownerCredential());
+            let owner = PgTestSupport.askAs(account, PgTestSupport.ownerCredential());
             let issued = owner("mutation { createPersonalAccessToken(name: \"cli\", scope: WRITE) { name scope token } }");
             let token = GraphqlTestKit.stringAt(List#{"createPersonalAccessToken", "token"}, issued);
             let readToken = issueVia(owner, "ro", "READ");
-            let viaPat = ask(admin, Credential.PersonalToken(token));
-            let viaReadPat = ask(admin, Credential.PersonalToken(readToken));
-            let accountViaPat = ask(account, Credential.PersonalToken(token));
-            let accountViaReadPat = ask(account, Credential.PersonalToken(readToken));
-            let adminMe = viaPat("{ me { email roles } }");
-            let createdType = viaPat("mutation { createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { apiId } }");
-            let readMe = viaReadPat("{ me { email roles } }");
-            let readCreates = viaReadPat("mutation { createContentType(input: { apiId: \"tags\", name: \"タグ\" }) { apiId } }") |> snd;
-            let accountMe = accountViaPat("{ me { email } }");
-            let readAccountMe = accountViaReadPat("{ me { email } }");
-            let readCreatesOrg = accountViaReadPat("mutation { createOrganization(name: \"Acme\") { id } }") |> snd;
-            (String.startsWith(prefix = "cmspat_", token), GraphqlTestKit.valueAt(List#{"createPersonalAccessToken", "scope"}, issued),
-             adminMe, createdType, readMe, readCreates, accountMe, readAccountMe, readCreatesOrg,
-             owner("{ me { personalAccessTokens { id name scope createdAt expiresAt lastUsedAt revokedAt } } }") |> tokensUsed)
+            let viaPat = PgTestSupport.askAs(admin, Credential.PersonalToken(token));
+            let viaReadPat = PgTestSupport.askAs(admin, Credential.PersonalToken(readToken));
+            let accountViaPat = PgTestSupport.askAs(account, Credential.PersonalToken(token));
+            let accountViaReadPat = PgTestSupport.askAs(account, Credential.PersonalToken(readToken));
+            List#{
+                PgTestSupport.named("tokenPrefix", String.startsWith(prefix = "cmspat_", token)),
+                PgTestSupport.named("issuedScope", GraphqlTestKit.valueAt(List#{"createPersonalAccessToken", "scope"}, issued)),
+                PgTestSupport.named("adminMe", viaPat("{ me { email roles } }")),
+                PgTestSupport.named("createdType", viaPat("mutation { createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { apiId } }")),
+                PgTestSupport.named("readMe", viaReadPat("{ me { email roles } }")),
+                PgTestSupport.named("readCreates", viaReadPat("mutation { createContentType(input: { apiId: \"tags\", name: \"タグ\" }) { apiId } }") |> snd),
+                PgTestSupport.named("accountMe", accountViaPat("{ me { email } }")),
+                PgTestSupport.named("readAccountMe", accountViaReadPat("{ me { email } }")),
+                PgTestSupport.named("readCreatesOrg", accountViaReadPat("mutation { createOrganization(name: \"Acme\") { id } }") |> snd),
+                PgTestSupport.named("tokensUsed", owner("{ me { personalAccessTokens { id name scope createdAt expiresAt lastUsedAt revokedAt } } }") |> tokensUsed)
+            }
         });
+        let noMessage: Option[String] = None;
         Assert.assertEq(
-            expected = (
-                true, Value.Str("WRITE"),
-                (Value.Obj(Map#{ "me" => Value.Obj(Map#{ "email" => Value.Str("owner@test"), "roles" => Value.List(Value.Str("OWNER") :: Nil) }) }), None),
-                (Value.Obj(Map#{ "createContentType" => Value.Obj(Map#{ "apiId" => Value.Str("blogs") }) }), None),
-                (Value.Obj(Map#{ "me" => Value.Obj(Map#{ "email" => Value.Str("owner@test"), "roles" => Value.List(Value.Str("VIEWER") :: Nil) }) }), None),
-                Some("この操作（manageTypes）の権限がありません"),
-                me("owner@test"),
-                me("owner@test"),
-                Some("この操作は read の PAT ではできません。write の PAT かログインした本人で行ってください"),
-                List#{ ("cli", Value.Str("WRITE"), true, Value.Null), ("ro", Value.Str("READ"), true, Value.Null) }),
+            expected = List#{
+                PgTestSupport.named("tokenPrefix", true),
+                PgTestSupport.named("issuedScope", Value.Str("WRITE")),
+                PgTestSupport.named("adminMe", (Value.Obj(Map#{ "me" => Value.Obj(Map#{ "email" => Value.Str("owner@test"), "roles" => Value.List(Value.Str("OWNER") :: Nil) }) }), noMessage)),
+                PgTestSupport.named("createdType", (Value.Obj(Map#{ "createContentType" => Value.Obj(Map#{ "apiId" => Value.Str("blogs") }) }), noMessage)),
+                PgTestSupport.named("readMe", (Value.Obj(Map#{ "me" => Value.Obj(Map#{ "email" => Value.Str("owner@test"), "roles" => Value.List(Value.Str("VIEWER") :: Nil) }) }), noMessage)),
+                PgTestSupport.named("readCreates", Some("この操作（manageTypes）の権限がありません")),
+                PgTestSupport.named("accountMe", me("owner@test")),
+                PgTestSupport.named("readAccountMe", me("owner@test")),
+                PgTestSupport.named("readCreatesOrg", Some("この操作は read の PAT ではできません。write の PAT かログインした本人で行ってください")),
+                PgTestSupport.named("tokensUsed", List#{ ("cli", Value.Str("WRITE"), true, Value.Null), ("ro", Value.Str("READ"), true, Value.Null) })
+            },
             outcome)
 
     ///
@@ -91,10 +84,10 @@ mod TestPersonalTokenPg {
         let outcome = PgTestSupport.withPool(pool -> {
             PgTestSupport.seed(() -> ());
             let (_, account) = schemas(pool);
-            let owner = ask(account, PgTestSupport.ownerCredential());
+            let owner = PgTestSupport.askAs(account, PgTestSupport.ownerCredential());
             let orgId = firstOrganizationId(owner("{ me { organizations { organization { id } } } }"));
             let readToken = issueVia(owner, "ro", "READ");
-            let viaReadPat = ask(account, Credential.PersonalToken(readToken));
+            let viaReadPat = PgTestSupport.askAs(account, Credential.PersonalToken(readToken));
             (viaReadPat("{ organization(id: \"${orgId}\") { name members { email } projects { slug } } }"),
              viaReadPat("{ me { personalAccessTokens { name } } }"))
         });
@@ -116,9 +109,9 @@ mod TestPersonalTokenPg {
         let outcome = PgTestSupport.withPool(pool -> {
             PgTestSupport.seed(() -> ());
             let (admin, account) = schemas(pool);
-            let token = issueVia(ask(account, PgTestSupport.ownerCredential()), "cli", "WRITE");
-            let accountViaPat = ask(account, Credential.PersonalToken(token));
-            let adminViaPat = ask(admin, Credential.PersonalToken(token));
+            let token = issueVia(PgTestSupport.askAs(account, PgTestSupport.ownerCredential()), "cli", "WRITE");
+            let accountViaPat = PgTestSupport.askAs(account, Credential.PersonalToken(token));
+            let adminViaPat = PgTestSupport.askAs(admin, Credential.PersonalToken(token));
             (accountViaPat("mutation { createPersonalAccessToken(name: \"again\", scope: READ) { token } }") |> snd,
              adminViaPat("mutation { createApiKey(name: \"ci\", scope: WRITE, role: OWNER) { key } }") |> snd,
              adminViaPat("mutation { inviteMember(email: \"a@example.com\", role: VIEWER) { email } }"))
@@ -137,7 +130,7 @@ mod TestPersonalTokenPg {
         let now = Time.Clock.runWithIO(Time.Clock.now);
         let day = 86_400_000i64;
         let outcome = PgTestSupport.withAccountApi(() -> (), (account, _) -> {
-            let owner = ask(account, PgTestSupport.ownerCredential());
+            let owner = PgTestSupport.askAs(account, PgTestSupport.ownerCredential());
             let expiresAt = response -> GraphqlTestKit.stringAt(List#{"createPersonalAccessToken", "expiresAt"}, response) |> Timestamp.fromIso8601 |> Option.map(Timestamp.toEpochMillis);
             let byDefault = owner("mutation { createPersonalAccessToken(name: \"d\", scope: READ) { expiresAt } }") |> expiresAt;
             (byDefault |> Option.map(deadline -> Int64.abs(deadline - (now + 90i64 * day)) < day),
@@ -159,24 +152,24 @@ mod TestPersonalTokenPg {
         let outcome = PgTestSupport.withPool(pool -> {
             PgTestSupport.seed(() -> ());
             let (admin, account) = schemas(pool);
-            let alice = ask(account, bearer("alice", "alice@example.com"));
-            let bob = ask(account, bearer("bob", "bob@example.com"));
+            let alice = PgTestSupport.askAs(account, PgTestSupport.bearer("alice", "alice@example.com"));
+            let bob = PgTestSupport.askAs(account, PgTestSupport.bearer("bob", "bob@example.com"));
             let issued = alice("mutation { createPersonalAccessToken(name: \"cli\", scope: WRITE) { id token } }");
             let tokenId = GraphqlTestKit.stringAt(List#{"createPersonalAccessToken", "id"}, issued);
             let token = GraphqlTestKit.stringAt(List#{"createPersonalAccessToken", "token"}, issued);
             let bobSees = bob("{ me { personalAccessTokens { name } } }");
             let withoutId = message -> message |> Option.map(String.replace(src = tokenId, dst = "<id>"));
             let bobRevokes = bob("mutation { revokePersonalAccessToken(id: \"${tokenId}\") }") |> snd |> withoutId;
-            let beforeRevoke = ask(admin, Credential.PersonalToken(token))("{ me { email } }");
+            let beforeRevoke = PgTestSupport.askAs(admin, Credential.PersonalToken(token))("{ me { email } }");
             let aliceRevokes = alice("mutation { revokePersonalAccessToken(id: \"${tokenId}\") }");
-            let afterRevoke = ask(admin, Credential.PersonalToken(token))("{ me { email } }") |> snd;
+            let afterRevoke = PgTestSupport.askAs(admin, Credential.PersonalToken(token))("{ me { email } }") |> snd;
             let revokedTwice = alice("mutation { revokePersonalAccessToken(id: \"${tokenId}\") }") |> snd |> withoutId;
-            let expired = PgTestSupport.mutate(pool, () -> {
+            let expired = PgTestSupport.mutateOrBug(pool, () -> {
                 let user = Accounts.resolveUser({ ownerEmail = None }, { issuer = "test", subject = "alice", email = "alice@example.com", name = "alice" });
-                Session.runWith(Accounts.actorWithoutProject(user, Login.Interactive), () -> PersonalTokens.issue(pepper(), { name = "old", scope = PatScope.Write, ttlDays = Some(1) }, twoDaysAgo))
-            }) |> PgTestSupport.seededOrBug;
-            let viaExpired = ask(admin, Credential.PersonalToken(expired#token))("{ me { email } }") |> snd;
-            let viaUnknown = ask(admin, Credential.PersonalToken("cmspat_nope"))("{ me { email } }") |> snd;
+                Session.runWith(Accounts.actorWithoutProject(user, Login.Interactive), () -> PersonalTokens.issue(PgTestSupport.pepper(), { name = "old", scope = PatScope.Write, ttlDays = Some(1) }, twoDaysAgo))
+            });
+            let viaExpired = PgTestSupport.askAs(admin, Credential.PersonalToken(expired#token))("{ me { email } }") |> snd;
+            let viaUnknown = PgTestSupport.askAs(admin, Credential.PersonalToken("cmspat_nope"))("{ me { email } }") |> snd;
             (bobSees, bobRevokes, beforeRevoke, fst(aliceRevokes), afterRevoke, revokedTwice, viaExpired, viaUnknown)
         });
         let notFound = Some("personal access token '<id>' が見つかりません");

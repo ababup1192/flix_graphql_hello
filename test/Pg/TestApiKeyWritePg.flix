@@ -6,33 +6,17 @@ mod TestApiKeyWritePg {
 
     use Util.Json.Json
 
-    def pepper(): SecretHash.Pepper = { pepperId = "test", secret = "test-pepper" }
-
     /// blogs 型（title）を作り、shop プロジェクトも作る。戻り値は (blogs の型 id, shop)。
     def seed(): (TypeId, ProjectId) \ Db + CmsErr + IdGen + Tenant + Session =
         let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
         discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
         (blogs#id, Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店"))
 
-    /// 管理 API をこの身元で叩く ask。
-    def asCredential(schema: Schema, credential: Credential): String -> (Value, Option[String]) \ IO =
-        queryText -> GraphqlTestKit.askWith(schema, Context.withCredential(credential), queryText)
-
-    /// bootstrap の owner（ログインの JWT）として今のプロジェクトで走らせる。
-    def asOwner(thunk: Unit -> a \ ef): a \ (ef - Session) + Db + IdGen + Tenant =
-        let owner = Accounts.resolveUser({ ownerEmail = Some("owner@test") }, { issuer = "test", subject = "owner", email = "owner@test", name = "owner" });
-        Session.runWith(Accounts.actorFor(owner, Tenant.current(), Login.Interactive), thunk)
-
-    /// apiKeys の一覧を (name, scope, role, lastUsedAt が付いたか) にして name で並べる。
+    /// apiKeys の一覧を name で並べ、(name, scope, role, lastUsedAt が付いたか) にする。
     def keysUsed(response: (Value, Option[String])): List[(String, Value, Value, Bool)] =
         GraphqlTestKit.listAt(List#{"apiKeys"}, response)
-            |> List.map(item -> (nameOf(item), Value.field("scope", item), Value.field("role", item), Value.field("lastUsedAt", item) != Value.Null))
-            |> List.sortBy(fst4)
-
-    def fst4(item: (a, b, c, d)): a = { let (first, _, _, _) = item; first }
-
-    /// 一覧の 1 件の name。無ければ空。
-    def nameOf(item: Value): String = Value.field("name", item) |> Value.asStr |> Option.getWithDefault("")
+            |> List.sortBy(GraphqlTestKit.nameOf)
+            |> List.map(item -> (GraphqlTestKit.nameOf(item), Value.field("scope", item), Value.field("role", item), Value.field("lastUsedAt", item) != Value.Null))
 
     ///
     /// 発行と使い方。owner が WRITE / WRITER と WRITE / EDITOR の鍵を作り、
@@ -53,8 +37,8 @@ mod TestApiKeyWritePg {
             let readWithRole = owner("mutation { createApiKey(name: \"x\", scope: READ, role: WRITER) { id } }") |> snd;
             let writeWithoutRole = owner("mutation { createApiKey(name: \"y\", scope: WRITE) { id } }") |> snd;
             let writeViewer = owner("mutation { createApiKey(name: \"v\", scope: WRITE, role: VIEWER) { id } }") |> snd;
-            let writer = asCredential(schema, Credential.ApiKey(writerKey));
-            let editor = asCredential(schema, Credential.ApiKey(editorKey));
+            let writer = PgTestSupport.askAs(schema, Credential.ApiKey(writerKey));
+            let editor = PgTestSupport.askAs(schema, Credential.ApiKey(editorKey));
             let created = writer("mutation { createEntry(typeId: \"${TypeId.toInt64(blogs)}\", fields: { title: \"hi\" }) { id stage } }");
             let entryId = GraphqlTestKit.stringAt(List#{"createEntry", "id"}, created);
             let writerPublishes = writer("mutation { publishEntry(id: \"${entryId}\") { id } }") |> snd;
@@ -63,30 +47,43 @@ mod TestApiKeyWritePg {
             let writerChangesVisibility = writer("mutation { updateProjectVisibility(visibility: PRIVATE) { id } }") |> snd;
             let editorPublishes = editor("mutation { publishEntry(id: \"${entryId}\") { stage } }");
             let authors = owner("{ entry(id: \"${entryId}\") { versions { author } } }") |> GraphqlTestKit.valueAt(List#{"entry", "versions"});
-            (GraphqlTestKit.valueAt(List#{"createEntry", "stage"}, created),
-             GraphqlTestKit.valueAt(List#{"createApiKey", "role"}, editorIssued), GraphqlTestKit.valueAt(List#{"createApiKey", "expiresAt"}, editorIssued),
-             unusedKey, readWithRole, writeWithoutRole, writeViewer,
-             writerPublishes, writerCreatesKey, writerInvites, writerChangesVisibility,
-             editorPublishes, authors,
-             owner("{ apiKeys { name scope role lastUsedAt } }") |> keysUsed)
+            List#{
+                PgTestSupport.named("createdStage", GraphqlTestKit.valueAt(List#{"createEntry", "stage"}, created)),
+                PgTestSupport.named("editorRole", GraphqlTestKit.valueAt(List#{"createApiKey", "role"}, editorIssued)),
+                PgTestSupport.named("editorExpiresAt", GraphqlTestKit.valueAt(List#{"createApiKey", "expiresAt"}, editorIssued)),
+                PgTestSupport.named("unusedKey", unusedKey),
+                PgTestSupport.named("readWithRole", readWithRole),
+                PgTestSupport.named("writeWithoutRole", writeWithoutRole),
+                PgTestSupport.named("writeViewer", writeViewer),
+                PgTestSupport.named("writerPublishes", writerPublishes),
+                PgTestSupport.named("writerCreatesKey", writerCreatesKey),
+                PgTestSupport.named("writerInvites", writerInvites),
+                PgTestSupport.named("writerChangesVisibility", writerChangesVisibility),
+                PgTestSupport.named("editorPublishes", editorPublishes),
+                PgTestSupport.named("authors", authors),
+                PgTestSupport.named("keysUsed", owner("{ apiKeys { name scope role lastUsedAt } }") |> keysUsed)
+            }
         });
+        let noMessage: Option[String] = None;
         Assert.assertEq(
-            expected = (
-                Value.Str("DRAFT"),
-                Value.Str("EDITOR"), Value.Null,
-                None,
-                Some("role: role は scope が WRITE の鍵にだけ渡せます"),
-                Some("role: scope が WRITE の鍵には role が要ります（WRITER / EDITOR / OWNER）"),
-                Some("role: WRITE の鍵の役割は WRITER / EDITOR / OWNER です"),
-                Some("この操作（publishEntries）の権限がありません"),
-                Some("この操作（manageApiKeys）の権限がありません"),
-                Some("この操作（manageMembers）の権限がありません"),
-                Some("この操作（manageProject）の権限がありません"),
-                (Value.Obj(Map#{ "publishEntry" => Value.Obj(Map#{ "stage" => Value.Str("PUBLISHED") }) }), None),
-                Value.List(Value.Obj(Map#{ "author" => Value.Str("api-key:deploy") }) :: Nil),
-                List#{ ("ci", Value.Str("WRITE"), Value.Str("WRITER"), true),
-                       ("deploy", Value.Str("WRITE"), Value.Str("EDITOR"), true),
-                       ("spare", Value.Str("READ"), Value.Null, false) }),
+            expected = List#{
+                PgTestSupport.named("createdStage", Value.Str("DRAFT")),
+                PgTestSupport.named("editorRole", Value.Str("EDITOR")),
+                PgTestSupport.named("editorExpiresAt", Value.Null),
+                PgTestSupport.named("unusedKey", noMessage),
+                PgTestSupport.named("readWithRole", Some("role: role は scope が WRITE の鍵にだけ渡せます")),
+                PgTestSupport.named("writeWithoutRole", Some("role: scope が WRITE の鍵には role が要ります（WRITER / EDITOR / OWNER）")),
+                PgTestSupport.named("writeViewer", Some("role: WRITE の鍵の役割は WRITER / EDITOR / OWNER です")),
+                PgTestSupport.named("writerPublishes", Some("この操作（publishEntries）の権限がありません")),
+                PgTestSupport.named("writerCreatesKey", Some("この操作（manageApiKeys）の権限がありません")),
+                PgTestSupport.named("writerInvites", Some("この操作（manageMembers）の権限がありません")),
+                PgTestSupport.named("writerChangesVisibility", Some("この操作（manageProject）の権限がありません")),
+                PgTestSupport.named("editorPublishes", (Value.Obj(Map#{ "publishEntry" => Value.Obj(Map#{ "stage" => Value.Str("PUBLISHED") }) }), noMessage)),
+                PgTestSupport.named("authors", Value.List(Value.Obj(Map#{ "author" => Value.Str("api-key:deploy") }) :: Nil)),
+                PgTestSupport.named("keysUsed", List#{ ("ci", Value.Str("WRITE"), Value.Str("WRITER"), true),
+                                                       ("deploy", Value.Str("WRITE"), Value.Str("EDITOR"), true),
+                                                       ("spare", Value.Str("READ"), Value.Null, false) })
+            },
             outcome)
 
     ///
@@ -105,7 +102,7 @@ mod TestApiKeyWritePg {
             let revokedIssued = owner("mutation { createApiKey(name: \"gone\", scope: WRITE, role: WRITER) { id key } }");
             discard owner("mutation { revokeApiKey(id: \"${GraphqlTestKit.stringAt(List#{"createApiKey", "id"}, revokedIssued)}\") }");
             let shopKey = GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, shopOwner("mutation { createApiKey(name: \"shop\", scope: WRITE, role: OWNER) { key } }"));
-            let createWith = key -> asCredential(schema, Credential.ApiKey(key))("mutation { createEntry(typeId: \"${TypeId.toInt64(blogs)}\", fields: { title: \"hi\" }) { id } }") |> snd;
+            let createWith = key -> PgTestSupport.askAs(schema, Credential.ApiKey(key))("mutation { createEntry(typeId: \"${TypeId.toInt64(blogs)}\", fields: { title: \"hi\" }) { id } }") |> snd;
             (pastExpiry,
              createWith(GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, revokedIssued)),
              createWith(shopKey),
@@ -127,13 +124,14 @@ mod TestApiKeyWritePg {
     def testPgWriteApiKeyResolve(): Unit \ {IO, Assert} =
         let now = 1_700_000_000_000i64;
         let farFuture = 4_102_444_800_000i64;
-        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1", "k2"}, () -> asOwner(() -> {
-            let forever = ApiKeys.create(pepper(), { name = "ci", scope = ApiKeyScope.Write(Role.Owner), expiresAt = None }, now);
-            let untilFarFuture = ApiKeys.create(pepper(), { name = "short", scope = ApiKeyScope.Read, expiresAt = Some(Timestamp.fromEpochMillis(farFuture)) }, now);
+        let pepper = PgTestSupport.pepper();
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1", "k2"}, () -> PgTestSupport.asOwner(() -> {
+            let forever = ApiKeys.create(pepper, { name = "ci", scope = ApiKeyScope.Write(Role.Owner), expiresAt = None }, now);
+            let untilFarFuture = ApiKeys.create(pepper, { name = "short", scope = ApiKeyScope.Read, expiresAt = Some(Timestamp.fromEpochMillis(farFuture)) }, now);
             let summary = found -> found |> Option.map(key -> (key#name, key#scope));
-            (ApiKeys.resolve(pepper(), forever#key, ProjectId.default(), farFuture) |> summary,
-             ApiKeys.resolve(pepper(), untilFarFuture#key, ProjectId.default(), farFuture - 1i64) |> summary,
-             ApiKeys.resolve(pepper(), untilFarFuture#key, ProjectId.default(), farFuture) |> summary)
+            (ApiKeys.resolve(pepper, forever#key, ProjectId.default(), farFuture) |> summary,
+             ApiKeys.resolve(pepper, untilFarFuture#key, ProjectId.default(), farFuture - 1i64) |> summary,
+             ApiKeys.resolve(pepper, untilFarFuture#key, ProjectId.default(), farFuture) |> summary)
         })));
         Assert.assertEq(expected = Ok(Ok((Some(("ci", ApiKeyScope.Write(Role.Owner))), Some(("short", ApiKeyScope.Read)), None))), result)
 
@@ -142,8 +140,8 @@ mod TestApiKeyWritePg {
     ///
     @Test
     def testPgTouchApiKeyOncePerMinute(): Unit \ {IO, Assert} =
-        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1"}, () -> asOwner(() -> {
-            let issued = ApiKeys.create(pepper(), { name = "ci", scope = ApiKeyScope.Read, expiresAt = None }, 0i64);
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1"}, () -> PgTestSupport.asOwner(() -> {
+            let issued = ApiKeys.create(PgTestSupport.pepper(), { name = "ci", scope = ApiKeyScope.Read, expiresAt = None }, 0i64);
             (ApiKeys.touch(issued#id, ProjectId.default()), ApiKeys.touch(issued#id, ProjectId.default()))
         })));
         Assert.assertEq(expected = Ok(Ok((1, 0))), result)
@@ -158,18 +156,17 @@ mod TestApiKeyWritePg {
             discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
             discard ContentEntries.publish(entry#id, "tester", false);
-            asOwner(() -> ApiKeys.create(pepper(), { name = "site", scope = ApiKeyScope.ReadDraft, expiresAt = None }, 0i64))#key
+            PgTestSupport.asOwner(() -> ApiKeys.create(PgTestSupport.pepper(), { name = "site", scope = ApiKeyScope.ReadDraft, expiresAt = None }, 0i64))#key
         });
         let outcome = PgTestSupport.withPool(pool -> {
             let key = PgTestSupport.seed(seedWithKey);
             let deps = PgTestSupport.deps();
-            let cache = ContentEngine.create(deps);
-            let engine = match ContentEngine.current(cache, pool, ProjectId.default()) { case Ok(found) => found case Err(message) => bug!(message) };
+            let engine = PgTestSupport.contentEngine(pool);
             let admin = AdminSchema.make(deps, AdminRunner.make(pool, deps, ProjectId.default()));
-            let lastUsed = () -> PgTestSupport.mutate(pool, () -> asOwner(() -> ApiKeys.list() |> List.map(found -> Option.nonEmpty(found#lastUsedAt)))) |> PgTestSupport.seededOrBug;
+            let lastUsed = () -> PgTestSupport.mutateOrBug(pool, () -> PgTestSupport.asOwner(() -> ApiKeys.list() |> List.map(found -> Option.nonEmpty(found#lastUsedAt))));
             let viaContent = GraphqlTestKit.askEngineWith(engine, Context.withCredential(Credential.ApiKey(key)), "{ blogs { totalCount } }");
             let afterContent = lastUsed();
-            let viaAdmin = asCredential(admin, Credential.ApiKey(key))("{ contentTypes { apiId } }") |> snd;
+            let viaAdmin = PgTestSupport.askAs(admin, Credential.ApiKey(key))("{ contentTypes { apiId } }") |> snd;
             (viaContent, afterContent, viaAdmin, lastUsed())
         });
         Assert.assertEq(

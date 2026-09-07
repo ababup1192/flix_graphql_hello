@@ -17,8 +17,8 @@ mod TestAdminScenarioPg {
             let renamed = ask("mutation { updateContentType(id: \"${typeId}\", input: { name: \"ブログ\", previewUrl: \"https://example.com/{id}\" }) { name previewUrl fields { apiId } } }");
             let patched = ask("mutation { updateField(id: \"${titleId}\", input: { required: false, config: { maxLength: 50 } }) { required config { maxLength } } }");
             let created = ask("mutation { createEntry(typeId: \"${typeId}\", id: \"e1\", fields: { title: \"a\" }) { id version stage publishedAt } }");
-            let published = ask("mutation { publishEntry(id: \"e1\") { version stage versions { reason } } }") |> fst;
-            let versionAfterPublish = published |> Value.path(List#{"publishEntry", "version"}) |> Value.asInt |> Option.getWithDefault(-1);
+            let published = ask("mutation { publishEntry(id: \"e1\") { version stage versions { reason } } }");
+            let versionAfterPublish = GraphqlTestKit.intAt(List#{"publishEntry", "version"}, published);
             let changed = ask("mutation { updateEntry(id: \"e1\", fields: { title: \"b\" }, expectedVersion: ${versionAfterPublish}) { stage fields } }");
             let stale = ask("mutation { updateEntry(id: \"e1\", fields: { title: \"c\" }, expectedVersion: ${versionAfterPublish}) { stage } }") |> snd;
             let unpublished = ask("mutation { unpublishEntry(id: \"e1\") { stage publishedAt } }");
@@ -27,24 +27,25 @@ mod TestAdminScenarioPg {
             let typeDeleted = ask("mutation { deleteContentType(id: \"${typeId}\") }");
             let noTypes = ask("{ contentTypes { id } }");
             (typeId, versionAfterPublish,
-             (renamed, patched, created,
-              (published |> Value.path(List#{"publishEntry", "stage"}), published |> Value.path(List#{"publishEntry", "versions"})),
-              changed, stale, unpublished, deleted, gone, typeDeleted, noTypes))
+             List#{ ("renamed", renamed), ("patched", patched), ("created", created), ("published", published), ("changed", changed),
+                    ("unpublished", unpublished), ("deleted", deleted), ("gone", gone), ("typeDeleted", typeDeleted), ("noTypes", noTypes) },
+             stale)
         });
-        let (typeId, versionAfterPublish, observed) = outcome;
+        let (typeId, versionAfterPublish, responses, stale) = outcome;
         Assert.assertEq(
             expected = (
-                (Value.Obj(Map#{ "updateContentType" => Value.Obj(Map#{ "name" => Value.Str("ブログ"), "previewUrl" => Value.Str("https://example.com/{id}"), "fields" => Value.List(Value.Obj(Map#{ "apiId" => Value.Str("title") }) :: Value.Obj(Map#{ "apiId" => Value.Str("body") }) :: Nil) }) }), None),
-                (Value.Obj(Map#{ "updateField" => Value.Obj(Map#{ "required" => Value.Bool(false), "config" => Value.Obj(Map#{ "maxLength" => Value.Int(50) }) }) }), None),
-                (Value.Obj(Map#{ "createEntry" => Value.Obj(Map#{ "id" => Value.Str("e1"), "version" => Value.Int(1), "stage" => Value.Str("DRAFT"), "publishedAt" => Value.Null }) }), None),
-                (Value.Str("PUBLISHED"), Value.List(Value.Obj(Map#{ "reason" => Value.Str("PUBLISH") }) :: Nil)),
-                (Value.Obj(Map#{ "updateEntry" => Value.Obj(Map#{ "stage" => Value.Str("CHANGED"), "fields" => Value.Obj(Map#{ "title" => Value.Str("b") }) }) }), None),
-                Some("entry 'e1' は他で更新されています（今の version は ${versionAfterPublish + 1}）。読み直してから保存してください"),
-                (Value.Obj(Map#{ "unpublishEntry" => Value.Obj(Map#{ "stage" => Value.Str("DRAFT"), "publishedAt" => Value.Null }) }), None),
-                (Value.Obj(Map#{ "deleteEntry" => Value.Str("e1") }), None),
-                (Value.Obj(Map#{ "entry" => Value.Null, "entries" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }) }), None),
-                (Value.Obj(Map#{ "deleteContentType" => Value.Str(typeId) }), None),
-                (Value.Obj(Map#{ "contentTypes" => Value.List(Nil) }), None)),
-            observed)
+                List#{
+                    ("renamed", (Value.Obj(Map#{ "updateContentType" => Value.Obj(Map#{ "name" => Value.Str("ブログ"), "previewUrl" => Value.Str("https://example.com/{id}"), "fields" => Value.List(Value.Obj(Map#{ "apiId" => Value.Str("title") }) :: Value.Obj(Map#{ "apiId" => Value.Str("body") }) :: Nil) }) }), None)),
+                    ("patched", (Value.Obj(Map#{ "updateField" => Value.Obj(Map#{ "required" => Value.Bool(false), "config" => Value.Obj(Map#{ "maxLength" => Value.Int(50) }) }) }), None)),
+                    ("created", (Value.Obj(Map#{ "createEntry" => Value.Obj(Map#{ "id" => Value.Str("e1"), "version" => Value.Int(1), "stage" => Value.Str("DRAFT"), "publishedAt" => Value.Null }) }), None)),
+                    ("published", (Value.Obj(Map#{ "publishEntry" => Value.Obj(Map#{ "version" => Value.Int(versionAfterPublish), "stage" => Value.Str("PUBLISHED"), "versions" => Value.List(Value.Obj(Map#{ "reason" => Value.Str("PUBLISH") }) :: Nil) }) }), None)),
+                    ("changed", (Value.Obj(Map#{ "updateEntry" => Value.Obj(Map#{ "stage" => Value.Str("CHANGED"), "fields" => Value.Obj(Map#{ "title" => Value.Str("b") }) }) }), None)),
+                    ("unpublished", (Value.Obj(Map#{ "unpublishEntry" => Value.Obj(Map#{ "stage" => Value.Str("DRAFT"), "publishedAt" => Value.Null }) }), None)),
+                    ("deleted", (Value.Obj(Map#{ "deleteEntry" => Value.Str("e1") }), None)),
+                    ("gone", (Value.Obj(Map#{ "entry" => Value.Null, "entries" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }) }), None)),
+                    ("typeDeleted", (Value.Obj(Map#{ "deleteContentType" => Value.Str(typeId) }), None)),
+                    ("noTypes", (Value.Obj(Map#{ "contentTypes" => Value.List(Nil) }), None)) },
+                Some("entry 'e1' は他で更新されています（今の version は ${versionAfterPublish + 1}）。読み直してから保存してください")),
+            (responses, stale))
 
 }

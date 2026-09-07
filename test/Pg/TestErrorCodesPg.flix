@@ -18,12 +18,6 @@ mod TestErrorCodesPg {
         GraphqlTestKit.firstErrorField("extensions",
             Graphql.executeWith(engine, GraphqlTestKit.queryOnly(queryText), Context.withCredential(credential)))
 
-    /// 組めないのはテストの前提が壊れている。
-    def engineOf(schema: Schema): Graphql.Engine \ IO = match Graphql.buildEngine(schema) {
-        case Ok(engine)   => engine
-        case Err(message) => bug!("engine: ${message}")
-    }
-
     ///
     /// 管理 API のそれぞれの失敗に、分類（code）と手掛かりが付く。
     ///
@@ -36,7 +30,7 @@ mod TestErrorCodesPg {
     @Test
     def testPgErrorCodesInAdminApi(): Unit \ {IO, Assert} =
         let (entryId, invalid, notFound, forbidden, conflict, deadToken, brokenJwt) = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
-            let engine = engineOf(schema);
+            let engine = GraphqlTestKit.engineOrBug(schema);
             let owner = PgTestSupport.ownerCredential();
             let ask = queryText -> GraphqlTestKit.askEngineWith(engine, Context.withCredential(owner), queryText);
             let extensions = (credential, queryText) -> extensionsOf(engine, credential, queryText);
