@@ -3,8 +3,11 @@
 ///
 mod TestPublishPg {
 
+    import java.lang.Thread
+
     use Util.Json.Json
     use CmsErr.CmsFailure
+    use DbError.DbFailure
 
     ///
     /// blogs（title: required / slug: unique / views）を作って id を返す。
@@ -139,4 +142,46 @@ mod TestPublishPg {
             (ApiId.text(codes#apiId), untouched#updatedAt == first#updatedAt, blocked)
         }));
         Assert.assertEq(expected = Ok(Ok(("code", true, Err("fields.code: '1' は公開中の entry 'n1' が使っています")))), result)
+
+    /// 同じ値を同時に公開しても 1 件しか通らない。先の Tx が commit するまで後の Tx は advisory lock で待ち、commit 後に先の公開を見て invalid になる。
+    /// ロックが無ければ、後の Tx は commit 前の先の公開が見えず、両方通ってしまう。
+    ///
+    ///   T1: Tx 開始 → publish(A) → 「進んだ」を送る → 「commit してよい」を待つ → commit
+    ///   T2: 「進んだ」を受けてから publish(B) → ロックで待つ → T1 の commit 後に A を見て ✗
+    @Test
+    def testPgUniqueLockSerializesConcurrentPublish(): Unit \ {IO, Assert, Chan, NonDet} =
+        PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"a", "b"}, () -> {
+            let blogs = blogsForPublish();
+            discard ContentEntries.create(blogs, None, titled("A", "same"));
+            discard ContentEntries.create(blogs, None, titled("B", "same"))
+        }));
+        Assert.assertEq(expected = Ok(Err("fields.slug: 'same' は公開中の entry 'a' が使っています")), PgTestSupport.withPool(raceSameSlug))
+
+    ///
+    /// T1 が A を公開して commit せずに待つあいだに T2 が B を公開しにいき、T1 を commit させてから T2 の結果を返す。
+    ///
+    def raceSameSlug(pool: Pool): Result[DbFailure, Result[String, Stage]] \ {IO, Chan, NonDet} =
+        region rc {
+            let (started, startedRx) = Channel.buffered(1);
+            let (release, releaseRx) = Channel.buffered(1);
+            let (done, doneRx) = Channel.buffered(1);
+            spawn discard PgTestSupport.mutate(pool, () -> {
+                discard ContentEntries.publish(CmsTestKit.entryId("a"), "tester", false);
+                Channel.send((), started);
+                Channel.recv(releaseRx)
+            }) @ rc;
+            Channel.recv(startedRx);
+            spawn Channel.send(publishOutcome(pool, "b"), done) @ rc;
+            // T2 がロックで待つ所まで進むのを待ってから T1 を commit させる
+            Thread.sleep(500i64);
+            Channel.send((), release);
+            Channel.recv(doneRx)
+        }
+
+
+    ///
+    /// プール越しに 1 つの Tx で publish し、(DB の失敗, (業務エラーの文言, stage)) の形で返す。
+    ///
+    def publishOutcome(pool: Pool, id: String): Result[DbFailure, Result[String, Stage]] \ IO =
+        DbError.runWithFailure(() -> CmsTestKit.messageOr(entry -> entry#stage, () -> Pool.withLazyTx(pool, () -> ContentEntries.publish(CmsTestKit.entryId(id), "tester", false))))
 }
