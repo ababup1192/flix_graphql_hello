@@ -61,7 +61,7 @@ mod TestAccountPg {
             let members = alice("{ organization(id: \"${orgId}\") { members { email role } } }");
             let memberAdds = bob("mutation { addOrganizationMember(orgId: \"${orgId}\", email: \"carol@example.com\", role: MEMBER) { email } }") |> snd;
             let outsiderSees = carol("{ organization(id: \"${orgId}\") { name } }");
-            let memberSees = bob("{ organization(id: \"${orgId}\") { name members { email } } }");
+            let memberSees = bob("{ organization(id: \"${orgId}\") { name members { userId email name role } } }");
             let lastOwner = alice("mutation { removeOrganizationMember(orgId: \"${orgId}\", userId: \"${aliceId}\") }") |> snd;
             let removed = alice("mutation { removeOrganizationMember(orgId: \"${orgId}\", userId: \"${bobId}\") }");
             (added, members, memberAdds, outsiderSees, memberSees, lastOwner, removed |> fst |> Value.field("removeOrganizationMember") |> Value.asStr |> Option.map(id -> id == bobId))

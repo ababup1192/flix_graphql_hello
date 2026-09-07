@@ -68,7 +68,7 @@ mod TestPersonalTokenPg {
             let readCreatesOrg = accountViaReadPat("mutation { createOrganization(name: \"Acme\") { id } }") |> snd;
             (String.startsWith(prefix = "cmspat_", token), GraphqlTestKit.valueAt(List#{"createPersonalAccessToken", "scope"}, issued),
              adminMe, createdType, readMe, readCreates, accountMe, readAccountMe, readCreatesOrg,
-             owner("{ me { personalAccessTokens { name scope lastUsedAt revokedAt } } }") |> tokensUsed)
+             owner("{ me { personalAccessTokens { id name scope createdAt expiresAt lastUsedAt revokedAt } } }") |> tokensUsed)
         });
         Assert.assertEq(
             expected = (

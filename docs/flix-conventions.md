@@ -116,6 +116,43 @@ N はゲームが決める。エンジンは N を知らない（今のテンプ
 機械で裁く lint は無い。基準・測り方・残っている二乗の一覧は engine リポの
 `docs/performance.md`。
 
+## GraphQL のリゾルバのラムダに effect を使う式を直に書かない
+
+Flix 0.75.3 は、リゾルバのラムダの中に effect（`Time.Clock.Clock` など）を呼ぶ式を直に書くと、
+JVM の **VerifyError（`Instruction type does not match stack map`）** を出すコードを吐く事がある。
+**effect を使う計算は名前付きの関数に切り出し、ラムダからはそれを呼ぶだけにする**
+（実例は `src/admin/ScheduleResolvers.flix` の `isOverdue`）。
+
+```flix
+// NG: ラムダの中で直に Clock を呼ぶ
+overdue = (_context, source) -> Ok(source#status == ScheduleStatus.Pending and Timestamp.toEpochMillis(source#runAt) <= Time.Clock.now()),
+
+// OK: 関数に切り出す
+overdue = (_context, source) -> Ok(isOverdue(source)),
+```
+
+**いつ出るか**（2026-09-07 に実測）:
+
+| どこ | 出るか |
+|---|---|
+| `make check`（型検査） | 出ない |
+| スキーマの組み立て（`AdminSchema.make` + `Graphql.buildEngine`） | 出ない |
+| そのフィールドを**選ばない** query | 出ない |
+| そのフィールドを**選ぶ** query | **出る** |
+
+つまり、GraphQL 越しに 1 度も選ばれないフィールドは、誰も見張っていない。
+しかも実行中に例外で飛ぶので Tx が開いたまま接続が漏れ、後続のテストが DROP TABLE で止まる。
+
+**見張るテスト**:
+
+- `test/admin/TestApiSurface.flix` — 管理 API と Account API の object 型とフィールドの一覧を
+  introspection で読んで突き合わせる（DB 不要。`make test` に載る）。型やフィールドを足すとここが落ちる
+- `test/Pg/TestAdminMutationsPg.flix` — admin.graphql の全フィールドを GraphQL 越しに 1 度は選ぶ
+- `test/Pg/TestAccountPg.flix` / `test/Pg/TestPersonalTokenPg.flix` — Account API の同じ物
+- `test/Pg/TestAssetsPg.flix` の `testPgAssetInContentApi` — コンテンツ API の組み込みフィールド
+
+フィールドを足したら、`TestApiSurface` の期待値と、上の Pg テストの selection の**両方**に足す。
+
 ## その他の落とし穴
 
 - レコードは `Eq` / `Order` を持てない。比較したい値は名前付き 1 フィールドの enum で包む

@@ -3,6 +3,10 @@
 /// ユースケースを直に呼ぶテストでは見えない、リゾルバ・AdminMapping・graphql-java の境界の不具合（型の写し漏れ・ラムダの VerifyError）を拾う。
 /// id は前の応答から取り、決め打ちしない。
 ///
+/// admin.graphql の全 object 型の全フィールドを 1 度は選ぶ（値を見ない物も selection には並べる）。
+/// フィールドを足したら、ここの selection にも足す事。選ばれないフィールドのリゾルバは誰も実行しない。
+/// 型の一覧との突き合わせは test/admin/TestApiSurface。
+///
 mod TestAdminMutationsPg {
 
     use Net.HttpRequest
@@ -52,11 +56,11 @@ mod TestAdminMutationsPg {
         let errors = Ref.fresh(Static, Nil);
         let outcome = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
             let ask = recording(PgTestSupport.askOwner(schema), errors);
-            let webhookCreated = ask("mutation { createWebhook(input: { name: \"site\", url: \"https://example.com/hook\", events: [SCHEMA_CHANGED] }) { webhook { id name events active } secret } }");
+            let webhookCreated = ask("mutation { createWebhook(input: { name: \"site\", url: \"https://example.com/hook\", events: [SCHEMA_CHANGED] }) { webhook { id name url events active createdAt } secret } }");
             let webhookId = GraphqlTestKit.stringAt(List#{"createWebhook", "webhook", "id"}, webhookCreated);
-            let typeCreated = ask("mutation { createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { id apiId kind name singular plural previewUrl fields { id } } }");
+            let typeCreated = ask("mutation { createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { id apiId kind name singular plural previewUrl fields { id } createdAt updatedAt } }");
             let typeId = GraphqlTestKit.stringAt(List#{"createContentType", "id"}, typeCreated);
-            let titleAdded = ask("mutation { addField(typeId: \"${typeId}\", input: { apiId: \"title\", name: \"題名\", kind: TEXT, required: true }) { id apiId kind many required unique localized targetTypeId parentFieldId position children { id } config { maxLength } } }");
+            let titleAdded = ask("mutation { addField(typeId: \"${typeId}\", input: { apiId: \"title\", name: \"題名\", kind: TEXT, required: true }) { id apiId kind many required unique localized targetTypeId parentFieldId position children { id } config { maxLength sourceField min max integer options } } }");
             let titleId = GraphqlTestKit.stringAt(List#{"addField", "id"}, titleAdded);
             let bodyId = GraphqlTestKit.stringAt(List#{"addField", "id"}, ask("mutation { addField(typeId: \"${typeId}\", input: { apiId: \"body\", name: \"本文\", kind: TEXT_AREA }) { id } }"));
             let tagId = GraphqlTestKit.stringAt(List#{"addField", "id"}, ask("mutation { addField(typeId: \"${typeId}\", input: { apiId: \"tag\", name: \"タグ\", kind: TEXT }) { id } }"));
@@ -95,7 +99,7 @@ mod TestAdminMutationsPg {
                 true,
                 Value.List(Value.Str("SCHEMA_CHANGED") :: Nil),
                 (Value.Str("blogs"), Value.Str("COLLECTION"), Value.Str("Blog"), Value.Str("blogs"), Value.Null, Value.List(Nil)),
-                (Value.Str("title"), Value.Str("TEXT"), Value.Bool(true), Value.Bool(false), Value.Int(0), Value.List(Nil), Value.Obj(Map#{ "maxLength" => Value.Null })),
+                (Value.Str("title"), Value.Str("TEXT"), Value.Bool(true), Value.Bool(false), Value.Int(0), Value.List(Nil), Value.Obj(Map#{ "maxLength" => Value.Null, "sourceField" => Value.Null, "min" => Value.Null, "max" => Value.Null, "integer" => Value.Null, "options" => Value.Null })),
                 Value.Obj(Map#{ "updateField" => Value.Obj(Map#{ "name" => Value.Str("タイトル"), "required" => Value.Bool(true), "config" => Value.Obj(Map#{ "maxLength" => Value.Int(50) }) }) }),
                 true,
                 Value.Obj(Map#{ "reorderFields" => Value.Obj(Map#{ "fields" => Value.List(Value.Obj(Map#{ "apiId" => Value.Str("body"), "position" => Value.Int(0) }) :: Value.Obj(Map#{ "apiId" => Value.Str("title"), "position" => Value.Int(1) }) :: Nil) }) }),
@@ -263,7 +267,7 @@ mod TestAdminMutationsPg {
             let keyId = GraphqlTestKit.stringAt(List#{"createApiKey", "id"}, issued);
             let keys = ask("{ apiKeys { id name scope revokedAt } }");
             let revoked = ask("mutation { revokeApiKey(id: \"${keyId}\") }");
-            let keysAfter = ask("{ apiKeys { name revokedAt } }");
+            let keysAfter = ask("{ apiKeys { name createdAt expiresAt revokedAt } }");
             (fst(me),
              fst(visibility),
              (GraphqlTestKit.valueAt(List#{"inviteMember", "email"}, invitedAlice), GraphqlTestKit.valueAt(List#{"inviteMember", "role"}, invitedAlice)),

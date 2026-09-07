@@ -91,16 +91,21 @@ mod TestAssetsPg {
             result)
 
     /// コンテンツ API は cover を Asset（url / width）に、body を RichText（html / text）に展開する。html の image は配信 URL。
+    ///
+    /// 2 本目の query は、コンテンツ API の組み込みフィールド（`_types`・entry の時刻・Asset・RichText）を残らず 1 度選ぶ。
+    /// 値は時刻や本文の長さで変わるのでエラーが出ない事だけ見る。組み込みフィールドを足したらここにも足す事
+    /// （選ばれないリゾルバのラムダは実行されず、JVM の VerifyError を誰も見張らない）。
     @Test
     def testPgAssetInContentApi(): Unit \ {IO, Assert} =
-        let fetched = PgTestSupport.withContentApi(() -> discard seedPublished(), ask ->
-            ask("{ blog(id: \"b1\") { cover { url width } body { html text headings { level text id } } } }"));
+        let (fetched, everyField) = PgTestSupport.withContentApi(() -> discard seedPublished(), ask ->
+            (ask("{ blog(id: \"b1\") { cover { url width } body { html text headings { level text id } } } }"),
+             ask("{ _types blogs { totalCount nodes { id } } blog(id: \"b1\") { id stage publishedAt createdAt updatedAt cover { id fileName mime size height alt } body { json wordCount readingTimeMinutes excerpt(length: 10) } } }")));
         Assert.assertEq(
-            expected = (Value.Obj(Map#{ "blog" => Value.Obj(Map#{
+            expected = ((Value.Obj(Map#{ "blog" => Value.Obj(Map#{
                 "cover" => Value.Obj(Map#{ "url" => Value.Str("http://127.0.0.1:9000/cms/1/asset010/cover.png"), "width" => Value.Int(640) }),
                 "body" => Value.Obj(Map#{ "html" => Value.Str("<p>本文</p><img src=\"http://127.0.0.1:9000/cms/1/asset010/cover.png\" alt=\"表紙\" width=\"640\" height=\"480\">"), "text" => Value.Str("本文"), "headings" => Value.List(Nil) })
-            }) }), None),
-            fetched)
+            }) }), None), None),
+            (fetched, snd(everyField)))
 
     /// 宣言と違う Content-Type で置こうとすると、署名が合わず拒まれる（403）。
     @Test
