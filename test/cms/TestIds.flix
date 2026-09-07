@@ -35,3 +35,10 @@ def testProjectSlugParse(): Unit \ Assert =
          ProjectSlug.parse("-blog") |> Option.map(ProjectSlug.text),
          ProjectSlug.parse(String.repeat(65, "a")) |> Option.map(ProjectSlug.text),
          ProjectSlug.text(ProjectSlug.default())))
+
+/// 決めた id のハンドラでも ULID と public_id は呼ぶたびに違い、ULID は 26 文字で発行順に並ぶ。
+@Test
+def testFixedIdsAreDistinct(): Unit \ Assert =
+    let (ulids, publicIds) = IdGen.runWithFixed(Nil, () -> (List#{IdGen.freshUlid(), IdGen.freshUlid(), IdGen.freshUlid()}, List#{IdGen.freshPublicId(), IdGen.freshPublicId()}));
+    Assert.assertEq(expected = (3, true, List#{26, 26, 26}, 2),
+        (List.toSet(ulids) |> Set.size, List.sort(ulids) == ulids, List.map(String.length, ulids), List.toSet(publicIds) |> Set.size))

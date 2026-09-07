@@ -6,7 +6,8 @@
 ///
 /// 環境変数: CMS_DSN / CMS_DB_USER / CMS_DB_PASSWORD（DbConfig。表の所有者）、CMS_DB_APP_USER / CMS_DB_APP_PASSWORD（リクエスト用のロール。無ければ所有者で繋ぐ）、ASSET_*（StorageConfig。省略時は asset 無し）、
 /// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_BASE_DOMAIN（`{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。省略時は /p/ だけ）、
-/// CMS_DEFAULT_PROJECT（プロジェクト slug 無しの時のプロジェクト slug。省略時は default、空ならプロジェクト slug 無しは 404）、CMS_SIGNUP（open / closed）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
+/// CMS_DEFAULT_PROJECT（プロジェクト slug 無しの時のプロジェクト slug。省略時は default、空ならプロジェクト slug 無しは 404）、CMS_SIGNUP（open / closed）、
+/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
 /// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health に出す版。省略時は dev）
 ///
 def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
@@ -33,19 +34,22 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
             let cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins };
             let version = Sys.Env.getVar("CMS_VERSION") |> Option.getWithDefault("dev");
             let baseDomain = Sys.Env.getVar("CMS_BASE_DOMAIN") |> Option.filter(text -> not String.isEmpty(text));
-            let contentConfig = { cors = cors, graphqlPath = "/graphql", version = version };
-            let adminConfig = { cors = cors, graphqlPath = "/admin/graphql", version = version };
-            let accountConfig = { cors = cors, graphqlPath = "/account/graphql", version = version };
+            let jobsToken = Sys.Env.getVar("CMS_JOBS_TOKEN") |> Option.filter(text -> not String.isEmpty(text));
+            let jobsOn = Sys.Env.getVar("CMS_JOBS") |> Option.getWithDefault("on") != "off";
+            let jobs = BackgroundJobs.createState();
+            let contentConfig = { cors = cors, graphqlPath = "/graphql", version = version, jobsToken = jobsToken };
+            let adminConfig = { cors = cors, graphqlPath = "/admin/graphql", version = version, jobsToken = jobsToken };
+            let accountConfig = { cors = cors, graphqlPath = "/account/graphql", version = version, jobsToken = jobsToken };
             let engineCache = ContentEngine.create(deps);
             // WhyNot: コンテンツ API を実行する時以外（/health、404、preflight、GET）でエンジンを組まないのは、型定義が壊れた時に
             // 死活監視や preflight まで 503 になり、404 ごとに目印の SELECT が走るため。GraphQL を実行しない道なので管理 API のエンジンで受ける
             // WhyNot: 開発モード（X-Dev-User を信じる）で 127.0.0.1 にしか bind しないのは、ヘッダで人になれる経路を LAN に開けないため
             let bind = match deps#auth#mode { case AuthConfig.Mode.Dev => Some("127.0.0.1") case _ => None };
-            // Webhook の配信は別スレッドで回す。積むのはリクエストの Tx（outbox）、送るのはここ
+            // 予約公開と Webhook の配信はプロセス内のワーカーで回す。積むのはリクエストの Tx（outbox）、拾って実行するのはここ
             region rc {
-            spawn WebhookDispatcher.runForever(pool) @ rc;
+            if (jobsOn) spawn BackgroundJobs.runForever(pool, jobs) @ rc else println("jobs: CMS_JOBS=off なのでプロセス内のワーカーは回しません（POST /jobs/tick か別の worker で回してください）");
             HttpServer.listen(bind, 8080, request ->
-                Health.runWithPool(pool, () -> {
+                Health.runWithPool(pool, jobs, () -> {
                     let (projectSlug, path) = Server.projectOf(baseDomain, request);
                     let scoped = { path = path | request };
                     let credential = credentialOf(deps#auth, jwks, request);

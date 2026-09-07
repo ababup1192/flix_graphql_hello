@@ -4,8 +4,9 @@
 /// - cors: 許すオリジン
 /// - graphqlPath: GraphQL を受けるパス（"/graphql" / "/admin/graphql" / "/account/graphql"）
 /// - version: /health に出す版（イメージの git の sha など）
+/// - jobsToken: POST /jobs/tick（外部トリガー）を許す X-Jobs-Token の値。None なら閉じる
 ///
-pub type alias ServerConfig = { cors = CorsConfig, graphqlPath = String, version = String }
+pub type alias ServerConfig = { cors = CorsConfig, graphqlPath = String, version = String, jobsToken = Option[String] }
 
 ///
 /// HTTP リクエストを GraphQL の実行と死活監視に橋渡しするルーティング。
@@ -16,12 +17,13 @@ mod Server {
     ///
     /// CORS 無しの設定。テストと、同一オリジンだけで使うとき。
     ///
-    pub def defaultConfig(): ServerConfig = { cors = Cors.none(), graphqlPath = "/graphql", version = "dev" }
+    pub def defaultConfig(): ServerConfig = { cors = Cors.none(), graphqlPath = "/graphql", version = "dev", jobsToken = None }
 
     ///
     /// リクエストを 1 つ処理する。
     /// - POST <graphqlPath>: ボディ {"query": "...", "variables": {...}, "operationName": "..."} を実行して {"data": ..., "errors": [...]} を返す
-    /// - GET /health: DB に届けば 200、届かなければ 503
+    /// - GET /health: DB に届けば 200、届かなければ 503。jobs.lastTickAt にワーカーが最後に回った時刻
+    /// - POST /jobs/tick: 外部トリガー。X-Jobs-Token が設定と一致すればワーカーを 1 周回す（無ければ 404）
     /// - OPTIONS: CORS の preflight
     /// パスのクエリ文字列は無視する。許したオリジンからのリクエストには CORS ヘッダを足す。
     /// リクエストヘッダは Origin 以外まだ見ない。
@@ -39,6 +41,7 @@ mod Server {
                 if (isJson(request)) executeBody(credential, request#body) else errorResponse(415, Nil, "Content-Type: application/json で送ってください")
             case (_, path) if path == config#graphqlPath      => errorResponse(405, ("Allow", "POST") :: Nil, "POST only")
             case ("GET", "/health")   => health(config#version)
+            case ("POST", "/jobs/tick") => jobsTick(config, request)
             case (_, "/health")       => errorResponse(405, ("Allow", "GET") :: Nil, "GET only")
             case _                    => errorResponse(404, Nil, "not found")
         }
@@ -115,12 +118,29 @@ mod Server {
         String.splitOn(substr = "?", path) |> List.head |> Option.getWithDefault(path)
 
     ///
-    /// GET /health。DB に届けば {"status": "ok", "version": "..."}、届かなければ 503 で理由を付ける。
+    /// GET /health。DB に届けば {"status": "ok", "version": "...", "jobs": {"lastTickAt": ...}}、届かなければ 503 で理由を付ける。
     ///
     def health(version: String): HttpResponse \ Health =
+        let jobs = Value.Obj(Map#{ "lastTickAt" => Health.jobsLastTick() |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null) });
         match Health.checkDb() {
-            case Ok(())       => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str(version) })) }
-            case Err(message) => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str(version), "db" => Value.Str(message) })) }
+            case Ok(())       => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str(version), "jobs" => jobs })) }
+            case Err(message) => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str(version), "db" => Value.Str(message), "jobs" => jobs })) }
+        }
+
+    ///
+    /// POST /jobs/tick。トークンが設定されていなければ 404（存在を見せない）、違えば 403、合えば 1 周回して失敗の説明を返す。
+    ///
+    def jobsTick(config: ServerConfig, request: HttpRequest): HttpResponse \ Health =
+        let given = request#headers |> List.find(match (name, _) -> String.toLowerCase(name) == "x-jobs-token") |> Option.map(snd) |> Option.map(String.trim);
+        match config#jobsToken {
+            case None => errorResponse(404, Nil, "not found")
+            case Some(expected) =>
+                if (given != Some(expected)) errorResponse(403, Nil, "X-Jobs-Token が違います")
+                else {
+                    let failures = Health.runJobs();
+                    { status = if (List.isEmpty(failures)) 200 else 500, headers = Nil,
+                      body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str(if (List.isEmpty(failures)) "ok" else "error"), "failures" => Value.List(failures |> List.map(Value.Str)) })) }
+                }
         }
 
     ///

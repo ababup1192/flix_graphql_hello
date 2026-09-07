@@ -133,6 +133,23 @@ mod AdminMapping {
     pub def webhookDraftOf(input: GeneratedAdmin.WebhookInput): WebhookDraft =
         { name = input#name, url = input#url, events = input#events |> List.map(webhookEventOf), active = input#active |> Option.getWithDefault(true) }
 
+    pub def scheduleActionToGql(action: ScheduleAction): GeneratedAdmin.ScheduleAction = match action {
+        case ScheduleAction.Publish   => GeneratedAdmin.ScheduleAction.Publish
+        case ScheduleAction.Unpublish => GeneratedAdmin.ScheduleAction.Unpublish
+    }
+
+    pub def scheduleStatusToGql(status: ScheduleStatus): GeneratedAdmin.ScheduleStatus = match status {
+        case ScheduleStatus.Pending   => GeneratedAdmin.ScheduleStatus.Pending
+        case ScheduleStatus.Running   => GeneratedAdmin.ScheduleStatus.Running
+        case ScheduleStatus.Done      => GeneratedAdmin.ScheduleStatus.Done
+        case ScheduleStatus.Failed    => GeneratedAdmin.ScheduleStatus.Failed
+        case ScheduleStatus.Cancelled => GeneratedAdmin.ScheduleStatus.Cancelled
+    }
+
+    /// ISO 8601 の文字列から時刻。形が違えば invalid。
+    pub def timestampOf(argument: String, text: String): Timestamp.Timestamp \ CmsErr =
+        Timestamp.fromIso8601(text) |> CmsErr.orInvalid(argument, "'${text}' は ISO 8601 の時刻ではありません（例: 2026-09-08T09:00:00Z）")
+
     pub def visibilityToGql(visibility: Visibility): GeneratedAdmin.Visibility = match visibility {
         case Visibility.Public  => GeneratedAdmin.Visibility.Public
         case Visibility.Private => GeneratedAdmin.Visibility.Private

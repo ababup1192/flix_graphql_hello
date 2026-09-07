@@ -26,6 +26,25 @@ curl -s localhost:8080/health # {"status":"ok","version":"..."}
 サイトはその token を `X-Preview-Token` ヘッダに付けてコンテンツ API に `stage: DRAFT` で問い合わせる。読めるのはその entry と参照先の下書きだけで、一覧の下書きや他の entry は読めない。
 既定 1 時間、最長 1 日で切れる。無状態（表を持たない）なので、鍵（`CMS_API_KEY_PEPPER`）を回せば全部無効になる。
 
+## 予約公開とバックグラウンドワーカー
+
+予約公開（`schedulePublish` / `scheduleUnpublish`）と Webhook の配信は、業務の Tx と同じ DB に仕事の行を積み（outbox）、
+プロセス内のバックグラウンドワーカーが 2 秒ごとに拾って実行する。拾う SQL は `FOR UPDATE SKIP LOCKED` なので、複数台で動かしても同じ仕事は 1 台にしか渡らない。
+実行中にプロセスが落ちた仕事は 10 分後に拾い直す（公開は冪等。Webhook は受け手が `X-Cms-Delivery` で重複を捨てる）。終わった記録は 30 日で消す。
+
+`/health` の `jobs.lastTickAt` がワーカーの最終実行時刻。外形監視で古ければワーカーが止まっている。
+
+保険として、外の cron から同じ処理を呼べる（`CMS_JOBS_TOKEN` を設定した時だけ）。同時に呼ばれても二重にはならない。
+
+```bash
+# systemd timer / cron から 1 分ごと
+curl -fsS -X POST -H "X-Jobs-Token: $CMS_JOBS_TOKEN" http://127.0.0.1:8080/jobs/tick
+```
+
+Cloudflare Cron Triggers なら Worker から同じ POST を送る。`CMS_JOBS=off` にすればプロセス内のワーカーは回らず、外部トリガー（か同じイメージを別に立てた worker）だけで回せる。
+
+デプロイ時の注意: migration は列を足す変更に留める（旧版が動いている間に列を消さない）。別プロセスの worker を立てる時は、アプリを先に上げて migration を当ててから worker を上げる。
+
 ## Webhook の受け方
 
 公開・取り下げ・削除・型の変更で、登録した URL に JSON を POST する（管理 API の `createWebhook`。secret はその応答でしか見えない）。
@@ -105,6 +124,8 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_BOOTSTRAP_OWNER` | 最初の owner の email。その初回ログインを既定の組織の owner にする | 無し |
 | `CMS_DEFAULT_PROJECT` | プロジェクト slug 無しの `/graphql` / `/admin/graphql` が向くプロジェクト slug。空にするとプロジェクト slug 無しは 404（クラウド版） | default |
 | `CMS_SIGNUP` | `open`（ログインした人は誰でも組織を作れる）/ `closed`（既定の組織の owner だけ） | open |
+| `CMS_JOBS` | `on` ならプロセス内のバックグラウンドワーカー（予約公開と Webhook の配信）を回す。`off` は外部トリガーか別の worker で回す時 | on |
+| `CMS_JOBS_TOKEN` | `POST /jobs/tick`（外部トリガー）を許す `X-Jobs-Token` の値。無ければその口は閉じる | 無し |
 | `CMS_BASE_DOMAIN` | `{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。無ければ `/p/{プロジェクト slug}/` だけ | 無し |
 | `CMS_API_KEY_PEPPER` / `CMS_API_KEY_PEPPER_ID` | 公開 API の鍵のハッシュに混ぜる秘密と版。無ければ鍵を発行できない | 無し / v1 |
 | `JAVA_OPTS` | JVM の引数 | `-Xss32m -XX:MaxRAMPercentage=70` |

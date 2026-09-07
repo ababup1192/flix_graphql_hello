@@ -25,7 +25,7 @@ mod TestServer {
     ///
     /// 管理画面のオリジンだけ許す設定。
     ///
-    def adminConfig(): ServerConfig = { cors = { allowedOrigins = "https://admin.example.com" :: Nil }, graphqlPath = "/graphql", version = "dev" }
+    def adminConfig(): ServerConfig = { cors = { allowedOrigins = "https://admin.example.com" :: Nil }, graphqlPath = "/graphql", version = "dev", jobsToken = None }
 
     ///
     /// runWithEcho が data に入れて返す形。variables が無いリクエストは空の Obj、operationName が無ければ Null。
@@ -135,7 +135,7 @@ mod TestServer {
     /// DB に届けば 200 と {"status": "ok"}。クエリ文字列が付いていても同じ。
     @Test
     def testServerHealthOk(): Unit \ Assert =
-        Assert.assertEq(expected = ((200, Ok(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str("dev") }))), 200),
+        Assert.assertEq(expected = ((200, Ok(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str("dev"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null }) }))), 200),
             GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> {
                 let response = Server.handle(Server.defaultConfig(), Credential.Missing, { method = "GET", path = "/health", headers = Nil, body = "" });
                 ((response#status, JsonValue.parse(response#body)),
@@ -147,7 +147,7 @@ mod TestServer {
     def testServerHealthFailure(): Unit \ Assert =
         let response = GraphqlFake.runWithEcho(() -> HealthFake.runWithFailure("connection refused", () ->
             Server.handle(Server.defaultConfig(), Credential.Missing, { method = "GET", path = "/health", headers = Nil, body = "" })));
-        Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused") }))),
+        Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null }) }))),
             (response#status, JsonValue.parse(response#body)))
 
     /// /health への POST は 405 で Allow: GET。
@@ -218,5 +218,16 @@ mod TestServer {
              Server.projectOf(base, { method = "GET", path = "/p/shop/graphql", headers = hostOf("consumer.example.com"), body = "" }),
              Server.projectOf(base, { method = "GET", path = "/admin/graphql", headers = hostOf("business.example.com"), body = "" }),
              Server.projectOf(None, { method = "GET", path = "/graphql", headers = hostOf("business.example.com"), body = "" })))
+
+
+    /// POST /jobs/tick は、トークンが設定されていなければ 404、違えば 403、合えば 200 で失敗の一覧（空）を返す。
+    @Test
+    def testServerJobsTick(): Unit \ Assert =
+        let request = token -> { method = "POST", path = "/jobs/tick", headers = ("X-Jobs-Token", token) :: Nil, body = "" };
+        let closed = Server.defaultConfig();
+        let opened = { jobsToken = Some("secret") | Server.defaultConfig() };
+        let call = (config, token) -> GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(config, Credential.Missing, request(token))));
+        Assert.assertEq(expected = (404, 403, 200, "{\"failures\":[],\"status\":\"ok\"}"),
+            (call(closed, "secret")#status, call(opened, "wrong")#status, call(opened, "secret")#status, call(opened, "secret")#body))
 
 }

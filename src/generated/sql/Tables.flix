@@ -768,6 +768,68 @@ mod ProjectsTable {
 }
 
 ///
+/// scheduled_actions テーブル。enum は断片 DSL の型に付ける印、関数は列。
+///
+mod ScheduledActionsTable {
+
+    use SqlValue.SqlValue
+
+    pub enum ScheduledActionsTable {
+        case ScheduledActionsTable
+    }
+
+    pub def id(): Fragment.Col[ScheduledActionsTable, String, Fragment.NotNull] = Fragment.Col.Col("id", SqlValue.Str)
+    pub def projectId(): Fragment.Col[ScheduledActionsTable, Int64, Fragment.NotNull] = Fragment.Col.Col("project_id", SqlValue.Int64)
+    pub def entryId(): Fragment.Col[ScheduledActionsTable, String, Fragment.NotNull] = Fragment.Col.Col("entry_id", SqlValue.Str)
+    pub def action(): Fragment.Col[ScheduledActionsTable, String, Fragment.NotNull] = Fragment.Col.Col("action", SqlValue.Str)
+    pub def runAt(): Fragment.Col[ScheduledActionsTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("run_at", SqlValue.ofTimestamp)
+    pub def withDependencies(): Fragment.Col[ScheduledActionsTable, Bool, Fragment.NotNull] = Fragment.Col.Col("with_dependencies", SqlValue.Bool)
+    pub def status(): Fragment.Col[ScheduledActionsTable, String, Fragment.NotNull] = Fragment.Col.Col("status", SqlValue.Str)
+    pub def requestedBy(): Fragment.Col[ScheduledActionsTable, String, Fragment.NotNull] = Fragment.Col.Col("requested_by", SqlValue.Str)
+    pub def lastError(): Fragment.Col[ScheduledActionsTable, String, Fragment.NotNull] = Fragment.Col.Col("last_error", SqlValue.Str)
+    pub def createdAt(): Fragment.Col[ScheduledActionsTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("created_at", SqlValue.ofTimestamp)
+    pub def doneAt(): Fragment.Col[ScheduledActionsTable, Timestamp.Timestamp, Fragment.Nullable] = Fragment.Col.Col("done_at", SqlValue.ofTimestamp)
+    pub def claimedAt(): Fragment.Col[ScheduledActionsTable, Timestamp.Timestamp, Fragment.Nullable] = Fragment.Col.Col("claimed_at", SqlValue.ofTimestamp)
+
+    ///
+    /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
+    ///
+    pub enum Constraint with Eq, Order, ToString {
+        /// scheduled_actions_action_check (check)
+        case ActionCheck
+        /// scheduled_actions_status_check (check)
+        case StatusCheck
+        /// scheduled_actions_project_id_fkey (foreign key)
+        case ProjectIdFkey
+    }
+
+    ///
+    /// このテーブルへの書き込みを、制約違反を `translate` で翻訳しながら実行する。
+    /// translate は thunk と同じ型の値を返すか、業務エラーのエフェクトを投げる。翻訳しない case は `raiseConstraint`。
+    /// enum に無い名前の違反と、制約違反以外の DbErr はそのまま上へ。Tx の外で呼ぶ（違反で abort した Tx に COMMIT を出さない）。
+    ///
+    pub def onConstraint(translate: Constraint -> a \ ef1, thunk: Unit -> a \ ef2): a \ ef1 + ef2 + {TransientDbErr, DbErr} =
+        DbError.onConstraintWith(constraintOf, translate, thunk)
+
+    ///
+    /// 翻訳しない制約を元の DbErr に戻す。`onConstraint` に渡す関数の中で使う。
+    ///
+    pub def raiseConstraint(constraint: Constraint): a \ DbErr = match constraint {
+        case Constraint.ActionCheck => DbErr.checkViolation("scheduled_actions_action_check")
+        case Constraint.StatusCheck => DbErr.checkViolation("scheduled_actions_status_check")
+        case Constraint.ProjectIdFkey => DbErr.foreignKeyViolation("scheduled_actions_project_id_fkey")
+    }
+
+    def constraintOf(name: String): Option[Constraint] = match name {
+        case "scheduled_actions_action_check" => Some(Constraint.ActionCheck)
+        case "scheduled_actions_status_check" => Some(Constraint.StatusCheck)
+        case "scheduled_actions_project_id_fkey" => Some(Constraint.ProjectIdFkey)
+        case _ => None
+    }
+
+}
+
+///
 /// users テーブル。enum は断片 DSL の型に付ける印、関数は列。
 ///
 mod UsersTable {
@@ -843,6 +905,7 @@ mod WebhookDeliveriesTable {
     pub def lastError(): Fragment.Col[WebhookDeliveriesTable, String, Fragment.NotNull] = Fragment.Col.Col("last_error", SqlValue.Str)
     pub def createdAt(): Fragment.Col[WebhookDeliveriesTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("created_at", SqlValue.ofTimestamp)
     pub def deliveredAt(): Fragment.Col[WebhookDeliveriesTable, Timestamp.Timestamp, Fragment.Nullable] = Fragment.Col.Col("delivered_at", SqlValue.ofTimestamp)
+    pub def claimedAt(): Fragment.Col[WebhookDeliveriesTable, Timestamp.Timestamp, Fragment.Nullable] = Fragment.Col.Col("claimed_at", SqlValue.ofTimestamp)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。

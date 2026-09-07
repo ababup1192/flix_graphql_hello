@@ -13,6 +13,7 @@ pub enum Entity with Eq, Order, ToString {
     case Organization
     case Webhook
     case WebhookDelivery
+    case Schedule
 }
 
 ///
@@ -119,6 +120,7 @@ mod CmsErr {
         case Entity.Organization => "organization"
         case Entity.Webhook      => "webhook"
         case Entity.WebhookDelivery => "delivery"
+        case Entity.Schedule     => "schedule"
     }
 
 }

@@ -57,12 +57,23 @@ query resetDelivery(id: String, projectId: Int64) -> exec {
 
 // unscoped: dispatcher はプロジェクトを跨いで送る番の物を拾い、1 件ずつそのプロジェクトの印で送る。複数台でも同じ行を二重に拾わない（SKIP LOCKED）
 query claimDueDeliveries(limit: Int64) -> many {
-    UPDATE webhook_deliveries SET status = 'sending', attempts = attempts + 1
+    UPDATE webhook_deliveries SET status = 'sending', attempts = attempts + 1, claimed_at = now()
     WHERE id IN (
         SELECT id FROM webhook_deliveries WHERE status = 'pending' AND next_attempt_at <= now()
         ORDER BY next_attempt_at LIMIT :limit FOR UPDATE SKIP LOCKED
     )
     RETURNING id, project_id, webhook_id, event, payload, attempts
+}
+
+// unscoped: 送っている最中に落ちた行の回復。受け手には届いているかもしれないので、受け手は X-Cms-Delivery で重複を見分ける
+query recoverStuckDeliveries(staleMinutes: Int64) -> exec {
+    UPDATE webhook_deliveries SET status = 'pending', next_attempt_at = now()
+    WHERE status = 'sending' AND claimed_at < now() - make_interval(mins => :staleMinutes::int)
+}
+
+// unscoped: 古い記録の掃除
+query purgeOldDeliveries(keepDays: Int64) -> exec {
+    DELETE FROM webhook_deliveries WHERE status IN ('delivered', 'failed') AND created_at < now() - make_interval(days => :keepDays::int)
 }
 
 query markDelivered(id: String, projectId: Int64, lastStatus: Int32) -> exec {

@@ -116,6 +116,19 @@ mod AdminMutationResolvers {
             case None         => Err("プレビュートークンを発行できません（CMS_API_KEY_PEPPER が設定されていません）")
         }
 
+    /// Mutation.schedulePublish
+    pub def schedulePublish(): GeneratedAdmin.MutationSchedulePublishResolver[AdminEff] =
+        (_context, entryId, at, withDependencies) ->
+            Ok(Schedules.schedule(AdminMapping.entryId("entryId", entryId), ScheduleAction.Publish, AdminMapping.timestampOf("at", at), withDependencies |> Option.getWithDefault(false)))
+
+    /// Mutation.scheduleUnpublish
+    pub def scheduleUnpublish(): GeneratedAdmin.MutationScheduleUnpublishResolver[AdminEff] =
+        (_context, entryId, at) -> Ok(Schedules.schedule(AdminMapping.entryId("entryId", entryId), ScheduleAction.Unpublish, AdminMapping.timestampOf("at", at), false))
+
+    /// Mutation.cancelSchedule
+    pub def cancelSchedule(): GeneratedAdmin.MutationCancelScheduleResolver[AdminEff] =
+        (_context, id) -> Ok(Schedules.cancel(AdminMapping.publicIdOf(id)))
+
     /// Mutation.createWebhook
     pub def createWebhook(): GeneratedAdmin.MutationCreateWebhookResolver[AdminEff] =
         (_context, input) -> Ok(Webhooks.create(AdminMapping.webhookDraftOf(input)))
@@ -161,6 +174,9 @@ mod AdminMutationResolvers {
             createApiKey            = createApiKey(deps),
             revokeApiKey            = revokeApiKey(),
             createPreviewToken      = createPreviewToken(deps),
+            schedulePublish         = schedulePublish(),
+            scheduleUnpublish       = scheduleUnpublish(),
+            cancelSchedule          = cancelSchedule(),
             createWebhook           = createWebhook(),
             updateWebhook           = updateWebhook(),
             deleteWebhook           = deleteWebhook(),

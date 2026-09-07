@@ -89,6 +89,7 @@ mod CmsTestKit {
     ///
     /// 決めた id を順に振る。
     ///
+    /// 注意: public_id と ULID は呼ぶたびに 1 から数え直す。同じ表に対して 2 度 withIds で作ると重複する（2 度目は乱数の handler で）。
     pub def withIds(texts: List[String], body: Unit -> a \ ef): a \ ef - IdGen =
         IdGen.runWithFixed(entryIds(texts), body)
 

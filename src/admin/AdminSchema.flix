@@ -20,6 +20,7 @@ mod AdminSchema {
             apiKey                 = ApiKeyResolvers.resolvers(),
             issuedApiKey           = IssuedApiKeyResolvers.resolvers(),
             previewToken           = PreviewTokenResolvers.resolvers(),
+            schedule               = ScheduleResolvers.resolvers(),
             webhook                = WebhookResolvers.resolvers(),
             issuedWebhook          = IssuedWebhookResolvers.resolvers(),
             webhookDelivery        = WebhookDeliveryResolvers.resolvers(),

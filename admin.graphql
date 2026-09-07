@@ -32,6 +32,8 @@ type Query {
   webhooks: [Webhook!]!
   """Webhook の配信の記録。新しい順（owner だけ）"""
   webhookDeliveries(webhookId: ID!, first: Int = 20): [WebhookDelivery!]!
+  """予約公開の一覧。新しい順。entryId を渡せばその entry の物だけ"""
+  schedules(entryId: ID, first: Int = 50): [Schedule!]!
 }
 
 """入力の 1 つの誤り。path は GraphQL の入力に対応（"fields.title" など）"""
@@ -120,6 +122,14 @@ type Mutation {
   既定 1 時間、最長 1 日。url は型の previewUrl の {id} を置き換えて ?preview=<token> を付けた物（previewUrl が無ければ null）"""
   createPreviewToken(entryId: ID!, expiresInSeconds: Int = 3600): PreviewToken!
 
+  """時刻を指定して公開する（publishEntries を持つ人）。at は ISO 8601。同じ entry の未実行の公開の予約は置き換わる。
+  時刻が来たら通常の publishEntry と同じ検査で公開し、通らなければ FAILED に理由が残る"""
+  schedulePublish(entryId: ID!, at: String!, withDependencies: Boolean = false): Schedule!
+  """時刻を指定して取り下げる"""
+  scheduleUnpublish(entryId: ID!, at: String!): Schedule!
+  """未実行の予約を取り消す"""
+  cancelSchedule(id: ID!): Schedule!
+
   """今のプロジェクトの公開範囲（owner だけ）"""
   updateProjectVisibility(visibility: Visibility!): Project!
   """email で招待する（owner だけ）。初回ログインで役割が付く"""
@@ -142,6 +152,36 @@ type Mutation {
   deleteWebhook(id: ID!): ID!
   """配信をもう 1 度送る（owner だけ）。failed や delivered の物にも使える"""
   redeliverWebhook(deliveryId: ID!): WebhookDelivery!
+}
+
+enum ScheduleAction {
+  PUBLISH
+  UNPUBLISH
+}
+
+enum ScheduleStatus {
+  """時刻を待っている"""
+  PENDING
+  """実行中"""
+  RUNNING
+  DONE
+  """実行したが通らなかった。lastError に理由"""
+  FAILED
+  CANCELLED
+}
+
+"""予約公開 1 つ。id は時刻順（ULID）"""
+type Schedule {
+  id: ID!
+  entryId: ID!
+  action: ScheduleAction!
+  runAt: String!
+  withDependencies: Boolean!
+  status: ScheduleStatus!
+  requestedBy: String!
+  lastError: String!
+  createdAt: String!
+  doneAt: String
 }
 
 """下書きを公開前のサイトで見るためのトークン"""
