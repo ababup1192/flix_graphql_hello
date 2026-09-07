@@ -100,7 +100,7 @@ mod TestAdminMutationsPg {
     /// scheduleUnpublish は未来なので false。
     ///
     ///   createEntry ─ publishCheck / impact ─ publishEntry ─ updateEntry ─ saveVersion ─ updateEntry(null で消す) ─ restoreVersion
-    ///     └ entry / entries(search) ─ schedulePublish(過去) ─ scheduleUnpublish(未来) ─ schedules ─ cancelSchedule
+    ///     └ entry(diff PUBLISHED → DRAFT) / entries(search) ─ schedulePublish(過去) ─ scheduleUnpublish(未来) ─ schedules ─ cancelSchedule
     ///     └ createPreviewToken ─ unpublishEntry ─ deleteEntry
     ///
     @Test
@@ -119,7 +119,7 @@ mod TestAdminMutationsPg {
             let versionId = GraphqlTestKit.stringAt(List#{"saveVersion", "id"}, saved);
             let cleared = ask("mutation { updateEntry(id: \"${entryId}\", fields: { body: null }, expectedVersion: ${versionAfterPublish + 1}) { version fields } }");
             let restored = ask("mutation { restoreVersion(id: \"${entryId}\", versionId: \"${versionId}\", expectedVersion: ${versionAfterPublish + 2}) { version fields } }");
-            let fetched = ask("{ entry(id: \"${entryId}\") { id stage versions { reason } } entries(typeId: \"${typeId}\", search: \"a\") { totalCount nodes { id } } }");
+            let fetched = ask("{ entry(id: \"${entryId}\") { id stage versions { reason } diff(from: { stage: PUBLISHED }, to: { stage: DRAFT }) { path kind before after children { path } lines { kind text } } } entries(typeId: \"${typeId}\", search: \"a\") { totalCount nodes { id } } }");
             let scheduled = ask("mutation { schedulePublish(entryId: \"${entryId}\", at: \"2020-01-01T00:00:00Z\") { id entryId action runAt withDependencies status requestedBy lastError overdue createdAt doneAt } }");
             let unpublishScheduled = ask("mutation { scheduleUnpublish(entryId: \"${entryId}\", at: \"2100-01-01T00:00:00Z\") { id action status overdue } }");
             let unpublishScheduleId = GraphqlTestKit.stringAt(List#{"scheduleUnpublish", "id"}, unpublishScheduled);
@@ -138,7 +138,8 @@ mod TestAdminMutationsPg {
              GraphqlTestKit.valueAt(List#{"updateEntry", "fields"}, cleared),
              (GraphqlTestKit.valueAt(List#{"restoreVersion", "version"}, restored) == Value.Int(versionAfterPublish + 3), GraphqlTestKit.valueAt(List#{"restoreVersion", "fields"}, restored)),
              fst(fetched) == Value.Obj(Map#{
-                 "entry" => Value.Obj(Map#{ "id" => Value.Str(entryId), "stage" => Value.Str("CHANGED"), "versions" => Value.List(Value.Obj(Map#{ "reason" => Value.Str("SAVE") }) :: Value.Obj(Map#{ "reason" => Value.Str("PUBLISH") }) :: Nil) }),
+                 "entry" => Value.Obj(Map#{ "id" => Value.Str(entryId), "stage" => Value.Str("CHANGED"), "versions" => Value.List(Value.Obj(Map#{ "reason" => Value.Str("SAVE") }) :: Value.Obj(Map#{ "reason" => Value.Str("PUBLISH") }) :: Nil),
+                     "diff" => Value.List(Value.Obj(Map#{ "path" => Value.Str("body"), "kind" => Value.Str("CHANGED"), "before" => Value.Str("x"), "after" => Value.Str("y"), "children" => Value.Null, "lines" => Value.Null }) :: Nil) }),
                  "entries" => Value.Obj(Map#{ "totalCount" => Value.Int(1), "nodes" => Value.List(Value.Obj(Map#{ "id" => Value.Str(entryId) }) :: Nil) }) })),
              ((GraphqlTestKit.stringAt(List#{"schedulePublish", "entryId"}, scheduled) == entryId, GraphqlTestKit.valueAt(List#{"schedulePublish", "action"}, scheduled), GraphqlTestKit.valueAt(List#{"schedulePublish", "withDependencies"}, scheduled), GraphqlTestKit.valueAt(List#{"schedulePublish", "status"}, scheduled), GraphqlTestKit.valueAt(List#{"schedulePublish", "requestedBy"}, scheduled), GraphqlTestKit.valueAt(List#{"schedulePublish", "lastError"}, scheduled), GraphqlTestKit.valueAt(List#{"schedulePublish", "overdue"}, scheduled), GraphqlTestKit.valueAt(List#{"schedulePublish", "doneAt"}, scheduled)),
              (GraphqlTestKit.valueAt(List#{"scheduleUnpublish", "action"}, unpublishScheduled), GraphqlTestKit.valueAt(List#{"scheduleUnpublish", "status"}, unpublishScheduled), GraphqlTestKit.valueAt(List#{"scheduleUnpublish", "overdue"}, unpublishScheduled)),

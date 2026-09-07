@@ -229,7 +229,7 @@ mod ContentEntries {
         if (existing#stage == Stage.Published) notify(WebhookEvent.EntryUnpublished, id, existing#typeId) else ();
         get(id)
 
-    // ---- 版 ----
+    // ---- バージョン ----
 
     ///
     /// entry の版。新しい順。
@@ -258,6 +258,31 @@ mod ContentEntries {
         let existing = get(id);
         let owner = ContentTypes.get(existing#typeId);
         writeDraft(owner, existing, EntryValidation.prune(owner#fields, found#data), expectedVersion)
+
+    ///
+    /// 2 つのバージョンの中身の差分（fromRef → toRef）。中身の比べ方は EntryDiff。
+    ///
+    pub def diff(id: EntryId, fromRef: VersionRef, toRef: VersionRef): List[FieldChange] \ DbRead + CmsErr + Tenant + Session =
+        Session.require(Permission.ReadDraft);
+        let existing = get(id);
+        let owner = ContentTypes.get(existing#typeId);
+        EntryDiff.diff(owner#fields, versionData(existing, fromRef), versionData(existing, toRef))
+
+    ///
+    /// バージョンの参照が指す中身。DRAFT は今の下書き、PUBLISHED は公開中の中身（未公開なら notFound）、
+    /// versionId はそのバージョンの中身（他の entry の物なら notFound）。
+    ///
+    pub def versionData(existing: Entry, versionRef: VersionRef): EntryData \ DbRead + CmsErr + Tenant = match versionRef {
+        case VersionRef.Draft     => existing#data
+        case VersionRef.Published =>
+            EntriesQueries.findEntryByStage({ id = EntryId.text(existing#id), stage = EntryRows.stageToDb(Stage.Published), projectId = Tenant.currentId() })
+                |> Option.map(EntryRows.toEntry(Stage.Published)) |> Option.map(published -> published#data)
+                |> CmsErr.orNotFound(Entity.Entry, "${existing#id} (published)")
+        case VersionRef.Version(versionId) =>
+            EntriesQueries.findVersion({ id = VersionId.toInt64(versionId), projectId = Tenant.currentId() }) |> Option.map(EntryRows.toVersion)
+                |> Option.filter(version -> version#entryId == existing#id) |> Option.map(version -> version#data)
+                |> CmsErr.orNotFound(Entity.Version, "${versionId}")
+    }
 
     // ---- 部品 ----
 

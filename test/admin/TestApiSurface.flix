@@ -45,9 +45,11 @@ mod TestApiSurface {
                 "Asset: id url fileName mime size width height alt status createdAt usedBy" ::
                 "AssetPage: nodes totalCount" ::
                 "ContentType: id apiId kind name singular plural previewUrl fields createdAt updatedAt" ::
-                "Entry: id typeId version stage fields publishedAt createdAt updatedAt versions" ::
+                "DiffLine: kind text" ::
+                "Entry: id typeId version stage fields publishedAt createdAt updatedAt versions diff" ::
                 "EntryPage: nodes totalCount" ::
                 "EntryVersion: id version reason author fields createdAt" ::
+                "FieldChange: path kind before after children lines" ::
                 "FieldConfig: maxLength sourceField min max integer options" ::
                 "FieldDef: id apiId name kind many required unique localized targetTypeId parentFieldId children config position" ::
                 "Impact: breaks cascades" ::

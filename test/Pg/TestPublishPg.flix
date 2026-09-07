@@ -83,6 +83,75 @@ mod TestPublishPg {
         }));
         Assert.assertEq(expected = Ok(Ok((VersionReason.Save, Some(Json.JString("New")), Some(Json.JString("Old")), 3, Err(CmsFailure.NotFound(Entity.Version, "1"))))), result)
 
+    /// 差分: CHANGED の entry で PUBLISHED → DRAFT を取ると、変えたフィールド 1 件だけ出る。未公開の entry の PUBLISHED は notFound。
+    ///
+    ///   create(Old/old) → publish → update(title: New) → diff(PUBLISHED, DRAFT) = [title: Old → New]
+    @Test
+    def testPgDiffPublishedToDraft(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"d1", "d2"}, () -> {
+            let blogs = blogsForPublish();
+            let created = ContentEntries.create(blogs, None, titled("Old", "old"));
+            let unpublished = ContentEntries.create(blogs, None, titled("Alone", "alone"));
+            let published = ContentEntries.publish(created#id, "tester", false);
+            discard ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("New"))}), published#version);
+            let changed = ContentEntries.diff(created#id, VersionRef.Published, VersionRef.Draft);
+            let missing = CmsErr.runWithResult(() -> ContentEntries.diff(unpublished#id, VersionRef.Published, VersionRef.Draft));
+            (changed, missing)
+        }));
+        Assert.assertEq(expected = Ok(Ok((
+            FieldChange.FieldChange("title", Change.Changed(Json.JString("Old"), Json.JString("New"))) :: Nil,
+            Err(CmsFailure.NotFound(Entity.Entry, "d2 (published)"))))), result)
+
+    /// 差分: versionId 同士で restore 前後の差が読める。restore した後の下書きは元のバージョンと同じ（差分無し）。他の entry のバージョンは notFound。
+    ///
+    ///   create(Old) → saveVersion(v1) → update(New) → saveVersion(v2) → restore(v1)
+    ///     diff(v1, v2) = [title: Old → New] / diff(v1, DRAFT) = [] / other の diff(v1, DRAFT) = notFound
+    @Test
+    def testPgDiffBetweenVersions(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"b1", "b2"}, () -> {
+            let blogs = blogsForPublish();
+            let created = ContentEntries.create(blogs, None, titled("Old", "old"));
+            let other = ContentEntries.create(blogs, None, titled("Other", "other"));
+            let first = ContentEntries.saveVersion(created#id, "tester");
+            let edited = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("New"))}), created#version);
+            let second = ContentEntries.saveVersion(created#id, "tester");
+            discard ContentEntries.restoreVersion(created#id, first#id, edited#version);
+            let between = ContentEntries.diff(created#id, VersionRef.Version(first#id), VersionRef.Version(second#id));
+            let restored = ContentEntries.diff(created#id, VersionRef.Version(first#id), VersionRef.Draft);
+            let foreign = CmsErr.runWithResult(() -> ContentEntries.diff(other#id, VersionRef.Version(first#id), VersionRef.Draft));
+            (between, restored, foreign)
+        }));
+        Assert.assertEq(expected = Ok(Ok((
+            FieldChange.FieldChange("title", Change.Changed(Json.JString("Old"), Json.JString("New"))) :: Nil,
+            Nil,
+            Err(CmsFailure.NotFound(Entity.Version, "1"))))), result)
+
+    /// 差分（GraphQL 越し）: RICH_TEXT の差分は TEXT で lines が出る。versionId を渡す形も通る。
+    ///
+    ///   createEntry(body: "a") → publishEntry → updateEntry(body: "b") → saveVersion
+    ///     diff(PUBLISHED → DRAFT) = [body TEXT: - a / + b] / diff(versionId → DRAFT) = []
+    @Test
+    def testPgDiffRichTextViaAdminApi(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
+            let ask = PgTestSupport.askOwner(schema);
+            let typeId = GraphqlTestKit.stringAt(List#{"createContentType", "id"}, ask("mutation { createContentType(input: { apiId: \"posts\", name: \"投稿\" }) { id } }"));
+            discard ask("mutation { addField(typeId: \"${typeId}\", input: { apiId: \"body\", name: \"本文\", kind: RICH_TEXT }) { id } }");
+            let docOf = text -> "{ type: \"doc\", content: [{ type: \"paragraph\", content: [{ type: \"text\", text: \"${text}\" }] }] }";
+            let created = ask("mutation { createEntry(typeId: \"${typeId}\", fields: { body: ${docOf("a")} }) { id version } }");
+            let entryId = GraphqlTestKit.stringAt(List#{"createEntry", "id"}, created);
+            let published = ask("mutation { publishEntry(id: \"${entryId}\") { version } }");
+            discard ask("mutation { updateEntry(id: \"${entryId}\", fields: { body: ${docOf("b")} }, expectedVersion: ${GraphqlTestKit.intAt(List#{"publishEntry", "version"}, published)}) { version } }");
+            let saved = ask("mutation { saveVersion(id: \"${entryId}\") { id } }");
+            let versionId = GraphqlTestKit.stringAt(List#{"saveVersion", "id"}, saved);
+            ask("{ entry(id: \"${entryId}\") { text: diff(from: { stage: PUBLISHED }, to: { stage: DRAFT }) { path kind before after children { path } lines { kind text } } same: diff(from: { versionId: \"${versionId}\" }, to: { stage: DRAFT }) { path } } }")
+        });
+        Assert.assertEq(
+            expected = (Value.Obj(Map#{ "entry" => Value.Obj(Map#{
+                "text" => Value.List(Value.Obj(Map#{ "path" => Value.Str("body"), "kind" => Value.Str("TEXT"), "before" => Value.Null, "after" => Value.Null, "children" => Value.Null,
+                    "lines" => Value.List(Value.Obj(Map#{ "kind" => Value.Str("DEL"), "text" => Value.Str("a") }) :: Value.Obj(Map#{ "kind" => Value.Str("ADD"), "text" => Value.Str("b") }) :: Nil) }) :: Nil),
+                "same" => Value.List(Nil) }) }), None),
+            outcome)
+
     /// 復元した下書きは公開し直せる。公開側は復元した中身になり、CHANGED は消える。
     ///
     ///   create(Old/old) → publish → update(New/new) → publish → restore(最初の公開の版) → publish ✓ → 公開側 = Old

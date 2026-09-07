@@ -4,7 +4,7 @@
 mod GeneratedAdmin {
 
     /// 生成元の SDL 本文（改行は LF）。GeneratedCheck が SDL ファイルと照合する
-    pub def sdlText(): String = "\"\"\"任意の JSON 値。entry の中身（フィールドの apiId → 値）に使う\"\"\"\nscalar JSON\n\n\"\"\"管理 API。content type とフィールドの定義と、entry を読み書きする。形は固定で、コンテンツ API は定義から実行時に組む\"\"\"\ntype Query {\n  \"\"\"全 content type。apiId 順\"\"\"\n  contentTypes: [ContentType!]!\n  \"\"\"id か apiId で 1 つ。無ければ null\"\"\"\n  contentType(id: ID, apiId: String): ContentType\n  \"\"\"型の entry の一覧。更新が新しい順。search は下書きの中身に含む文字列\"\"\"\n  entries(typeId: ID!, search: String, first: Int = 50, skip: Int = 0): EntryPage!\n  \"\"\"entry 1 つ。無ければ null\"\"\"\n  entry(id: ID!): Entry\n  \"\"\"asset の一覧。新しい順。アップロード途中（PENDING）の物も出る\"\"\"\n  assets(first: Int = 50, skip: Int = 0): AssetPage!\n  \"\"\"asset 1 つ。無ければ null\"\"\"\n  asset(id: ID!): Asset\n  \"\"\"公開できるか。書き込まない。violations が空なら publishEntry は通る（unique は押した瞬間の競合を除く）\"\"\"\n  publishCheck(id: ID!): PublishReport!\n  \"\"\"操作の影響。取り下げ・削除で壊れる参照元と、公開で一緒に動く参照先\"\"\"\n  impact(id: ID!, action: ImpactAction!): Impact!\n\n  \"\"\"自分。ログインしていなければ null。organizations と projects は自分が触れる物だけ\"\"\"\n  me: Me\n  \"\"\"今のプロジェクトのメンバー（owner だけ）\"\"\"\n  members: [Member!]!\n  \"\"\"今のプロジェクトの招待（owner だけ）\"\"\"\n  invitations: [Invitation!]!\n  \"\"\"今のプロジェクトの API キー（owner だけ）。生の鍵は出ない\"\"\"\n  apiKeys: [ApiKey!]!\n  \"\"\"今のプロジェクトの Webhook（owner だけ）。secret は出ない\"\"\"\n  webhooks: [Webhook!]!\n  \"\"\"Webhook の配信の記録。新しい順（owner だけ）\"\"\"\n  webhookDeliveries(webhookId: ID!, first: Int = 20): [WebhookDelivery!]!\n  \"\"\"予約公開の一覧。新しい順。entryId を渡せばその entry の物だけ\"\"\"\n  schedules(entryId: ID, first: Int = 50): [Schedule!]!\n}\n\n\"\"\"入力の 1 つの誤り。path は GraphQL の入力に対応（\"fields.title\" など）\"\"\"\ntype Violation {\n  path: String!\n  message: String!\n}\n\n\"\"\"公開の検査結果（dry-run）\"\"\"\ntype PublishReport {\n  ok: Boolean!\n  \"\"\"required / unique / 参照の消失 / asset の未完了。全部一度に\"\"\"\n  violations: [Violation!]!\n  \"\"\"未公開の参照先。withDependencies: true で一緒に公開できる\"\"\"\n  unpublishedDependencies: [Entry!]!\n}\n\nenum ImpactAction {\n  PUBLISH\n  UNPUBLISH\n  DELETE\n}\n\n\"\"\"この entry を参照している 1 つ\"\"\"\ntype Referrer {\n  entry: Entry!\n  \"\"\"参照しているフィールドの apiId。本文内のリンクなら RICH_TEXT のフィールド\"\"\"\n  via: String!\n  \"\"\"参照している側のどの中身か\"\"\"\n  stage: ContentStage!\n}\n\n\"\"\"中身の段階\"\"\"\nenum ContentStage {\n  DRAFT\n  PUBLISHED\n}\n\n\"\"\"操作の影響\"\"\"\ntype Impact {\n  \"\"\"壊れる（参照先を失う）entry。取り下げ・削除の前に見せる\"\"\"\n  breaks: [Referrer!]!\n  \"\"\"一緒に動く entry。公開なら先に公開される未公開の参照先\"\"\"\n  cascades: [Entry!]!\n}\n\ntype Mutation {\n  createContentType(input: ContentTypeInput!): ContentType!\n  updateContentType(id: ID!, input: ContentTypePatch!): ContentType!\n  \"\"\"フィールドごと消す\"\"\"\n  deleteContentType(id: ID!): ID!\n  \"\"\"末尾に足す\"\"\"\n  addField(typeId: ID!, input: FieldInput!): FieldDef!\n  updateField(id: ID!, input: FieldPatch!): FieldDef!\n  removeField(id: ID!): ID!\n  \"\"\"ids の順に並べ直す。型の全フィールドを過不足なく渡す\"\"\"\n  reorderFields(typeId: ID!, ids: [ID!]!): ContentType!\n\n  \"\"\"下書きを作る。id を渡せば（移行用）それを使い、無ければ振る。fields は apiId → 値\"\"\"\n  createEntry(typeId: ID!, fields: JSON!, id: ID): Entry!\n  \"\"\"下書きを直す。fields のキーだけ上書きし、null で消す。expectedVersion が今の version と違えば CONFLICT\"\"\"\n  updateEntry(id: ID!, fields: JSON!, expectedVersion: Int!): Entry!\n  \"\"\"ゴミ箱へ（soft delete）。公開中なら公開も取り下げる\"\"\"\n  deleteEntry(id: ID!): ID!\n  \"\"\"下書きを公開する。required と unique と参照先の公開はここで検査する。公開中なら公開側を下書きで上書きする。\n  withDependencies なら未公開の参照先を先に公開する\"\"\"\n  publishEntry(id: ID!, withDependencies: Boolean = false): Entry!\n  \"\"\"公開を取り下げる。下書きは残る\"\"\"\n  unpublishEntry(id: ID!): Entry!\n  \"\"\"今の下書きを版として残す\"\"\"\n  saveVersion(id: ID!): EntryVersion!\n  \"\"\"版の中身を下書きに戻す。expectedVersion は updateEntry と同じ\"\"\"\n  restoreVersion(id: ID!, versionId: ID!, expectedVersion: Int!): Entry!\n\n  \"\"\"asset の置き先（署名付き PUT URL）を発行する。ブラウザが Content-Type / Content-Length を宣言どおりにして PUT し、\n  終わったら confirmAsset を呼ぶ。URL は expiresInSeconds で切れる\"\"\"\n  createUploadUrl(input: UploadInput!): Upload!\n  \"\"\"置いた事をストレージで確かめて READY にする。画像なら寸法を渡す。置かれていなければエラー\"\"\"\n  confirmAsset(id: ID!, input: AssetConfirmInput): Asset!\n  \"\"\"alt を変える。ファイルの差し替えは新しい asset を作る\"\"\"\n  updateAsset(id: ID!, input: AssetPatch!): Asset!\n  \"\"\"消す。entry（下書き・公開・richText の画像を含む）が使っていればエラー\"\"\"\n  deleteAsset(id: ID!): ID!\n\n  \"\"\"プレビュートークンを発行する（readDraft を持つ人）。X-Preview-Token で渡すと、その entry と参照先の下書きをコンテンツ API で読める。\n  既定 1 時間、最長 1 日。url は型の previewUrl の {id} を置き換えて ?preview=<token> を付けた物（previewUrl が無ければ null）\"\"\"\n  createPreviewToken(entryId: ID!, expiresInSeconds: Int = 3600): PreviewToken!\n\n  \"\"\"時刻を指定して公開する（publishEntries を持つ人）。at は ISO 8601。同じ entry の未実行の公開の予約は置き換わる。\n  時刻が来たら通常の publishEntry と同じ検査で公開し、通らなければ FAILED に理由が残る\"\"\"\n  schedulePublish(entryId: ID!, at: String!, withDependencies: Boolean = false): Schedule!\n  \"\"\"時刻を指定して取り下げる\"\"\"\n  scheduleUnpublish(entryId: ID!, at: String!): Schedule!\n  \"\"\"未実行の予約を取り消す\"\"\"\n  cancelSchedule(id: ID!): Schedule!\n\n  \"\"\"今のプロジェクトの公開範囲（owner だけ）\"\"\"\n  updateProjectVisibility(visibility: Visibility!): Project!\n  \"\"\"email で招待する（owner だけ）。初回ログインで役割が付く\"\"\"\n  inviteMember(email: String!, role: Role!): Invitation!\n  cancelInvitation(id: ID!): ID!\n  \"\"\"役割を変える（owner だけ）。最後の owner は降格できない\"\"\"\n  changeMemberRole(userId: ID!, role: Role!): Member!\n  \"\"\"外す（owner だけ）。最後の owner は外せない\"\"\"\n  removeMember(userId: ID!): ID!\n  \"\"\"API キーを発行する（owner だけ）。key はこの応答でしか見えない。scope が WRITE なら role が必須（自分の役割より高くはできない）、\n  それ以外で role を渡すとエラー。expiresAt（ISO 8601）を渡すとその時刻で切れる。無ければ期限無し\"\"\"\n  createApiKey(name: String!, scope: ApiKeyScope!, role: Role, expiresAt: String): IssuedApiKey!\n  \"\"\"失効する（owner だけ）\"\"\"\n  revokeApiKey(id: ID!): ID!\n\n  \"\"\"Webhook を作る（owner だけ）。secret はこの応答でしか見えない\"\"\"\n  createWebhook(input: WebhookInput!): IssuedWebhook!\n  \"\"\"Webhook を直す（owner だけ）。secret は変わらない\"\"\"\n  updateWebhook(id: ID!, input: WebhookInput!): Webhook!\n  \"\"\"Webhook を消す。配信の記録も消える（owner だけ）\"\"\"\n  deleteWebhook(id: ID!): ID!\n  \"\"\"配信をもう 1 度送る（owner だけ）。failed や delivered の物にも使える\"\"\"\n  redeliverWebhook(deliveryId: ID!): WebhookDelivery!\n}\n\nenum ScheduleAction {\n  PUBLISH\n  UNPUBLISH\n}\n\nenum ScheduleStatus {\n  \"\"\"時刻を待っている\"\"\"\n  PENDING\n  \"\"\"実行中\"\"\"\n  RUNNING\n  DONE\n  \"\"\"実行したが通らなかった。lastError に理由\"\"\"\n  FAILED\n  CANCELLED\n}\n\n\"\"\"予約公開 1 つ。id は時刻順（ULID）\"\"\"\ntype Schedule {\n  id: ID!\n  entryId: ID!\n  action: ScheduleAction!\n  runAt: String!\n  withDependencies: Boolean!\n  status: ScheduleStatus!\n  requestedBy: String!\n  lastError: String!\n  \"\"\"runAt が既に過ぎている（次の周ですぐ実行される）。管理画面が「過去の時刻です」と出すため\"\"\"\n  overdue: Boolean!\n  createdAt: String!\n  doneAt: String\n}\n\n\"\"\"下書きを公開前のサイトで見るためのトークン\"\"\"\ntype PreviewToken {\n  token: String!\n  entryId: ID!\n  expiresAt: String!\n  \"\"\"管理画面が開くプレビューの URL。型に previewUrl が無ければ null\"\"\"\n  url: String\n}\n\n\"\"\"Webhook が知らせる出来事\"\"\"\nenum WebhookEvent {\n  \"\"\"entry を公開した（再公開も）\"\"\"\n  ENTRY_PUBLISHED\n  \"\"\"公開を取り下げた\"\"\"\n  ENTRY_UNPUBLISHED\n  \"\"\"entry をゴミ箱へ入れた\"\"\"\n  ENTRY_DELETED\n  \"\"\"content type かフィールドが変わった\"\"\"\n  SCHEMA_CHANGED\n}\n\n\"\"\"配信 1 回の状態\"\"\"\nenum DeliveryStatus {\n  \"\"\"送る番を待っている（再試行待ちも）\"\"\"\n  PENDING\n  \"\"\"送っている最中\"\"\"\n  SENDING\n  \"\"\"2xx が返った\"\"\"\n  DELIVERED\n  \"\"\"回数を使い切った。redeliverWebhook で送り直せる\"\"\"\n  FAILED\n}\n\ninput WebhookInput {\n  name: String!\n  \"\"\"POST 先。http:// か https://\"\"\"\n  url: String!\n  events: [WebhookEvent!]!\n  active: Boolean = true\n}\n\n\"\"\"登録した Webhook。受け手は X-Cms-Signature（sha256=HMAC(secret, \"timestamp.body\")）で照合する\"\"\"\ntype Webhook {\n  id: ID!\n  name: String!\n  url: String!\n  events: [WebhookEvent!]!\n  active: Boolean!\n  createdAt: String!\n}\n\ntype IssuedWebhook {\n  webhook: Webhook!\n  \"\"\"HMAC の鍵。この応答でしか見えない\"\"\"\n  secret: String!\n}\n\n\"\"\"配信の記録 1 つ。id は時刻順（ULID）\"\"\"\ntype WebhookDelivery {\n  id: ID!\n  event: WebhookEvent!\n  status: DeliveryStatus!\n  \"\"\"送った回数\"\"\"\n  attempts: Int!\n  nextAttemptAt: String!\n  \"\"\"最後の HTTP のステータス。応答が無ければ 0\"\"\"\n  lastStatus: Int!\n  lastError: String!\n  createdAt: String!\n  deliveredAt: String\n}\n\n\"\"\"プロジェクトでの役割。上が下を含む\"\"\"\nenum Role {\n  VIEWER\n  WRITER\n  EDITOR\n  OWNER\n}\n\n\"\"\"組織での役割。OWNER は組織の全プロジェクトの owner でもある\"\"\"\nenum OrgRole {\n  MEMBER\n  OWNER\n}\n\n\"\"\"API キーの範囲\"\"\"\nenum ApiKeyScope {\n  \"\"\"公開中の中身\"\"\"\n  READ\n  \"\"\"下書きも\"\"\"\n  READ_DRAFT\n  \"\"\"管理 API を role の範囲で叩ける（CI やスクリプト用）。メンバー・鍵・プロジェクトの管理はできない\"\"\"\n  WRITE\n}\n\n\"\"\"プロジェクトの見え方\"\"\"\nenum Visibility {\n  \"\"\"公開中の中身はキー無しで読める\"\"\"\n  PUBLIC\n  \"\"\"read のキーが要る\"\"\"\n  PRIVATE\n}\n\n\"\"\"自分\"\"\"\ntype Me {\n  id: ID!\n  email: String!\n  name: String!\n  \"\"\"今のプロジェクトでの役割（無ければ空）と、できる事\"\"\"\n  roles: [Role!]!\n  permissions: [String!]!\n  organizations: [OrganizationMembership!]!\n  projects: [ProjectMembership!]!\n}\n\ntype Organization {\n  id: ID!\n  name: String!\n}\n\ntype OrganizationMembership {\n  organization: Organization!\n  role: OrgRole!\n}\n\ntype Project {\n  id: ID!\n  slug: String!\n  name: String!\n  visibility: Visibility!\n}\n\ntype ProjectMembership {\n  project: Project!\n  role: Role!\n}\n\ntype Member {\n  userId: ID!\n  email: String!\n  name: String!\n  role: Role!\n}\n\ntype Invitation {\n  id: ID!\n  email: String!\n  role: Role!\n  createdAt: String!\n}\n\ntype ApiKey {\n  id: ID!\n  name: String!\n  scope: ApiKeyScope!\n  \"\"\"WRITE の鍵の役割。それ以外は null\"\"\"\n  role: Role\n  createdAt: String!\n  \"\"\"期限。無ければ null\"\"\"\n  expiresAt: String\n  \"\"\"最後に管理 API で使った時刻（1 分の粒度）。公開 API の読み取りでは更新しない\"\"\"\n  lastUsedAt: String\n  revokedAt: String\n}\n\n\"\"\"発行した鍵。key はこの時だけ\"\"\"\ntype IssuedApiKey {\n  id: ID!\n  name: String!\n  scope: ApiKeyScope!\n  role: Role\n  expiresAt: String\n  key: String!\n}\n\n\"\"\"asset の状態\"\"\"\nenum AssetStatus {\n  \"\"\"URL を出したが、まだ置かれた事を確かめていない\"\"\"\n  PENDING\n  \"\"\"置かれ、confirmAsset が確かめた\"\"\"\n  READY\n}\n\n\"\"\"画像やファイル。中身はストレージにあり、url で配信する\"\"\"\ntype Asset {\n  id: ID!\n  \"\"\"配信 URL\"\"\"\n  url: String!\n  fileName: String!\n  mime: String!\n  \"\"\"バイト数\"\"\"\n  size: Int!\n  \"\"\"画像の幅。画像でなければ null\"\"\"\n  width: Int\n  height: Int\n  alt: String!\n  status: AssetStatus!\n  createdAt: String!\n  \"\"\"この asset を使っている entry（下書き・公開・本文の image）\"\"\"\n  usedBy: [Entry!]!\n}\n\n\"\"\"asset の一覧の 1 ページ\"\"\"\ntype AssetPage {\n  nodes: [Asset!]!\n  totalCount: Int!\n}\n\n\"\"\"署名付き URL の発行結果\"\"\"\ntype Upload {\n  asset: Asset!\n  \"\"\"ここへ PUT する\"\"\"\n  uploadUrl: String!\n  \"\"\"URL の有効期限（秒）\"\"\"\n  expiresInSeconds: Int!\n}\n\ninput UploadInput {\n  fileName: String!\n  \"\"\"image/png などの許可リストにある物\"\"\"\n  mime: String!\n  \"\"\"バイト数。20 MB まで\"\"\"\n  size: Int!\n}\n\ninput AssetConfirmInput {\n  width: Int\n  height: Int\n  alt: String\n}\n\ninput AssetPatch {\n  alt: String!\n}\n\n\"\"\"entry の状態\"\"\"\nenum EntryStage {\n  \"\"\"まだ公開していない\"\"\"\n  DRAFT\n  \"\"\"公開中で、下書きは公開した物と同じ\"\"\"\n  PUBLISHED\n  \"\"\"公開中で、公開後に下書きが進んでいる（再公開で反映）\"\"\"\n  CHANGED\n}\n\n\"\"\"entry。fields は下書きの中身\"\"\"\ntype Entry {\n  id: ID!\n  typeId: ID!\n  \"\"\"楽観ロックの版。updateEntry に expectedVersion として渡す\"\"\"\n  version: Int!\n  stage: EntryStage!\n  fields: JSON!\n  publishedAt: String\n  createdAt: String!\n  updatedAt: String!\n  \"\"\"版。新しい順。公開時と saveVersion で積む\"\"\"\n  versions: [EntryVersion!]!\n}\n\n\"\"\"版を積んだ理由\"\"\"\nenum VersionReason {\n  PUBLISH\n  SAVE\n}\n\n\"\"\"entry の版\"\"\"\ntype EntryVersion {\n  id: ID!\n  \"\"\"積んだ時点の entry の version\"\"\"\n  version: Int!\n  reason: VersionReason!\n  author: String!\n  fields: JSON!\n  createdAt: String!\n}\n\n\"\"\"entry の一覧の 1 ページ\"\"\"\ntype EntryPage {\n  nodes: [Entry!]!\n  totalCount: Int!\n}\n\n\"\"\"content type の種別\"\"\"\nenum TypeKind {\n  \"\"\"entry を何件でも持つ\"\"\"\n  COLLECTION\n  \"\"\"entry を 1 件だけ持つ（サイト設定など）\"\"\"\n  SINGLETON\n}\n\n\"\"\"フィールドの種類\"\"\"\nenum FieldKind {\n  TEXT\n  TEXT_AREA\n  \"\"\"URL に使う識別子。sourceField から自動生成し、型の中で一意\"\"\"\n  SLUG\n  NUMBER\n  BOOLEAN\n  \"\"\"決まった選択肢から。config.options。many: true なら複数選べる（値は選択肢の配列）\"\"\"\n  SELECT\n  \"\"\"他の entry への参照。targetTypeId が参照先の型\"\"\"\n  REFERENCE\n  \"\"\"子フィールドを持つ入れ子。値は子の apiId → 値のオブジェクト\"\"\"\n  OBJECT\n  \"\"\"複数の OBJECT（variant）から選んで並べる。常に配列。値は { blockType: <variant の apiId>, ... } の並び\"\"\"\n  BLOCKS\n  \"\"\"画像やファイル。値は asset の id（createUploadUrl で作った物）。コンテンツ API では Asset に展開する\"\"\"\n  ASSET\n  \"\"\"構造化した本文。値は ProseMirror の doc（{ type: \"doc\", content: [...] }）。配列にできない。コンテンツ API では json / html / text\"\"\"\n  RICH_TEXT\n  \"\"\"日時。値は ISO 8601 の文字列（\"2026-09-08T09:00:00Z\"）。日付だけ（\"2026-09-08\"）は UTC の 0 時に揃える。コンテンツ API では _eq / _gt / _gte / _lt / _lte で絞れ、並び替えできる\"\"\"\n  DATE\n}\n\n\"\"\"content type。apiId がコンテンツ API のクエリ名の元になる\"\"\"\ntype ContentType {\n  id: ID!\n  \"\"\"lowerCamel の識別子（\"blogs\"）\"\"\"\n  apiId: String!\n  kind: TypeKind!\n  \"\"\"管理画面に出す名前\"\"\"\n  name: String!\n  \"\"\"コンテンツ API の型名（\"Blog\"）\"\"\"\n  singular: String!\n  \"\"\"コンテンツ API の一覧クエリ名（\"blogs\"）\"\"\"\n  plural: String!\n  \"\"\"管理画面のプレビューが開く URL。{id} を entry の id に置き換える\"\"\"\n  previewUrl: String\n  \"\"\"最上位のフィールド。position 順。子は children\"\"\"\n  fields: [FieldDef!]!\n  createdAt: String!\n  updatedAt: String!\n}\n\n\"\"\"フィールドの定義\"\"\"\ntype FieldDef {\n  id: ID!\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  \"\"\"配列か\"\"\"\n  many: Boolean!\n  \"\"\"公開時に値が要るか\"\"\"\n  required: Boolean!\n  \"\"\"型の中で値が一意か\"\"\"\n  unique: Boolean!\n  \"\"\"言語ごとに値を持つか\"\"\"\n  localized: Boolean!\n  \"\"\"REFERENCE の参照先の型\"\"\"\n  targetTypeId: ID\n  \"\"\"OBJECT / BLOCKS の子なら親のフィールド\"\"\"\n  parentFieldId: ID\n  \"\"\"OBJECT の子フィールド、BLOCKS の variant。position 順\"\"\"\n  children: [FieldDef!]!\n  config: FieldConfig!\n  \"\"\"兄弟の中の並び順\"\"\"\n  position: Int!\n}\n\n\"\"\"kind ごとの設定。使わない項目は null\"\"\"\ntype FieldConfig {\n  \"\"\"TEXT / TEXT_AREA / SLUG の最大文字数\"\"\"\n  maxLength: Int\n  \"\"\"SLUG の元にするフィールドの apiId\"\"\"\n  sourceField: String\n  \"\"\"NUMBER の下限\"\"\"\n  min: Float\n  \"\"\"NUMBER の上限\"\"\"\n  max: Float\n  \"\"\"NUMBER を整数に限るか\"\"\"\n  integer: Boolean\n  \"\"\"SELECT の選択肢。UPPER_SNAKE\"\"\"\n  options: [String!]\n}\n\ninput ContentTypeInput {\n  apiId: String!\n  kind: TypeKind = COLLECTION\n  name: String!\n  \"\"\"省くと apiId から導く\"\"\"\n  singular: String\n  \"\"\"省くと apiId から導く\"\"\"\n  plural: String\n  previewUrl: String\n}\n\n\"\"\"触らない項目は省く\"\"\"\ninput ContentTypePatch {\n  name: String\n  singular: String\n  plural: String\n  previewUrl: String\n}\n\ninput FieldInput {\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  many: Boolean = false\n  required: Boolean = false\n  unique: Boolean = false\n  localized: Boolean = false\n  \"\"\"REFERENCE の参照先の型\"\"\"\n  targetTypeId: ID\n  \"\"\"OBJECT / BLOCKS の子として足すなら親のフィールド\"\"\"\n  parentFieldId: ID\n  config: FieldConfigInput\n}\n\n\"\"\"触らない項目は省く。config は丸ごと置き換える\"\"\"\ninput FieldPatch {\n  name: String\n  required: Boolean\n  unique: Boolean\n  localized: Boolean\n  config: FieldConfigInput\n}\n\ninput FieldConfigInput {\n  maxLength: Int\n  sourceField: String\n  min: Float\n  max: Float\n  integer: Boolean\n  options: [String!]\n}\n"
+    pub def sdlText(): String = "\"\"\"任意の JSON 値。entry の中身（フィールドの apiId → 値）に使う\"\"\"\nscalar JSON\n\n\"\"\"管理 API。content type とフィールドの定義と、entry を読み書きする。形は固定で、コンテンツ API は定義から実行時に組む\"\"\"\ntype Query {\n  \"\"\"全 content type。apiId 順\"\"\"\n  contentTypes: [ContentType!]!\n  \"\"\"id か apiId で 1 つ。無ければ null\"\"\"\n  contentType(id: ID, apiId: String): ContentType\n  \"\"\"型の entry の一覧。更新が新しい順。search は下書きの中身に含む文字列\"\"\"\n  entries(typeId: ID!, search: String, first: Int = 50, skip: Int = 0): EntryPage!\n  \"\"\"entry 1 つ。無ければ null\"\"\"\n  entry(id: ID!): Entry\n  \"\"\"asset の一覧。新しい順。アップロード途中（PENDING）の物も出る\"\"\"\n  assets(first: Int = 50, skip: Int = 0): AssetPage!\n  \"\"\"asset 1 つ。無ければ null\"\"\"\n  asset(id: ID!): Asset\n  \"\"\"公開できるか。書き込まない。violations が空なら publishEntry は通る（unique は押した瞬間の競合を除く）\"\"\"\n  publishCheck(id: ID!): PublishReport!\n  \"\"\"操作の影響。取り下げ・削除で壊れる参照元と、公開で一緒に動く参照先\"\"\"\n  impact(id: ID!, action: ImpactAction!): Impact!\n\n  \"\"\"自分。ログインしていなければ null。organizations と projects は自分が触れる物だけ\"\"\"\n  me: Me\n  \"\"\"今のプロジェクトのメンバー（owner だけ）\"\"\"\n  members: [Member!]!\n  \"\"\"今のプロジェクトの招待（owner だけ）\"\"\"\n  invitations: [Invitation!]!\n  \"\"\"今のプロジェクトの API キー（owner だけ）。生の鍵は出ない\"\"\"\n  apiKeys: [ApiKey!]!\n  \"\"\"今のプロジェクトの Webhook（owner だけ）。secret は出ない\"\"\"\n  webhooks: [Webhook!]!\n  \"\"\"Webhook の配信の記録。新しい順（owner だけ）\"\"\"\n  webhookDeliveries(webhookId: ID!, first: Int = 20): [WebhookDelivery!]!\n  \"\"\"予約公開の一覧。新しい順。entryId を渡せばその entry の物だけ\"\"\"\n  schedules(entryId: ID, first: Int = 50): [Schedule!]!\n}\n\n\"\"\"入力の 1 つの誤り。path は GraphQL の入力に対応（\"fields.title\" など）\"\"\"\ntype Violation {\n  path: String!\n  message: String!\n}\n\n\"\"\"公開の検査結果（dry-run）\"\"\"\ntype PublishReport {\n  ok: Boolean!\n  \"\"\"required / unique / 参照の消失 / asset の未完了。全部一度に\"\"\"\n  violations: [Violation!]!\n  \"\"\"未公開の参照先。withDependencies: true で一緒に公開できる\"\"\"\n  unpublishedDependencies: [Entry!]!\n}\n\nenum ImpactAction {\n  PUBLISH\n  UNPUBLISH\n  DELETE\n}\n\n\"\"\"この entry を参照している 1 つ\"\"\"\ntype Referrer {\n  entry: Entry!\n  \"\"\"参照しているフィールドの apiId。本文内のリンクなら RICH_TEXT のフィールド\"\"\"\n  via: String!\n  \"\"\"参照している側のどの中身か\"\"\"\n  stage: ContentStage!\n}\n\n\"\"\"中身の段階\"\"\"\nenum ContentStage {\n  DRAFT\n  PUBLISHED\n}\n\n\"\"\"操作の影響\"\"\"\ntype Impact {\n  \"\"\"壊れる（参照先を失う）entry。取り下げ・削除の前に見せる\"\"\"\n  breaks: [Referrer!]!\n  \"\"\"一緒に動く entry。公開なら先に公開される未公開の参照先\"\"\"\n  cascades: [Entry!]!\n}\n\ntype Mutation {\n  createContentType(input: ContentTypeInput!): ContentType!\n  updateContentType(id: ID!, input: ContentTypePatch!): ContentType!\n  \"\"\"フィールドごと消す\"\"\"\n  deleteContentType(id: ID!): ID!\n  \"\"\"末尾に足す\"\"\"\n  addField(typeId: ID!, input: FieldInput!): FieldDef!\n  updateField(id: ID!, input: FieldPatch!): FieldDef!\n  removeField(id: ID!): ID!\n  \"\"\"ids の順に並べ直す。型の全フィールドを過不足なく渡す\"\"\"\n  reorderFields(typeId: ID!, ids: [ID!]!): ContentType!\n\n  \"\"\"下書きを作る。id を渡せば（移行用）それを使い、無ければ振る。fields は apiId → 値\"\"\"\n  createEntry(typeId: ID!, fields: JSON!, id: ID): Entry!\n  \"\"\"下書きを直す。fields のキーだけ上書きし、null で消す。expectedVersion が今の version と違えば CONFLICT\"\"\"\n  updateEntry(id: ID!, fields: JSON!, expectedVersion: Int!): Entry!\n  \"\"\"ゴミ箱へ（soft delete）。公開中なら公開も取り下げる\"\"\"\n  deleteEntry(id: ID!): ID!\n  \"\"\"下書きを公開する。required と unique と参照先の公開はここで検査する。公開中なら公開側を下書きで上書きする。\n  withDependencies なら未公開の参照先を先に公開する\"\"\"\n  publishEntry(id: ID!, withDependencies: Boolean = false): Entry!\n  \"\"\"公開を取り下げる。下書きは残る\"\"\"\n  unpublishEntry(id: ID!): Entry!\n  \"\"\"今の下書きをバージョンとして残す\"\"\"\n  saveVersion(id: ID!): EntryVersion!\n  \"\"\"バージョンの中身を下書きに戻す。expectedVersion は updateEntry と同じ\"\"\"\n  restoreVersion(id: ID!, versionId: ID!, expectedVersion: Int!): Entry!\n\n  \"\"\"asset の置き先（署名付き PUT URL）を発行する。ブラウザが Content-Type / Content-Length を宣言どおりにして PUT し、\n  終わったら confirmAsset を呼ぶ。URL は expiresInSeconds で切れる\"\"\"\n  createUploadUrl(input: UploadInput!): Upload!\n  \"\"\"置いた事をストレージで確かめて READY にする。画像なら寸法を渡す。置かれていなければエラー\"\"\"\n  confirmAsset(id: ID!, input: AssetConfirmInput): Asset!\n  \"\"\"alt を変える。ファイルの差し替えは新しい asset を作る\"\"\"\n  updateAsset(id: ID!, input: AssetPatch!): Asset!\n  \"\"\"消す。entry（下書き・公開・richText の画像を含む）が使っていればエラー\"\"\"\n  deleteAsset(id: ID!): ID!\n\n  \"\"\"プレビュートークンを発行する（readDraft を持つ人）。X-Preview-Token で渡すと、その entry と参照先の下書きをコンテンツ API で読める。\n  既定 1 時間、最長 1 日。url は型の previewUrl の {id} を置き換えて ?preview=<token> を付けた物（previewUrl が無ければ null）\"\"\"\n  createPreviewToken(entryId: ID!, expiresInSeconds: Int = 3600): PreviewToken!\n\n  \"\"\"時刻を指定して公開する（publishEntries を持つ人）。at は ISO 8601。同じ entry の未実行の公開の予約は置き換わる。\n  時刻が来たら通常の publishEntry と同じ検査で公開し、通らなければ FAILED に理由が残る\"\"\"\n  schedulePublish(entryId: ID!, at: String!, withDependencies: Boolean = false): Schedule!\n  \"\"\"時刻を指定して取り下げる\"\"\"\n  scheduleUnpublish(entryId: ID!, at: String!): Schedule!\n  \"\"\"未実行の予約を取り消す\"\"\"\n  cancelSchedule(id: ID!): Schedule!\n\n  \"\"\"今のプロジェクトの公開範囲（owner だけ）\"\"\"\n  updateProjectVisibility(visibility: Visibility!): Project!\n  \"\"\"email で招待する（owner だけ）。初回ログインで役割が付く\"\"\"\n  inviteMember(email: String!, role: Role!): Invitation!\n  cancelInvitation(id: ID!): ID!\n  \"\"\"役割を変える（owner だけ）。最後の owner は降格できない\"\"\"\n  changeMemberRole(userId: ID!, role: Role!): Member!\n  \"\"\"外す（owner だけ）。最後の owner は外せない\"\"\"\n  removeMember(userId: ID!): ID!\n  \"\"\"API キーを発行する（owner だけ）。key はこの応答でしか見えない。scope が WRITE なら role が必須（自分の役割より高くはできない）、\n  それ以外で role を渡すとエラー。expiresAt（ISO 8601）を渡すとその時刻で切れる。無ければ期限無し\"\"\"\n  createApiKey(name: String!, scope: ApiKeyScope!, role: Role, expiresAt: String): IssuedApiKey!\n  \"\"\"失効する（owner だけ）\"\"\"\n  revokeApiKey(id: ID!): ID!\n\n  \"\"\"Webhook を作る（owner だけ）。secret はこの応答でしか見えない\"\"\"\n  createWebhook(input: WebhookInput!): IssuedWebhook!\n  \"\"\"Webhook を直す（owner だけ）。secret は変わらない\"\"\"\n  updateWebhook(id: ID!, input: WebhookInput!): Webhook!\n  \"\"\"Webhook を消す。配信の記録も消える（owner だけ）\"\"\"\n  deleteWebhook(id: ID!): ID!\n  \"\"\"配信をもう 1 度送る（owner だけ）。failed や delivered の物にも使える\"\"\"\n  redeliverWebhook(deliveryId: ID!): WebhookDelivery!\n}\n\nenum ScheduleAction {\n  PUBLISH\n  UNPUBLISH\n}\n\nenum ScheduleStatus {\n  \"\"\"時刻を待っている\"\"\"\n  PENDING\n  \"\"\"実行中\"\"\"\n  RUNNING\n  DONE\n  \"\"\"実行したが通らなかった。lastError に理由\"\"\"\n  FAILED\n  CANCELLED\n}\n\n\"\"\"予約公開 1 つ。id は時刻順（ULID）\"\"\"\ntype Schedule {\n  id: ID!\n  entryId: ID!\n  action: ScheduleAction!\n  runAt: String!\n  withDependencies: Boolean!\n  status: ScheduleStatus!\n  requestedBy: String!\n  lastError: String!\n  \"\"\"runAt が既に過ぎている（次の周ですぐ実行される）。管理画面が「過去の時刻です」と出すため\"\"\"\n  overdue: Boolean!\n  createdAt: String!\n  doneAt: String\n}\n\n\"\"\"下書きを公開前のサイトで見るためのトークン\"\"\"\ntype PreviewToken {\n  token: String!\n  entryId: ID!\n  expiresAt: String!\n  \"\"\"管理画面が開くプレビューの URL。型に previewUrl が無ければ null\"\"\"\n  url: String\n}\n\n\"\"\"Webhook が知らせる出来事\"\"\"\nenum WebhookEvent {\n  \"\"\"entry を公開した（再公開も）\"\"\"\n  ENTRY_PUBLISHED\n  \"\"\"公開を取り下げた\"\"\"\n  ENTRY_UNPUBLISHED\n  \"\"\"entry をゴミ箱へ入れた\"\"\"\n  ENTRY_DELETED\n  \"\"\"content type かフィールドが変わった\"\"\"\n  SCHEMA_CHANGED\n}\n\n\"\"\"配信 1 回の状態\"\"\"\nenum DeliveryStatus {\n  \"\"\"送る番を待っている（再試行待ちも）\"\"\"\n  PENDING\n  \"\"\"送っている最中\"\"\"\n  SENDING\n  \"\"\"2xx が返った\"\"\"\n  DELIVERED\n  \"\"\"回数を使い切った。redeliverWebhook で送り直せる\"\"\"\n  FAILED\n}\n\ninput WebhookInput {\n  name: String!\n  \"\"\"POST 先。http:// か https://\"\"\"\n  url: String!\n  events: [WebhookEvent!]!\n  active: Boolean = true\n}\n\n\"\"\"登録した Webhook。受け手は X-Cms-Signature（sha256=HMAC(secret, \"timestamp.body\")）で照合する\"\"\"\ntype Webhook {\n  id: ID!\n  name: String!\n  url: String!\n  events: [WebhookEvent!]!\n  active: Boolean!\n  createdAt: String!\n}\n\ntype IssuedWebhook {\n  webhook: Webhook!\n  \"\"\"HMAC の鍵。この応答でしか見えない\"\"\"\n  secret: String!\n}\n\n\"\"\"配信の記録 1 つ。id は時刻順（ULID）\"\"\"\ntype WebhookDelivery {\n  id: ID!\n  event: WebhookEvent!\n  status: DeliveryStatus!\n  \"\"\"送った回数\"\"\"\n  attempts: Int!\n  nextAttemptAt: String!\n  \"\"\"最後の HTTP のステータス。応答が無ければ 0\"\"\"\n  lastStatus: Int!\n  lastError: String!\n  createdAt: String!\n  deliveredAt: String\n}\n\n\"\"\"プロジェクトでの役割。上が下を含む\"\"\"\nenum Role {\n  VIEWER\n  WRITER\n  EDITOR\n  OWNER\n}\n\n\"\"\"組織での役割。OWNER は組織の全プロジェクトの owner でもある\"\"\"\nenum OrgRole {\n  MEMBER\n  OWNER\n}\n\n\"\"\"API キーの範囲\"\"\"\nenum ApiKeyScope {\n  \"\"\"公開中の中身\"\"\"\n  READ\n  \"\"\"下書きも\"\"\"\n  READ_DRAFT\n  \"\"\"管理 API を role の範囲で叩ける（CI やスクリプト用）。メンバー・鍵・プロジェクトの管理はできない\"\"\"\n  WRITE\n}\n\n\"\"\"プロジェクトの見え方\"\"\"\nenum Visibility {\n  \"\"\"公開中の中身はキー無しで読める\"\"\"\n  PUBLIC\n  \"\"\"read のキーが要る\"\"\"\n  PRIVATE\n}\n\n\"\"\"自分\"\"\"\ntype Me {\n  id: ID!\n  email: String!\n  name: String!\n  \"\"\"今のプロジェクトでの役割（無ければ空）と、できる事\"\"\"\n  roles: [Role!]!\n  permissions: [String!]!\n  organizations: [OrganizationMembership!]!\n  projects: [ProjectMembership!]!\n}\n\ntype Organization {\n  id: ID!\n  name: String!\n}\n\ntype OrganizationMembership {\n  organization: Organization!\n  role: OrgRole!\n}\n\ntype Project {\n  id: ID!\n  slug: String!\n  name: String!\n  visibility: Visibility!\n}\n\ntype ProjectMembership {\n  project: Project!\n  role: Role!\n}\n\ntype Member {\n  userId: ID!\n  email: String!\n  name: String!\n  role: Role!\n}\n\ntype Invitation {\n  id: ID!\n  email: String!\n  role: Role!\n  createdAt: String!\n}\n\ntype ApiKey {\n  id: ID!\n  name: String!\n  scope: ApiKeyScope!\n  \"\"\"WRITE の鍵の役割。それ以外は null\"\"\"\n  role: Role\n  createdAt: String!\n  \"\"\"期限。無ければ null\"\"\"\n  expiresAt: String\n  \"\"\"最後に管理 API で使った時刻（1 分の粒度）。公開 API の読み取りでは更新しない\"\"\"\n  lastUsedAt: String\n  revokedAt: String\n}\n\n\"\"\"発行した鍵。key はこの時だけ\"\"\"\ntype IssuedApiKey {\n  id: ID!\n  name: String!\n  scope: ApiKeyScope!\n  role: Role\n  expiresAt: String\n  key: String!\n}\n\n\"\"\"asset の状態\"\"\"\nenum AssetStatus {\n  \"\"\"URL を出したが、まだ置かれた事を確かめていない\"\"\"\n  PENDING\n  \"\"\"置かれ、confirmAsset が確かめた\"\"\"\n  READY\n}\n\n\"\"\"画像やファイル。中身はストレージにあり、url で配信する\"\"\"\ntype Asset {\n  id: ID!\n  \"\"\"配信 URL\"\"\"\n  url: String!\n  fileName: String!\n  mime: String!\n  \"\"\"バイト数\"\"\"\n  size: Int!\n  \"\"\"画像の幅。画像でなければ null\"\"\"\n  width: Int\n  height: Int\n  alt: String!\n  status: AssetStatus!\n  createdAt: String!\n  \"\"\"この asset を使っている entry（下書き・公開・本文の image）\"\"\"\n  usedBy: [Entry!]!\n}\n\n\"\"\"asset の一覧の 1 ページ\"\"\"\ntype AssetPage {\n  nodes: [Asset!]!\n  totalCount: Int!\n}\n\n\"\"\"署名付き URL の発行結果\"\"\"\ntype Upload {\n  asset: Asset!\n  \"\"\"ここへ PUT する\"\"\"\n  uploadUrl: String!\n  \"\"\"URL の有効期限（秒）\"\"\"\n  expiresInSeconds: Int!\n}\n\ninput UploadInput {\n  fileName: String!\n  \"\"\"image/png などの許可リストにある物\"\"\"\n  mime: String!\n  \"\"\"バイト数。画像は 20 MB、動画は 200 MB まで\"\"\"\n  size: Int!\n}\n\ninput AssetConfirmInput {\n  width: Int\n  height: Int\n  alt: String\n}\n\ninput AssetPatch {\n  alt: String!\n}\n\n\"\"\"entry の状態\"\"\"\nenum EntryStage {\n  \"\"\"まだ公開していない\"\"\"\n  DRAFT\n  \"\"\"公開中で、下書きは公開した物と同じ\"\"\"\n  PUBLISHED\n  \"\"\"公開中で、公開後に下書きが進んでいる（再公開で反映）\"\"\"\n  CHANGED\n}\n\n\"\"\"entry。fields は下書きの中身\"\"\"\ntype Entry {\n  id: ID!\n  typeId: ID!\n  \"\"\"楽観ロックのバージョン番号。updateEntry に expectedVersion として渡す\"\"\"\n  version: Int!\n  stage: EntryStage!\n  fields: JSON!\n  publishedAt: String\n  createdAt: String!\n  updatedAt: String!\n  \"\"\"バージョン。新しい順。公開時と saveVersion で積む\"\"\"\n  versions: [EntryVersion!]!\n  \"\"\"2 つのバージョンの中身の差分。from → to の向き。同じなら空。定義の position 順で、定義に無いキーは最後\"\"\"\n  diff(from: VersionRef!, to: VersionRef!): [FieldChange!]!\n}\n\n\"\"\"どのバージョンか。versionId か stage のどちらか 1 つ（両方・両方無しは INVALID）。DRAFT は今の下書き、PUBLISHED は公開中の中身（未公開なら NOT_FOUND）\"\"\"\ninput VersionRef {\n  versionId: ID\n  stage: ContentStage\n}\n\n\"\"\"フィールド（か配列の 1 要素）の変わり方\"\"\"\nenum ChangeKind {\n  \"\"\"to にだけある\"\"\"\n  ADDED\n  \"\"\"from にだけある\"\"\"\n  REMOVED\n  \"\"\"値が違う（OBJECT がオブジェクトでなくなった時や BLOCKS の variant が変わった時も）\"\"\"\n  CHANGED\n  \"\"\"OBJECT / BLOCKS / 配列の中で違う。children に中身\"\"\"\n  NESTED\n  \"\"\"RICH_TEXT の Markdown の行差分。lines に中身\"\"\"\n  TEXT\n}\n\n\"\"\"1 つの差分。path は \"hero.headline\" / \"tags[2]\" / \"sections[0].headline\" の形\"\"\"\ntype FieldChange {\n  path: String!\n  kind: ChangeKind!\n  \"\"\"from 側の値。ADDED と NESTED と TEXT では null\"\"\"\n  before: JSON\n  \"\"\"to 側の値。REMOVED と NESTED と TEXT では null\"\"\"\n  after: JSON\n  \"\"\"NESTED の中身。それ以外は null\"\"\"\n  children: [FieldChange!]\n  \"\"\"TEXT の行。それ以外は null\"\"\"\n  lines: [DiffLine!]\n}\n\n\"\"\"行差分の 1 行\"\"\"\nenum LineKind {\n  \"\"\"両方にある\"\"\"\n  SAME\n  \"\"\"to にだけある\"\"\"\n  ADD\n  \"\"\"from にだけある\"\"\"\n  DEL\n}\n\ntype DiffLine {\n  kind: LineKind!\n  text: String!\n}\n\n\"\"\"バージョンを積んだ理由\"\"\"\nenum VersionReason {\n  PUBLISH\n  SAVE\n}\n\n\"\"\"entry のバージョン\"\"\"\ntype EntryVersion {\n  id: ID!\n  \"\"\"積んだ時点の entry の version\"\"\"\n  version: Int!\n  reason: VersionReason!\n  author: String!\n  fields: JSON!\n  createdAt: String!\n}\n\n\"\"\"entry の一覧の 1 ページ\"\"\"\ntype EntryPage {\n  nodes: [Entry!]!\n  totalCount: Int!\n}\n\n\"\"\"content type の種別\"\"\"\nenum TypeKind {\n  \"\"\"entry を何件でも持つ\"\"\"\n  COLLECTION\n  \"\"\"entry を 1 件だけ持つ（サイト設定など）\"\"\"\n  SINGLETON\n}\n\n\"\"\"フィールドの種類\"\"\"\nenum FieldKind {\n  TEXT\n  TEXT_AREA\n  \"\"\"URL に使う識別子。sourceField から自動生成し、型の中で一意\"\"\"\n  SLUG\n  NUMBER\n  BOOLEAN\n  \"\"\"決まった選択肢から。config.options。many: true なら複数選べる（値は選択肢の配列）\"\"\"\n  SELECT\n  \"\"\"他の entry への参照。targetTypeId が参照先の型\"\"\"\n  REFERENCE\n  \"\"\"子フィールドを持つ入れ子。値は子の apiId → 値のオブジェクト\"\"\"\n  OBJECT\n  \"\"\"複数の OBJECT（variant）から選んで並べる。常に配列。値は { blockType: <variant の apiId>, ... } の並び\"\"\"\n  BLOCKS\n  \"\"\"画像やファイル。値は asset の id（createUploadUrl で作った物）。コンテンツ API では Asset に展開する\"\"\"\n  ASSET\n  \"\"\"構造化した本文。値は ProseMirror の doc（{ type: \"doc\", content: [...] }）。配列にできない。コンテンツ API では json / html / text\"\"\"\n  RICH_TEXT\n  \"\"\"日時。値は ISO 8601 の文字列（\"2026-09-08T09:00:00Z\"）。日付だけ（\"2026-09-08\"）は UTC の 0 時に揃える。コンテンツ API では _eq / _gt / _gte / _lt / _lte で絞れ、並び替えできる\"\"\"\n  DATE\n}\n\n\"\"\"content type。apiId がコンテンツ API のクエリ名の元になる\"\"\"\ntype ContentType {\n  id: ID!\n  \"\"\"lowerCamel の識別子（\"blogs\"）\"\"\"\n  apiId: String!\n  kind: TypeKind!\n  \"\"\"管理画面に出す名前\"\"\"\n  name: String!\n  \"\"\"コンテンツ API の型名（\"Blog\"）\"\"\"\n  singular: String!\n  \"\"\"コンテンツ API の一覧クエリ名（\"blogs\"）\"\"\"\n  plural: String!\n  \"\"\"管理画面のプレビューが開く URL。{id} を entry の id に置き換える\"\"\"\n  previewUrl: String\n  \"\"\"最上位のフィールド。position 順。子は children\"\"\"\n  fields: [FieldDef!]!\n  createdAt: String!\n  updatedAt: String!\n}\n\n\"\"\"フィールドの定義\"\"\"\ntype FieldDef {\n  id: ID!\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  \"\"\"配列か\"\"\"\n  many: Boolean!\n  \"\"\"公開時に値が要るか\"\"\"\n  required: Boolean!\n  \"\"\"型の中で値が一意か\"\"\"\n  unique: Boolean!\n  \"\"\"言語ごとに値を持つか\"\"\"\n  localized: Boolean!\n  \"\"\"REFERENCE の参照先の型\"\"\"\n  targetTypeId: ID\n  \"\"\"OBJECT / BLOCKS の子なら親のフィールド\"\"\"\n  parentFieldId: ID\n  \"\"\"OBJECT の子フィールド、BLOCKS の variant。position 順\"\"\"\n  children: [FieldDef!]!\n  config: FieldConfig!\n  \"\"\"兄弟の中の並び順\"\"\"\n  position: Int!\n}\n\n\"\"\"kind ごとの設定。使わない項目は null\"\"\"\ntype FieldConfig {\n  \"\"\"TEXT / TEXT_AREA / SLUG の最大文字数\"\"\"\n  maxLength: Int\n  \"\"\"SLUG の元にするフィールドの apiId\"\"\"\n  sourceField: String\n  \"\"\"NUMBER の下限\"\"\"\n  min: Float\n  \"\"\"NUMBER の上限\"\"\"\n  max: Float\n  \"\"\"NUMBER を整数に限るか\"\"\"\n  integer: Boolean\n  \"\"\"SELECT の選択肢。UPPER_SNAKE\"\"\"\n  options: [String!]\n}\n\ninput ContentTypeInput {\n  apiId: String!\n  kind: TypeKind = COLLECTION\n  name: String!\n  \"\"\"省くと apiId から導く\"\"\"\n  singular: String\n  \"\"\"省くと apiId から導く\"\"\"\n  plural: String\n  previewUrl: String\n}\n\n\"\"\"触らない項目は省く\"\"\"\ninput ContentTypePatch {\n  name: String\n  singular: String\n  plural: String\n  previewUrl: String\n}\n\ninput FieldInput {\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  many: Boolean = false\n  required: Boolean = false\n  unique: Boolean = false\n  localized: Boolean = false\n  \"\"\"REFERENCE の参照先の型\"\"\"\n  targetTypeId: ID\n  \"\"\"OBJECT / BLOCKS の子として足すなら親のフィールド\"\"\"\n  parentFieldId: ID\n  config: FieldConfigInput\n}\n\n\"\"\"触らない項目は省く。config は丸ごと置き換える\"\"\"\ninput FieldPatch {\n  name: String\n  required: Boolean\n  unique: Boolean\n  localized: Boolean\n  config: FieldConfigInput\n}\n\ninput FieldConfigInput {\n  maxLength: Int\n  sourceField: String\n  min: Float\n  max: Float\n  integer: Boolean\n  options: [String!]\n}\n"
 
     /// 生成した schemagen のバージョン
     pub def generatorVersion(): String = "6"
@@ -177,7 +177,39 @@ mod GeneratedAdmin {
     pub def entryStageCodec(): GqlCodec[EntryStage] =
         GqlCodec.enumOf("EntryStage", value -> match value { case EntryStage.Draft => "DRAFT" case EntryStage.Published => "PUBLISHED" case EntryStage.Changed => "CHANGED" }, EntryStage.Draft :: EntryStage.Published :: EntryStage.Changed :: Nil) |> GqlCodec.describe("entry の状態") |> GqlCodec.describeValue(EntryStage.Draft, "まだ公開していない") |> GqlCodec.describeValue(EntryStage.Published, "公開中で、下書きは公開した物と同じ") |> GqlCodec.describeValue(EntryStage.Changed, "公開中で、公開後に下書きが進んでいる（再公開で反映）")
 
-    /// enum VersionReason。版を積んだ理由
+    /// enum ChangeKind。フィールド（か配列の 1 要素）の変わり方
+    pub enum ChangeKind with Eq, Order, ToString {
+        /// to にだけある
+        case Added
+        /// from にだけある
+        case Removed
+        /// 値が違う（OBJECT がオブジェクトでなくなった時や BLOCKS の variant が変わった時も）
+        case Changed
+        /// OBJECT / BLOCKS / 配列の中で違う。children に中身
+        case Nested
+        /// RICH_TEXT の Markdown の行差分。lines に中身
+        case Text
+    }
+
+    /// ChangeKind の Codec
+    pub def changeKindCodec(): GqlCodec[ChangeKind] =
+        GqlCodec.enumOf("ChangeKind", value -> match value { case ChangeKind.Added => "ADDED" case ChangeKind.Removed => "REMOVED" case ChangeKind.Changed => "CHANGED" case ChangeKind.Nested => "NESTED" case ChangeKind.Text => "TEXT" }, ChangeKind.Added :: ChangeKind.Removed :: ChangeKind.Changed :: ChangeKind.Nested :: ChangeKind.Text :: Nil) |> GqlCodec.describe("フィールド（か配列の 1 要素）の変わり方") |> GqlCodec.describeValue(ChangeKind.Added, "to にだけある") |> GqlCodec.describeValue(ChangeKind.Removed, "from にだけある") |> GqlCodec.describeValue(ChangeKind.Changed, "値が違う（OBJECT がオブジェクトでなくなった時や BLOCKS の variant が変わった時も）") |> GqlCodec.describeValue(ChangeKind.Nested, "OBJECT / BLOCKS / 配列の中で違う。children に中身") |> GqlCodec.describeValue(ChangeKind.Text, "RICH_TEXT の Markdown の行差分。lines に中身")
+
+    /// enum LineKind。行差分の 1 行
+    pub enum LineKind with Eq, Order, ToString {
+        /// 両方にある
+        case Same
+        /// to にだけある
+        case Add
+        /// from にだけある
+        case Del
+    }
+
+    /// LineKind の Codec
+    pub def lineKindCodec(): GqlCodec[LineKind] =
+        GqlCodec.enumOf("LineKind", value -> match value { case LineKind.Same => "SAME" case LineKind.Add => "ADD" case LineKind.Del => "DEL" }, LineKind.Same :: LineKind.Add :: LineKind.Del :: Nil) |> GqlCodec.describe("行差分の 1 行") |> GqlCodec.describeValue(LineKind.Same, "両方にある") |> GqlCodec.describeValue(LineKind.Add, "to にだけある") |> GqlCodec.describeValue(LineKind.Del, "from にだけある")
+
+    /// enum VersionReason。バージョンを積んだ理由
     pub enum VersionReason with Eq, Order, ToString {
         /// PUBLISH
         case Publish
@@ -187,7 +219,7 @@ mod GeneratedAdmin {
 
     /// VersionReason の Codec
     pub def versionReasonCodec(): GqlCodec[VersionReason] =
-        GqlCodec.enumOf("VersionReason", value -> match value { case VersionReason.Publish => "PUBLISH" case VersionReason.Save => "SAVE" }, VersionReason.Publish :: VersionReason.Save :: Nil) |> GqlCodec.describe("版を積んだ理由")
+        GqlCodec.enumOf("VersionReason", value -> match value { case VersionReason.Publish => "PUBLISH" case VersionReason.Save => "SAVE" }, VersionReason.Publish :: VersionReason.Save :: Nil) |> GqlCodec.describe("バージョンを積んだ理由")
 
     /// enum TypeKind。content type の種別
     pub enum TypeKind with Eq, Order, ToString {
@@ -252,7 +284,7 @@ mod GeneratedAdmin {
     pub def uploadInputCodec(): GqlCodec[UploadInput] =
         let f0 = Schema.arg("fileName", GqlCodec.string());
         let f1 = Schema.arg("mime", GqlCodec.string()) |> Arg.withDescription("image/png などの許可リストにある物");
-        let f2 = Schema.arg("size", GqlCodec.int32()) |> Arg.withDescription("バイト数。20 MB まで");
+        let f2 = Schema.arg("size", GqlCodec.int32()) |> Arg.withDescription("バイト数。画像は 20 MB、動画は 200 MB まで");
         GqlCodec.inputObject("UploadInput", Arg.info(f0) :: Arg.info(f1) :: Arg.info(f2) :: Nil, fields ->
             forM (v0 <- Arg.decodeField(f0, fields); v1 <- Arg.decodeField(f1, fields); v2 <- Arg.decodeField(f2, fields)) yield { fileName = v0, mime = v1, size = v2 })
 
@@ -275,6 +307,16 @@ mod GeneratedAdmin {
         let f0 = Schema.arg("alt", GqlCodec.string());
         GqlCodec.inputObject("AssetPatch", Arg.info(f0) :: Nil, fields ->
             forM (v0 <- Arg.decodeField(f0, fields)) yield { alt = v0 })
+
+    /// input VersionRef
+    pub type alias VersionRef = { versionId = Option[Id], stage = Option[ContentStage] }
+
+    /// VersionRef の Codec
+    pub def versionRefCodec(): GqlCodec[VersionRef] =
+        let f0 = Schema.arg("versionId", GqlCodec.option(GqlCodec.id()));
+        let f1 = Schema.arg("stage", GqlCodec.option(contentStageCodec()));
+        GqlCodec.inputObject("VersionRef", Arg.info(f0) :: Arg.info(f1) :: Nil, fields ->
+            forM (v0 <- Arg.decodeField(f0, fields); v1 <- Arg.decodeField(f1, fields)) yield { versionId = v0, stage = v1 }) |> GqlCodec.describe("どのバージョンか。versionId か stage のどちらか 1 つ（両方・両方無しは INVALID）。DRAFT は今の下書き、PUBLISHED は公開中の中身（未公開なら NOT_FOUND）")
 
     /// input ContentTypeInput
     pub type alias ContentTypeInput = { apiId = String, kind = Option[TypeKind], name = String, singular = Option[String], plural = Option[String], previewUrl = Option[String] }
@@ -655,6 +697,24 @@ mod GeneratedAdmin {
     pub type alias EntryUpdatedAtResolver[ef: Eff] = Context -> Entry -> Result[FieldError, String] \ ef
     /// Entry.versions
     pub type alias EntryVersionsResolver[ef: Eff] = Context -> Entry -> Result[FieldError, List[EntryVersion]] \ ef
+    /// Entry.diff
+    pub type alias EntryDiffResolver[ef: Eff] = Context -> Entry -> VersionRef -> VersionRef -> Result[FieldError, List[FieldChange]] \ ef
+    /// FieldChange.path
+    pub type alias FieldChangePathResolver[ef: Eff] = Context -> FieldChange -> Result[FieldError, String] \ ef
+    /// FieldChange.kind
+    pub type alias FieldChangeKindResolver[ef: Eff] = Context -> FieldChange -> Result[FieldError, ChangeKind] \ ef
+    /// FieldChange.before
+    pub type alias FieldChangeBeforeResolver[ef: Eff] = Context -> FieldChange -> Result[FieldError, Option[Value]] \ ef
+    /// FieldChange.after
+    pub type alias FieldChangeAfterResolver[ef: Eff] = Context -> FieldChange -> Result[FieldError, Option[Value]] \ ef
+    /// FieldChange.children
+    pub type alias FieldChangeChildrenResolver[ef: Eff] = Context -> FieldChange -> Result[FieldError, Option[List[FieldChange]]] \ ef
+    /// FieldChange.lines
+    pub type alias FieldChangeLinesResolver[ef: Eff] = Context -> FieldChange -> Result[FieldError, Option[List[DiffLine]]] \ ef
+    /// DiffLine.kind
+    pub type alias DiffLineKindResolver[ef: Eff] = Context -> DiffLine -> Result[FieldError, LineKind] \ ef
+    /// DiffLine.text
+    pub type alias DiffLineTextResolver[ef: Eff] = Context -> DiffLine -> Result[FieldError, String] \ ef
     /// EntryVersion.id
     pub type alias EntryVersionIdResolver[ef: Eff] = Context -> EntryVersion -> Result[FieldError, Id] \ ef
     /// EntryVersion.version
@@ -977,7 +1037,24 @@ mod GeneratedAdmin {
         publishedAt = EntryPublishedAtResolver[ef],
         createdAt = EntryCreatedAtResolver[ef],
         updatedAt = EntryUpdatedAtResolver[ef],
-        versions = EntryVersionsResolver[ef]
+        versions = EntryVersionsResolver[ef],
+        diff = EntryDiffResolver[ef]
+    }
+
+    /// type FieldChange のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
+    pub type alias FieldChangeResolvers[ef: Eff] = {
+        path = FieldChangePathResolver[ef],
+        kind = FieldChangeKindResolver[ef],
+        before = FieldChangeBeforeResolver[ef],
+        after = FieldChangeAfterResolver[ef],
+        children = FieldChangeChildrenResolver[ef],
+        lines = FieldChangeLinesResolver[ef]
+    }
+
+    /// type DiffLine のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
+    pub type alias DiffLineResolvers[ef: Eff] = {
+        kind = DiffLineKindResolver[ef],
+        text = DiffLineTextResolver[ef]
     }
 
     /// type EntryVersion のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
@@ -1305,7 +1382,7 @@ mod GeneratedAdmin {
         expiresInSeconds = (_context, src) -> Ok(src#expiresInSeconds)
     }
 
-    /// type Entry の既定リゾルバ。source の同名ラベルをそのまま返す。versions は含まない（オブジェクト型を返すか、引数を持つ）
+    /// type Entry の既定リゾルバ。source の同名ラベルをそのまま返す。versions, diff は含まない（オブジェクト型を返すか、引数を持つ）
     pub def entryDefaults(): {
         id = Context -> { id = Id | r0 } -> Result[FieldError, Id] \ ef,
         typeId = Context -> { typeId = Id | r1 } -> Result[FieldError, Id] \ ef,
@@ -1324,6 +1401,28 @@ mod GeneratedAdmin {
         publishedAt = (_context, src) -> Ok(src#publishedAt),
         createdAt = (_context, src) -> Ok(src#createdAt),
         updatedAt = (_context, src) -> Ok(src#updatedAt)
+    }
+
+    /// type FieldChange の既定リゾルバ。source の同名ラベルをそのまま返す。children, lines は含まない（オブジェクト型を返すか、引数を持つ）
+    pub def fieldChangeDefaults(): {
+        path = Context -> { path = String | r0 } -> Result[FieldError, String] \ ef,
+        kind = Context -> { kind = ChangeKind | r1 } -> Result[FieldError, ChangeKind] \ ef,
+        before = Context -> { before = Option[Value] | r2 } -> Result[FieldError, Option[Value]] \ ef,
+        after = Context -> { after = Option[Value] | r3 } -> Result[FieldError, Option[Value]] \ ef
+    } = {
+        path = (_context, src) -> Ok(src#path),
+        kind = (_context, src) -> Ok(src#kind),
+        before = (_context, src) -> Ok(src#before),
+        after = (_context, src) -> Ok(src#after)
+    }
+
+    /// type DiffLine の既定リゾルバ。source の同名ラベルをそのまま返す
+    pub def diffLineDefaults(): {
+        kind = Context -> { kind = LineKind | r0 } -> Result[FieldError, LineKind] \ ef,
+        text = Context -> { text = String | r1 } -> Result[FieldError, String] \ ef
+    } = {
+        kind = (_context, src) -> Ok(src#kind),
+        text = (_context, src) -> Ok(src#text)
     }
 
     /// type EntryVersion の既定リゾルバ。source の同名ラベルをそのまま返す
@@ -1443,6 +1542,8 @@ mod GeneratedAdmin {
         assetPage = AssetPageResolvers[ef],
         upload = UploadResolvers[ef],
         entry = EntryResolvers[ef],
+        fieldChange = FieldChangeResolvers[ef],
+        diffLine = DiffLineResolvers[ef],
         entryVersion = EntryVersionResolvers[ef],
         entryPage = EntryPageResolvers[ef],
         contentType = ContentTypeResolvers[ef],
@@ -1671,14 +1772,14 @@ mod GeneratedAdmin {
             {
                 let arg0 = Schema.arg("id", GqlCodec.id());
                 Schema.fieldRaw("saveVersion", Arg.info(arg0) :: Nil, Out.obj(entryVersionType(resolvers)), (context, _src, args) ->
-                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#saveVersion)(context, v0)) yield result) |> Field.withDescription("今の下書きを版として残す")
+                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#saveVersion)(context, v0)) yield result) |> Field.withDescription("今の下書きをバージョンとして残す")
             } ::
             {
                 let arg0 = Schema.arg("id", GqlCodec.id());
                 let arg1 = Schema.arg("versionId", GqlCodec.id());
                 let arg2 = Schema.arg("expectedVersion", GqlCodec.int32());
                 Schema.fieldRaw("restoreVersion", Arg.info(arg0) :: Arg.info(arg1) :: Arg.info(arg2) :: Nil, Out.obj(entryType(resolvers)), (context, _src, args) ->
-                    forM (v0 <- Arg.decode(arg0, args); v1 <- Arg.decode(arg1, args); v2 <- Arg.decode(arg2, args); result <- (resolvers#mutationRoot#restoreVersion)(context, v0, v1, v2)) yield result) |> Field.withDescription("版の中身を下書きに戻す。expectedVersion は updateEntry と同じ")
+                    forM (v0 <- Arg.decode(arg0, args); v1 <- Arg.decode(arg1, args); v2 <- Arg.decode(arg2, args); result <- (resolvers#mutationRoot#restoreVersion)(context, v0, v1, v2)) yield result) |> Field.withDescription("バージョンの中身を下書きに戻す。expectedVersion は updateEntry と同じ")
             } ::
             {
                 let arg0 = Schema.arg("input", uploadInputCodec());
@@ -2235,7 +2336,7 @@ mod GeneratedAdmin {
             } ::
             {
                 Schema.fieldRaw("version", Nil, Out.int32(), (context, src, _args) ->
-                    (resolvers#entry#version)(context, src)) |> Field.withDescription("楽観ロックの版。updateEntry に expectedVersion として渡す")
+                    (resolvers#entry#version)(context, src)) |> Field.withDescription("楽観ロックのバージョン番号。updateEntry に expectedVersion として渡す")
             } ::
             {
                 Schema.fieldRaw("stage", Nil, Out.scalar(entryStageCodec()), (context, src, _args) ->
@@ -2259,9 +2360,57 @@ mod GeneratedAdmin {
             } ::
             {
                 Schema.fieldRaw("versions", Nil, Out.list(Out.obj(entryVersionType(resolvers))), (context, src, _args) ->
-                    (resolvers#entry#versions)(context, src)) |> Field.withDescription("版。新しい順。公開時と saveVersion で積む")
+                    (resolvers#entry#versions)(context, src)) |> Field.withDescription("バージョン。新しい順。公開時と saveVersion で積む")
+            } ::
+            {
+                let arg0 = Schema.arg("from", versionRefCodec());
+                let arg1 = Schema.arg("to", versionRefCodec());
+                Schema.fieldRaw("diff", Arg.info(arg0) :: Arg.info(arg1) :: Nil, Out.list(Out.obj(fieldChangeType(resolvers))), (context, src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); v1 <- Arg.decode(arg1, args); result <- (resolvers#entry#diff)(context, src, v0, v1)) yield result) |> Field.withDescription("2 つのバージョンの中身の差分。from → to の向き。同じなら空。定義の position 順で、定義に無いキーは最後")
             } ::
             Nil) |> ObjectType.withDescription("entry。fields は下書きの中身")
+
+    /// type FieldChange
+    def fieldChangeType(resolvers: Resolvers[ef]): ObjectType[FieldChange, ef] =
+        Schema.objectType("FieldChange", () ->
+            {
+                Schema.fieldRaw("path", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#fieldChange#path)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("kind", Nil, Out.scalar(changeKindCodec()), (context, src, _args) ->
+                    (resolvers#fieldChange#kind)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("before", Nil, Out.option(Out.json()), (context, src, _args) ->
+                    (resolvers#fieldChange#before)(context, src)) |> Field.withDescription("from 側の値。ADDED と NESTED と TEXT では null")
+            } ::
+            {
+                Schema.fieldRaw("after", Nil, Out.option(Out.json()), (context, src, _args) ->
+                    (resolvers#fieldChange#after)(context, src)) |> Field.withDescription("to 側の値。REMOVED と NESTED と TEXT では null")
+            } ::
+            {
+                Schema.fieldRaw("children", Nil, Out.option(Out.list(Out.obj(fieldChangeType(resolvers)))), (context, src, _args) ->
+                    (resolvers#fieldChange#children)(context, src)) |> Field.withDescription("NESTED の中身。それ以外は null")
+            } ::
+            {
+                Schema.fieldRaw("lines", Nil, Out.option(Out.list(Out.obj(diffLineType(resolvers)))), (context, src, _args) ->
+                    (resolvers#fieldChange#lines)(context, src)) |> Field.withDescription("TEXT の行。それ以外は null")
+            } ::
+            Nil) |> ObjectType.withDescription("1 つの差分。path は \"hero.headline\" / \"tags[2]\" / \"sections[0].headline\" の形")
+
+    /// type DiffLine
+    def diffLineType(resolvers: Resolvers[ef]): ObjectType[DiffLine, ef] =
+        Schema.objectType("DiffLine", () ->
+            {
+                Schema.fieldRaw("kind", Nil, Out.scalar(lineKindCodec()), (context, src, _args) ->
+                    (resolvers#diffLine#kind)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("text", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#diffLine#text)(context, src))
+            } ::
+            Nil)
 
     /// type EntryVersion
     def entryVersionType(resolvers: Resolvers[ef]): ObjectType[EntryVersion, ef] =
@@ -2290,7 +2439,7 @@ mod GeneratedAdmin {
                 Schema.fieldRaw("createdAt", Nil, Out.string(), (context, src, _args) ->
                     (resolvers#entryVersion#createdAt)(context, src))
             } ::
-            Nil) |> ObjectType.withDescription("entry の版")
+            Nil) |> ObjectType.withDescription("entry のバージョン")
 
     /// type EntryPage
     def entryPageType(resolvers: Resolvers[ef]): ObjectType[EntryPage, ef] =

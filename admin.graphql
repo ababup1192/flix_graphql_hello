@@ -103,9 +103,9 @@ type Mutation {
   publishEntry(id: ID!, withDependencies: Boolean = false): Entry!
   """公開を取り下げる。下書きは残る"""
   unpublishEntry(id: ID!): Entry!
-  """今の下書きを版として残す"""
+  """今の下書きをバージョンとして残す"""
   saveVersion(id: ID!): EntryVersion!
-  """版の中身を下書きに戻す。expectedVersion は updateEntry と同じ"""
+  """バージョンの中身を下書きに戻す。expectedVersion は updateEntry と同じ"""
   restoreVersion(id: ID!, versionId: ID!, expectedVersion: Int!): Entry!
 
   """asset の置き先（署名付き PUT URL）を発行する。ブラウザが Content-Type / Content-Length を宣言どおりにして PUT し、
@@ -409,7 +409,7 @@ input UploadInput {
   fileName: String!
   """image/png などの許可リストにある物"""
   mime: String!
-  """バイト数。20 MB まで"""
+  """バイト数。画像は 20 MB、動画は 200 MB まで"""
   size: Int!
 }
 
@@ -437,24 +437,75 @@ enum EntryStage {
 type Entry {
   id: ID!
   typeId: ID!
-  """楽観ロックの版。updateEntry に expectedVersion として渡す"""
+  """楽観ロックのバージョン番号。updateEntry に expectedVersion として渡す"""
   version: Int!
   stage: EntryStage!
   fields: JSON!
   publishedAt: String
   createdAt: String!
   updatedAt: String!
-  """版。新しい順。公開時と saveVersion で積む"""
+  """バージョン。新しい順。公開時と saveVersion で積む"""
   versions: [EntryVersion!]!
+  """2 つのバージョンの中身の差分。from → to の向き。同じなら空。定義の position 順で、定義に無いキーは最後"""
+  diff(from: VersionRef!, to: VersionRef!): [FieldChange!]!
 }
 
-"""版を積んだ理由"""
+"""どのバージョンか。versionId か stage のどちらか 1 つ（両方・両方無しは INVALID）。DRAFT は今の下書き、PUBLISHED は公開中の中身（未公開なら NOT_FOUND）"""
+input VersionRef {
+  versionId: ID
+  stage: ContentStage
+}
+
+"""フィールド（か配列の 1 要素）の変わり方"""
+enum ChangeKind {
+  """to にだけある"""
+  ADDED
+  """from にだけある"""
+  REMOVED
+  """値が違う（OBJECT がオブジェクトでなくなった時や BLOCKS の variant が変わった時も）"""
+  CHANGED
+  """OBJECT / BLOCKS / 配列の中で違う。children に中身"""
+  NESTED
+  """RICH_TEXT の Markdown の行差分。lines に中身"""
+  TEXT
+}
+
+"""1 つの差分。path は "hero.headline" / "tags[2]" / "sections[0].headline" の形"""
+type FieldChange {
+  path: String!
+  kind: ChangeKind!
+  """from 側の値。ADDED と NESTED と TEXT では null"""
+  before: JSON
+  """to 側の値。REMOVED と NESTED と TEXT では null"""
+  after: JSON
+  """NESTED の中身。それ以外は null"""
+  children: [FieldChange!]
+  """TEXT の行。それ以外は null"""
+  lines: [DiffLine!]
+}
+
+"""行差分の 1 行"""
+enum LineKind {
+  """両方にある"""
+  SAME
+  """to にだけある"""
+  ADD
+  """from にだけある"""
+  DEL
+}
+
+type DiffLine {
+  kind: LineKind!
+  text: String!
+}
+
+"""バージョンを積んだ理由"""
 enum VersionReason {
   PUBLISH
   SAVE
 }
 
-"""entry の版"""
+"""entry のバージョン"""
 type EntryVersion {
   id: ID!
   """積んだ時点の entry の version"""

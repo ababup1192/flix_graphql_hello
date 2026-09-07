@@ -33,6 +33,8 @@ mod AdminSchema {
             impact        = ImpactResolvers.resolvers(),
             entry        = EntryResolvers.resolvers(),
             entryVersion = EntryVersionResolvers.resolvers(),
+            fieldChange  = FieldChangeResolvers.resolvers(),
+            diffLine     = DiffLineResolvers.resolvers(),
             entryPage    = EntryPageResolvers.resolvers(),
             contentType  = ContentTypeResolvers.resolvers(),
             fieldDef     = FieldDefResolvers.resolvers(),

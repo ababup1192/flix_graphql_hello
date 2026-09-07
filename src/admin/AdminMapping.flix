@@ -291,6 +291,64 @@ mod AdminMapping {
 
     pub def idOfVersion(id: VersionId): Id = Id.Id(Int64.toString(VersionId.toInt64(id)))
 
+    ///
+    /// input VersionRef をドメインに。versionId と stage のどちらか 1 つ。両方や両方無しは invalid（argument は引数名）。
+    ///
+    pub def versionRefOf(argument: String, input: GeneratedAdmin.VersionRef): VersionRef \ CmsErr = match (input#versionId, input#stage) {
+        case (Some(id), None)                                => VersionRef.Version(versionId(argument, id))
+        case (None, Some(GeneratedAdmin.ContentStage.Draft))     => VersionRef.Draft
+        case (None, Some(GeneratedAdmin.ContentStage.Published)) => VersionRef.Published
+        case _                                               => CmsErr.invalid(Violation.Violation(argument, "versionId か stage のどちらか 1 つにしてください") :: Nil)
+    }
+
+    // ---- 差分 ----
+
+    pub def changeKindToGql(change: Change): GeneratedAdmin.ChangeKind = match change {
+        case Change.Added(_)      => GeneratedAdmin.ChangeKind.Added
+        case Change.Removed(_)    => GeneratedAdmin.ChangeKind.Removed
+        case Change.Changed(_, _) => GeneratedAdmin.ChangeKind.Changed
+        case Change.Nested(_)     => GeneratedAdmin.ChangeKind.Nested
+        case Change.Text(_)       => GeneratedAdmin.ChangeKind.Text
+    }
+
+    /// from 側の値。REMOVED と CHANGED だけ。
+    pub def changeBefore(change: Change): Option[Value] = match change {
+        case Change.Removed(before)    => Some(JsonValue.fromJson(before))
+        case Change.Changed(before, _) => Some(JsonValue.fromJson(before))
+        case _                         => None
+    }
+
+    /// to 側の値。ADDED と CHANGED だけ。
+    pub def changeAfter(change: Change): Option[Value] = match change {
+        case Change.Added(after)      => Some(JsonValue.fromJson(after))
+        case Change.Changed(_, after) => Some(JsonValue.fromJson(after))
+        case _                        => None
+    }
+
+    /// NESTED の中身。
+    pub def changeChildren(change: Change): Option[List[FieldChange]] = match change {
+        case Change.Nested(children) => Some(children)
+        case _                       => None
+    }
+
+    /// TEXT の行。
+    pub def changeLines(change: Change): Option[List[DiffLine]] = match change {
+        case Change.Text(lines) => Some(lines)
+        case _                  => None
+    }
+
+    pub def lineKindToGql(line: DiffLine): GeneratedAdmin.LineKind = match line {
+        case DiffLine.Same(_) => GeneratedAdmin.LineKind.Same
+        case DiffLine.Add(_)  => GeneratedAdmin.LineKind.Add
+        case DiffLine.Del(_)  => GeneratedAdmin.LineKind.Del
+    }
+
+    pub def lineText(line: DiffLine): String = match line {
+        case DiffLine.Same(text) => text
+        case DiffLine.Add(text)  => text
+        case DiffLine.Del(text)  => text
+    }
+
 
     // ---- JSON ----
 

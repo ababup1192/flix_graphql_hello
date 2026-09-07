@@ -115,6 +115,18 @@ mod VersionId {
 }
 
 ///
+/// どのバージョンの中身か。差分（ContentEntries.diff）の両端に使う。
+///
+pub enum VersionRef with Eq, ToString {
+    /// 今の下書き
+    case Draft
+    /// 公開中の中身（未公開なら無い）
+    case Published
+    /// 積んだバージョン
+    case Version(VersionId)
+}
+
+///
 /// 版を積んだ理由。
 ///
 pub enum VersionReason with Eq, Order, ToString {

@@ -14,8 +14,45 @@ mod EntryResolvers {
             publishedAt = (_context, source) -> Ok(source#publishedAt |> Option.map(Timestamp.toIso8601)),
             createdAt   = (_context, source) -> Ok(Timestamp.toIso8601(source#createdAt)),
             updatedAt   = (_context, source) -> Ok(Timestamp.toIso8601(source#updatedAt)),
-            +versions   = (_context, source) -> Ok(ContentEntries.versions(source#id))
+            +versions   = (_context, source) -> Ok(ContentEntries.versions(source#id)),
+            +diff       = (_context, source, fromRef, toRef) -> Ok(diffOf(source, fromRef, toRef))
             | GeneratedAdmin.entryDefaults()
+        }
+
+    /// Entry.diff。参照を読んでドメインの差分を取る。
+    def diffOf(source: Entry, fromRef: GeneratedAdmin.VersionRef, toRef: GeneratedAdmin.VersionRef): List[FieldChange] \ DbRead + CmsErr + Tenant + Session =
+        ContentEntries.diff(source#id, AdminMapping.versionRefOf("from", fromRef), AdminMapping.versionRefOf("to", toRef))
+
+}
+
+///
+/// 管理 API の type FieldChange のリゾルバ。source はドメインの FieldChange（パスは最上位から辿った表記）。
+///
+mod FieldChangeResolvers {
+
+    /// type FieldChange のリゾルバ一式
+    pub def resolvers(): GeneratedAdmin.FieldChangeResolvers[AdminEff] =
+        {
+            path     = (_context, source) -> Ok(FieldChange.path(source)),
+            kind     = (_context, source) -> Ok(AdminMapping.changeKindToGql(FieldChange.change(source))),
+            before   = (_context, source) -> Ok(AdminMapping.changeBefore(FieldChange.change(source))),
+            after    = (_context, source) -> Ok(AdminMapping.changeAfter(FieldChange.change(source))),
+            children = (_context, source) -> Ok(AdminMapping.changeChildren(FieldChange.change(source))),
+            lines    = (_context, source) -> Ok(AdminMapping.changeLines(FieldChange.change(source)))
+        }
+
+}
+
+///
+/// 管理 API の type DiffLine のリゾルバ。source はドメインの DiffLine。
+///
+mod DiffLineResolvers {
+
+    /// type DiffLine のリゾルバ一式
+    pub def resolvers(): GeneratedAdmin.DiffLineResolvers[AdminEff] =
+        {
+            kind = (_context, source) -> Ok(AdminMapping.lineKindToGql(source)),
+            text = (_context, source) -> Ok(AdminMapping.lineText(source))
         }
 
 }
