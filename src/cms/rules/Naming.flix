@@ -144,9 +144,11 @@ mod Naming {
     /// フィールドの性質の組み合わせ。unique は配列・OBJECT・BLOCKS・ASSET・RICH_TEXT に付けられない（値ごとの一意を DB で守れない）。
     /// BLOCKS は常に配列、RICH_TEXT は配列にできない。
     ///
-    pub def validateFlags(kind: FieldKind, many: Bool, unique: Bool): List[Violation] =
+    pub def validateFlags(field: { kind = FieldKind, many = Bool, unique = Bool | r }): List[Violation] =
+        let many = field#many;
+        let unique = field#unique;
         let uniqueChecks = if (many and unique) Violation.Violation("unique", "配列のフィールドには付けられません") :: Nil else Nil;
-        let structureChecks = match kind {
+        let structureChecks = match field#kind {
             case FieldKind.Blocks if not many => Violation.Violation("many", "BLOCKS は常に配列です（many: true）") :: Nil
             case FieldKind.Object if unique   => Violation.Violation("unique", "OBJECT には付けられません") :: Nil
             case FieldKind.Blocks if unique   => Violation.Violation("unique", "BLOCKS には付けられません") :: Nil
@@ -185,10 +187,10 @@ mod Naming {
     ///
     /// WhyNot: 子でも黙って受けて無視しないのは、付けた人が効いていると思い込むため。効かせるなら検査と一意の写しを入れ子に広げてから外す。
     ///
-    pub def validateChildFlags(hasParent: Bool, required: Bool, unique: Bool): List[Violation] =
-        if (not hasParent) Nil
-        else (if (required) Violation.Violation("required", "子フィールドには付けられません（公開の検査は最上位だけ）") :: Nil else Nil)
-             ::: (if (unique) Violation.Violation("unique", "子フィールドには付けられません（一意は最上位だけ）") :: Nil else Nil)
+    pub def validateChildFlags(field: { hasParent = Bool, required = Bool, unique = Bool }): List[Violation] =
+        if (not field#hasParent) Nil
+        else (if (field#required) Violation.Violation("required", "子フィールドには付けられません（公開の検査は最上位だけ）") :: Nil else Nil)
+             ::: (if (field#unique) Violation.Violation("unique", "子フィールドには付けられません（一意は最上位だけ）") :: Nil else Nil)
 
     ///
     /// Select の選択肢の綴り。コンテンツ API の enum の値になるので UPPER_SNAKE（[A-Z][A-Z0-9_]*）。

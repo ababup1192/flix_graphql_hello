@@ -77,8 +77,8 @@ mod TestNaming {
     @Test
     def testNamingValidateChildFlags(): Unit \ Assert =
         Assert.assertEq(expected = (Nil, List#{"required", "unique"}, List#{"many"}, Nil),
-            (CmsTestKit.violationPaths(Naming.validateChildFlags(false, true, true)),
-             CmsTestKit.violationPaths(Naming.validateChildFlags(true, true, true)),
+            (CmsTestKit.violationPaths(Naming.validateChildFlags({ hasParent = false, required = true, unique = true })),
+             CmsTestKit.violationPaths(Naming.validateChildFlags({ hasParent = true, required = true, unique = true })),
              CmsTestKit.violationPaths(Naming.validateParent(Some(FieldKind.Blocks), FieldKind.Object, true)),
              CmsTestKit.violationPaths(Naming.validateParent(Some(FieldKind.Blocks), FieldKind.Object, false))))
 
@@ -86,11 +86,11 @@ mod TestNaming {
     @Test
     def testNamingValidateFlags(): Unit \ Assert =
         Assert.assertEq(expected = (Nil, List#{"unique"}, List#{"many"}, List#{"unique"}, List#{"unique", "unique"}),
-            (CmsTestKit.violationPaths(Naming.validateFlags(FieldKind.Text, false, true)),
-             CmsTestKit.violationPaths(Naming.validateFlags(FieldKind.Text, true, true)),
-             CmsTestKit.violationPaths(Naming.validateFlags(FieldKind.Blocks, false, false)),
-             CmsTestKit.violationPaths(Naming.validateFlags(FieldKind.Object, false, true)),
-             CmsTestKit.violationPaths(Naming.validateFlags(FieldKind.Blocks, true, true))))
+            (CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.Text, many = false, unique = true })),
+             CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.Text, many = true, unique = true })),
+             CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.Blocks, many = false, unique = false })),
+             CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.Object, many = false, unique = true })),
+             CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.Blocks, many = true, unique = true }))))
 
     // ---- config ----
 

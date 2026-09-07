@@ -53,7 +53,7 @@ mod WebhookDispatcher {
                     |> HttpRequest.setHeader("X-Cms-Event", claimed#event)
                     |> HttpRequest.setHeader("X-Cms-Delivery", claimed#id)
                     |> HttpRequest.setHeader("X-Cms-Timestamp", timestamp)
-                    |> HttpRequest.setHeader("X-Cms-Signature", signature(webhook#secret, timestamp, body))
+                    |> HttpRequest.setHeader("X-Cms-Signature", signature(webhook#secret, { timestamp = timestamp, body = body }))
                     |> HttpRequest.withTimeout(Time.Duration.seconds(10));
                 let outcome = match Net.Http.send(request) {
                     case Ok(response) => if (HttpResponse.isSuccess(response)) Ok(HttpResponse.status(response)) else Err((HttpResponse.status(response), "HTTP ${HttpResponse.status(response)}"))
@@ -81,8 +81,8 @@ mod WebhookDispatcher {
             }
         };
         match outcome {
-            case Ok(status)            => BackgroundJobs.logJob("webhook", claimed#id, "delivered", "HTTP ${status}")
-            case Err((status, reason)) => BackgroundJobs.logJob("webhook", claimed#id, if (Option.isEmpty(retryDelaySeconds(claimed#attempts))) "failed" else "retry", "HTTP ${status} ${reason}")
+            case Ok(status)            => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = JobLog.JobOutcome.Delivered, detail = "HTTP ${status}" })
+            case Err((status, reason)) => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = if (Option.isEmpty(retryDelaySeconds(claimed#attempts))) JobLog.JobOutcome.Failed else JobLog.JobOutcome.RetryLater, detail = "HTTP ${status} ${reason}" })
         };
         DbRunner.retrying(() -> TenantTx.withLazyTx(pool, projectId, write)) |> Result.mapErr(failure -> "配信の結果を書けません: ${failure}")
 
@@ -100,7 +100,7 @@ mod WebhookDispatcher {
     ///
     /// X-Cms-Signature の値。secret を鍵に "timestamp.body" の HMAC-SHA256（16 進）。受け手は同じ計算で照合し、timestamp が古ければ捨てる。
     ///
-    pub def signature(secret: String, timestamp: String, body: String): String =
-        "sha256=" + Sha256.hmacHex(secret, "${timestamp}.${body}")
+    pub def signature(secret: String, signed: { timestamp = String, body = String }): String =
+        "sha256=" + Sha256.hmacHex(secret, "${signed#timestamp}.${signed#body}")
 
 }

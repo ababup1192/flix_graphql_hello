@@ -11,11 +11,13 @@ mod AppRole {
     /// WhyNot: 名前とパスワードを文字列で埋め込むのは、CREATE / ALTER ROLE がバインド変数を受けないため。
     /// 名前は識別子の規則で検査し、パスワードは quote_literal を通す。
     ///
-    pub def ensure(connection: Jdbc.ConnectionConfig, name: String, password: String): Result[String, Unit] \ IO =
+    pub def ensure(owner: Jdbc.ConnectionConfig, app: Jdbc.ConnectionConfig): Result[String, Unit] \ IO =
+        let name = app#user;
+        let password = app#password;
         if (not String.isMatch(regex = "^[a-z_][a-z0-9_]{0,62}$", name))
             Err("CMS_DB_APP_USER '${name}' はロール名の形ではありません（英小文字・数字・_）")
         else {
-            let outcome = DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(connection, _ -> {
+            let outcome = DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(owner, _ -> {
                 let exists = Sql.fetch("SELECT 1 AS found FROM pg_roles WHERE rolname = $1", SqlValue.Str(name) :: Nil) |> List.nonEmpty;
                 if (exists) () else discard Sql.execute("CREATE ROLE ${name} NOLOGIN NOBYPASSRLS", Nil);
                 discard Sql.execute("ALTER ROLE ${name} LOGIN NOBYPASSRLS PASSWORD ${quoteLiteral(password)}", Nil);

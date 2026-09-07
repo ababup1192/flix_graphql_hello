@@ -148,7 +148,7 @@ mod ContentTypes {
         let config = changes#config |> Option.getWithDefault(existing#config);
         let unique = changes#unique |> Option.getWithDefault(existing#unique);
         let required = changes#required |> Option.getWithDefault(existing#required);
-        CmsErr.raiseIfAny(Naming.validateFlags(existing#kind, existing#many, unique) ::: Naming.validateChildFlags(Option.nonEmpty(existing#parent), required, unique) ::: Naming.validateConfig(taken, existing#kind, config));
+        CmsErr.raiseIfAny(Naming.validateFlags({ unique = unique | existing }) ::: Naming.validateChildFlags({ hasParent = Option.nonEmpty(existing#parent), required = required, unique = unique }) ::: Naming.validateConfig(taken, existing#kind, config));
         discard ContentFieldsQueries.updateField({ id = FieldId.toInt64(id), projectId = Tenant.currentId() }, ContentTypeRows.fieldChanges(changes));
         touch(existing#typeId);
         getField(id)
@@ -182,10 +182,10 @@ mod ContentTypes {
     ///
     def validateDraft(taken: List[ApiId], parent: Option[FieldDef], draft: FieldDraft): List[Violation] =
         Naming.validateFieldApiId(taken, draft#apiId)
-            ::: Naming.validateFlags(draft#kind, draft#many, draft#unique)
+            ::: Naming.validateFlags(draft)
             ::: Naming.validateTarget(draft#kind, draft#target)
             ::: Naming.validateParent(parent |> Option.map(found -> found#kind), draft#kind, draft#many)
-            ::: Naming.validateChildFlags(Option.nonEmpty(parent), draft#required, draft#unique)
+            ::: Naming.validateChildFlags({ hasParent = Option.nonEmpty(parent), required = draft#required, unique = draft#unique })
             ::: Naming.validateConfig(taken, draft#kind, draft#config)
 
     ///

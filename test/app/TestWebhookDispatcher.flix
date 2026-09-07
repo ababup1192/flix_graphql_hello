@@ -3,8 +3,9 @@
 /// 署名は "sha256=" + HMAC-SHA256(secret, "timestamp.body") の 16 進。secret かボディが違えば変わる。
 @Test
 def testWebhookSignature(): Unit \ Assert =
-    let first = WebhookDispatcher.signature("whsec_abc", "1700000000", "{\"event\":\"entry.published\"}");
-    let other = WebhookDispatcher.signature("whsec_abd", "1700000000", "{\"event\":\"entry.published\"}");
+    let signed = { timestamp = "1700000000", body = "{\"event\":\"entry.published\"}" };
+    let first = WebhookDispatcher.signature("whsec_abc", signed);
+    let other = WebhookDispatcher.signature("whsec_abd", signed);
     Assert.assertEq(expected = (true, 7 + 64, false),
         (String.startsWith(prefix = "sha256=", first), String.length(first), first == other))
 

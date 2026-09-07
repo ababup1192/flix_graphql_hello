@@ -93,7 +93,7 @@ mod PgTestSupport {
     ///
     pub def withPool(body: Pool -> a \ ef): a \ ef + IO =
         let app = appConfig();
-        match AppRole.ensure(config(), app#user, app#password) {
+        match AppRole.ensure(config(), app) {
             case Ok(())       => ()
             case Err(message) => bug!(message)
         };

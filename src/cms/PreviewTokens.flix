@@ -22,12 +22,12 @@ mod PreviewTokens {
     ///
     /// 発行する。readDraft を持つ人（writer 以上・readDraft の鍵）だけ。entry が無ければ notFound。
     ///
-    pub def issue(pepper: ApiKeys.Pepper, entryId: EntryId, ttlSeconds: Int64, nowMillis: Int64): PreviewToken \ DbRead + CmsErr + Tenant + Session =
+    pub def issue(pepper: ApiKeys.Pepper, entryId: EntryId, window: { ttlSeconds = Int64, nowMillis = Int64 }): PreviewToken \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ReadDraft);
         let entry = ContentEntries.get(entryId);
         let owner = ContentTypes.get(entry#typeId);
-        let ttl = Int64.max(60i64, Int64.min(maxTtlSeconds(), ttlSeconds));
-        let exp = nowMillis / 1000i64 + ttl;
+        let ttl = Int64.max(60i64, Int64.min(maxTtlSeconds(), window#ttlSeconds));
+        let exp = window#nowMillis / 1000i64 + ttl;
         let payload = "${Tenant.currentId()}.${EntryId.text(entryId)}.${exp}";
         let encoded = Base64Url.encode(String.toBytes(payload));
         let token = prefix() + encoded + "." + Sha256.hmacHex(pepper#secret, payload);

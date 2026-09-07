@@ -55,7 +55,7 @@ mod TestWebhooksPg {
             let redelivered = listDeliveries() |> List.find(delivery -> delivery#id == oldest) |> Option.map(delivery -> (delivery#status, delivery#attempts, delivery#lastStatus, Option.nonEmpty(delivery#deliveredAt)));
             let lastRequest = Ref.get(received) |> List.head;
             let signatureMatches = lastRequest |> Option.map(req ->
-                header("X-Cms-Signature", req) == WebhookDispatcher.signature(issued#secret, header("X-Cms-Timestamp", req), HttpRequest.body(req) |> Option.getWithDefault("")));
+                header("X-Cms-Signature", req) == WebhookDispatcher.signature(issued#secret, { timestamp = header("X-Cms-Timestamp", req), body = HttpRequest.body(req) |> Option.getWithDefault("") }));
             let lastEvent = lastRequest |> Option.map(req -> (header("X-Cms-Event", req), header("X-Cms-Delivery", req) == oldest, HttpRequest.url(req)));
             let bodyMentionsProject = lastRequest |> Option.flatMap(HttpRequest.body) |> Option.map(body -> String.contains(substr = "\"project\":\"default\"", body) and String.contains(substr = "\"type\":\"blogs\"", body));
             (queued, firstTick, afterFailure, secondTick, thirdTick, redelivered, signatureMatches, lastEvent, bodyMentionsProject, List.length(Ref.get(received)))

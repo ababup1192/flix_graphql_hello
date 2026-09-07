@@ -104,12 +104,4 @@ mod BackgroundJobs {
             case _ => { lastTickAt = lastTickAt, pendingSchedules = -1i64, failedSchedules = -1i64, pendingDeliveries = -1i64, failedDeliveries = -1i64 }
         }
 
-    ///
-    /// 1 件の仕事の結果を 1 行 JSON で出す（Loki で数えられる形）。
-    ///
-    pub def logJob(kind: String, id: String, status: String, detail: String): Unit \ IO =
-        println(JsonValue.toJsonString(Value.Obj(Map#{
-            "job" => Value.Str(kind), "id" => Value.Str(id), "status" => Value.Str(status), "detail" => Value.Str(detail),
-            "time" => Value.Str(Timestamp.toIso8601(Timestamp.fromEpochMillis(System.currentTimeMillis()))) })))
-
 }

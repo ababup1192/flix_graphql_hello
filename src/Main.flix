@@ -139,7 +139,7 @@ def resolveDefaultProject(pool: Pool, configured: Option[String]): Result[String
 ///
 def ensureAppRole(owner: Jdbc.ConnectionConfig, app: Option[Jdbc.ConnectionConfig]): Result[String, Unit] \ IO = match app {
     case None        => { println("db: CMS_DB_APP_PASSWORD が無いので所有者（${owner#user}）で繋ぎます。RLS は効きますがロール分離はありません"); Ok(()) }
-    case Some(found) => AppRole.ensure(owner, found#user, found#password)
+    case Some(found) => AppRole.ensure(owner, found)
 }
 
 ///
