@@ -85,11 +85,12 @@ mod ContentEntries {
     /// 下書きを作る。id を渡せば（移行用）それを使い、無ければ振る。中身が型に合わなければ invalid。
     /// id はゴミ箱の物とも重ねられない（PK が残っている）。
     ///
-    pub def create(typeId: TypeId, given: Option[EntryId], data: EntryData): Entry \ Db + CmsErr + IdGen + Tenant + Session =
+    pub def create(typeId: TypeId, givenId: Option[EntryId], given: EntryData): Entry \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.WriteEntries);
         let owner = ContentTypes.get(typeId);
+        let data = EntryValidation.normalize(owner#fields, given);
         CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data) ::: singletonViolations(owner));
-        let id = given |> Option.getWithDefault(IdGen.freshEntryId());
+        let id = givenId |> Option.getWithDefault(IdGen.freshEntryId());
         let taken = EntriesQueries.entryExists({ id = EntryId.text(id), projectId = Tenant.currentId() }) |> Option.nonEmpty;
         CmsErr.raiseIfAny(if (taken) Violation.Violation("id", "'${id}' は既にあります（ゴミ箱の物を含む）") :: Nil else Nil);
         discard EntriesQueries.insertEntry({ id = EntryId.text(id), typeId = TypeId.toInt64(typeId), projectId = Tenant.currentId() });
@@ -259,9 +260,10 @@ mod ContentEntries {
     ///
     /// 下書きの中身を置き換えて版を 1 進める。expectedVersion が今の版と違えば conflict（読んでから書くまでの間に進んだ時も）。
     ///
-    def writeDraft(owner: ContentType, existing: Entry, data: EntryData, expectedVersion: Int32): Entry \ Db + CmsErr + Tenant =
+    def writeDraft(owner: ContentType, existing: Entry, given: EntryData, expectedVersion: Int32): Entry \ Db + CmsErr + Tenant =
         let id = existing#id;
         if (existing#version != expectedVersion) CmsErr.conflict(Entity.Entry, EntryId.text(id), existing#version) else ();
+        let data = EntryValidation.normalize(owner#fields, given);
         CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data));
         writeContent(id, Stage.Draft, owner, data);
         let advanced = EntriesQueries.bumpEntryVersion({ id = EntryId.text(id), expected = expectedVersion, projectId = Tenant.currentId() });

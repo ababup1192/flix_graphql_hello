@@ -103,3 +103,6 @@ GraphQL の `ID` は連番でなく乱数の public_id。内部の id に戻す�
 - ドメイン（src/cms）は GeneratedAdmin を知らない。enum と入力レコードはドメインが自分で持ち、写しは `AdminMapping`
 - 外向きの id: 連番は出さない。組織や鍵は乱数の public_id、配信記録のように時刻順に読む物は ULID（作成時刻が読めるので鍵や組織には使わない）
 - entry の中身は `EntryData = Map[ApiId, Json]`。GraphQL の `JSON` scalar（`Value`）との往復も `AdminMapping`
+- `FieldKind` は TEXT / TEXT_AREA / SLUG / NUMBER / BOOLEAN / SELECT / REFERENCE / OBJECT / BLOCKS / ASSET / RICH_TEXT / DATE。kind を足す時は ContentType（enum）・ContentTypeRows（DB の文字列）・migrations（CHECK）・Naming・EntryValidation・ContentSchemaBuilder・admin.graphql（`make generate`）・AdminMapping・MicrocmsSchema / MicrocmsImport の全部を触る
+- DATE の値は ISO 8601 の文字列。日付だけ（"2026-09-08"）は書く時に `EntryValidation.normalize` が UTC の 0 時に揃える（規則は `DateValues`）。絞り込みと並び替えは `EntryFilterSql` が timestamptz にして比べる
+- SELECT は `many: true` で複数選択（値は選択肢の配列。コンテンツ API では `[Enum!]!` と `_contains`）

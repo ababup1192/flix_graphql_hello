@@ -38,6 +38,22 @@ mod TestContentSchemaBuilder {
              String.contains(substr = "tags: [String!]!", sdl) and String.contains(substr = "views: Float", sdl),
              String.contains(substr = "siteSettings(", sdl)))
 
+    /// DATE は String で出て、_eq と範囲の 4 つで絞れ、orderBy に出る。配列の SELECT は enum の配列で出て、_contains は enum を受ける。
+    @Test
+    def testContentSchemaBuilderDateAndMultiSelect(): Unit \ Assert =
+        let fields = CmsTestKit.fieldDef("publishOn", FieldKind.Date) ::
+                     { many = true, config = { options = List#{"NEWS", "TECH"} | FieldConfig.empty() } | CmsTestKit.fieldDef("topics", FieldKind.Select) } :: Nil;
+        let sdl = Schema.toSdl(ContentSchemaBuilder.build(CmsTestKit.contentType(1i64, "blogs", TypeKind.Collection, "記事", fields) :: Nil, dryRunner()));
+        Assert.assertEq(
+            expected = Ok((true, true, true, true, true, false)),
+            sdl |> Result.map(text -> (
+                String.contains(substr = "publishOn: String", text),
+                String.contains(substr = "publishOn_gte: String", text) and String.contains(substr = "publishOn_lt: String", text) and String.contains(substr = "publishOn_eq: String", text),
+                String.contains(substr = "publishOn_DESC", text),
+                String.contains(substr = "topics: [BlogTopics!]!", text),
+                String.contains(substr = "topics_contains: BlogTopics", text),
+                String.contains(substr = "topics_ASC", text))))
+
     /// 子の無い OBJECT / BLOCKS は生やさない（空の型で graphql-java が落ちない）。子があれば生える。
     @Test
     def testContentSchemaBuilderSkipsEmptyNested(): Unit \ Assert =

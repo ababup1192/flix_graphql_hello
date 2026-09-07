@@ -2,7 +2,7 @@
 /// EntryFilterSql: 絞り込みと並び順が JSONB の式とプレースホルダに落ちる。純粋。
 ///
 ///
-/// blogs 型のフィールド。title(text) / views(number) / flag(boolean) / tags(text, many)
+/// blogs 型のフィールド。title(text) / views(number) / flag(boolean) / tags(text, many) / publishOn(date)
 ///
 mod TestEntryFilterSql {
 
@@ -12,7 +12,8 @@ mod TestEntryFilterSql {
         CmsTestKit.fieldDef("title", FieldKind.Text) ::
         CmsTestKit.fieldDef("views", FieldKind.Number) ::
         CmsTestKit.fieldDef("flag", FieldKind.Boolean) ::
-        { many = true | CmsTestKit.fieldDef("tags", FieldKind.Text) } :: Nil
+        { many = true | CmsTestKit.fieldDef("tags", FieldKind.Text) } ::
+        CmsTestKit.fieldDef("publishOn", FieldKind.Date) :: Nil
 
     /// 条件は式とプレースホルダになる。値は SQL の文面に出ない。数値と真偽値は jsonb_typeof で見てからキャストする（型の違う古い値で落ちない）。
     @Test
@@ -53,6 +54,16 @@ mod TestEntryFilterSql {
             Fragment.renderPred(EntryFilterSql.pred(Condition.ArrayContains(CmsTestKit.apiId("tags"), "t1") :: Nil), 1)
         } with RawSql.runWithAllow;
         Assert.assertEq(expected = ("((jsonb_typeof(c.data->'tags') = 'array' AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(c.data->'tags') AS elem WHERE elem = $1)))", List#{SqlValue.Str("t1")}), rendered)
+
+    /// DATE は日時の形（YYYY-MM-DDT…）の値だけ timestamptz にして比べ、値は Timestamp のプレースホルダ。並び替えも同じ式。
+    @Test
+    def testEntryFilterSqlDate(): Unit \ Assert =
+        let at = Timestamp.at("2026-09-08T00:00:00Z");
+        let expr = "((CASE WHEN (c.data->>'publishOn') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN c.data->>'publishOn' END)::timestamptz)";
+        Assert.assertEq(
+            expected = (("(${expr} >= $1)", List#{SqlValue.Timestamp(Timestamp.toEpochMicros(at))}), "ORDER BY ${expr} DESC, e.id ASC"),
+            (run { Fragment.renderPred(EntryFilterSql.pred(Condition.DateGte(CmsTestKit.apiId("publishOn"), at) :: Nil), 1) } with RawSql.runWithAllow,
+             Fragment.renderOrder(EntryFilterSql.order(filterFields(), (SortKey.ByField(CmsTestKit.apiId("publishOn")), Direction.Desc) :: Nil))))
 
     /// OR の空のグループは「どれにも合わない」。OR: [{}] で絞り込みが全件に広がらず、OR: [] も FALSE。
     @Test

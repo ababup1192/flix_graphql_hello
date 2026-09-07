@@ -45,6 +45,12 @@ pub enum Condition with Eq, Order, ToString {
     case NumberLt(ApiId, Float64)
     case NumberLte(ApiId, Float64)
     case BoolEq(ApiId, Bool)
+    /// DATE の比較。値は timestamptz にして比べる
+    case DateEq(ApiId, Timestamp.Timestamp)
+    case DateGt(ApiId, Timestamp.Timestamp)
+    case DateGte(ApiId, Timestamp.Timestamp)
+    case DateLt(ApiId, Timestamp.Timestamp)
+    case DateLte(ApiId, Timestamp.Timestamp)
     /// true なら値が無い物、false なら値がある物
     case IsNull(ApiId, Bool)
     /// 配列のフィールド（文字列・select・reference）がこの値を含む

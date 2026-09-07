@@ -240,6 +240,7 @@ mod AdminMapping {
         case GeneratedAdmin.FieldKind.Blocks   => FieldKind.Blocks
         case GeneratedAdmin.FieldKind.Asset    => FieldKind.Asset
         case GeneratedAdmin.FieldKind.RichText => FieldKind.RichText
+        case GeneratedAdmin.FieldKind.Date     => FieldKind.Date
     }
 
     pub def fieldKindToGql(kind: FieldKind): GeneratedAdmin.FieldKind = match kind {
@@ -254,6 +255,7 @@ mod AdminMapping {
         case FieldKind.Blocks   => GeneratedAdmin.FieldKind.Blocks
         case FieldKind.Asset    => GeneratedAdmin.FieldKind.Asset
         case FieldKind.RichText => GeneratedAdmin.FieldKind.RichText
+        case FieldKind.Date     => GeneratedAdmin.FieldKind.Date
     }
 
     ///

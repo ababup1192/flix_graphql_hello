@@ -92,6 +92,16 @@ mod TestNaming {
              CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.Object, many = false, unique = true })),
              CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.Blocks, many = true, unique = true }))))
 
+    /// SELECT は配列（複数選択）にでき、DATE は配列にも unique にもできる。配列の SELECT / DATE に unique は付けられない。
+    @Test
+    def testNamingValidateFlagsSelectAndDate(): Unit \ Assert =
+        Assert.assertEq(expected = (Nil, Nil, Nil, List#{"unique"}, List#{"unique"}),
+            (CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.Select, many = true, unique = false })),
+             CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.Date, many = true, unique = false })),
+             CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.Date, many = false, unique = true })),
+             CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.Select, many = true, unique = true })),
+             CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.Date, many = true, unique = true }))))
+
     // ---- config ----
 
     /// SLUG は sourceField が要り、それは同じ型にあるフィールドでなければならない。

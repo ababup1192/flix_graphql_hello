@@ -110,6 +110,58 @@ mod TestEntryValidation {
         Assert.assertEq(expected = List#{"fields.related.Bad Key", "fields.sections[0].bad-key"},
             CmsTestKit.violationPaths(EntryValidation.draft(fields, data)) |> List.sort)
 
+    // ---- DATE ----
+
+    /// DATE は ISO 8601 の日時（offset 付き）と日付だけの形が通る。offset の無い日時・文字列でない値・でたらめは落ちる。
+    @Test
+    def testEntryValidationDate(): Unit \ Assert =
+        let fields = CmsTestKit.fieldDef("publishOn", FieldKind.Date) :: Nil;
+        let check = value -> CmsTestKit.violationPaths(EntryValidation.draft(fields, CmsTestKit.entryData(List#{("publishOn", value)})));
+        Assert.assertEq(expected = (Nil, Nil, Nil, List#{"fields.publishOn"}, List#{"fields.publishOn"}, List#{"fields.publishOn"}),
+            (check(Json.JString("2026-09-08T09:00:00Z")),
+             check(Json.JString("2026-09-08T18:00:00+09:00")),
+             check(Json.JString("2026-09-08")),
+             check(Json.JString("2026-09-08T09:00:00")),
+             check(CmsTestKit.intJson(20260908)),
+             check(Json.JString("next week"))))
+
+    /// normalize は日付だけの DATE を UTC の 0 時の日時にする。日時はそのまま（offset も残す）。配列と入れ子（Object / Blocks）の中も揃え、他の kind は触らない。
+    @Test
+    def testEntryValidationNormalizeDate(): Unit \ Assert =
+        let hero = { children = Children.Children(CmsTestKit.fieldDef("at", FieldKind.Date) :: Nil) | CmsTestKit.fieldDef("hero", FieldKind.Object) };
+        let fields = CmsTestKit.fieldDef("publishOn", FieldKind.Date) ::
+                     { many = true | CmsTestKit.fieldDef("dates", FieldKind.Date) } ::
+                     { children = Children.Children(CmsTestKit.fieldDef("at", FieldKind.Date) :: Nil) | CmsTestKit.fieldDef("meta", FieldKind.Object) } ::
+                     { many = true, children = Children.Children(hero :: Nil) | CmsTestKit.fieldDef("sections", FieldKind.Blocks) } ::
+                     CmsTestKit.fieldDef("title", FieldKind.Text) :: Nil;
+        let given = CmsTestKit.entryData(List#{
+            ("publishOn", Json.JString("2026-09-08")),
+            ("dates", Json.JArray(Vector#{Json.JString("2026-01-01"), Json.JString("2026-09-08T18:00:00+09:00")})),
+            ("meta", Json.JObject(Map#{ "at" => Json.JString("2026-02-02") })),
+            ("sections", Json.JArray(Vector#{Json.JObject(Map#{ "blockType" => Json.JString("hero"), "at" => Json.JString("2026-03-03") })})),
+            ("title", Json.JString("2026-09-08"))});
+        Assert.assertEq(
+            expected = CmsTestKit.entryData(List#{
+                ("publishOn", Json.JString("2026-09-08T00:00:00Z")),
+                ("dates", Json.JArray(Vector#{Json.JString("2026-01-01T00:00:00Z"), Json.JString("2026-09-08T18:00:00+09:00")})),
+                ("meta", Json.JObject(Map#{ "at" => Json.JString("2026-02-02T00:00:00Z") })),
+                ("sections", Json.JArray(Vector#{Json.JObject(Map#{ "blockType" => Json.JString("hero"), "at" => Json.JString("2026-03-03T00:00:00Z") })})),
+                ("title", Json.JString("2026-09-08"))}),
+            EntryValidation.normalize(fields, given))
+
+    // ---- 複数選択の SELECT ----
+
+    /// many の SELECT は選択肢の配列。要素ごとに選択肢の中だけ通り、外れた要素はパスが何番目かまで指す。配列でない値は落ちる。
+    @Test
+    def testEntryValidationMultiSelect(): Unit \ Assert =
+        let fields = { many = true, config = { options = List#{"A", "B"} | FieldConfig.empty() } | CmsTestKit.fieldDef("tags", FieldKind.Select) } :: Nil;
+        let check = value -> CmsTestKit.violationPaths(EntryValidation.draft(fields, CmsTestKit.entryData(List#{("tags", value)})));
+        Assert.assertEq(expected = (Nil, Nil, List#{"fields.tags[1]"}, List#{"fields.tags"}),
+            (check(Json.JArray(Vector#{Json.JString("A"), Json.JString("B")})),
+             check(Json.JArray(Vector.empty())),
+             check(Json.JArray(Vector#{Json.JString("A"), Json.JString("C")})),
+             check(Json.JString("A"))))
+
     /// 型に無いキーを落とす（フィールドを消した後の古い値）。型にあるキーはそのまま。
     @Test
     def testEntryValidationPrune(): Unit \ Assert =

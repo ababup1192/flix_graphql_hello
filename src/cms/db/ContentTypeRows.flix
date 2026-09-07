@@ -29,6 +29,7 @@ mod ContentTypeRows {
         case FieldKind.Blocks   => "blocks"
         case FieldKind.Asset    => "asset"
         case FieldKind.RichText => "richText"
+        case FieldKind.Date     => "date"
     }
 
     ///
@@ -55,6 +56,7 @@ mod ContentTypeRows {
         case "blocks"   => Some(FieldKind.Blocks)
         case "asset"    => Some(FieldKind.Asset)
         case "richText" => Some(FieldKind.RichText)
+        case "date"     => Some(FieldKind.Date)
         case _          => None
     }
 

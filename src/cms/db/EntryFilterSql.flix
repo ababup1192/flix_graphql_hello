@@ -44,6 +44,7 @@ mod EntryFilterSql {
             case SortKey.ByField(apiId) => match List.find(field -> field#apiId == apiId, fields) |> Option.map(field -> field#kind) {
                 case Some(FieldKind.Number)  => numberExpr(apiId)
                 case Some(FieldKind.Boolean) => boolExpr(apiId)
+                case Some(FieldKind.Date)    => dateExpr(apiId)
                 case _                       => textExpr(apiId)
             }
         };
@@ -65,6 +66,11 @@ mod EntryFilterSql {
         case Condition.NumberLt(apiId, x)        => Pred.Compare(numberExpr(apiId), CompareOp.Lt, SqlValue.Float64(x))
         case Condition.NumberLte(apiId, x)       => Pred.Compare(numberExpr(apiId), CompareOp.Le, SqlValue.Float64(x))
         case Condition.BoolEq(apiId, b)          => Pred.Compare(boolExpr(apiId), CompareOp.Eq, SqlValue.Bool(b))
+        case Condition.DateEq(apiId, at)         => Pred.Compare(dateExpr(apiId), CompareOp.Eq, timestampValue(at))
+        case Condition.DateGt(apiId, at)         => Pred.Compare(dateExpr(apiId), CompareOp.Gt, timestampValue(at))
+        case Condition.DateGte(apiId, at)        => Pred.Compare(dateExpr(apiId), CompareOp.Ge, timestampValue(at))
+        case Condition.DateLt(apiId, at)         => Pred.Compare(dateExpr(apiId), CompareOp.Lt, timestampValue(at))
+        case Condition.DateLte(apiId, at)        => Pred.Compare(dateExpr(apiId), CompareOp.Le, timestampValue(at))
         case Condition.IsNull(apiId, true)       => Pred.IsNull(textExpr(apiId))
         case Condition.IsNull(apiId, false)      => Pred.IsNotNull(textExpr(apiId))
         case Condition.ArrayContains(apiId, text) =>
@@ -94,6 +100,17 @@ mod EntryFilterSql {
     def numberExpr(apiId: ApiId): String = "(${typedExpr(apiId, "number")}::numeric)"
 
     def boolExpr(apiId: ApiId): String = "(${typedExpr(apiId, "boolean")}::boolean)"
+
+    ///
+    /// 日時として取り出す式。日時の形（YYYY-MM-DDT…。書く時に揃える）でない値は NULL。
+    ///
+    /// WhyNot: 文字列なら何でも ::timestamptz にしないのは、同じ apiId で作り直した DATE に古い文字列が残っていると
+    /// キャストで PG の例外になり、一覧のクエリ全体が落ちるため。形を見てから落とす
+    ///
+    def dateExpr(apiId: ApiId): String =
+        "((CASE WHEN (c.data->>'${ApiId.text(apiId)}') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN c.data->>'${ApiId.text(apiId)}' END)::timestamptz)"
+
+    def timestampValue(at: Timestamp.Timestamp): SqlValue = SqlValue.Timestamp(Timestamp.toEpochMicros(at))
 
     def typedExpr(apiId: ApiId, jsonType: String): String =
         "(CASE WHEN jsonb_typeof(c.data->'${ApiId.text(apiId)}') = '${jsonType}' THEN c.data->>'${ApiId.text(apiId)}' END)"

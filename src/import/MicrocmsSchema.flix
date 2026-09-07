@@ -1,7 +1,7 @@
 ///
 /// microCMS の「API スキーマ」の export（JSON）を読み、この CMS の型に写す前の形にする。純粋。
 /// 写し方: text → TEXT、textArea → TEXT_AREA、richEditor → RICH_TEXT、media → ASSET、boolean → BOOLEAN、number → NUMBER、
-/// relation → REFERENCE、relationList → REFERENCE（配列）、repeater → BLOCKS（customFieldIds が variant、custom の fields が子）。
+/// relation → REFERENCE、relationList → REFERENCE（配列）、repeater → BLOCKS（customFieldIds が variant、custom の fields が子）、date → DATE。
 ///
 mod MicrocmsSchema {
 
@@ -17,10 +17,11 @@ mod MicrocmsSchema {
         case Media
         case Boolean
         case Number
+        case Date
         case Relation(String)
         case RelationList(String)
         case Repeater(List[String])
-        /// この CMS に写せない種類（select / date / file / iframe / custom 単体など）。名前を持って報告する
+        /// この CMS に写せない種類（select / file / iframe / custom 単体など）。名前を持って報告する
         case Unsupported(String)
     }
 
@@ -83,6 +84,7 @@ mod MicrocmsSchema {
         case "media"        => Kind.Media
         case "boolean"      => Kind.Boolean
         case "number"       => Kind.Number
+        case "date"         => Kind.Date
         case "relation"     => stringAt("referencedApiEndpoint", fields) |> Option.map(Kind.Relation) |> Option.getWithDefault(Kind.Unsupported("relation（参照先なし）"))
         case "relationList" => stringAt("referencedApiEndpoint", fields) |> Option.map(Kind.RelationList) |> Option.getWithDefault(Kind.Unsupported("relationList（参照先なし）"))
         case "repeater"     => Map.get("customFieldIds", fields) |> Option.flatMap(asArray) |> Option.map(items -> items |> List.filterMap(asString)) |> Option.map(Kind.Repeater) |> Option.getWithDefault(Kind.Unsupported("repeater（variant なし）"))

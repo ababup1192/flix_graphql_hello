@@ -354,7 +354,7 @@ mod ContentSchemaBuilder {
         { info = Arg.info(arg), decode = fields -> Arg.decodeField(arg, fields) |> Result.map(found -> found |> Option.map(toConditions) |> Option.getWithDefault(Nil)) }
 
     ///
-    /// 型の全フィールドの葉の条件。id は _eq / _in、フィールドは kind ごと。
+    /// 型の全フィールドの葉の条件。id は _eq / _in、フィールドは kind ごと（DATE は _eq と範囲。値は ISO 8601 の文字列）。
     /// 配列は _isNull と（文字列・SELECT・REFERENCE・ASSET なら）_contains。OBJECT / BLOCKS / RICH_TEXT は _isNull だけ。
     ///
     def leafArgs(owner: ContentType): List[LeafArg] =
@@ -368,7 +368,7 @@ mod ContentSchemaBuilder {
         isNull :: (if (field#many) arrayLeafArgs(prefix, field) else scalarLeafArgs(prefix, field))
 
     ///
-    /// 配列のフィールドの葉。要素の一致（_contains）だけ。NUMBER / BOOLEAN / OBJECT / BLOCKS / RICH_TEXT の配列は _isNull のみ。
+    /// 配列のフィールドの葉。要素の一致（_contains）だけ。SELECT の配列は選択肢 1 つを含むか。NUMBER / BOOLEAN / DATE / OBJECT / BLOCKS / RICH_TEXT の配列は _isNull のみ。
     ///
     def arrayLeafArgs(prefix: String, field: FieldDef): List[LeafArg] =
         let apiId = field#apiId;
@@ -379,6 +379,7 @@ mod ContentSchemaBuilder {
             case FieldKind.RichText  => Nil
             case FieldKind.Number    => Nil
             case FieldKind.Boolean   => Nil
+            case FieldKind.Date      => Nil
             case FieldKind.Reference => idLeaf(name, EntryId.parse, found -> Condition.ArrayContains(apiId, EntryId.text(found))) :: Nil
             case FieldKind.Asset     => idLeaf(name, AssetId.parse, found -> Condition.ArrayContains(apiId, AssetId.text(found))) :: Nil
             case FieldKind.Select    => leafArg(name, selectCodec(prefix, field), text -> Condition.ArrayContains(apiId, text) :: Nil) :: Nil
@@ -401,6 +402,7 @@ mod ContentSchemaBuilder {
                 idsLeaf("${name}_id_in", EntryId.parse, found -> Condition.TextIn(apiId, List.map(EntryId.text, found))) :: Nil
             case FieldKind.Select    => equalityLeaves(name, apiId, selectCodec(prefix, field))
             case FieldKind.Number    => numberLeaves(name, apiId)
+            case FieldKind.Date      => dateLeaves(name, apiId)
             case FieldKind.Boolean   => leafArg("${name}_eq", GqlCodec.bool(), b -> Condition.BoolEq(apiId, b) :: Nil) :: Nil
             case _                   => equalityLeaves(name, apiId, GqlCodec.string()) ::: searchLeaves(name, apiId)
         }
@@ -422,6 +424,19 @@ mod ContentSchemaBuilder {
         leafArg("${name}_gte", GqlCodec.float64(), x -> Condition.NumberGte(apiId, x) :: Nil) ::
         leafArg("${name}_lt", GqlCodec.float64(), x -> Condition.NumberLt(apiId, x) :: Nil) ::
         leafArg("${name}_lte", GqlCodec.float64(), x -> Condition.NumberLte(apiId, x) :: Nil) :: Nil
+
+    ///
+    /// DATE の `_eq` と範囲の 4 つ。値は ISO 8601 の日時か日付（"2026-09-08" は UTC の 0 時）。読めない文字列は Never（何にも合わない）に倒す。
+    ///
+    def dateLeaves(name: String, apiId: ApiId): List[LeafArg] =
+        dateLeaf("${name}_eq", at -> Condition.DateEq(apiId, at)) ::
+        dateLeaf("${name}_gt", at -> Condition.DateGt(apiId, at)) ::
+        dateLeaf("${name}_gte", at -> Condition.DateGte(apiId, at)) ::
+        dateLeaf("${name}_lt", at -> Condition.DateLt(apiId, at)) ::
+        dateLeaf("${name}_lte", at -> Condition.DateLte(apiId, at)) :: Nil
+
+    def dateLeaf(name: String, make: Timestamp.Timestamp -> Condition): LeafArg =
+        leafArg(name, GqlCodec.string(), text -> (DateValues.parse(text) |> Option.map(make) |> Option.getWithDefault(Condition.Never)) :: Nil)
 
     ///
     /// ID を 1 つ受ける葉。規則（parse）に合わない id は Never（何にも合わない）に倒す。

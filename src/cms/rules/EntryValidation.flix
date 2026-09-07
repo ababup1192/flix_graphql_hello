@@ -49,6 +49,43 @@ mod EntryValidation {
     }
 
     ///
+    /// 書く前に値の形を揃える。DATE の日付だけの値（"2026-09-08"）を UTC の 0 時の日時にする。入れ子（Object / Blocks）の中も見る。
+    /// 他の値はそのまま。
+    ///
+    pub def normalize(fields: List[FieldDef], data: EntryData): EntryData =
+        let byApiId = fields |> List.map(field -> (field#apiId, field)) |> List.toMap;
+        data |> Map.mapWithKey((apiId, value) -> match Map.get(apiId, byApiId) {
+            case None        => value
+            case Some(field) => normalizeField(field, value)
+        })
+
+    def normalizeField(field: FieldDef, value: Json): Json =
+        match (field#many, value) {
+            case (true, Json.JArray(items)) => Json.JArray(Vector.map(normalizeScalar(field), items))
+            case (true, _)                  => value
+            case (false, _)                 => normalizeScalar(field, value)
+        }
+
+    def normalizeScalar(field: FieldDef, value: Json): Json =
+        match (field#kind, value) {
+            case (FieldKind.Date, Json.JString(text))     => Json.JString(DateValues.normalize(text))
+            case (FieldKind.Object, Json.JObject(inner))  => Json.JObject(normalizeObject(Children.toList(field#children), inner))
+            case (FieldKind.Blocks, Json.JObject(inner))  => match EntryValue.readBlock(Children.toList(field#children), value) {
+                case Some((variant, _)) => Json.JObject(normalizeObject(Children.toList(variant#children), inner))
+                case None               => value
+            }
+            case _                                        => value
+        }
+
+    /// 入れ子のオブジェクト。キーは文字列のまま持ち、規則に合う物だけ子の定義で揃える（blockType などはそのまま）。
+    def normalizeObject(children: List[FieldDef], inner: Map[String, Json]): Map[String, Json] =
+        let byText = children |> List.map(child -> (ApiId.text(child#apiId), child)) |> List.toMap;
+        inner |> Map.mapWithKey((key, value) -> match Map.get(key, byText) {
+            case None        => value
+            case Some(child) => normalizeField(child, value)
+        })
+
+    ///
     /// 変更を重ねる。patch のキーだけ上書きし、null は消す。
     ///
     pub def merge(before: EntryData, patch: EntryData): EntryData =
@@ -83,6 +120,8 @@ mod EntryValidation {
             case (FieldKind.Reference, Json.JString(text)) => if (Option.nonEmpty(EntryId.parse(text))) Nil else Violation.Violation(path, "entry の id（${EntryId.rule()}）にしてください") :: Nil
             case (FieldKind.Asset, Json.JString(text))    => if (Option.nonEmpty(AssetId.parse(text))) Nil else Violation.Violation(path, "asset の id（${EntryId.rule()}）にしてください") :: Nil
             case (FieldKind.RichText, Json.JObject(_))    => RichText.validate(path, value)
+            case (FieldKind.Date, Json.JString(text))     => if (Option.nonEmpty(DateValues.parse(text))) Nil else Violation.Violation(path, "ISO 8601 の日時（2026-09-08T09:00:00Z）か日付（2026-09-08）にしてください") :: Nil
+            case (FieldKind.Date, _)                      => Violation.Violation(path, "日時の文字列にしてください") :: Nil
             case (FieldKind.Asset, _)                     => Violation.Violation(path, "asset の id にしてください") :: Nil
             case (FieldKind.RichText, _)                  => Violation.Violation(path, "richText は { type: \"doc\", content: [...] } のオブジェクトにしてください") :: Nil
             case (FieldKind.Select, _)                    => Violation.Violation(path, "文字列にしてください") :: Nil

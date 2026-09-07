@@ -61,6 +61,7 @@ mod MicrocmsImport {
         case Kind.Media             => draftOf(field, FieldKind.Asset, false, None, parent)
         case Kind.Boolean           => draftOf(field, FieldKind.Boolean, false, None, parent)
         case Kind.Number            => draftOf(field, FieldKind.Number, false, None, parent)
+        case Kind.Date              => draftOf(field, FieldKind.Date, false, None, parent)
         case Kind.Relation(target)     => draftOf(field, FieldKind.Reference, false, Map.get(target, types), parent)
         case Kind.RelationList(target) => draftOf(field, FieldKind.Reference, true, Map.get(target, types), parent)
         case _                      => draftOf(field, FieldKind.Text, false, None, parent)
@@ -110,6 +111,7 @@ mod MicrocmsImport {
         case Kind.Media      => Some(Json.JString(AssetId.text(asset)))
         case Kind.Boolean    => Some(Json.JBool(Int32.remainder(n, 2) == 0))
         case Kind.Number     => Some(Json.JNumber(Int32.toBigDecimal(n)))
+        case Kind.Date       => Some(Json.JString("2026-09-${String.padLeft(2, '0', "${Int32.remainder(n - 1, 28) + 1}")}T00:00:00Z"))
         case Kind.Relation(target) =>
             if (withReferences) Map.get(target, created) |> Option.flatMap(List.head) |> Option.map(id -> Json.JString(EntryId.text(id))) else None
         case Kind.RelationList(target) =>

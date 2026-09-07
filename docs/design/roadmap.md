@@ -25,6 +25,7 @@ Docker（起動時 migration、JSON ログ、/health の版）、deploy/ の com
 | 6 | 予約公開・公開停止予約（2026-09-07 に実装済み）| 編集者 | 済み | `schedulePublish` / `scheduleUnpublish` / `cancelSchedule` / `schedules`。outbox（scheduled_actions）をプロセス内のバックグラウンドワーカー（BackgroundJobs。Webhook と同じ tick）が拾い、通常の publish と同じ検査で実行。失敗は FAILED に理由。実行中に落ちた行は 10 分で回復、記録は 30 日で掃除。外部トリガー `POST /jobs/tick`（`CMS_JOBS_TOKEN`）、`CMS_JOBS=off`、`/health` の `jobs.lastTickAt` |
 | 7 | GraphQL の GET 対応（2026-09-07 に実装済み）| サイト運営者 | 済み | `GET /graphql?query=&variables=&operationName=`。mutation は 405。身元無しで errors が無ければ `Cache-Control: public, max-age / s-maxage / stale-while-revalidate`（`CMS_CACHE_MAX_AGE`。既定 60 秒）、鍵やトークン付きは `private, no-store`。`Vary: X-Api-Key, X-Preview-Token, Authorization` |
 | 8 | microCMS 移行ツール（2026-09-07 に前半を実装。スキーマの写しとダミー投入）| 自社 | 残り: 実データ（HTML → doc、画像の取り直し） | `make import-microcms` が API スキーマの export（import/microcms/schema）を型に写し、ダミーの entry を作って公開する。実物の 9 API で通した。分かった事: エンドポイント名は複数形とは限らない（plural を `<apiId>List` に）、custom field と同名の子がある（子に Value を付ける） |
+| 8b | DATE と複数選択の SELECT（2026-09-07 に実装済み）| 自社 | 済み | microCMS の date / 複数選択を写すための kind。DATE は ISO 8601 の文字列（日付だけは UTC の 0 時に揃える）で、コンテンツ API に `_eq` / `_gt` / `_gte` / `_lt` / `_lte`（timestamptz で比較）と `_ASC` / `_DESC`。SELECT は `many: true` で選択肢の配列になり、`[Enum!]!` と `_contains` |
 | 9 | 管理画面（Elm、別リポジトリ） | 編集者 | 1〜2 日 + 目で見る往復 | ログイン、プロジェクト切り替え、型の編集、entry の一覧・編集、TipTap、画像、公開、プレビュー、dry-run と impact の表示 |
 | 10 | 公開サイトの載せ替え | 自社 | 半日 | elm-pages を GraphQL に。`headings` で目次、`html` で本文。Cloudflare Pages の再ビルドは Webhook |
 

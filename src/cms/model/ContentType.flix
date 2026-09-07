@@ -22,7 +22,7 @@ pub enum FieldKind with Eq, Order, ToString {
     case Number
     /// 真偽値
     case Boolean
-    /// 決まった選択肢から 1 つ。config.options
+    /// 決まった選択肢から。config.options。many なら複数選べる（値は選択肢の配列）
     case Select
     /// 他の entry への参照。target が参照先の型
     case Reference
@@ -34,6 +34,8 @@ pub enum FieldKind with Eq, Order, ToString {
     case Asset
     /// 構造化した本文（ProseMirror の doc）。コンテンツ API では RichText（json / html / text）
     case RichText
+    /// 日時。値は ISO 8601 の文字列（"2026-09-08T09:00:00Z"）。日付だけ（"2026-09-08"）は書く時に UTC の 0 時に揃える
+    case Date
 }
 
 ///
