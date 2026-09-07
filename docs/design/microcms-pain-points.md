@@ -12,3 +12,8 @@ microCMS を日常で使ってきた人が挙げた不満。管理画面の計�
 | 残り文字数が視覚的に分かりづらい | 上限を超えてから気づく | X の文字数の見せ方（円のゲージ、残り少なくなると色が変わり、超えた分をハイライト）。上限はフィールドの設定（Naming の config）に持つ |
 | 画像の大きさの数値指定が直感的でない | 幅や高さを数字で入れても結果が想像できない | プレビュー付きのリサイズ、プリセット（サムネイル / 本文 / OGP）、`?w=` の URL パラメータを画面で組み立てて見せる |
 | 本文の中で画像を横に並べられない。繰り返しフィールドで記事の外に組むしかない | 「ここだけ 2 枚横に」が本文の流れで書けない。記事の構造がフィールドに漏れる | richText の doc に gallery（container node、attrs.columns 2〜4、中は image だけ）。HTML は `data-gallery`、Markdown は 1 行に画像を並べたら gallery、エディタは画像を画像の横にドロップ。Gutenberg / Ghost / Medium と同じ定番（2026-09-08） |
+| リンクカードやアフィリエイトカードをカスタムフィールドで持ち、本文が分断される | 本文の流れの中に置けない | richText の doc に linkCard（url だけ持つ。OGP はサイト側か将来の asset の仕事）。Markdown は URL だけの行で embed にならない物 |
+| 画像に alt を持てず、別のフィールドで alt を持つ | アクセシビリティと SEO のために alt を別管理する手間 | image の attrs.alt。公開時に alt 必須にできる config。Markdown は `![alt](asset:ID "caption")` |
+| コードブロックにファイル名と行のハイライトが無い | 直前の段落に書くしかない | codeBlock の attrs.fileName / highlightLines。Markdown は ```` ```ts:src/a.ts {1,3-5} ```` |
+| 脚注が無い | 末尾に手書き | footnote mark。Markdown は `[^1]`（gallery などの後で） |
+| 文字色・寄せ・カスタムクラスがあり、本文にスタイルが混ざる | サイトの見た目と食い違う。移行で消える | 出さない（決め）。強調は mark、区別は callout。表のセル結合も入れない |
