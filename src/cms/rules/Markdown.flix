@@ -1,9 +1,12 @@
 ///
 /// richText の doc（ProseMirror 形式。RichText が正）と Markdown の双方向変換。全部純粋。
 ///
-/// 方言は GFM + 決め事: 見出しの id は `## 見出し {#id}`、callout は GitHub alerts（`> [!NOTE]`）、image は `![caption](asset:ID){width=W height=H}`、
-/// embed は URL だけの段落、entry へのリンクは `[text](entry:ID)`、underline は `<u>…</u>`。入れ子は 2 空白、番号は 1 から振り直す。
-/// 読む時は少し広く受け（`*` の箇条書き、`1)`、`***`、`__` と `*`、行末 2 空白）、読めない物は段落の text に落として必ず RichText.validate に通る doc を返す。
+/// 方言は GFM + 決め事: 見出しの id は `## 見出し {#id}`、callout は GitHub alerts（`> [!NOTE]`）、image は `![alt](asset:ID "caption"){width=W height=H}`、
+/// gallery は 1 行に image を空白区切りで 2 つ以上（枚数と違う columns は行末に `{columns=N}`）、embed と linkCard は URL だけの段落（提供元が判れば embed）、
+/// codeBlock は ```` ```言語:ファイル名 {1,3-5} ````、details は `<details><summary>…</summary>` から `</details>` の行まで、
+/// entry へのリンクは `[text](entry:ID)`、underline は `<u>…</u>`。入れ子は 2 空白、番号は 1 から振り直す。
+/// 読む時は少し広く受け（`*` の箇条書き、`1)`、`***`、`__` と `*`、行末 2 空白、`![caption](asset:ID)`、summary の無い `<details>`）、
+/// 読めない物は段落の text に落として必ず RichText.validate に通る doc を返す。
 ///
 /// WhyNot: Java の Markdown ライブラリを使わないのは、方言（asset: / entry: / alerts / {#id}）を完全に握るためと、依存を増やさないため。
 ///
@@ -20,13 +23,29 @@ mod Markdown {
         case BulletList(List[List[Block]])
         case OrderedList(List[List[Block]])
         case Blockquote(List[Block])
-        case CodeBlock(Option[String], String)
+        case CodeBlock(CodeInfo, String)
         case Table(List[List[Cell]])
         case Callout(CalloutKind, List[Block])
         case HorizontalRule
-        case Image(String, Option[String], Option[(Int32, Int32)])
+        case Image(Picture)
+        case Gallery(Int32, List[Picture])
         case Embed(String)
+        case LinkCard(String)
+        case Details(String, List[Block])
     }
+
+    /// codeBlock のフェンスに書く物。(言語, ファイル名, 強調する行)。
+    enum CodeInfo {
+        case CodeInfo(Option[String], Option[String], Option[String])
+    }
+
+    /// image 1 つ。(asset の id, alt, caption, (幅, 高さ))。gallery の中でも同じ。
+    enum Picture {
+        case Picture(String, Option[String], Option[String], Option[(Int32, Int32)])
+    }
+
+    /// summary の無い details に入れる summary。
+    def defaultSummary(): String = "詳細"
 
     /// 表のセル。(tableHeader か, 中身)。
     enum Cell {
@@ -84,14 +103,20 @@ mod Markdown {
         case Some("bulletList")     => Some(Block.BulletList(listItemsOf(fields)))
         case Some("orderedList")    => Some(Block.OrderedList(listItemsOf(fields)))
         case Some("blockquote")     => Some(Block.Blockquote(blocksOf(children(fields))))
-        case Some("codeBlock")      => Some(Block.CodeBlock(attrString("language", fields), childrenText(fields)))
+        case Some("codeBlock")      => Some(Block.CodeBlock(CodeInfo.CodeInfo(attrString("language", fields), attrString("fileName", fields), attrString("highlightLines", fields)), childrenText(fields)))
         case Some("table")          => Some(Block.Table(children(fields) |> List.filterMap(rowOf)))
         case Some("callout")        => attrString("kind", fields) |> Option.flatMap(calloutKindOf) |> Option.map(kind -> Block.Callout(kind, blocksOf(children(fields))))
         case Some("horizontalRule") => Some(Block.HorizontalRule)
-        case Some("image")          => attrString("assetId", fields) |> Option.map(assetId -> Block.Image(assetId, attrString("caption", fields) |> Option.filter(String.nonEmpty), imageSizeOf(fields)))
+        case Some("image")          => pictureOf(fields) |> Option.map(Block.Image)
+        case Some("gallery")        => Some(Block.Gallery(attrInt("columns", fields) |> Option.getWithDefault(RichText.minGalleryColumns()) |> clampColumns, children(fields) |> List.filterMap(objectFields) |> List.filterMap(pictureOf)))
         case Some("embed")          => attrString("url", fields) |> Option.map(Block.Embed)
+        case Some("linkCard")       => attrString("url", fields) |> Option.map(Block.LinkCard)
+        case Some("details")        => Some(Block.Details(attrString("summary", fields) |> Option.filter(String.nonEmpty) |> Option.getWithDefault(defaultSummary()), blocksOf(children(fields))))
         case _                      => None
     })
+
+    def pictureOf(fields: Map[String, Json]): Option[Picture] =
+        attrString("assetId", fields) |> Option.map(assetId -> Picture.Picture(assetId, attrString("alt", fields) |> Option.filter(String.nonEmpty), attrString("caption", fields) |> Option.filter(String.nonEmpty), imageSizeOf(fields)))
 
     def imageSizeOf(fields: Map[String, Json]): Option[(Int32, Int32)] =
         attrInt("width", fields) |> Option.flatMap(width -> attrInt("height", fields) |> Option.map(height -> (width, height)))
@@ -144,6 +169,11 @@ mod Markdown {
 
     def clampLevel(level: Int32): Int32 = Int32.max(1, Int32.min(level, RichText.maxHeadingLevel()))
 
+    def clampColumns(columns: Int32): Int32 = Int32.max(RichText.minGalleryColumns(), Int32.min(columns, RichText.maxGalleryColumns()))
+
+    /// {columns=N} を書かない時の columns。枚数を 4 で丸めた物。
+    def defaultColumns(pictures: List[Picture]): Int32 = clampColumns(List.length(pictures))
+
     // ---- 木 → doc（JSON）----
 
     def blockJson(block: Block): Json = match block {
@@ -152,17 +182,30 @@ mod Markdown {
         case Block.BulletList(items)               => objectNode("bulletList", Nil, items |> List.map(listItemJson))
         case Block.OrderedList(items)              => objectNode("orderedList", Nil, items |> List.map(listItemJson))
         case Block.Blockquote(blocks)              => objectNode("blockquote", Nil, blocks |> List.map(blockJson))
-        case Block.CodeBlock(language, code)       => objectNode("codeBlock", language |> Option.map(found -> ("language", Json.JString(found))) |> Option.toList, textNode(Nil, code) :: Nil)
+        case Block.CodeBlock(info, code)           => objectNode("codeBlock", codeInfoAttrs(info), textNode(Nil, code) :: Nil)
         case Block.Table(rows)                     => objectNode("table", Nil, rows |> List.map(cells -> objectNode("tableRow", Nil, cells |> List.map(cellJson))))
         case Block.Callout(kind, blocks)           => objectNode("callout", ("kind", Json.JString(String.toLowerCase(calloutLabel(kind)))) :: Nil, blocks |> List.map(blockJson))
         case Block.HorizontalRule                  => leafNode("horizontalRule", Nil)
-        case Block.Image(assetId, caption, size)   =>
-            leafNode("image",
-                (("assetId", Json.JString(assetId)) :: Nil)
-                    ::: (caption |> Option.map(found -> ("caption", Json.JString(found))) |> Option.toList)
-                    ::: (size |> Option.map(match (width, height) -> ("width", intJson(width)) :: ("height", intJson(height)) :: Nil) |> Option.getWithDefault(Nil)))
+        case Block.Image(picture)                  => pictureJson(picture)
+        case Block.Gallery(columns, pictures)      => objectNode("gallery", ("columns", intJson(columns)) :: Nil, pictures |> List.map(pictureJson))
         case Block.Embed(url)                      => leafNode("embed", ("url", Json.JString(url)) :: Nil)
+        case Block.LinkCard(url)                   => leafNode("linkCard", ("url", Json.JString(url)) :: Nil)
+        case Block.Details(summary, blocks)        => objectNode("details", ("summary", Json.JString(summary)) :: Nil, blocks |> List.map(blockJson))
     }
+
+    def codeInfoAttrs(info: CodeInfo): List[(String, Json)] =
+        let CodeInfo.CodeInfo(language, fileName, highlightLines) = info;
+        (language |> Option.map(found -> ("language", Json.JString(found))) |> Option.toList)
+            ::: (fileName |> Option.map(found -> ("fileName", Json.JString(found))) |> Option.toList)
+            ::: (highlightLines |> Option.map(found -> ("highlightLines", Json.JString(found))) |> Option.toList)
+
+    def pictureJson(picture: Picture): Json =
+        let Picture.Picture(assetId, alt, caption, size) = picture;
+        leafNode("image",
+            (("assetId", Json.JString(assetId)) :: Nil)
+                ::: (alt |> Option.map(found -> ("alt", Json.JString(found))) |> Option.toList)
+                ::: (caption |> Option.map(found -> ("caption", Json.JString(found))) |> Option.toList)
+                ::: (size |> Option.map(match (width, height) -> ("width", intJson(width)) :: ("height", intJson(height)) :: Nil) |> Option.getWithDefault(Nil)))
 
     def listItemJson(blocks: List[Block]): Json = objectNode("listItem", Nil, blocks |> List.map(blockJson))
 
@@ -214,12 +257,33 @@ mod Markdown {
         case Block.OrderedList(items)            => Some(items |> List.zipWithIndex |> List.map(match (index, item) -> renderListItem("${index + 1}. ", item)) |> List.join("\n"))
         case Block.Blockquote(blocks)            => Some(renderBlocks(blocks) |> prefixLines(">"))
         case Block.Callout(kind, blocks)         => Some(("[!${calloutLabel(kind)}]" :: (Some(renderBlocks(blocks)) |> Option.filter(String.nonEmpty) |> Option.toList)) |> List.join("\n") |> prefixLines(">"))
-        case Block.CodeBlock(language, code)     => Some(renderCodeBlock(language, code))
+        case Block.CodeBlock(info, code)         => Some(renderCodeBlock(info, code))
         case Block.Table(rows)                   => Some(renderTable(rows))
         case Block.HorizontalRule                => Some("---")
-        case Block.Image(assetId, caption, size) => Some("![${caption |> Option.map(escape) |> Option.getWithDefault("")}](asset:${assetId})${size |> Option.map(match (width, height) -> "{width=${width} height=${height}}") |> Option.getWithDefault("")}")
+        case Block.Image(picture)                => Some(renderPicture(picture))
+        case Block.Gallery(columns, pictures)    => Some(renderGallery(columns, pictures))
         case Block.Embed(url)                    => Some(url)
+        case Block.LinkCard(url)                 => Some(url)
+        case Block.Details(summary, blocks)      => Some(("<details><summary>${summary}</summary>" :: (Some(renderBlocks(blocks)) |> Option.filter(String.nonEmpty) |> Option.toList) ::: ("</details>" :: Nil)) |> List.join("\n\n"))
     }
+
+    /// `![alt](asset:ID "caption"){width=W height=H}`。caption は title の位置。alt だけの時は空の title を書く（title が無い形は caption と読むため）。
+    def renderPicture(picture: Picture): String =
+        let Picture.Picture(assetId, alt, caption, size) = picture;
+        let title = match (alt, caption) {
+            case (_, Some(found)) => " \"${escapeTitle(found)}\""
+            case (Some(_), None)  => " \"\""
+            case (None, None)     => ""
+        };
+        "![${alt |> Option.map(escape) |> Option.getWithDefault("")}](asset:${assetId}${title})${size |> Option.map(match (width, height) -> "{width=${width} height=${height}}") |> Option.getWithDefault("")}"
+
+    /// title の中では `"` も逃がす。
+    def escapeTitle(text: String): String = escape(text) |> String.replace(src = "\"", dst = "\\\"")
+
+    /// image を空白で並べる。columns が枚数から決まる物と違う時だけ `{columns=N}` を足す。
+    def renderGallery(columns: Int32, pictures: List[Picture]): String =
+        let suffix = if (columns == defaultColumns(pictures)) "" else " {columns=${columns}}";
+        (pictures |> List.map(renderPicture) |> List.join(" ")) ++ suffix
 
     /// リストの 1 項目。1 行目に印、2 行目からは 2 空白。入れ子のリストの前は空行を挟まない。
     def renderListItem(marker: String, blocks: List[Block]): String =
@@ -242,10 +306,12 @@ mod Markdown {
     def prefixLines(marker: String, text: String): String =
         text |> String.splitOn(substr = "\n") |> List.map(line -> if (String.isEmpty(line)) marker else "${marker} ${line}") |> List.join("\n")
 
-    /// 中身に ``` で始まる行があれば ```` で囲む。
-    def renderCodeBlock(language: Option[String], code: String): String =
+    /// 中身に ``` で始まる行があれば ```` で囲む。フェンスは ```` ```言語:ファイル名 {行} ````（無い物は書かない）。
+    def renderCodeBlock(info: CodeInfo, code: String): String =
+        let CodeInfo.CodeInfo(language, fileName, highlightLines) = info;
         let fence = if (code |> String.splitOn(substr = "\n") |> List.exists(String.startsWith(prefix = "```"))) "````" else "```";
-        "${fence}${language |> Option.getWithDefault("")}\n${code}\n${fence}"
+        let header = (language |> Option.getWithDefault("")) ++ (fileName |> Option.map(found -> ":${found}") |> Option.getWithDefault("")) ++ (highlightLines |> Option.map(found -> " {${found}}") |> Option.getWithDefault(""));
+        "${fence}${header}\n${code}\n${fence}"
 
     /// GFM の表。1 行目の次に区切り行。列数は 1 行目に合わせる。
     def renderTable(rows: List[List[Cell]]): String =
@@ -356,7 +422,9 @@ mod Markdown {
     /// 1 行の種類。
     enum LineKind {
         case Blank
-        case Fence(Int32, Option[String])
+        case Fence(Int32, CodeInfo)
+        case DetailsOpen(String)
+        case DetailsClose
         case HeadingLine(Int32, String)
         case Rule
         case Quote(String)
@@ -380,7 +448,9 @@ mod Markdown {
     /// 先頭の 1 ブロックを読み、残りの行を返す。
     def parseOne(kind: LineKind, line: String, rest: List[String]): (Option[Block], List[String]) = match kind {
         case LineKind.Blank                    => (None, rest)
-        case LineKind.Fence(length, language)  => parseFence(length, language, rest)
+        case LineKind.Fence(length, info)      => parseFence(length, info, rest)
+        case LineKind.DetailsOpen(summary)     => parseDetails(summary, rest)
+        case LineKind.DetailsClose             => (None, rest)
         case LineKind.HeadingLine(level, text) => (Some(parseHeading(level, text)), rest)
         case LineKind.Rule                     => (Some(Block.HorizontalRule), rest)
         case LineKind.Quote(_)                 => parseQuote(line :: rest)
@@ -390,16 +460,30 @@ mod Markdown {
     }
 
     def lineKind(line: String): LineKind =
-        List#{ blankKind, fenceKind, headingKind, ruleKind, quoteKind, bulletKind, orderedKind }
+        List#{ blankKind, fenceKind, detailsOpenKind, detailsCloseKind, headingKind, ruleKind, quoteKind, bulletKind, orderedKind }
             |> List.findMap(classify -> classify(line))
             |> Option.getWithDefault(LineKind.Plain)
 
     def blankKind(line: String): Option[LineKind] = if (isBlank(line)) Some(LineKind.Blank) else None
 
-    def fenceKind(line: String): Option[LineKind] = match captures("^\\s{0,3}(`{3,})\\s*(\\S*)\\s*$", line) {
-        case fence :: language :: Nil => Some(LineKind.Fence(String.length(fence), Some(language) |> Option.filter(RichText.isLanguage)))
-        case _                        => None
+    /// ```` ```言語:ファイル名 {行} ````。言語・ファイル名・行は規則に合わなければ無い物にする。
+    def fenceKind(line: String): Option[LineKind] = match captures("^\\s{0,3}(`{3,})([^\\s:{`]*)(?::(\\S+))?\\s*(?:\\{([^}\\s]*)\\})?\\s*$", line) {
+        case fence :: language :: fileName :: highlightLines :: Nil =>
+            Some(LineKind.Fence(String.length(fence), CodeInfo.CodeInfo(
+                Some(language) |> Option.filter(RichText.isLanguage),
+                Some(fileName) |> Option.filter(RichText.isFileName),
+                Some(highlightLines) |> Option.filter(RichText.isHighlightLines))))
+        case _ => None
     }
+
+    /// `<details><summary>…</summary>`。summary が無いか空なら「詳細」。
+    def detailsOpenKind(line: String): Option[LineKind] = match captures("^\\s{0,3}<details>\\s*(?:<summary>(.*?)</summary>)?\\s*$", line) {
+        case summary :: Nil => Some(LineKind.DetailsOpen(Some(String.trim(summary)) |> Option.filter(String.nonEmpty) |> Option.getWithDefault(defaultSummary())))
+        case _              => None
+    }
+
+    def detailsCloseKind(line: String): Option[LineKind] =
+        if (String.isMatch(regex = "^\\s{0,3}</details>\\s*$", line)) Some(LineKind.DetailsClose) else None
 
     def headingKind(line: String): Option[LineKind] = match captures("^\\s{0,3}(#{1,6})(\\s+.*)?$", line) {
         case hashes :: text :: Nil => Some(LineKind.HeadingLine(String.length(hashes), text))
@@ -444,10 +528,15 @@ mod Markdown {
     }
 
     /// ``` から閉じる ``` まで。閉じなければ末尾まで。
-    def parseFence(length: Int32, language: Option[String], rest: List[String]): (Option[Block], List[String]) =
+    def parseFence(length: Int32, info: CodeInfo, rest: List[String]): (Option[Block], List[String]) =
         let closes = line -> String.isMatch(regex = "^\\s{0,3}`{${length},}\\s*$", line);
         let (body, after) = List.span(line -> not closes(line), rest);
-        (Some(Block.CodeBlock(language, List.join("\n", body))), List.drop(1, after))
+        (Some(Block.CodeBlock(info, List.join("\n", body))), List.drop(1, after))
+
+    /// `<details>` の行から `</details>` の行まで。中身は普通のブロック。閉じなければ末尾まで。
+    def parseDetails(summary: String, rest: List[String]): (Option[Block], List[String]) =
+        let (body, after) = List.span(line -> Option.isEmpty(detailsCloseKind(line)), rest);
+        (Some(Block.Details(summary, parseBlocks(body))), List.drop(1, after))
 
     /// `## 見出し {#id}`。閉じ側の # は落とす。5 段以上は 4 に丸める。
     def parseHeading(level: Int32, text: String): Block =
@@ -541,7 +630,7 @@ mod Markdown {
 
     // ---- 段落 ----
 
-    /// 空行か段落を切る行まで。image か URL だけなら image / embed / link の段落。
+    /// 空行か段落を切る行まで。image だけなら image / gallery、URL だけなら embed / linkCard。
     def parseParagraph(lines: List[String]): (Option[Block], List[String]) = match lines {
         case first :: rest =>
             let (continuation, after) = List.span(line -> not interruptsParagraph(line), rest);
@@ -551,19 +640,51 @@ mod Markdown {
     }
 
     def paragraphBlock(text: String): Block =
-        List#{ imageBlock, urlBlock } |> List.findMap(parse -> parse(text)) |> Option.getWithDefault(Block.Paragraph(parseInlines(text)))
+        List#{ picturesBlock, urlBlock } |> List.findMap(parse -> parse(text)) |> Option.getWithDefault(Block.Paragraph(parseInlines(text)))
 
-    /// `![caption](asset:ID)` と `![caption](asset:ID){width=W height=H}`。
-    def imageBlock(text: String): Option[Block] = match captures("^!\\[(.*)\\]\\(asset:([A-Za-z0-9_-]{1,64})\\)(\\{width=([0-9]{1,9}) height=([0-9]{1,9})\\})?$", text) {
-        case caption :: assetId :: _ :: width :: height :: Nil =>
-            Some(Block.Image(assetId, Some(unescape(caption)) |> Option.filter(String.nonEmpty), Int32.fromString(width) |> Option.flatMap(w -> Int32.fromString(height) |> Option.map(h -> (w, h)))))
-        case _ => None
+    /// image だけの段落。1 つなら image、空白区切りで 2 つ以上なら gallery（行末の `{columns=N}` は 2 〜 4 に丸める）。文字が混ざれば None。
+    def picturesBlock(text: String): Option[Block] =
+        let (pictures, rest) = takePictures(text, Nil);
+        match (pictures, columnsSuffix(rest)) {
+            case (picture :: Nil, Some(None))    => Some(Block.Image(picture))
+            case (_ :: _ :: _, Some(columns))    => Some(Block.Gallery(columns |> Option.map(clampColumns) |> Option.getWithDefault(defaultColumns(pictures)), pictures))
+            case _                               => None
+        }
+
+    /// 先頭から image を読めるだけ読む。(image の列, 残り)。image と image の間は空白。
+    def takePictures(text: String, acc: List[Picture]): (List[Picture], String) = match takePicture(text) {
+        case Some((picture, rest)) =>
+            if (String.isMatch(regex = "^\\s+!\\[[\\s\\S]*$", rest)) takePictures(String.trimLeft(rest), picture :: acc)
+            else (List.reverse(picture :: acc), rest)
+        case None => (List.reverse(acc), text)
     }
 
-    /// URL だけの段落。提供元が判れば embed、他は link 付きの段落。
+    /// 残りが空なら Some(None)、`{columns=N}` なら Some(Some(N))、他は None。
+    def columnsSuffix(rest: String): Option[Option[Int32]] = match captures("^\\s*(?:\\{columns=([0-9]{1,9})\\})?\\s*$", rest) {
+        case "" :: Nil      => Some(None)
+        case columns :: Nil => Some(Int32.fromString(columns))
+        case _              => None
+    }
+
+    ///
+    /// `![alt](asset:ID "caption"){width=W height=H}` を 1 つ。title が無い `![caption](asset:ID)` は caption と読む。
+    /// (image, 残りの文字)。
+    ///
+    def takePicture(text: String): Option[(Picture, String)] =
+        match captures("^!\\[((?:[^\\]\\\\]|\\\\.)*)\\]\\(asset:([A-Za-z0-9_-]{1,64})( \"((?:[^\"\\\\]|\\\\.)*)\")?\\)(?:\\{width=([0-9]{1,9}) height=([0-9]{1,9})\\})?([\\s\\S]*)$", text) {
+            case bracket :: assetId :: titlePart :: title :: width :: height :: rest :: Nil =>
+                let size = Int32.fromString(width) |> Option.flatMap(w -> Int32.fromString(height) |> Option.map(h -> (w, h)));
+                let picture =
+                    if (String.isEmpty(titlePart)) Picture.Picture(assetId, None, Some(unescape(bracket)) |> Option.filter(String.nonEmpty), size)
+                    else Picture.Picture(assetId, Some(unescape(bracket)) |> Option.filter(String.nonEmpty), Some(unescape(title)) |> Option.filter(String.nonEmpty), size);
+                Some((picture, rest))
+            case _ => None
+        }
+
+    /// URL だけの段落。提供元が判れば embed、他は linkCard。
     def urlBlock(text: String): Option[Block] =
         if (String.isMatch(regex = "^https?://\\S+$", text))
-            Some(if (Option.nonEmpty(RichText.embedOf(text))) Block.Embed(text) else Block.Paragraph(Inline.Text(Mark.Link(LinkTarget.Href(text)) :: Nil, text) :: Nil))
+            Some(if (Option.nonEmpty(RichText.embedOf(text))) Block.Embed(text) else Block.LinkCard(text))
         else None
 
     // ---- Markdown → 木（inline）----
@@ -630,9 +751,9 @@ mod Markdown {
             }
         else Step.Literal('<', pos + 1)
 
-    /// `[text](target)`。閉じないか target に空白があれば `[` の文字。
+    /// `[text](target)`。閉じないか target に空白があれば `[` の文字。`![` は image の書き方なので link にしない。
     def linkStep(marks: List[Mark], text: String, pos: Int32): Step =
-        let found = String.indexOfLeftWithOffset(substr = "](", offset = pos + 1, text)
+        let found = (if (String.nth(pos - 1, text) == Some('!')) None else String.indexOfLeftWithOffset(substr = "](", offset = pos + 1, text))
             |> Option.flatMap(labelEnd -> closingParen(text, labelEnd + 2) |> Option.map(targetEnd -> (labelEnd, targetEnd)))
             |> Option.filter(match (labelEnd, targetEnd) -> not String.exists(Char.isWhitespace, String.slice(start = labelEnd + 2, end = targetEnd, text)));
         match found {

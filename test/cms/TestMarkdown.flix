@@ -1,5 +1,6 @@
 ///
 /// richText の doc と Markdown の双方向変換。方言の表・往復・境界・壊れた入力・RichText との整合。
+/// 本文の穴を塞ぐノード（gallery / image の alt / linkCard / codeBlock の fileName と highlightLines / details）の方言もここ。
 ///
 mod TestMarkdown {
 
@@ -52,13 +53,27 @@ mod TestMarkdown {
 
     def hardBreak(): Json = CmsTestKit.richLeaf("hardBreak", Nil)
 
-    def image(assetId: String, caption: Option[String], size: Option[(Int32, Int32)]): Json =
+    def image(assetId: String, alt: Option[String], caption: Option[String], size: Option[(Int32, Int32)]): Json =
         CmsTestKit.richLeaf("image",
             (("assetId", Json.JString(assetId)) :: Nil)
+                ::: (alt |> Option.map(found -> ("alt", Json.JString(found))) |> Option.toList)
                 ::: (caption |> Option.map(found -> ("caption", Json.JString(found))) |> Option.toList)
                 ::: (size |> Option.map(match (width, height) -> List#{ ("width", CmsTestKit.intJson(width)), ("height", CmsTestKit.intJson(height)) }) |> Option.getWithDefault(Nil)))
 
     def embed(url: String): Json = CmsTestKit.richLeaf("embed", List#{ ("url", Json.JString(url)) })
+
+    def gallery(columns: Int32, images: List[Json]): Json = CmsTestKit.richNode("gallery", List#{ ("columns", CmsTestKit.intJson(columns)) }, images)
+
+    def linkCard(url: String): Json = CmsTestKit.richLeaf("linkCard", List#{ ("url", Json.JString(url)) })
+
+    def codeBlockWith(language: Option[String], fileName: Option[String], highlightLines: Option[String], code: String): Json =
+        CmsTestKit.richNode("codeBlock",
+            (language |> Option.map(found -> ("language", Json.JString(found))) |> Option.toList)
+                ::: (fileName |> Option.map(found -> ("fileName", Json.JString(found))) |> Option.toList)
+                ::: (highlightLines |> Option.map(found -> ("highlightLines", Json.JString(found))) |> Option.toList),
+            List#{ plain(code) })
+
+    def details(summary: String, blocks: List[Json]): Json = CmsTestKit.richNode("details", List#{ ("summary", Json.JString(summary)) }, blocks)
 
     def simpleParagraph(text: String): Json = paragraph(List#{ plain(text) })
 
@@ -94,14 +109,33 @@ mod TestMarkdown {
         (doc(List#{ simpleParagraph("上"), horizontalRule(), simpleParagraph("下") }), "上\n\n---\n\n下"),
         // hardBreak: 行末の \
         (doc(List#{ paragraph(List#{ plain("行 1"), hardBreak(), plain("行 2") }) }), "行 1\\\n行 2"),
-        // image: caption と asset:ID。width / height があれば直後に
-        (doc(List#{ image("asset001", Some("写真"), Some((640, 480))) }), "![写真](asset:asset001){width=640 height=480}"),
-        (doc(List#{ image("asset001", Some("写真"), None) }), "![写真](asset:asset001)"),
-        (doc(List#{ image("asset001", None, None) }), "![](asset:asset001)"),
+        // image: `![alt](asset:ID "caption")`。alt と caption の 4 通り。alt だけの時は空の caption を書く（`![alt](asset:ID)` は caption と読むため）。width / height があれば直後に
+        (doc(List#{ image("asset001", None, None, None) }), "![](asset:asset001)"),
+        (doc(List#{ image("asset001", Some("説明"), None, None) }), "![説明](asset:asset001 \"\")"),
+        (doc(List#{ image("asset001", None, Some("写真"), None) }), "![](asset:asset001 \"写真\")"),
+        (doc(List#{ image("asset001", Some("説明"), Some("写真"), None) }), "![説明](asset:asset001 \"写真\")"),
+        (doc(List#{ image("asset001", Some("説明"), Some("写真"), Some((640, 480))) }), "![説明](asset:asset001 \"写真\"){width=640 height=480}"),
+        (doc(List#{ image("asset001", None, Some("引用 \"符\""), None) }), "![](asset:asset001 \"引用 \\\"符\\\"\")"),
+        // gallery: 1 行に画像を 2 つ以上、空白区切り。columns は枚数（4 で丸める）。枚数と違う時だけ行末に {columns=N}
+        (doc(List#{ gallery(2, List#{ image("asset001", None, None, None), image("asset002", None, Some("図 2"), None) }) }), "![](asset:asset001) ![](asset:asset002 \"図 2\")"),
+        (doc(List#{ gallery(3, List#{ image("asset001", None, None, None), image("asset002", None, None, Some((640, 480))), image("asset003", Some("c"), None, None) }) }), "![](asset:asset001) ![](asset:asset002){width=640 height=480} ![c](asset:asset003 \"\")"),
+        (doc(List#{ gallery(4, List#{ image("asset001", None, None, None), image("asset002", None, None, None), image("asset003", None, None, None), image("asset004", None, None, None), image("asset005", None, None, None) }) }), "![](asset:asset001) ![](asset:asset002) ![](asset:asset003) ![](asset:asset004) ![](asset:asset005)"),
+        (doc(List#{ gallery(3, List#{ image("asset001", None, None, None), image("asset002", None, None, None) }) }), "![](asset:asset001) ![](asset:asset002) {columns=3}"),
         // embed: URL だけの段落
         (doc(List#{ embed("https://www.youtube.com/watch?v=dQw4w9WgXcQ") }), "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
         (doc(List#{ embed("https://vimeo.com/123456") }), "https://vimeo.com/123456"),
         (doc(List#{ embed("https://x.com/flixlang/status/1234567890") }), "https://x.com/flixlang/status/1234567890"),
+        // linkCard: URL だけの段落で、提供元でない物
+        (doc(List#{ linkCard("https://example.com/") }), "https://example.com/"),
+        (doc(List#{ linkCard("http://example.com/a?b=1&c=2") }), "http://example.com/a?b=1&c=2"),
+        // codeBlock: ```言語:ファイル名 {行}。言語無しは `:` から、行だけは空白の後ろ
+        (doc(List#{ codeBlockWith(Some("ts"), Some("src/a.ts"), Some("1,3-5"), "const x = 1;") }), "```ts:src/a.ts {1,3-5}\nconst x = 1;\n```"),
+        (doc(List#{ codeBlockWith(None, Some("src/a.ts"), None, "x") }), "```:src/a.ts\nx\n```"),
+        (doc(List#{ codeBlockWith(Some("ts"), None, Some("2"), "x") }), "```ts {2}\nx\n```"),
+        (doc(List#{ codeBlockWith(None, None, Some("2-3"), "x") }), "``` {2-3}\nx\n```"),
+        // details: GitHub がそのまま畳む形。summary の行、空行、中身、空行、閉じ
+        (doc(List#{ details("補足", List#{ simpleParagraph("中身"), bulletList(List#{ listItem(List#{ simpleParagraph("a") }) }) }) }), "<details><summary>補足</summary>\n\n中身\n\n- a\n\n</details>"),
+        (doc(List#{ details("空", Nil) }), "<details><summary>空</summary>\n\n</details>"),
         // marks
         (doc(List#{ paragraph(List#{ plain("a "), marked("bold", "太字"), plain(" b") }) }), "a **太字** b"),
         (doc(List#{ paragraph(List#{ plain("a "), marked("italic", "斜体"), plain(" b") }) }), "a _斜体_ b"),
@@ -134,8 +168,17 @@ mod TestMarkdown {
         ("*斜体*", doc(List#{ paragraph(List#{ marked("italic", "斜体") }) })),
         // 行末 2 空白の hardBreak
         ("行 1  \n行 2", doc(List#{ paragraph(List#{ plain("行 1"), hardBreak(), plain("行 2") }) })),
-        // 提供元でない URL だけの段落は link 付きの段落
-        ("https://example.com/", doc(List#{ paragraph(List#{ linked("https://example.com/", "https://example.com/") }) })),
+        // 昔の `![caption](asset:ID)` は caption として読む
+        ("![写真](asset:asset001)", doc(List#{ image("asset001", None, Some("写真"), None) })),
+        ("![写真](asset:asset001){width=640 height=480}", doc(List#{ image("asset001", None, Some("写真"), Some((640, 480))) })),
+        // gallery の {columns=N} は 2 〜 4 に丸める。枚数と同じなら書かない
+        ("![](asset:asset001) ![](asset:asset002) {columns=9}", doc(List#{ gallery(4, List#{ image("asset001", None, None, None), image("asset002", None, None, None) }) })),
+        ("![](asset:asset001) ![](asset:asset002) {columns=1}", doc(List#{ gallery(2, List#{ image("asset001", None, None, None), image("asset002", None, None, None) }) })),
+        ("![](asset:asset001)   ![](asset:asset002)  {columns=2}", doc(List#{ gallery(2, List#{ image("asset001", None, None, None), image("asset002", None, None, None) }) })),
+        // summary の無い details は「詳細」。中身の前後の空行は無くてもよい
+        ("<details>\n中身\n</details>", doc(List#{ details("詳細", List#{ simpleParagraph("中身") }) })),
+        // 閉じない details は末尾まで
+        ("<details><summary>補足</summary>\n\n中身\n\n続き", doc(List#{ details("補足", List#{ simpleParagraph("中身"), simpleParagraph("続き") }) })),
         // 見出しの後ろの空白と、閉じ側の #
         ("##   見出し  ", doc(List#{ heading(2, "見出し") })),
         // CRLF
@@ -185,8 +228,12 @@ mod TestMarkdown {
     ///   ├ table ─ tableRow(tableHeader "見出し", tableHeader "値") / tableRow(tableCell **太字**, tableCell "a|b")
     ///   ├ callout(tip) ─ paragraph "ヒント"
     ///   ├ horizontalRule
-    ///   ├ image(asset001, "キャプション", 640x480)
+    ///   ├ image(asset001, alt "説明", "キャプション", 640x480)
     ///   ├ embed(YouTube)
+    ///   ├ gallery(3) ─ image(asset002) / image(asset003, "図 2") / image(asset004, alt "d")
+    ///   ├ linkCard(https://example.com/card)
+    ///   ├ codeBlock(ts, src/a.ts, 1,3-5) "const y = 2;"
+    ///   ├ details("補足") ─ paragraph "畳んだ中身" / gallery(2) ─ image(asset005) / image(asset006)
     ///   └ paragraph "行 1" hardBreak "行 2"
     ///
     def article(): Json = doc(List#{
@@ -205,8 +252,12 @@ mod TestMarkdown {
             tableRow(List#{ tableCell(List#{ marked("bold", "太字") }), tableCell(List#{ plain("a|b") }) }) }),
         callout("tip", List#{ simpleParagraph("ヒント") }),
         horizontalRule(),
-        image("asset001", Some("キャプション"), Some((640, 480))),
+        image("asset001", Some("説明"), Some("キャプション"), Some((640, 480))),
         embed("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+        gallery(3, List#{ image("asset002", None, None, None), image("asset003", None, Some("図 2"), None), image("asset004", Some("d"), None, None) }),
+        linkCard("https://example.com/card"),
+        codeBlockWith(Some("ts"), Some("src/a.ts"), Some("1,3-5"), "const y = 2;"),
+        details("補足", List#{ simpleParagraph("畳んだ中身"), gallery(2, List#{ image("asset005", None, None, None), image("asset006", None, None, None) }) }),
         paragraph(List#{ plain("行 1"), hardBreak(), plain("行 2") })
     })
 
@@ -222,8 +273,12 @@ mod TestMarkdown {
         ++ "| 見出し | 値 |\n| --- | --- |\n| **太字** | a\\|b |\n\n"
         ++ "> [!TIP]\n> ヒント\n\n"
         ++ "---\n\n"
-        ++ "![キャプション](asset:asset001){width=640 height=480}\n\n"
+        ++ "![説明](asset:asset001 \"キャプション\"){width=640 height=480}\n\n"
         ++ "https://www.youtube.com/watch?v=dQw4w9WgXcQ\n\n"
+        ++ "![](asset:asset002) ![](asset:asset003 \"図 2\") ![d](asset:asset004 \"\")\n\n"
+        ++ "https://example.com/card\n\n"
+        ++ "```ts:src/a.ts {1,3-5}\nconst y = 2;\n```\n\n"
+        ++ "<details><summary>補足</summary>\n\n畳んだ中身\n\n![](asset:asset005) ![](asset:asset006)\n\n</details>\n\n"
         ++ "行 1\\\n行 2"
 
     /// 見本の記事は doc → md → doc で元に戻り、md → doc → md でも元に戻る。
@@ -314,16 +369,31 @@ mod TestMarkdown {
              Markdown.fromMarkdown("> [!FOO]\n> x"),
              CmsTestKit.violationPaths(RichText.validate("fields.body", Markdown.fromMarkdown("[x](javascript:alert(1))")))))
 
-    /// 壊れた入力でも validate に通る doc を返す（規則外の言語名・見出しの id・5 段以上の見出し・規則外の asset id）。
+    /// 1 行に画像と文字が混ざれば普通の段落（gallery にも image にもならない）。閉じない details は末尾まで、`</details>` だけの行は何も作らない。
+    @Test
+    def testBrokenNewNodes(): Unit \ Assert =
+        Assert.assertEq(
+            expected = (
+                doc(List#{ simpleParagraph("![](asset:asset001) と ![](asset:asset002)") }),
+                doc(List#{ simpleParagraph("![](asset:asset001) 説明") }),
+                doc(List#{ details("補足", List#{ simpleParagraph("a") }), simpleParagraph("b") }),
+                doc(List#{ simpleParagraph("a") })),
+            (Markdown.fromMarkdown("![](asset:asset001) と ![](asset:asset002)"),
+             Markdown.fromMarkdown("![](asset:asset001) 説明"),
+             Markdown.fromMarkdown("<details><summary>補足</summary>\na\n</details>\nb"),
+             Markdown.fromMarkdown("</details>\na")))
+
+    /// 壊れた入力でも validate に通る doc を返す（規則外の言語名・見出しの id・5 段以上の見出し・規則外の asset id・規則外のファイル名と行）。
     @Test
     def testBrokenInputStillValidates(): Unit \ Assert =
-        let markdown = "```C++\nx\n```\n\n# 題 {#見出し}\n\n###### 深い\n\n![c](asset:not an id)";
+        let markdown = "```C++\nx\n```\n\n# 題 {#見出し}\n\n###### 深い\n\n![c](asset:not an id)\n\n```ts:a<b {3-}\ny\n```";
         Assert.assertEq(
             expected = (Nil, doc(List#{
                 codeBlock(None, "x"),
                 heading(1, "題 {#見出し}"),
                 heading(4, "深い"),
-                simpleParagraph("![c](asset:not an id)") })),
+                simpleParagraph("![c](asset:not an id)"),
+                codeBlock(Some("ts"), "y") })),
             (RichText.validate("fields.body", Markdown.fromMarkdown(markdown)), Markdown.fromMarkdown(markdown)))
 
     // ---- 6. RichText との整合 ----
@@ -334,7 +404,7 @@ mod TestMarkdown {
         let roundTripped = Markdown.fromMarkdown(Markdown.toMarkdown(article()));
         Assert.assertEq(
             expected = (Nil,
-                "タイトル\nこれは 太字 と 斜体 と 打ち消し と code と 下線 と 外部 と 記事 です。\n見出し 2\n箇条書き 1\n箇条書き 2\n入れ子\n番号 1\n番号 2\n引用\nconst x = 1;\n見出し\n値\n太字\na|b\nヒント\n行 1\n行 2"),
+                "タイトル\nこれは 太字 と 斜体 と 打ち消し と code と 下線 と 外部 と 記事 です。\n見出し 2\n箇条書き 1\n箇条書き 2\n入れ子\n番号 1\n番号 2\n引用\nconst x = 1;\n見出し\n値\n太字\na|b\nヒント\n図 2\nhttps://example.com/card\nconst y = 2;\n補足\n畳んだ中身\n行 1\n行 2"),
             (RichText.validate("fields.body", roundTripped),
              RichText.toText(roundTripped) |> String.replaceMatches(regex = "\n+", to = "\n")))
 

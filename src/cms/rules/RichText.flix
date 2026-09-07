@@ -4,19 +4,30 @@
 /// 形: `{ type: "doc", content: [node] }`。node は `{ type, attrs?, content?, marks?, text? }`。
 /// 許すノードとマークはホワイトリストで、知らない物は invalid にする（後から足すのは易しく、外すのは既存の entry が壊れる）。
 ///
-/// HTML には class を付けない。サイト側が `.prose h2` のように親で当てる。種類の区別が要る所（callout / embed）は data 属性。
+/// HTML には class を付けない。サイト側が `.prose h2` のように親で当てる。種類の区別が要る所（callout / embed / gallery / linkCard / codeBlock の fileName）は data 属性。
+///
+/// ノードの一覧:
+/// - container: paragraph / heading(level, id) / bulletList / orderedList / listItem / blockquote / codeBlock(language, fileName, highlightLines) /
+///   table / tableRow / tableCell / tableHeader / callout(kind) / gallery(columns。中は image だけ) / details(summary)
+/// - leaf: text(marks) / hardBreak / horizontalRule / image(assetId, alt, caption, width, height) / embed(url) / linkCard(url)
 ///
 mod RichText {
 
     use Util.Json.Json
 
-    /// 子（content）を持てるノード。table > tableRow > tableCell / tableHeader > paragraph。callout の中は段落など。
+    /// 子（content）を持てるノード。table > tableRow > tableCell / tableHeader > paragraph。callout と details の中は段落など。gallery の中は image だけ。
     pub def containerNodes(): List[String] =
         "paragraph" :: "heading" :: "bulletList" :: "orderedList" :: "listItem" :: "blockquote" :: "codeBlock" ::
-        "table" :: "tableRow" :: "tableCell" :: "tableHeader" :: "callout" :: Nil
+        "table" :: "tableRow" :: "tableCell" :: "tableHeader" :: "callout" :: "gallery" :: "details" :: Nil
 
-    /// 子を持たないノード。image は attrs.assetId で asset を、embed は attrs.url で外部の動画や投稿を指す。
-    pub def leafNodes(): List[String] = "text" :: "hardBreak" :: "horizontalRule" :: "image" :: "embed" :: Nil
+    /// 子を持たないノード。image は attrs.assetId で asset を、embed は attrs.url で外部の動画や投稿を、linkCard は attrs.url で任意のページを指す。
+    pub def leafNodes(): List[String] = "text" :: "hardBreak" :: "horizontalRule" :: "image" :: "embed" :: "linkCard" :: Nil
+
+    /// gallery の attrs.columns の下限。attrs.columns が無い時の値でもある。
+    pub def minGalleryColumns(): Int32 = 2
+
+    /// gallery の attrs.columns の上限。
+    pub def maxGalleryColumns(): Int32 = 4
 
     /// text に付けられるマーク。link は attrs.href（外部）か attrs.entryId（この CMS の entry）。
     pub def markNames(): List[String] = "bold" :: "italic" :: "strike" :: "underline" :: "code" :: "link" :: Nil
@@ -83,6 +94,9 @@ mod RichText {
             case Some("callout") => checkCallout(path, fields) ::: checkChildren(path, fields)
             case Some("image") => checkImage(path, fields)
             case Some("embed") => checkEmbed(path, fields)
+            case Some("gallery") => checkGallery(path, fields)
+            case Some("linkCard") => checkLinkCard(path, fields)
+            case Some("details") => checkDetails(path, fields) ::: checkChildren(path, fields)
             case Some(name) if List.memberOf(name, containerNodes()) => checkChildren(path, fields)
             case Some(name) if List.memberOf(name, leafNodes()) => Nil
             case Some(name) => Violation.Violation(path, "知らないノード '${name}' です（${List.join(", ", containerNodes() ::: leafNodes())}）") :: Nil
@@ -123,12 +137,19 @@ mod RichText {
         };
         levelCheck ::: idCheck
 
-    /// codeBlock。attrs.language は任意で、あれば小文字英数字と `+ # -`。
-    def checkCodeBlock(path: String, fields: Map[String, Json]): List[Violation] = match Map.get("language", attrs(fields)) {
-        case None => Nil
-        case Some(Json.JString(language)) if isLanguage(language) => Nil
-        case Some(_) => Violation.Violation(path, "codeBlock の attrs.language は小文字英数字と + # - を 1 〜 32 文字にしてください") :: Nil
-    }
+    /// codeBlock。attrs.language / fileName / highlightLines はどれも任意で、あれば形を見る。
+    def checkCodeBlock(path: String, fields: Map[String, Json]): List[Violation] =
+        checkOptionalString(path, "language", isLanguage, "codeBlock の attrs.language は小文字英数字と + # - を 1 〜 32 文字にしてください", fields)
+            ::: checkOptionalString(path, "fileName", isFileName, "codeBlock の attrs.fileName はパスの文字（英数字・日本語・/ . _ -）を 1 〜 200 文字にしてください", fields)
+            ::: checkOptionalString(path, "highlightLines", isHighlightLines, "codeBlock の attrs.highlightLines は 1,3-5 の形にしてください", fields)
+
+    /// 任意の文字列の attr。無ければ通り、あれば文字列で規則に合う事。
+    def checkOptionalString(path: String, name: String, isValid: String -> Bool, message: String, fields: Map[String, Json]): List[Violation] =
+        match Map.get(name, attrs(fields)) {
+            case None => Nil
+            case Some(Json.JString(found)) if isValid(found) => Nil
+            case Some(_) => Violation.Violation(path, message) :: Nil
+        }
 
     /// callout。attrs.kind は note / tip / warning。
     def checkCallout(path: String, fields: Map[String, Json]): List[Violation] = match attrString("kind", fields) {
@@ -136,10 +157,39 @@ mod RichText {
         case _ => Violation.Violation(path, "callout の attrs.kind は ${List.join(" / ", calloutKinds())} にしてください") :: Nil
     }
 
-    /// image ノード。attrs.assetId は asset の id。alt と caption は任意の文字列。
-    def checkImage(path: String, fields: Map[String, Json]): List[Violation] = match attrString("assetId", fields) |> Option.flatMap(AssetId.parse) {
-        case Some(_) => Nil
-        case None    => Violation.Violation(path, "image の attrs.assetId は asset の id にしてください") :: Nil
+    /// image ノード。attrs.assetId は asset の id。alt は任意の文字列。
+    def checkImage(path: String, fields: Map[String, Json]): List[Violation] =
+        let assetIdCheck = match attrString("assetId", fields) |> Option.flatMap(AssetId.parse) {
+            case Some(_) => Nil
+            case None    => Violation.Violation(path, "image の attrs.assetId は asset の id にしてください") :: Nil
+        };
+        assetIdCheck ::: checkOptionalString(path, "alt", _ -> true, "image の attrs.alt は文字列にしてください", fields)
+
+    /// gallery。attrs.columns は任意で 2 〜 4。中は 1 つ以上の image だけ。
+    def checkGallery(path: String, fields: Map[String, Json]): List[Violation] =
+        let columnsCheck = match Map.get("columns", attrs(fields)) {
+            case None => Nil
+            case Some(found) if Option.exists(isGalleryColumns, EntryValue.asInt32(found)) => Nil
+            case Some(_) => Violation.Violation(path, "gallery の attrs.columns は ${minGalleryColumns()} 〜 ${maxGalleryColumns()} にしてください") :: Nil
+        };
+        let emptyCheck = if (List.isEmpty(children(fields))) Violation.Violation(path, "gallery には image を 1 つ以上入れてください") :: Nil else Nil;
+        columnsCheck ::: emptyCheck ::: (children(fields) |> List.zipWithIndex |> List.flatMap(match (index, child) -> checkGalleryChild("${path}.content[${index}]", child)))
+
+    def checkGalleryChild(path: String, child: Json): List[Violation] = match child {
+        case Json.JObject(fields) if typeOf(fields) == Some("image") => checkImage(path, fields)
+        case _ => Violation.Violation(path, "gallery の中は image だけにしてください") :: Nil
+    }
+
+    /// linkCard。attrs.url は http(s) だけ（mailto: はカードにならない）。
+    def checkLinkCard(path: String, fields: Map[String, Json]): List[Violation] = match attrString("url", fields) {
+        case Some(url) if isHttpUrl(url) => Nil
+        case _ => Violation.Violation(path, "linkCard の attrs.url は http(s):// にしてください") :: Nil
+    }
+
+    /// details。attrs.summary は空でない文字列。
+    def checkDetails(path: String, fields: Map[String, Json]): List[Violation] = match attrString("summary", fields) {
+        case Some(summary) if String.nonEmpty(String.trim(summary)) => Nil
+        case _ => Violation.Violation(path, "details の attrs.summary は空でない文字列にしてください") :: Nil
     }
 
     /// embed ノード。attrs.url が知っている提供元の形でなければ止める（任意の iframe は通さない）。
@@ -155,8 +205,19 @@ mod RichText {
     pub def isLanguage(language: String): Bool = String.isMatch(regex = "^[a-z0-9+#-]{1,32}$", language)
 
     /// link に許す href。javascript: 等を通さない。
-    pub def isSafeHref(href: String): Bool =
-        String.startsWith(prefix = "https://", href) or String.startsWith(prefix = "http://", href) or String.startsWith(prefix = "mailto:", href)
+    pub def isSafeHref(href: String): Bool = isHttpUrl(href) or String.startsWith(prefix = "mailto:", href)
+
+    /// linkCard に許す url。http(s) だけ。
+    pub def isHttpUrl(url: String): Bool = String.startsWith(prefix = "https://", url) or String.startsWith(prefix = "http://", url)
+
+    /// codeBlock のファイル名に許す形。パスの文字（英数字・日本語などの文字・/ . _ -）で、空白と " < > は通らない。
+    pub def isFileName(fileName: String): Bool = String.isMatch(regex = "^[\\p{L}\\p{N}_./-]{1,200}$", fileName)
+
+    /// codeBlock の強調行に許す形。`1,3-5` のように行番号か範囲をカンマで並べる。
+    pub def isHighlightLines(lines: String): Bool = String.isMatch(regex = "^[0-9]{1,6}(-[0-9]{1,6})?(,[0-9]{1,6}(-[0-9]{1,6})?)*$", lines)
+
+    /// gallery の columns に許す範囲。
+    pub def isGalleryColumns(columns: Int32): Bool = columns >= minGalleryColumns() and columns <= maxGalleryColumns()
 
     ///
     /// 埋め込みの URL から (提供元, id)。知らない形は None。
@@ -241,10 +302,19 @@ mod RichText {
         case Json.JObject(fields) => match typeOf(fields) {
             case Some("text")      => Map.get("text", fields) |> Option.flatMap(EntryValue.asString) |> Option.getWithDefault("")
             case Some("hardBreak") => "\n"
+            case Some("gallery")   => (children(fields) |> List.filterMap(captionOf) |> List.map(caption -> caption ++ "\n") |> List.join(""))
+            case Some("linkCard")  => (attrString("url", fields) |> Option.getWithDefault("")) ++ "\n"
+            case Some("details")   => (attrString("summary", fields) |> Option.getWithDefault("")) ++ "\n" ++ childrenText(fields)
             case Some(name) if List.memberOf(name, containerNodes()) => childrenText(fields) ++ "\n"
             case _                 => childrenText(fields)
         }
         case _ => ""
+    }
+
+    /// image の空でない caption。
+    def captionOf(node: Json): Option[String] = match node {
+        case Json.JObject(fields) => attrString("caption", fields) |> Option.filter(String.nonEmpty)
+        case _                    => None
     }
 
     def childrenText(fields: Map[String, Json]): String =
@@ -315,7 +385,9 @@ mod RichText {
                 case Some("blockquote")     => "<blockquote>${inner()}</blockquote>"
                 case Some("codeBlock")      =>
                     let language = attrString("language", fields) |> Option.filter(isLanguage) |> Option.map(found -> " class=\"language-${found}\"") |> Option.getWithDefault("");
-                    "<pre><code${language}>${inner()}</code></pre>"
+                    let fileName = attrString("fileName", fields) |> Option.filter(isFileName) |> Option.map(found -> " data-file-name=\"${escape(found)}\"") |> Option.getWithDefault("");
+                    let highlightLines = attrString("highlightLines", fields) |> Option.filter(isHighlightLines) |> Option.map(found -> " data-highlight-lines=\"${found}\"") |> Option.getWithDefault("");
+                    "<pre${fileName}${highlightLines}><code${language}>${inner()}</code></pre>"
                 case Some("table")          => "<table>${inner()}</table>"
                 case Some("tableRow")       => "<tr>${inner()}</tr>"
                 case Some("tableCell")      => "<td>${inner()}</td>"
@@ -325,6 +397,9 @@ mod RichText {
                 case Some("hardBreak")      => "<br>"
                 case Some("image")          => imageHtml(images, fields)
                 case Some("embed")          => embedHtml(fields)
+                case Some("gallery")        => galleryHtml(images, fields)
+                case Some("linkCard")       => linkCardHtml(fields)
+                case Some("details")        => "<details><summary>${escape(attrString("summary", fields) |> Option.getWithDefault(""))}</summary>${inner()}</details>"
                 case _                      => inner()
             }
         case _ => ""
@@ -332,19 +407,37 @@ mod RichText {
 
     /// image。caption があれば figure で包む。
     def imageHtml(images: Map[AssetId, ImageRef], fields: Map[String, Json]): String =
-        match attrString("assetId", fields) |> Option.flatMap(AssetId.parse) |> Option.flatMap(id -> Map.get(id, images)) {
-            case Some(image) =>
-                let size = match (image#width, image#height) {
-                    case (Some(width), Some(height)) => " width=\"${width}\" height=\"${height}\""
-                    case _                           => ""
-                };
-                let img = "<img src=\"${escape(image#url)}\" alt=\"${escape(attrString("alt", fields) |> Option.getWithDefault(""))}\"${size}>";
-                match attrString("caption", fields) |> Option.filter(caption -> not String.isEmpty(caption)) {
-                    case Some(caption) => "<figure>${img}<figcaption>${escape(caption)}</figcaption></figure>"
-                    case None          => img
-                }
-            case None => ""
+        match imageParts(images, fields) {
+            case Some((img, Some(caption))) => "<figure>${img}<figcaption>${caption}</figcaption></figure>"
+            case Some((img, None))          => img
+            case None                       => ""
         }
+
+    /// image の img タグと、エスケープ済みの caption。asset が無ければ None。
+    def imageParts(images: Map[AssetId, ImageRef], fields: Map[String, Json]): Option[(String, Option[String])] =
+        attrString("assetId", fields) |> Option.flatMap(AssetId.parse) |> Option.flatMap(id -> Map.get(id, images)) |> Option.map(image -> {
+            let size = match (image#width, image#height) {
+                case (Some(width), Some(height)) => " width=\"${width}\" height=\"${height}\""
+                case _                           => ""
+            };
+            let img = "<img src=\"${escape(image#url)}\" alt=\"${escape(attrString("alt", fields) |> Option.getWithDefault(""))}\"${size}>";
+            (img, attrString("caption", fields) |> Option.filter(String.nonEmpty) |> Option.map(escape))
+        })
+
+    /// gallery。data-gallery に columns。中の image は並べる箱になるので caption が無くても figure。
+    def galleryHtml(images: Map[AssetId, ImageRef], fields: Map[String, Json]): String =
+        let columns = attrInt("columns", fields) |> Option.filter(isGalleryColumns) |> Option.getWithDefault(minGalleryColumns());
+        let items = children(fields) |> List.filterMap(child -> match child {
+            case Json.JObject(image) if typeOf(image) == Some("image") => imageParts(images, image)
+            case _ => None
+        }) |> List.map(match (img, caption) -> "<figure>${img}${caption |> Option.map(found -> "<figcaption>${found}</figcaption>") |> Option.getWithDefault("")}</figure>") |> List.join("");
+        "<div data-gallery=\"${columns}\">${items}</div>"
+
+    /// linkCard。url だけの a。OGP の取得と見た目はサイト側。
+    def linkCardHtml(fields: Map[String, Json]): String = match attrString("url", fields) |> Option.filter(isHttpUrl) {
+        case Some(url) => "<a data-link-card href=\"${escape(url)}\">${escape(url)}</a>"
+        case None      => ""
+    }
 
     /// embed。提供元ごとの固定の形。X はサイト側で widgets.js を読めば埋め込みになり、読まなければリンクとして残る。
     def embedHtml(fields: Map[String, Json]): String =

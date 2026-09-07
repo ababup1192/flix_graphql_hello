@@ -1,5 +1,6 @@
 ///
 /// richText の規則。ホワイトリストの検査、asset の取り出し、平文と HTML。
+/// 本文の穴を塞ぐノード（gallery / image の alt / linkCard / codeBlock の fileName と highlightLines / details）もここ。
 ///
 mod TestRichText {
 
@@ -59,7 +60,7 @@ mod TestRichText {
         Assert.assertEq(
             expected = List#{
                 ("fields.body", "richText は { type: \"doc\", content: [...] } の形にしてください"),
-                ("fields.body.content[0]", "知らないノード 'iframe' です（paragraph, heading, bulletList, orderedList, listItem, blockquote, codeBlock, table, tableRow, tableCell, tableHeader, callout, text, hardBreak, horizontalRule, image, embed）"),
+                ("fields.body.content[0]", "知らないノード 'iframe' です（paragraph, heading, bulletList, orderedList, listItem, blockquote, codeBlock, table, tableRow, tableCell, tableHeader, callout, gallery, details, text, hardBreak, horizontalRule, image, embed, linkCard）"),
                 ("fields.body.content[1].content[0].marks[0]", "link は attrs.href（http(s):// か mailto:）か attrs.entryId（entry の id）のどちらか 1 つにしてください"),
                 ("fields.body.content[2]", "heading の attrs.level は 1 〜 4 にしてください"),
                 ("fields.body.content[3]", "image の attrs.assetId は asset の id にしてください")
@@ -219,5 +220,154 @@ mod TestRichText {
         Assert.assertEq(
             expected = "<p><strong><em>x</em></strong></p>",
             RichText.toHtml(Map.empty(), node("doc", List#{ image("asset001", ""), node("paragraph", List#{ marked("x", List#{ mark("bold"), mark("italic") }) }) })))
+
+    // ---- 本文の穴を塞ぐノード ----
+
+    def gallery(columns: Option[Int32], content: List[Json]): Json =
+        CmsTestKit.richNode("gallery", columns |> Option.map(found -> ("columns", CmsTestKit.intJson(found))) |> Option.toList, content)
+
+    def imageWith(attrs: List[(String, Json)]): Json = CmsTestKit.richLeaf("image", ("assetId", Json.JString("asset001")) :: attrs)
+
+    def linkCard(url: String): Json = CmsTestKit.richLeaf("linkCard", List#{ ("url", Json.JString(url)) })
+
+    def codeBlockWith(attrs: List[(String, Json)], code: String): Json = CmsTestKit.richNode("codeBlock", attrs, List#{ text(code) })
+
+    def details(summary: Option[Json], content: List[Json]): Json =
+        CmsTestKit.richNode("details", summary |> Option.map(found -> ("summary", found)) |> Option.toList, content)
+
+    /// 1 ブロックだけの doc が validate に通るか。
+    def isValidDoc(block: Json): Bool = List.isEmpty(RichText.validate("fields.body", node("doc", List#{ block })))
+
+    /// gallery の attrs.columns は 2 〜 4。無ければ通る（既定 2）。1 と 5 は止まる。
+    @Test
+    def testValidateGalleryColumns(): Unit \ Assert =
+        let cases = List#{ (None, true), (Some(1), false), (Some(2), true), (Some(4), true), (Some(5), false) };
+        Assert.assertEq(expected = cases, cases |> List.map(match (columns, _) -> (columns, isValidDoc(gallery(columns, List#{ image("asset001", "") })))))
+
+    /// gallery の中は image だけ。paragraph が混ざればその子の場所で、空なら gallery の場所で止まる。中の image の assetId も見る。
+    @Test
+    def testValidateGalleryChildren(): Unit \ Assert =
+        let bad = node("doc", List#{
+            gallery(None, List#{ image("asset001", ""), node("paragraph", Nil) }),
+            gallery(None, Nil),
+            gallery(None, List#{ image("not an id!", "") })
+        });
+        Assert.assertEq(
+            expected = List#{ "fields.body.content[0].content[1]", "fields.body.content[1]", "fields.body.content[2].content[0]" },
+            CmsTestKit.violationPaths(RichText.validate("fields.body", bad)))
+
+    /// image の attrs.alt は省略できる文字列。数値は止まる。
+    @Test
+    def testValidateImageAlt(): Unit \ Assert =
+        let cases = List#{ (Nil, true), (List#{ ("alt", Json.JString("説明")) }, true), (List#{ ("alt", Json.JString("")) }, true), (List#{ ("alt", CmsTestKit.intJson(1)) }, false) };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (attrs, _) -> isValidDoc(imageWith(attrs))))
+
+    /// linkCard の attrs.url は http(s) だけ。javascript: / ftp: / mailto: は止まる。
+    @Test
+    def testValidateLinkCard(): Unit \ Assert =
+        let cases = List#{
+            ("https://example.com/a",  true),
+            ("http://example.com/",    true),
+            ("javascript:alert(1)",    false),
+            ("ftp://example.com/",     false),
+            ("mailto:a@example.com",   false),
+            ("",                       false)
+        };
+        Assert.assertEq(expected = cases, cases |> List.map(match (url, _) -> (url, isValidDoc(linkCard(url)))))
+
+    /// codeBlock の attrs.fileName はパスの文字（英数字・日本語・/ . _ -）。空白と " < > と空は止まる。
+    @Test
+    def testValidateCodeBlockFileName(): Unit \ Assert =
+        let cases = List#{
+            ("src/a.ts",          true),
+            ("ドキュメント/設定.yml", true),
+            ("Makefile",          true),
+            ("a b.ts",            false),
+            ("a\"b",              false),
+            ("<x>",               false),
+            ("",                  false)
+        };
+        Assert.assertEq(expected = cases, cases |> List.map(match (fileName, _) -> (fileName, isValidDoc(codeBlockWith(List#{ ("fileName", Json.JString(fileName)) }, "x")))))
+
+    /// codeBlock の attrs.highlightLines は `1,3-5` の形。文字・閉じない範囲・空は止まる。
+    @Test
+    def testValidateCodeBlockHighlightLines(): Unit \ Assert =
+        let cases = List#{ ("1,3-5", true), ("7", true), ("2-4", true), ("a", false), ("3-", false), ("1,", false), ("", false) };
+        Assert.assertEq(expected = cases, cases |> List.map(match (lines, _) -> (lines, isValidDoc(codeBlockWith(List#{ ("highlightLines", Json.JString(lines)) }, "x")))))
+
+    /// details の attrs.summary は空でない文字列。無い・空・数値は止まる。
+    @Test
+    def testValidateDetailsSummary(): Unit \ Assert =
+        let cases = List#{ (Some(Json.JString("補足")), true), (Some(Json.JString("")), false), (Some(Json.JString("  ")), false), (Some(CmsTestKit.intJson(1)), false), (None, false) };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (summary, _) -> isValidDoc(details(summary, List#{ node("paragraph", List#{ text("中身") }) }))))
+
+    /// gallery は data-gallery に columns（無ければ 2）。中の image は caption の有無に関わらず figure。無い asset の image は出ない。
+    @Test
+    def testToHtmlGallery(): Unit \ Assert =
+        let images = Map#{ AssetId.AssetId("asset001") => { url = "u1", width = Some(640), height = Some(480) }, AssetId.AssetId("asset002") => { url = "u2", width = None, height = None } };
+        let doc = node("doc", List#{
+            gallery(Some(3), List#{ imageWith(List#{ ("alt", Json.JString("a")) }), CmsTestKit.richLeaf("image", List#{ ("assetId", Json.JString("asset002")), ("caption", Json.JString("図 1")) }), image("asset009", "") }),
+            gallery(None, List#{ imageWith(Nil) })
+        });
+        Assert.assertEq(
+            expected = "<div data-gallery=\"3\"><figure><img src=\"u1\" alt=\"a\" width=\"640\" height=\"480\"></figure><figure><img src=\"u2\" alt=\"\"><figcaption>図 1</figcaption></figure></div>"
+                ++ "<div data-gallery=\"2\"><figure><img src=\"u1\" alt=\"\" width=\"640\" height=\"480\"></figure></div>",
+            RichText.toHtml(images, doc))
+
+    /// linkCard は data-link-card 付きの a で、中身は url。文字はエスケープ。
+    @Test
+    def testToHtmlLinkCard(): Unit \ Assert =
+        Assert.assertEq(
+            expected = "<a data-link-card href=\"https://example.com/?a=1&amp;b=2\">https://example.com/?a=1&amp;b=2</a>",
+            RichText.toHtml(Map.empty(), node("doc", List#{ linkCard("https://example.com/?a=1&b=2") })))
+
+    /// codeBlock の fileName と highlightLines は pre の data 属性。language の class はそのまま。無い物は出ない。
+    @Test
+    def testToHtmlCodeBlockFileNameAndHighlightLines(): Unit \ Assert =
+        let doc = node("doc", List#{
+            codeBlockWith(List#{ ("language", Json.JString("ts")), ("fileName", Json.JString("src/a.ts")), ("highlightLines", Json.JString("1,3-5")) }, "let x = 1"),
+            codeBlockWith(List#{ ("fileName", Json.JString("Makefile")) }, "check:"),
+            codeBlockWith(List#{ ("highlightLines", Json.JString("2")) }, "y")
+        });
+        Assert.assertEq(
+            expected = "<pre data-file-name=\"src/a.ts\" data-highlight-lines=\"1,3-5\"><code class=\"language-ts\">let x = 1</code></pre>"
+                ++ "<pre data-file-name=\"Makefile\"><code>check:</code></pre>"
+                ++ "<pre data-highlight-lines=\"2\"><code>y</code></pre>",
+            RichText.toHtml(Map.empty(), doc))
+
+    /// details は summary をエスケープして summary に、中身はそのまま。
+    @Test
+    def testToHtmlDetails(): Unit \ Assert =
+        Assert.assertEq(
+            expected = "<details><summary>&lt;補足&gt;</summary><p>中身</p><ul><li><p>x</p></li></ul></details>",
+            RichText.toHtml(Map.empty(), node("doc", List#{ details(Some(Json.JString("<補足>")), List#{ node("paragraph", List#{ text("中身") }), node("bulletList", List#{ node("listItem", List#{ node("paragraph", List#{ text("x") }) }) }) }) })))
+
+    /// 平文: gallery は中の caption を改行で（caption の無い image は出ない）、linkCard は url、details は summary と中身。
+    @Test
+    def testToTextNewNodes(): Unit \ Assert =
+        let doc = node("doc", List#{
+            gallery(Some(3), List#{ imageWith(List#{ ("caption", Json.JString("図 1")) }), imageWith(Nil), imageWith(List#{ ("caption", Json.JString("図 2")) }) }),
+            linkCard("https://example.com/"),
+            details(Some(Json.JString("補足")), List#{ node("paragraph", List#{ text("中身") }) })
+        });
+        Assert.assertEq(expected = "図 1\n図 2\nhttps://example.com/\n補足\n中身", RichText.toText(doc))
+
+    /// assetIds は gallery の中の image も拾う。重複は 1 つ。
+    @Test
+    def testAssetIdsInGallery(): Unit \ Assert =
+        Assert.assertEq(
+            expected = List#{ "asset001", "asset002" },
+            RichText.assetIds(node("doc", List#{ gallery(None, List#{ image("asset001", ""), image("asset002", "") }), image("asset001", "") })) |> List.map(AssetId.text))
+
+    /// details の中の見出しも目次に出て、h-N の番号は外と続く。
+    @Test
+    def testHeadingsInDetails(): Unit \ Assert =
+        let doc = node("doc", List#{
+            nodeWith("heading", List#{("level", CmsTestKit.intJson(2))}, List#{text("A")}),
+            details(Some(Json.JString("補足")), List#{ nodeWith("heading", List#{("level", CmsTestKit.intJson(3))}, List#{text("B")}) })
+        });
+        Assert.assertEq(
+            expected = (List#{ (2, "A", "h-1"), (3, "B", "h-2") }, "<h2 id=\"h-1\">A</h2><details><summary>補足</summary><h3 id=\"h-2\">B</h3></details>"),
+            (RichText.headings(doc) |> List.map(heading -> (heading#level, heading#text, heading#id)), RichText.toHtml(Map.empty(), doc)))
 
 }
