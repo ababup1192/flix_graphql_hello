@@ -53,6 +53,12 @@ mod Assets {
         discard ObjectStore.delete(asset#key)
 
     ///
+    /// この asset を中身（下書き・公開・本文の image）に持つ entry の id。
+    ///
+    pub def holders(id: AssetId): List[EntryId] \ DbRead + Tenant =
+        AssetsQueries.assetHolders({ projectId = Tenant.currentId(), assetId = AssetId.text(id) }) |> List.filterMap(row -> EntryId.parse(row#id))
+
+    ///
     /// id で 1 つ。無ければ None。他のプロジェクトの物も None。
     ///
     pub def find(id: AssetId): Option[Asset] \ DbRead + DbErr + Tenant =

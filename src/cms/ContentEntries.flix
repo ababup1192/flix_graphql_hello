@@ -107,23 +107,67 @@ mod ContentEntries {
         publishWithin(Nil, id, author, withDependencies)
 
     def publishWithin(visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + Tenant =
-        let key = EntryId.text(id);
         let existing = get(id);
         let owner = ContentTypes.get(existing#typeId);
         let data = EntryValidation.prune(owner#fields, existing#data);
-        let missing = EntriesQueries.missingTargets(key) |> List.filterMap(EntryRows.toTargetId);
-        CmsErr.raiseIfAny(EntryValidation.publish(owner#fields, data) ::: uniqueViolations(owner, existing)
-            ::: (missing |> List.map(target -> Violation.Violation("references", "参照先 '${target}' はありません（消されています）。参照を外してください")))
-            ::: assetViolations(owner, data));
-        let pending = EntriesQueries.unpublishedTargets(key) |> List.filterMap(EntryRows.toTargetId);
+        let report = reportOf(true, owner, existing, data);
+        CmsErr.raiseIfAny(report#violations);
+        let pending = report#unpublishedDependencies |> List.map(dependency -> dependency#id);
         if (withDependencies)
             List.forEach(dependency -> if (List.memberOf(dependency, id :: visited)) () else discard publishWithin(id :: visited, dependency, author, true), pending)
         else
             CmsErr.raiseIfAny(pending |> List.map(dependency -> Violation.Violation("references", "参照先 '${dependency}' が未公開です（withDependencies: true で一緒に公開できます）")));
         writeContent(id, Stage.Published, owner, data);
         discard EntriesQueries.insertVersion(EntryRows.versionInsert(existing, author, VersionReason.Publish));
-        discard EntriesQueries.markPublished(key);
+        discard EntriesQueries.markPublished(EntryId.text(id));
         get(id)
+
+    ///
+    /// 公開できるかを書き込まずに答える（dry-run）。違反を全部集め、未公開の参照先も返す。
+    /// unique の検査はロックを取らない（参考値。押した瞬間の競合は publish 本体が止める）。
+    ///
+    pub def publishReport(id: EntryId): PublishReport \ DbRead + DbErr + CmsErr + Tenant =
+        let existing = get(id);
+        let owner = ContentTypes.get(existing#typeId);
+        reportOf(false, owner, existing, EntryValidation.prune(owner#fields, existing#data))
+
+    ///
+    /// 公開の検査。lock なら unique の値ごとに advisory lock を取る（本番の publish）。
+    ///
+    def reportOf(lock: Bool, owner: ContentType, existing: Entry, data: EntryData): PublishReport \ DbRead + DbErr + Tenant =
+        let key = EntryId.text(existing#id);
+        let missing = EntriesQueries.missingTargets(key) |> List.filterMap(EntryRows.toTargetId);
+        let pending = EntriesQueries.unpublishedTargets(key) |> List.filterMap(EntryRows.toTargetId) |> List.filter(target -> not List.memberOf(target, missing));
+        {
+            violations = EntryValidation.publish(owner#fields, data) ::: uniqueViolations(lock, owner, existing)
+                ::: (missing |> List.map(target -> Violation.Violation("references", "参照先 '${target}' はありません（消されています）。参照を外してください")))
+                ::: assetViolations(owner, data),
+            unpublishedDependencies = pending |> List.filterMap(find)
+        }
+
+    ///
+    /// 操作の影響。取り下げ・削除で壊れる参照元（公開の中身。削除なら下書きも）と、公開で一緒に動く未公開の参照先（再帰）。
+    ///
+    pub def impact(id: EntryId, action: ImpactAction): Impact \ DbRead + DbErr + CmsErr + Tenant =
+        discard get(id);
+        match action {
+            case ImpactAction.Publish   => { breaks = Nil, cascades = dependenciesOf(id :: Nil, id) |> List.filterMap(find) }
+            case ImpactAction.Unpublish => { breaks = referrers(id, Stage.Published), cascades = Nil }
+            case ImpactAction.Delete    => { breaks = referrers(id, Stage.Published) ::: referrers(id, Stage.Draft), cascades = Nil }
+        }
+
+    /// stage の中身でこの entry を参照している物。参照元は下書きの中身で返す。
+    def referrers(id: EntryId, stage: Stage): List[Referrer] \ DbRead + DbErr + CmsErr + Tenant =
+        EntriesQueries.referrerLinks({ toEntryId = EntryId.text(id), stage = EntryRows.stageToDb(stage) })
+            |> List.filterMap(row -> EntryId.parse(row#fromEntryId) |> Option.flatMap(find) |> Option.map(entry ->
+                { entry = entry, via = ContentTypes.getField(FieldId.FieldId(row#fieldId))#apiId, stage = stage }))
+
+    /// 未公開の参照先を再帰的に集める（重複と循環は visited で止める）。
+    def dependenciesOf(visited: List[EntryId], id: EntryId): List[EntryId] \ DbRead =
+        let missing = EntriesQueries.missingTargets(EntryId.text(id)) |> List.filterMap(EntryRows.toTargetId);
+        let direct = EntriesQueries.unpublishedTargets(EntryId.text(id)) |> List.filterMap(EntryRows.toTargetId)
+            |> List.filter(target -> not List.memberOf(target, missing) and not List.memberOf(target, visited));
+        List.foldLeft((acc, target) -> if (List.memberOf(target, acc)) acc else acc ::: (target :: dependenciesOf(visited ::: acc ::: (target :: Nil), target)), Nil, direct)
 
     ///
     /// 中身が指す asset が全部このプロジェクトにあって ready か。無い・pending の物は公開できない（配信 URL が空になる）。
@@ -241,9 +285,9 @@ mod ContentEntries {
     /// 他の公開中の entry が同じ値を持っていれば違反。自分の値は構わない（再公開）。
     /// 検査の前に値ごとの advisory lock を取り、同じ値を同時に公開する Tx を直列にする（後の方が先の公開を見る）。
     ///
-    def uniqueViolations(owner: ContentType, entry: Entry): List[Violation] \ DbRead =
+    def uniqueViolations(lock: Bool, owner: ContentType, entry: Entry): List[Violation] \ DbRead =
         uniqueValues(owner, entry) |> List.filterMap(match (field, value) -> {
-            discard EntriesQueries.lockUniqueValue({ typeId = TypeId.toInt64(owner#id), fieldId = FieldId.toInt64(field#id), value = value });
+            if (lock) discard EntriesQueries.lockUniqueValue({ typeId = TypeId.toInt64(owner#id), fieldId = FieldId.toInt64(field#id), value = value }) else ();
             EntriesQueries.findUniqueHolder({ typeId = TypeId.toInt64(owner#id), apiId = ApiId.text(field#apiId), value = value })
                 |> Option.map(row -> row#id)
                 |> Option.filter(holder -> holder != EntryId.text(entry#id))

@@ -38,8 +38,17 @@ mod AdminQueryResolvers {
     pub def asset(): GeneratedAdmin.QueryAssetResolver[AdminEff] =
         (_context, id) -> Ok(Assets.find(AdminMapping.assetId("id", id)))
 
+    /// Query.publishCheck（dry-run）
+    pub def publishCheck(): GeneratedAdmin.QueryPublishCheckResolver[AdminEff] =
+        (_context, id) -> Ok(ContentEntries.publishReport(AdminMapping.entryId("id", id)))
+
+    /// Query.impact
+    pub def impact(): GeneratedAdmin.QueryImpactResolver[AdminEff] =
+        (_context, id, action) -> Ok(ContentEntries.impact(AdminMapping.entryId("id", id), AdminMapping.impactActionOf(action)))
+
     /// type Query のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.QueryResolvers[AdminEff] =
-        { contentTypes = contentTypes(), contentType = contentType(), entries = entries(), entry = entry(), assets = assets(), asset = asset() }
+        { contentTypes = contentTypes(), contentType = contentType(), entries = entries(), entry = entry(), assets = assets(), asset = asset(),
+          publishCheck = publishCheck(), impact = impact() }
 
 }

@@ -148,6 +148,15 @@ query missingTargets(fromEntryId: String) -> many {
     WHERE l.from_entry_id = :fromEntryId AND l.stage = 'draft' AND e.id IS NULL
 }
 
+// この entry を stage の中身で参照している entry と、どのフィールドで参照しているか（影響の見える化用）
+query referrerLinks(toEntryId: String, stage: String) -> many {
+    SELECT DISTINCT l.from_entry_id, l.field_id
+    FROM entry_links AS l
+    JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL
+    WHERE l.to_entry_id = :toEntryId AND l.stage = :stage
+    ORDER BY l.from_entry_id, l.field_id
+}
+
 // この entry を公開側で参照している entry（取り下げ・削除の防止用）
 query publishedReferrers(toEntryId: String) -> many {
     SELECT DISTINCT l.from_entry_id

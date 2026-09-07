@@ -15,7 +15,8 @@ mod AssetResolvers {
             height    = (_context, source) -> Ok(source#height),
             alt       = (_context, source) -> Ok(source#alt),
             status    = (_context, source) -> Ok(AdminMapping.assetStatusToGql(source#status)),
-            createdAt = (_context, source) -> Ok(Timestamp.toIso8601(source#createdAt))
+            createdAt = (_context, source) -> Ok(Timestamp.toIso8601(source#createdAt)),
+            usedBy    = (_context, source) -> Ok(Assets.holders(source#id) |> List.filterMap(ContentEntries.find))
         }
 
 }

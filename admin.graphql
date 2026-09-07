@@ -15,6 +15,54 @@ type Query {
   assets(first: Int = 50, skip: Int = 0): AssetPage!
   """asset 1 つ。無ければ null"""
   asset(id: ID!): Asset
+  """公開できるか。書き込まない。violations が空なら publishEntry は通る（unique は押した瞬間の競合を除く）"""
+  publishCheck(id: ID!): PublishReport!
+  """操作の影響。取り下げ・削除で壊れる参照元と、公開で一緒に動く参照先"""
+  impact(id: ID!, action: ImpactAction!): Impact!
+}
+
+"""入力の 1 つの誤り。path は GraphQL の入力に対応（"fields.title" など）"""
+type Violation {
+  path: String!
+  message: String!
+}
+
+"""公開の検査結果（dry-run）"""
+type PublishReport {
+  ok: Boolean!
+  """required / unique / 参照の消失 / asset の未完了。全部一度に"""
+  violations: [Violation!]!
+  """未公開の参照先。withDependencies: true で一緒に公開できる"""
+  unpublishedDependencies: [Entry!]!
+}
+
+enum ImpactAction {
+  PUBLISH
+  UNPUBLISH
+  DELETE
+}
+
+"""この entry を参照している 1 つ"""
+type Referrer {
+  entry: Entry!
+  """参照しているフィールドの apiId。本文内のリンクなら RICH_TEXT のフィールド"""
+  via: String!
+  """参照している側のどの中身か"""
+  stage: ContentStage!
+}
+
+"""中身の段階"""
+enum ContentStage {
+  DRAFT
+  PUBLISHED
+}
+
+"""操作の影響"""
+type Impact {
+  """壊れる（参照先を失う）entry。取り下げ・削除の前に見せる"""
+  breaks: [Referrer!]!
+  """一緒に動く entry。公開なら先に公開される未公開の参照先"""
+  cascades: [Entry!]!
 }
 
 type Mutation {
@@ -79,6 +127,8 @@ type Asset {
   alt: String!
   status: AssetStatus!
   createdAt: String!
+  """この asset を使っている entry（下書き・公開・本文の image）"""
+  usedBy: [Entry!]!
 }
 
 """asset の一覧の 1 ページ"""

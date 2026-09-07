@@ -27,4 +27,18 @@ mod TestEntryLinks {
             ("sections", Json.JArray(Vector#{Json.JObject(Map#{ "blockType" => Json.JString("teaser"), "post" => Json.JString("a3") })}))});
         Assert.assertEq(expected = List#{"a1", "a2", "a3"}, EntryLinks.targets(fields, data) |> List.map(EntryId.text))
 
+
+    /// RICH_TEXT の本文内のリンク（attrs.entryId）も参照として取り出す。位置は出現順、重複は 1 つ。
+    @Test
+    def testEntryLinksRichText(): Unit \ Assert =
+        let body = { id = FieldId.FieldId(5i64) | CmsTestKit.fieldDef("body", FieldKind.RichText) };
+        let link = id -> Util.Json.Json.JObject(Map#{ "type" => Util.Json.Json.JString("text"), "text" => Util.Json.Json.JString("x"),
+            "marks" => Util.Json.Json.JArray(Vector#{ Util.Json.Json.JObject(Map#{ "type" => Util.Json.Json.JString("link"), "attrs" => Util.Json.Json.JObject(Map#{ "entryId" => Util.Json.Json.JString(id) }) }) }) });
+        let doc = Util.Json.Json.JObject(Map#{ "type" => Util.Json.Json.JString("doc"), "content" => Util.Json.Json.JArray(Vector#{
+            Util.Json.Json.JObject(Map#{ "type" => Util.Json.Json.JString("paragraph"), "content" => Util.Json.Json.JArray(Vector#{ link("b2"), link("b3"), link("b2") }) }) }) });
+        Assert.assertEq(
+            expected = List#{ ("body", "b2", 0), ("body", "b3", 1) },
+            EntryLinks.extract(body :: Nil, CmsTestKit.entryData(List#{("body", doc)}))
+                |> List.map(found -> (ApiId.text(found#field#apiId), EntryId.text(found#target), found#position)))
+
 }

@@ -15,8 +15,8 @@ Docker（起動時 migration、JSON ログ、/health の版）、deploy/ の com
 
 | # | 機能 | 誰に | 時間 | 中身 |
 |---|---|---|---|---|
-| 1 | dry-run（`publishCheck`） | 編集者 | 2 時間 | 検査を `publishReport` に切り出し、required / unique / 参照 / asset の違反と未公開の参照先を全部一度に返す |
-| 2 | 影響の見える化（`impact`） | 編集者 | 半日 | 取り下げ・削除で壊れる entry（フィールドの参照・本文内の `entryId` リンク・asset の使用先）と、一緒に動く物を返す。**microCMS には無い** |
+| 1 | dry-run（`publishCheck`）済み 2026-09-07 | 編集者 | 2 時間 | 検査を `publishReport` に切り出し、required / unique / 参照 / asset の違反と未公開の参照先を全部一度に返す |
+| 2 | 影響の見える化（`impact`）済み 2026-09-07。本文内のリンクも entry_links に載せた | 編集者 | 半日 | 取り下げ・削除で壊れる entry（フィールドの参照・本文内の `entryId` リンク・asset の使用先）と、一緒に動く物を返す。**microCMS には無い** |
 | 3 | 認証・組織・権限 + subdomain | 全員 | 1〜2 時間 | [auth-and-organizations.md](auth-and-organizations.md)。`TokenVerifier`（JWKS。最初は Cloudflare Access）、`Actor` effect、memberships、`me`、Host で slug、API キー |
 | 4 | Webhook | サイト運営者 | 30 分 | 公開・取り下げ・型の変更で URL を叩く。HMAC 署名、再試行、`schema.changed` |
 | 5 | プレビュー トークン | 編集者 | 半日 | HMAC 署名、期限付き、参照先も下書きで辿れる。`previewUrl` と組み合わせ |
@@ -37,7 +37,7 @@ Docker（起動時 migration、JSON ログ、/health の版）、deploy/ の com
 | 13 | 型の export / apply | 開発者 | 半日 | SDL に寄せた書式で往復。差分の計画、削除の保護、`@renamedFrom` |
 | 14 | codegen の手順と CI の雛形 | 開発者 | 1 日 | elm-graphql / graphql-codegen に委ねる。Webhook で PR を開く |
 | 15 | 版の差分（`diff`） | 編集者 | 1 日 | JSON の差分と、richText は平文の差分 |
-| 16 | 画像の `usedBy`、pending の掃除 cron、asset の先読み | 編集者・運用 | 半日 | 既存の query を出すだけ + 孤児の削除 |
+| 16 | 画像の `usedBy`（済み）、pending の掃除 cron、asset の先読み | 編集者・運用 | 半日 | 既存の query を出すだけ + 孤児の削除 |
 | 17 | 課金（Stripe）と組織の上限 | サービス | 1〜2 日 | [hosting-and-externalized-risk.md](hosting-and-externalized-risk.md) |
 | 18 | 監査ログ | 企業 | 半日 | `Actor` が入れば mutation の入口 1 か所 |
 | 19 | 編集中の表示（在席） | 編集者 | 半日 | 楽観ロックは済み。誰が開いているかを出す |

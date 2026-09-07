@@ -1,5 +1,6 @@
 ///
-/// entry の中身から参照（Reference のフィールドの値）を取り出す。純粋。entry_links に写す元と、参照の展開に使う。
+/// entry の中身から参照（Reference のフィールドの値と、RichText の本文内のリンク）を取り出す。純粋。entry_links に写す元と、参照の展開に使う。
+/// 本文内のリンクも entry_links に載せるのは、リンク先を消したり取り下げたりした時に「壊れる」と分かるようにするため。
 ///
 mod EntryLinks {
 
@@ -24,6 +25,9 @@ mod EntryLinks {
                 EntryValue.objects(field#apiId, data) |> List.flatMap(extract(Children.toList(field#children)))
             case (FieldKind.Blocks, _) =>
                 EntryValue.blocks(field, data) |> List.flatMap(match (variant, inner) -> extract(Children.toList(variant#children), inner))
+            case (FieldKind.RichText, _) =>
+                Map.get(field#apiId, data) |> Option.map(RichText.linkedEntryIds) |> Option.getWithDefault(Nil)
+                    |> List.zipWithIndex |> List.map(match (index, target) -> { field = field, target = target, position = index })
             case _ => Nil
         })
 

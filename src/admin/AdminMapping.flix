@@ -56,6 +56,30 @@ mod AdminMapping {
     pub def idOfAsset(id: AssetId): Id = Id.Id(AssetId.text(id))
 
     ///
+    /// Violation の path と message。
+    ///
+    pub def violationPath(violation: Violation): String = { let Violation.Violation(path, _) = violation; path }
+
+    pub def violationMessage(violation: Violation): String = { let Violation.Violation(_, message) = violation; message }
+
+    ///
+    /// GraphQL の ImpactAction をドメインに。
+    ///
+    pub def impactActionOf(action: GeneratedAdmin.ImpactAction): ImpactAction = match action {
+        case GeneratedAdmin.ImpactAction.Publish   => ImpactAction.Publish
+        case GeneratedAdmin.ImpactAction.Unpublish => ImpactAction.Unpublish
+        case GeneratedAdmin.ImpactAction.Delete    => ImpactAction.Delete
+    }
+
+    ///
+    /// 中身の段階（draft / published の行）を GraphQL の enum に。
+    ///
+    pub def contentStageToGql(stage: Stage): GeneratedAdmin.ContentStage = match stage {
+        case Stage.Draft     => GeneratedAdmin.ContentStage.Draft
+        case Stage.Published => GeneratedAdmin.ContentStage.Published
+    }
+
+    ///
     /// asset の状態を GraphQL の enum に。
     ///
     pub def assetStatusToGql(status: AssetStatus): GeneratedAdmin.AssetStatus = match status {

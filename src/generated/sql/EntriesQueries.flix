@@ -7,7 +7,7 @@ mod EntriesQueries {
     ///
     /// 生成元 entries.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -2124303439
+    pub def sourceHash(): Int32 = 2107968480
 
     ///
     /// entryExists の 1 行。
@@ -366,6 +366,25 @@ mod EntriesQueries {
         let sql = "SELECT DISTINCT l.to_entry_id\n    FROM entry_links AS l\n    LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL\n    WHERE l.from_entry_id = $1 AND l.stage = 'draft' AND e.id IS NULL";
         let params = List#{SqlValue.Str(fromEntryId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(missingTargetsDecoder(), sql, params))
+
+    ///
+    /// referrerLinks の 1 行。
+    ///
+    pub type alias ReferrerLinksRow = { fromEntryId = String, fieldId = Int64 }
+
+    def referrerLinksDecoder(): Decoder[ReferrerLinksRow] =
+        forA (
+            fromEntryId <- Decoder.str("from_entry_id");
+            fieldId <- Decoder.int64("field_id")
+        ) yield { fromEntryId = fromEntryId, fieldId = fieldId }
+
+    ///
+    /// referrerLinks: SELECT DISTINCT l.from_entry_id, l.field_id FROM entry_links AS l JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL WHERE l.to_entry_id = $1 AND l.stage = $2 ORDER BY l.from_entry_id, l.field_id
+    ///
+    pub def referrerLinks(args: { toEntryId = String, stage = String }): List[ReferrerLinksRow] \ DbRead =
+        let sql = "SELECT DISTINCT l.from_entry_id, l.field_id\n    FROM entry_links AS l\n    JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL\n    WHERE l.to_entry_id = $1 AND l.stage = $2\n    ORDER BY l.from_entry_id, l.field_id";
+        let params = List#{SqlValue.Str(args#toEntryId), SqlValue.Str(args#stage)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(referrerLinksDecoder(), sql, params))
 
     ///
     /// publishedReferrers の 1 行。
