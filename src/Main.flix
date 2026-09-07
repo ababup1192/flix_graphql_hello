@@ -4,7 +4,8 @@
 /// パスの先頭に /p/{slug} を付けるとそのプロジェクト、無ければ既定のプロジェクト（default）。
 /// 起動に失敗したらメッセージを出して終了コード 1 で終わる。
 ///
-/// 環境変数: CMS_DSN / CMS_DB_USER / CMS_DB_PASSWORD（DbConfig）、CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）
+/// 環境変数: CMS_DSN / CMS_DB_USER / CMS_DB_PASSWORD（DbConfig）、ASSET_*（StorageConfig。省略時は asset 無し）、
+/// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）
 ///
 def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
     let started = forM (
@@ -12,7 +13,8 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
         connection  <- DbConfig.fromEnv();
         pool        <- openPool(connection);
         _           <- checkMigrations(connection);
-        adminEngines <- Ok(AdminEngine.create());
+        storage     <- StorageConfig.fromEnv();
+        adminEngines <- Ok(AdminEngine.create(storage));
         _           <- AdminEngine.current(adminEngines, pool, ProjectId.default())
     ) yield (pool, adminEngines);
     match started {

@@ -43,6 +43,45 @@ mod AdminMapping {
     ///
     pub def idOfEntry(id: EntryId): Id = Id.Id(EntryId.text(id))
 
+    ///
+    /// GraphQL の ID を asset の id に読む。規則（entry と同じ）に合わなければ invalid。
+    ///
+    pub def assetId(argument: String, id: Id): AssetId \ CmsErr =
+        let Id.Id(text) = id;
+        parsed(argument, EntryId.rule(), AssetId.parse, text)
+
+    ///
+    /// asset の id を GraphQL の ID にする。
+    ///
+    pub def idOfAsset(id: AssetId): Id = Id.Id(AssetId.text(id))
+
+    ///
+    /// asset の状態を GraphQL の enum に。
+    ///
+    pub def assetStatusToGql(status: AssetStatus): GeneratedAdmin.AssetStatus = match status {
+        case AssetStatus.Pending => GeneratedAdmin.AssetStatus.Pending
+        case AssetStatus.Ready   => GeneratedAdmin.AssetStatus.Ready
+    }
+
+    ///
+    /// バイト数や件数を GraphQL の Int に収める。上限（20 MB、一覧の件数）は Int32 に十分入る。
+    ///
+    pub def sizeToGql(value: Int64): Int32 = Int64.clampToInt32(min = 0, max = Int32.maxValue(), value)
+
+    ///
+    /// UploadInput をドメインの申し込みに。
+    ///
+    pub def uploadRequest(input: GeneratedAdmin.UploadInput): UploadRequest =
+        { fileName = input#fileName, mime = input#mime, size = Int32.toInt64(input#size) }
+
+    ///
+    /// AssetConfirmInput をドメインの confirm に。省かれていれば全部 None。
+    ///
+    pub def assetConfirm(input: Option[GeneratedAdmin.AssetConfirmInput]): AssetConfirm = match input {
+        case Some(found) => { width = found#width, height = found#height, alt = found#alt }
+        case None        => { width = None, height = None, alt = None }
+    }
+
     def number(argument: String, id: Id): Int64 \ CmsErr =
         let Id.Id(text) = id;
         match Int64.fromString(text) {

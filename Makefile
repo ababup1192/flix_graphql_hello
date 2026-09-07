@@ -1,7 +1,9 @@
 .PHONY: run check test test-unit test-pg db-up db-down query generate scaffold gen gen-check migrate migrate-status migrate-new
 
-# 実 PG 用の接続。docker-compose.yml と同じ値。run と test-pg の両方で使う
-PG_ENV = CMS_DSN=jdbc:postgresql://127.0.0.1:5432/cms CMS_DB_USER=cms CMS_DB_PASSWORD=cms
+# 実 PG と MinIO 用の接続。docker-compose.yml と同じ値。run と test-pg の両方で使う
+PG_ENV = CMS_DSN=jdbc:postgresql://127.0.0.1:5432/cms CMS_DB_USER=cms CMS_DB_PASSWORD=cms \
+	ASSET_ENDPOINT=http://127.0.0.1:9000 ASSET_BUCKET=cms ASSET_ACCESS_KEY=cms ASSET_SECRET_KEY=cms-secret \
+	ASSET_REGION=us-east-1 ASSET_PUBLIC_URL=http://127.0.0.1:9000/cms
 
 # サーバ起動。PG は make db-up で立てておく
 run:
@@ -28,13 +30,17 @@ test-unit:
 	cd $(UNIT_DIR) && $(CURDIR)/bin/flix test
 	cd schemagen && ../bin/flix test
 
-# 実 PostgreSQL に当たるテスト。コンテナを立て、test/ を全部（test/Pg/ 込み）回し、終わったら止める
+# PostgreSQL と MinIO を立て、バケットを作る。
+# WhyNot: `docker compose up -d --wait` 1 発にしないのは、バケットを作る minio-init が終了する（exit 0）のを --wait が失敗と見るため
+COMPOSE_UP = docker compose up -d --wait postgres minio && docker compose up minio-init
+
+# 実 PostgreSQL と MinIO に当たるテスト。コンテナを立て、test/ を全部（test/Pg/ 込み）回し、終わったら止める
 test-pg:
-	docker compose up -d --wait
+	$(COMPOSE_UP)
 	$(PG_ENV) bin/flix test; status=$$?; docker compose down -v; exit $$status
 
 db-up:
-	docker compose up -d --wait
+	$(COMPOSE_UP)
 
 db-down:
 	docker compose down -v

@@ -62,6 +62,22 @@ mod AdminMutationResolvers {
     pub def restoreVersion(): GeneratedAdmin.MutationRestoreVersionResolver[AdminEff] =
         (_context, id, versionId, expectedVersion) -> Ok(ContentEntries.restoreVersion(AdminMapping.entryId("id", id), AdminMapping.versionId("versionId", versionId), expectedVersion))
 
+    /// Mutation.createUploadUrl
+    pub def createUploadUrl(): GeneratedAdmin.MutationCreateUploadUrlResolver[AdminEff] =
+        (_context, input) -> Ok(Assets.createUpload(AdminMapping.uploadRequest(input)))
+
+    /// Mutation.confirmAsset。input を省けば寸法も alt も無し
+    pub def confirmAsset(): GeneratedAdmin.MutationConfirmAssetResolver[AdminEff] =
+        (_context, id, input) -> Ok(Assets.confirm(AdminMapping.assetId("id", id), AdminMapping.assetConfirm(input)))
+
+    /// Mutation.updateAsset
+    pub def updateAsset(): GeneratedAdmin.MutationUpdateAssetResolver[AdminEff] =
+        (_context, id, patch) -> Ok(Assets.updateAlt(AdminMapping.assetId("id", id), patch#alt))
+
+    /// Mutation.deleteAsset。消した id を返す
+    pub def deleteAsset(): GeneratedAdmin.MutationDeleteAssetResolver[AdminEff] =
+        (_context, id) -> { Assets.delete(AdminMapping.assetId("id", id)); Ok(id) }
+
     /// type Mutation のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.MutationResolvers[AdminEff] =
         {
@@ -78,7 +94,11 @@ mod AdminMutationResolvers {
             publishEntry      = publishEntry(),
             unpublishEntry    = unpublishEntry(),
             saveVersion       = saveVersion(),
-            restoreVersion    = restoreVersion()
+            restoreVersion    = restoreVersion(),
+            createUploadUrl   = createUploadUrl(),
+            confirmAsset      = confirmAsset(),
+            updateAsset       = updateAsset(),
+            deleteAsset       = deleteAsset()
         }
 
 }

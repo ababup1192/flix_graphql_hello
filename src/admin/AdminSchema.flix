@@ -10,6 +10,9 @@ mod AdminSchema {
         GeneratedAdmin.schema({
             queryRoot    = AdminQueryResolvers.resolvers(),
             mutationRoot = AdminMutationResolvers.resolvers(),
+            asset        = AssetResolvers.resolvers(),
+            assetPage    = AssetPageResolvers.resolvers(),
+            upload       = UploadResolvers.resolvers(),
             entry        = EntryResolvers.resolvers(),
             entryVersion = EntryVersionResolvers.resolvers(),
             entryPage    = EntryPageResolvers.resolvers(),

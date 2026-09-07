@@ -6,6 +6,7 @@ pub enum Entity with Eq, Order, ToString {
     case Field
     case Entry
     case Version
+    case Asset
 }
 
 ///
@@ -89,6 +90,7 @@ mod CmsErr {
         case Entity.Field       => "field"
         case Entity.Entry       => "entry"
         case Entity.Version     => "version"
+        case Entity.Asset       => "asset"
     }
 
 }

@@ -1,9 +1,9 @@
 ///
-/// schema.graphql から schemagen が生成したファイル。手で編集しない（`make generate` で作り直す）。
+/// SDL から schemagen が生成したファイル。手で編集しない（`make generate` で作り直す）。
 ///
 mod Generated {
 
-    /// 生成元の SDL 本文（改行は LF）。GeneratedCheck が schema.graphql と照合する
+    /// 生成元の SDL 本文（改行は LF）。GeneratedCheck が SDL ファイルと照合する
     pub def sdlText(): String = "type Query {\n  add(a: Int!, b: Int!): Int!\n  \"\"\"n 番目のフィボナッチ数\"\"\"\n  fibonacci(n: Int!): Int!\n  post(id: ID!): Post\n  \"\"\"status を省くと PUBLISHED だけ。null を渡すと全件\"\"\"\n  posts(status: PostStatus = PUBLISHED): [Post!]!\n  counter: Int!\n  \"\"\"title か name に text を含む記事と書き手\"\"\"\n  search(text: String!): [SearchResult!]!\n  node(id: ID!): Node\n}\n\n\"\"\"ID で引ける物\"\"\"\ninterface Node {\n  id: ID!\n}\n\n\"\"\"検索結果\"\"\"\nunion SearchResult = Post | Author\n\n\"\"\"記事の公開状態\"\"\"\nenum PostStatus {\n  \"\"\"下書き。一覧には出ない\"\"\"\n  DRAFT\n  PUBLISHED\n}\n\n\"\"\"記事\"\"\"\ntype Post implements Node {\n  id: ID!\n  title: String!\n  status: PostStatus!\n  author: Author!\n}\n\ntype Author implements Node {\n  id: ID!\n  name: String!\n  posts: [Post!]!\n}\n\n\"\"\"createPost の入力\"\"\"\ninput PostInput {\n  title: String!\n  status: PostStatus = DRAFT\n  authorId: ID!\n}\n\ntype Mutation {\n  increment(by: Int!): Int!\n  \"\"\"保存はしない。input から組み立てた Post を返すだけ\"\"\"\n  createPost(input: PostInput!): Post!\n}\n"
 
     /// 生成した schemagen のバージョン

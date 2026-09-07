@@ -11,6 +11,10 @@ type Query {
   entries(typeId: ID!, search: String, first: Int = 50, skip: Int = 0): EntryPage!
   """entry 1 つ。無ければ null"""
   entry(id: ID!): Entry
+  """asset の一覧。新しい順。アップロード途中（PENDING）の物も出る"""
+  assets(first: Int = 50, skip: Int = 0): AssetPage!
+  """asset 1 つ。無ければ null"""
+  asset(id: ID!): Asset
 }
 
 type Mutation {
@@ -40,6 +44,74 @@ type Mutation {
   saveVersion(id: ID!): EntryVersion!
   """版の中身を下書きに戻す。expectedVersion は updateEntry と同じ"""
   restoreVersion(id: ID!, versionId: ID!, expectedVersion: Int!): Entry!
+
+  """asset の置き先（署名付き PUT URL）を発行する。ブラウザが Content-Type / Content-Length を宣言どおりにして PUT し、
+  終わったら confirmAsset を呼ぶ。URL は expiresInSeconds で切れる"""
+  createUploadUrl(input: UploadInput!): Upload!
+  """置いた事をストレージで確かめて READY にする。画像なら寸法を渡す。置かれていなければエラー"""
+  confirmAsset(id: ID!, input: AssetConfirmInput): Asset!
+  """alt を変える。ファイルの差し替えは新しい asset を作る"""
+  updateAsset(id: ID!, input: AssetPatch!): Asset!
+  """消す。entry（下書き・公開・richText の画像を含む）が使っていればエラー"""
+  deleteAsset(id: ID!): ID!
+}
+
+"""asset の状態"""
+enum AssetStatus {
+  """URL を出したが、まだ置かれた事を確かめていない"""
+  PENDING
+  """置かれ、confirmAsset が確かめた"""
+  READY
+}
+
+"""画像やファイル。中身はストレージにあり、url で配信する"""
+type Asset {
+  id: ID!
+  """配信 URL"""
+  url: String!
+  fileName: String!
+  mime: String!
+  """バイト数"""
+  size: Int!
+  """画像の幅。画像でなければ null"""
+  width: Int
+  height: Int
+  alt: String!
+  status: AssetStatus!
+  createdAt: String!
+}
+
+"""asset の一覧の 1 ページ"""
+type AssetPage {
+  nodes: [Asset!]!
+  totalCount: Int!
+}
+
+"""署名付き URL の発行結果"""
+type Upload {
+  asset: Asset!
+  """ここへ PUT する"""
+  uploadUrl: String!
+  """URL の有効期限（秒）"""
+  expiresInSeconds: Int!
+}
+
+input UploadInput {
+  fileName: String!
+  """image/png などの許可リストにある物"""
+  mime: String!
+  """バイト数。20 MB まで"""
+  size: Int!
+}
+
+input AssetConfirmInput {
+  width: Int
+  height: Int
+  alt: String
+}
+
+input AssetPatch {
+  alt: String!
 }
 
 """entry の状態"""

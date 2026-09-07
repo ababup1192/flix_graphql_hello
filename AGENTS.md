@@ -25,13 +25,13 @@ Flix から graphql-java（Java の GraphQL ライブラリ）を Java interop �
 ## ビルドと実行
 
 Flix コンパイラは flix_game_engine の devbox が持つ jar を借りる（`bin/flix` が解決する）。
-DB 層は sqlfx（github:ababup1192/sqlfx）を `flix.toml` の `[dependencies]` で取る。PostgreSQL は docker compose。
+DB 層は sqlfx（github:ababup1192/sqlfx）を `flix.toml` の `[dependencies]` で取る。PostgreSQL と MinIO（asset の置き先。本番は R2）は docker compose。
 
 ```bash
 make check     # 型検査
 make test      # DB 無しのテスト（test/Pg を除く）
-make test-pg   # 実 PostgreSQL 込み（コンテナの起動と停止まで）
-make db-up     # PostgreSQL を起動
+make test-pg   # 実 PostgreSQL と MinIO 込み（コンテナの起動と停止まで）
+make db-up     # PostgreSQL と MinIO を起動
 make migrate   # migrations/ を当てる
 make run       # サーバ起動（CMS_DSN 等は Makefile が渡す）
 make generate  # admin.graphql → src/generated/graphql/、schema.graphql（見本）→ test/sample/（schemagen）
@@ -49,13 +49,14 @@ migrations/            DDL。sqlfx の机上スキーマの元で、make migrate
 queries/*.q            SQL
 src/generated/graphql/ schemagen の生成物（触らない）。GeneratedSchema / GeneratedAdminSchema
 src/generated/sql/     sqlfx の生成物（触らない）。*Queries / Tables
-src/cms/model/         ドメインの型。Ids（TypeId / FieldId / ApiId / TypeName）、ContentType（enum・レコード・Draft / Changes・FieldConfig）、Entry（EntryId / Stage / EntryData / IdGen）
+src/cms/model/         ドメインの型。Ids（TypeId / FieldId / ApiId / TypeName）、ContentType（enum・レコード・Draft / Changes・FieldConfig）、Entry（EntryId / Stage / EntryData / IdGen）、Asset（AssetId / AssetStatus / Upload）
 src/cms/rules/         純粋な規則。Naming（予約名・衝突・kind と config）、EntryValidation（下書きは緩く、公開は required まで）、EntryLinks（中身から参照を取り出す）
 src/cms/db/            行とドメインの値の変換と、絞り込みの SQL 化（EntryFilterSql）。列名と JSONB の式を知るのはここだけ
-src/cms/               ユースケース（ContentTypes / ContentEntries / Projects）と業務エラー（CmsErr）、今のプロジェクト（Tenant effect）
+src/cms/               ユースケース（ContentTypes / ContentEntries / Projects / Assets）と業務エラー（CmsErr）、今のプロジェクト（Tenant effect）
 src/admin/             管理 API。AdminMapping（GraphQL の型 ↔ ドメイン）、リゾルバ、AdminRunner（最初の SQL で借りる Tx）、AdminEngine（プロジェクトごとのエンジン）
 src/content/           コンテンツ API。ContentSchemaBuilder（定義 → Schema）、ContentEngine（目印で組み直す置き場）、ContentRunner（読むだけ）
-src/app/               Server（ルーティング・CORS・/health）、DbConfig、Health
+src/app/               Server（ルーティング・CORS・/health）、DbConfig、StorageConfig（ASSET_*。無ければ asset 無し）、Health
+src/storage/           asset の置き先。SigV4（純粋な署名）、ObjectStore effect（署名付き URL / HEAD / DELETE。MinIO と R2 は同じ handler）
 src/http/              手書き HTTP/1.1 と Cors
 src/graphql/           graphql-java の境界と Schema の DSL
 test/                  src と同じ構成。test/Pg/ だけ実 PG

@@ -192,6 +192,10 @@ pub eff IdGen {
     /// 新しい entry の id。
     ///
     def freshEntryId(): EntryId
+    ///
+    /// 新しい asset の id。entry と同じ形。
+    ///
+    def freshAssetId(): AssetId
 }
 
 mod IdGen {
@@ -206,8 +210,13 @@ mod IdGen {
     ///
     pub def runWithRandom(f: Unit -> a \ ef): a \ (ef - IdGen) + IO =
         run f() with handler IdGen {
-            def freshEntryId(resume) = resume(EntryId.EntryId(UUID.randomUUID().toString() |> String.replace(src = "-", dst = "") |> String.takeLeft(12)))
+            def freshEntryId(resume) = resume(EntryId.EntryId(randomText()))
+            def freshAssetId(resume) = resume(AssetId.AssetId(randomText()))
         }
+
+    /// UUID から作った 12 文字。
+    def randomText(): String \ IO =
+        UUID.randomUUID().toString() |> String.replace(src = "-", dst = "") |> String.takeLeft(12)
 
     ///
     /// 決めた id を順に返すハンドラ。尽きたら最後の物を繰り返す。
@@ -215,14 +224,15 @@ mod IdGen {
     pub def runWithFixed(ids: List[EntryId], f: Unit -> a \ ef): a \ ef - IdGen = region rc {
         let remaining = Ref.fresh(rc, ids);
         run f() with handler IdGen {
-            def freshEntryId(resume) = {
-                let next = match Ref.get(remaining) {
-                    case head :: tail => { Ref.put(if (List.isEmpty(tail)) head :: Nil else tail, remaining); head }
-                    case Nil          => EntryId.EntryId("fixed")
-                };
-                resume(next)
-            }
+            def freshEntryId(resume) = resume(nextFixed(remaining))
+            def freshAssetId(resume) = resume(AssetId.AssetId(EntryId.text(nextFixed(remaining))))
         }
+    }
+
+    /// 決めた id の次。尽きたら最後の物を繰り返す。
+    def nextFixed(remaining: Ref[List[EntryId], r]): EntryId \ r = match Ref.get(remaining) {
+        case head :: tail => { Ref.put(if (List.isEmpty(tail)) head :: Nil else tail, remaining); head }
+        case Nil          => EntryId.EntryId("fixed")
     }
 
 }

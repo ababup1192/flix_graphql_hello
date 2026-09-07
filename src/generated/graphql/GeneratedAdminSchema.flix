@@ -4,10 +4,22 @@
 mod GeneratedAdmin {
 
     /// 生成元の SDL 本文（改行は LF）。GeneratedCheck が SDL ファイルと照合する
-    pub def sdlText(): String = "\"\"\"任意の JSON 値。entry の中身（フィールドの apiId → 値）に使う\"\"\"\nscalar JSON\n\n\"\"\"管理 API。content type とフィールドの定義と、entry を読み書きする。形は固定で、コンテンツ API は定義から実行時に組む\"\"\"\ntype Query {\n  \"\"\"全 content type。apiId 順\"\"\"\n  contentTypes: [ContentType!]!\n  \"\"\"id か apiId で 1 つ。無ければ null\"\"\"\n  contentType(id: ID, apiId: String): ContentType\n  \"\"\"型の entry の一覧。更新が新しい順。search は下書きの中身に含む文字列\"\"\"\n  entries(typeId: ID!, search: String, first: Int = 50, skip: Int = 0): EntryPage!\n  \"\"\"entry 1 つ。無ければ null\"\"\"\n  entry(id: ID!): Entry\n}\n\ntype Mutation {\n  createContentType(input: ContentTypeInput!): ContentType!\n  updateContentType(id: ID!, input: ContentTypePatch!): ContentType!\n  \"\"\"フィールドごと消す\"\"\"\n  deleteContentType(id: ID!): ID!\n  \"\"\"末尾に足す\"\"\"\n  addField(typeId: ID!, input: FieldInput!): FieldDef!\n  updateField(id: ID!, input: FieldPatch!): FieldDef!\n  removeField(id: ID!): ID!\n  \"\"\"ids の順に並べ直す。型の全フィールドを過不足なく渡す\"\"\"\n  reorderFields(typeId: ID!, ids: [ID!]!): ContentType!\n\n  \"\"\"下書きを作る。id を渡せば（移行用）それを使い、無ければ振る。fields は apiId → 値\"\"\"\n  createEntry(typeId: ID!, fields: JSON!, id: ID): Entry!\n  \"\"\"下書きを直す。fields のキーだけ上書きし、null で消す。expectedVersion が今の version と違えば CONFLICT\"\"\"\n  updateEntry(id: ID!, fields: JSON!, expectedVersion: Int!): Entry!\n  \"\"\"ゴミ箱へ（soft delete）。公開中なら公開も取り下げる\"\"\"\n  deleteEntry(id: ID!): ID!\n  \"\"\"下書きを公開する。required と unique と参照先の公開はここで検査する。公開中なら公開側を下書きで上書きする。\n  withDependencies なら未公開の参照先を先に公開する\"\"\"\n  publishEntry(id: ID!, withDependencies: Boolean = false): Entry!\n  \"\"\"公開を取り下げる。下書きは残る\"\"\"\n  unpublishEntry(id: ID!): Entry!\n  \"\"\"今の下書きを版として残す\"\"\"\n  saveVersion(id: ID!): EntryVersion!\n  \"\"\"版の中身を下書きに戻す。expectedVersion は updateEntry と同じ\"\"\"\n  restoreVersion(id: ID!, versionId: ID!, expectedVersion: Int!): Entry!\n}\n\n\"\"\"entry の状態\"\"\"\nenum EntryStage {\n  \"\"\"まだ公開していない\"\"\"\n  DRAFT\n  \"\"\"公開中で、下書きは公開した物と同じ\"\"\"\n  PUBLISHED\n  \"\"\"公開中で、公開後に下書きが進んでいる（再公開で反映）\"\"\"\n  CHANGED\n}\n\n\"\"\"entry。fields は下書きの中身\"\"\"\ntype Entry {\n  id: ID!\n  typeId: ID!\n  \"\"\"楽観ロックの版。updateEntry に expectedVersion として渡す\"\"\"\n  version: Int!\n  stage: EntryStage!\n  fields: JSON!\n  publishedAt: String\n  createdAt: String!\n  updatedAt: String!\n  \"\"\"版。新しい順。公開時と saveVersion で積む\"\"\"\n  versions: [EntryVersion!]!\n}\n\n\"\"\"版を積んだ理由\"\"\"\nenum VersionReason {\n  PUBLISH\n  SAVE\n}\n\n\"\"\"entry の版\"\"\"\ntype EntryVersion {\n  id: ID!\n  \"\"\"積んだ時点の entry の version\"\"\"\n  version: Int!\n  reason: VersionReason!\n  author: String!\n  fields: JSON!\n  createdAt: String!\n}\n\n\"\"\"entry の一覧の 1 ページ\"\"\"\ntype EntryPage {\n  nodes: [Entry!]!\n  totalCount: Int!\n}\n\n\"\"\"content type の種別\"\"\"\nenum TypeKind {\n  \"\"\"entry を何件でも持つ\"\"\"\n  COLLECTION\n  \"\"\"entry を 1 件だけ持つ（サイト設定など）\"\"\"\n  SINGLETON\n}\n\n\"\"\"フィールドの種類\"\"\"\nenum FieldKind {\n  TEXT\n  TEXT_AREA\n  \"\"\"URL に使う識別子。sourceField から自動生成し、型の中で一意\"\"\"\n  SLUG\n  NUMBER\n  BOOLEAN\n  \"\"\"決まった選択肢から 1 つ。config.options\"\"\"\n  SELECT\n  \"\"\"他の entry への参照。targetTypeId が参照先の型\"\"\"\n  REFERENCE\n  \"\"\"子フィールドを持つ入れ子。値は子の apiId → 値のオブジェクト\"\"\"\n  OBJECT\n  \"\"\"複数の OBJECT（variant）から選んで並べる。常に配列。値は { blockType: <variant の apiId>, ... } の並び\"\"\"\n  BLOCKS\n}\n\n\"\"\"content type。apiId がコンテンツ API のクエリ名の元になる\"\"\"\ntype ContentType {\n  id: ID!\n  \"\"\"lowerCamel の識別子（\"blogs\"）\"\"\"\n  apiId: String!\n  kind: TypeKind!\n  \"\"\"管理画面に出す名前\"\"\"\n  name: String!\n  \"\"\"コンテンツ API の型名（\"Blog\"）\"\"\"\n  singular: String!\n  \"\"\"コンテンツ API の一覧クエリ名（\"blogs\"）\"\"\"\n  plural: String!\n  \"\"\"管理画面のプレビューが開く URL。{id} を entry の id に置き換える\"\"\"\n  previewUrl: String\n  \"\"\"最上位のフィールド。position 順。子は children\"\"\"\n  fields: [FieldDef!]!\n  createdAt: String!\n  updatedAt: String!\n}\n\n\"\"\"フィールドの定義\"\"\"\ntype FieldDef {\n  id: ID!\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  \"\"\"配列か\"\"\"\n  many: Boolean!\n  \"\"\"公開時に値が要るか\"\"\"\n  required: Boolean!\n  \"\"\"型の中で値が一意か\"\"\"\n  unique: Boolean!\n  \"\"\"言語ごとに値を持つか\"\"\"\n  localized: Boolean!\n  \"\"\"REFERENCE の参照先の型\"\"\"\n  targetTypeId: ID\n  \"\"\"OBJECT / BLOCKS の子なら親のフィールド\"\"\"\n  parentFieldId: ID\n  \"\"\"OBJECT の子フィールド、BLOCKS の variant。position 順\"\"\"\n  children: [FieldDef!]!\n  config: FieldConfig!\n  \"\"\"兄弟の中の並び順\"\"\"\n  position: Int!\n}\n\n\"\"\"kind ごとの設定。使わない項目は null\"\"\"\ntype FieldConfig {\n  \"\"\"TEXT / TEXT_AREA / SLUG の最大文字数\"\"\"\n  maxLength: Int\n  \"\"\"SLUG の元にするフィールドの apiId\"\"\"\n  sourceField: String\n  \"\"\"NUMBER の下限\"\"\"\n  min: Float\n  \"\"\"NUMBER の上限\"\"\"\n  max: Float\n  \"\"\"NUMBER を整数に限るか\"\"\"\n  integer: Boolean\n  \"\"\"SELECT の選択肢。UPPER_SNAKE\"\"\"\n  options: [String!]\n}\n\ninput ContentTypeInput {\n  apiId: String!\n  kind: TypeKind = COLLECTION\n  name: String!\n  \"\"\"省くと apiId から導く\"\"\"\n  singular: String\n  \"\"\"省くと apiId から導く\"\"\"\n  plural: String\n  previewUrl: String\n}\n\n\"\"\"触らない項目は省く\"\"\"\ninput ContentTypePatch {\n  name: String\n  singular: String\n  plural: String\n  previewUrl: String\n}\n\ninput FieldInput {\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  many: Boolean = false\n  required: Boolean = false\n  unique: Boolean = false\n  localized: Boolean = false\n  \"\"\"REFERENCE の参照先の型\"\"\"\n  targetTypeId: ID\n  \"\"\"OBJECT / BLOCKS の子として足すなら親のフィールド\"\"\"\n  parentFieldId: ID\n  config: FieldConfigInput\n}\n\n\"\"\"触らない項目は省く。config は丸ごと置き換える\"\"\"\ninput FieldPatch {\n  name: String\n  required: Boolean\n  unique: Boolean\n  localized: Boolean\n  config: FieldConfigInput\n}\n\ninput FieldConfigInput {\n  maxLength: Int\n  sourceField: String\n  min: Float\n  max: Float\n  integer: Boolean\n  options: [String!]\n}\n"
+    pub def sdlText(): String = "\"\"\"任意の JSON 値。entry の中身（フィールドの apiId → 値）に使う\"\"\"\nscalar JSON\n\n\"\"\"管理 API。content type とフィールドの定義と、entry を読み書きする。形は固定で、コンテンツ API は定義から実行時に組む\"\"\"\ntype Query {\n  \"\"\"全 content type。apiId 順\"\"\"\n  contentTypes: [ContentType!]!\n  \"\"\"id か apiId で 1 つ。無ければ null\"\"\"\n  contentType(id: ID, apiId: String): ContentType\n  \"\"\"型の entry の一覧。更新が新しい順。search は下書きの中身に含む文字列\"\"\"\n  entries(typeId: ID!, search: String, first: Int = 50, skip: Int = 0): EntryPage!\n  \"\"\"entry 1 つ。無ければ null\"\"\"\n  entry(id: ID!): Entry\n  \"\"\"asset の一覧。新しい順。アップロード途中（PENDING）の物も出る\"\"\"\n  assets(first: Int = 50, skip: Int = 0): AssetPage!\n  \"\"\"asset 1 つ。無ければ null\"\"\"\n  asset(id: ID!): Asset\n}\n\ntype Mutation {\n  createContentType(input: ContentTypeInput!): ContentType!\n  updateContentType(id: ID!, input: ContentTypePatch!): ContentType!\n  \"\"\"フィールドごと消す\"\"\"\n  deleteContentType(id: ID!): ID!\n  \"\"\"末尾に足す\"\"\"\n  addField(typeId: ID!, input: FieldInput!): FieldDef!\n  updateField(id: ID!, input: FieldPatch!): FieldDef!\n  removeField(id: ID!): ID!\n  \"\"\"ids の順に並べ直す。型の全フィールドを過不足なく渡す\"\"\"\n  reorderFields(typeId: ID!, ids: [ID!]!): ContentType!\n\n  \"\"\"下書きを作る。id を渡せば（移行用）それを使い、無ければ振る。fields は apiId → 値\"\"\"\n  createEntry(typeId: ID!, fields: JSON!, id: ID): Entry!\n  \"\"\"下書きを直す。fields のキーだけ上書きし、null で消す。expectedVersion が今の version と違えば CONFLICT\"\"\"\n  updateEntry(id: ID!, fields: JSON!, expectedVersion: Int!): Entry!\n  \"\"\"ゴミ箱へ（soft delete）。公開中なら公開も取り下げる\"\"\"\n  deleteEntry(id: ID!): ID!\n  \"\"\"下書きを公開する。required と unique と参照先の公開はここで検査する。公開中なら公開側を下書きで上書きする。\n  withDependencies なら未公開の参照先を先に公開する\"\"\"\n  publishEntry(id: ID!, withDependencies: Boolean = false): Entry!\n  \"\"\"公開を取り下げる。下書きは残る\"\"\"\n  unpublishEntry(id: ID!): Entry!\n  \"\"\"今の下書きを版として残す\"\"\"\n  saveVersion(id: ID!): EntryVersion!\n  \"\"\"版の中身を下書きに戻す。expectedVersion は updateEntry と同じ\"\"\"\n  restoreVersion(id: ID!, versionId: ID!, expectedVersion: Int!): Entry!\n\n  \"\"\"asset の置き先（署名付き PUT URL）を発行する。ブラウザが Content-Type / Content-Length を宣言どおりにして PUT し、\n  終わったら confirmAsset を呼ぶ。URL は expiresInSeconds で切れる\"\"\"\n  createUploadUrl(input: UploadInput!): Upload!\n  \"\"\"置いた事をストレージで確かめて READY にする。画像なら寸法を渡す。置かれていなければエラー\"\"\"\n  confirmAsset(id: ID!, input: AssetConfirmInput): Asset!\n  \"\"\"alt を変える。ファイルの差し替えは新しい asset を作る\"\"\"\n  updateAsset(id: ID!, input: AssetPatch!): Asset!\n  \"\"\"消す。entry（下書き・公開・richText の画像を含む）が使っていればエラー\"\"\"\n  deleteAsset(id: ID!): ID!\n}\n\n\"\"\"asset の状態\"\"\"\nenum AssetStatus {\n  \"\"\"URL を出したが、まだ置かれた事を確かめていない\"\"\"\n  PENDING\n  \"\"\"置かれ、confirmAsset が確かめた\"\"\"\n  READY\n}\n\n\"\"\"画像やファイル。中身はストレージにあり、url で配信する\"\"\"\ntype Asset {\n  id: ID!\n  \"\"\"配信 URL\"\"\"\n  url: String!\n  fileName: String!\n  mime: String!\n  \"\"\"バイト数\"\"\"\n  size: Int!\n  \"\"\"画像の幅。画像でなければ null\"\"\"\n  width: Int\n  height: Int\n  alt: String!\n  status: AssetStatus!\n  createdAt: String!\n}\n\n\"\"\"asset の一覧の 1 ページ\"\"\"\ntype AssetPage {\n  nodes: [Asset!]!\n  totalCount: Int!\n}\n\n\"\"\"署名付き URL の発行結果\"\"\"\ntype Upload {\n  asset: Asset!\n  \"\"\"ここへ PUT する\"\"\"\n  uploadUrl: String!\n  \"\"\"URL の有効期限（秒）\"\"\"\n  expiresInSeconds: Int!\n}\n\ninput UploadInput {\n  fileName: String!\n  \"\"\"image/png などの許可リストにある物\"\"\"\n  mime: String!\n  \"\"\"バイト数。20 MB まで\"\"\"\n  size: Int!\n}\n\ninput AssetConfirmInput {\n  width: Int\n  height: Int\n  alt: String\n}\n\ninput AssetPatch {\n  alt: String!\n}\n\n\"\"\"entry の状態\"\"\"\nenum EntryStage {\n  \"\"\"まだ公開していない\"\"\"\n  DRAFT\n  \"\"\"公開中で、下書きは公開した物と同じ\"\"\"\n  PUBLISHED\n  \"\"\"公開中で、公開後に下書きが進んでいる（再公開で反映）\"\"\"\n  CHANGED\n}\n\n\"\"\"entry。fields は下書きの中身\"\"\"\ntype Entry {\n  id: ID!\n  typeId: ID!\n  \"\"\"楽観ロックの版。updateEntry に expectedVersion として渡す\"\"\"\n  version: Int!\n  stage: EntryStage!\n  fields: JSON!\n  publishedAt: String\n  createdAt: String!\n  updatedAt: String!\n  \"\"\"版。新しい順。公開時と saveVersion で積む\"\"\"\n  versions: [EntryVersion!]!\n}\n\n\"\"\"版を積んだ理由\"\"\"\nenum VersionReason {\n  PUBLISH\n  SAVE\n}\n\n\"\"\"entry の版\"\"\"\ntype EntryVersion {\n  id: ID!\n  \"\"\"積んだ時点の entry の version\"\"\"\n  version: Int!\n  reason: VersionReason!\n  author: String!\n  fields: JSON!\n  createdAt: String!\n}\n\n\"\"\"entry の一覧の 1 ページ\"\"\"\ntype EntryPage {\n  nodes: [Entry!]!\n  totalCount: Int!\n}\n\n\"\"\"content type の種別\"\"\"\nenum TypeKind {\n  \"\"\"entry を何件でも持つ\"\"\"\n  COLLECTION\n  \"\"\"entry を 1 件だけ持つ（サイト設定など）\"\"\"\n  SINGLETON\n}\n\n\"\"\"フィールドの種類\"\"\"\nenum FieldKind {\n  TEXT\n  TEXT_AREA\n  \"\"\"URL に使う識別子。sourceField から自動生成し、型の中で一意\"\"\"\n  SLUG\n  NUMBER\n  BOOLEAN\n  \"\"\"決まった選択肢から 1 つ。config.options\"\"\"\n  SELECT\n  \"\"\"他の entry への参照。targetTypeId が参照先の型\"\"\"\n  REFERENCE\n  \"\"\"子フィールドを持つ入れ子。値は子の apiId → 値のオブジェクト\"\"\"\n  OBJECT\n  \"\"\"複数の OBJECT（variant）から選んで並べる。常に配列。値は { blockType: <variant の apiId>, ... } の並び\"\"\"\n  BLOCKS\n}\n\n\"\"\"content type。apiId がコンテンツ API のクエリ名の元になる\"\"\"\ntype ContentType {\n  id: ID!\n  \"\"\"lowerCamel の識別子（\"blogs\"）\"\"\"\n  apiId: String!\n  kind: TypeKind!\n  \"\"\"管理画面に出す名前\"\"\"\n  name: String!\n  \"\"\"コンテンツ API の型名（\"Blog\"）\"\"\"\n  singular: String!\n  \"\"\"コンテンツ API の一覧クエリ名（\"blogs\"）\"\"\"\n  plural: String!\n  \"\"\"管理画面のプレビューが開く URL。{id} を entry の id に置き換える\"\"\"\n  previewUrl: String\n  \"\"\"最上位のフィールド。position 順。子は children\"\"\"\n  fields: [FieldDef!]!\n  createdAt: String!\n  updatedAt: String!\n}\n\n\"\"\"フィールドの定義\"\"\"\ntype FieldDef {\n  id: ID!\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  \"\"\"配列か\"\"\"\n  many: Boolean!\n  \"\"\"公開時に値が要るか\"\"\"\n  required: Boolean!\n  \"\"\"型の中で値が一意か\"\"\"\n  unique: Boolean!\n  \"\"\"言語ごとに値を持つか\"\"\"\n  localized: Boolean!\n  \"\"\"REFERENCE の参照先の型\"\"\"\n  targetTypeId: ID\n  \"\"\"OBJECT / BLOCKS の子なら親のフィールド\"\"\"\n  parentFieldId: ID\n  \"\"\"OBJECT の子フィールド、BLOCKS の variant。position 順\"\"\"\n  children: [FieldDef!]!\n  config: FieldConfig!\n  \"\"\"兄弟の中の並び順\"\"\"\n  position: Int!\n}\n\n\"\"\"kind ごとの設定。使わない項目は null\"\"\"\ntype FieldConfig {\n  \"\"\"TEXT / TEXT_AREA / SLUG の最大文字数\"\"\"\n  maxLength: Int\n  \"\"\"SLUG の元にするフィールドの apiId\"\"\"\n  sourceField: String\n  \"\"\"NUMBER の下限\"\"\"\n  min: Float\n  \"\"\"NUMBER の上限\"\"\"\n  max: Float\n  \"\"\"NUMBER を整数に限るか\"\"\"\n  integer: Boolean\n  \"\"\"SELECT の選択肢。UPPER_SNAKE\"\"\"\n  options: [String!]\n}\n\ninput ContentTypeInput {\n  apiId: String!\n  kind: TypeKind = COLLECTION\n  name: String!\n  \"\"\"省くと apiId から導く\"\"\"\n  singular: String\n  \"\"\"省くと apiId から導く\"\"\"\n  plural: String\n  previewUrl: String\n}\n\n\"\"\"触らない項目は省く\"\"\"\ninput ContentTypePatch {\n  name: String\n  singular: String\n  plural: String\n  previewUrl: String\n}\n\ninput FieldInput {\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  many: Boolean = false\n  required: Boolean = false\n  unique: Boolean = false\n  localized: Boolean = false\n  \"\"\"REFERENCE の参照先の型\"\"\"\n  targetTypeId: ID\n  \"\"\"OBJECT / BLOCKS の子として足すなら親のフィールド\"\"\"\n  parentFieldId: ID\n  config: FieldConfigInput\n}\n\n\"\"\"触らない項目は省く。config は丸ごと置き換える\"\"\"\ninput FieldPatch {\n  name: String\n  required: Boolean\n  unique: Boolean\n  localized: Boolean\n  config: FieldConfigInput\n}\n\ninput FieldConfigInput {\n  maxLength: Int\n  sourceField: String\n  min: Float\n  max: Float\n  integer: Boolean\n  options: [String!]\n}\n"
 
     /// 生成した schemagen のバージョン
     pub def generatorVersion(): String = "6"
+
+    /// enum AssetStatus。asset の状態
+    pub enum AssetStatus with Eq, Order, ToString {
+        /// URL を出したが、まだ置かれた事を確かめていない
+        case Pending
+        /// 置かれ、confirmAsset が確かめた
+        case Ready
+    }
+
+    /// AssetStatus の Codec
+    pub def assetStatusCodec(): GqlCodec[AssetStatus] =
+        GqlCodec.enumOf("AssetStatus", value -> match value { case AssetStatus.Pending => "PENDING" case AssetStatus.Ready => "READY" }, AssetStatus.Pending :: AssetStatus.Ready :: Nil) |> GqlCodec.describe("asset の状態") |> GqlCodec.describeValue(AssetStatus.Pending, "URL を出したが、まだ置かれた事を確かめていない") |> GqlCodec.describeValue(AssetStatus.Ready, "置かれ、confirmAsset が確かめた")
 
     /// enum EntryStage。entry の状態
     pub enum EntryStage with Eq, Order, ToString {
@@ -72,6 +84,37 @@ mod GeneratedAdmin {
     /// FieldKind の Codec
     pub def fieldKindCodec(): GqlCodec[FieldKind] =
         GqlCodec.enumOf("FieldKind", value -> match value { case FieldKind.Text => "TEXT" case FieldKind.TextArea => "TEXT_AREA" case FieldKind.Slug => "SLUG" case FieldKind.Number => "NUMBER" case FieldKind.Boolean => "BOOLEAN" case FieldKind.Select => "SELECT" case FieldKind.Reference => "REFERENCE" case FieldKind.Object => "OBJECT" case FieldKind.Blocks => "BLOCKS" }, FieldKind.Text :: FieldKind.TextArea :: FieldKind.Slug :: FieldKind.Number :: FieldKind.Boolean :: FieldKind.Select :: FieldKind.Reference :: FieldKind.Object :: FieldKind.Blocks :: Nil) |> GqlCodec.describe("フィールドの種類") |> GqlCodec.describeValue(FieldKind.Slug, "URL に使う識別子。sourceField から自動生成し、型の中で一意") |> GqlCodec.describeValue(FieldKind.Select, "決まった選択肢から 1 つ。config.options") |> GqlCodec.describeValue(FieldKind.Reference, "他の entry への参照。targetTypeId が参照先の型") |> GqlCodec.describeValue(FieldKind.Object, "子フィールドを持つ入れ子。値は子の apiId → 値のオブジェクト") |> GqlCodec.describeValue(FieldKind.Blocks, "複数の OBJECT（variant）から選んで並べる。常に配列。値は { blockType: <variant の apiId>, ... } の並び")
+
+    /// input UploadInput
+    pub type alias UploadInput = { fileName = String, mime = String, size = Int32 }
+
+    /// UploadInput の Codec
+    pub def uploadInputCodec(): GqlCodec[UploadInput] =
+        let f0 = Schema.arg("fileName", GqlCodec.string());
+        let f1 = Schema.arg("mime", GqlCodec.string()) |> Arg.withDescription("image/png などの許可リストにある物");
+        let f2 = Schema.arg("size", GqlCodec.int32()) |> Arg.withDescription("バイト数。20 MB まで");
+        GqlCodec.inputObject("UploadInput", Arg.info(f0) :: Arg.info(f1) :: Arg.info(f2) :: Nil, fields ->
+            forM (v0 <- Arg.decodeField(f0, fields); v1 <- Arg.decodeField(f1, fields); v2 <- Arg.decodeField(f2, fields)) yield { fileName = v0, mime = v1, size = v2 })
+
+    /// input AssetConfirmInput
+    pub type alias AssetConfirmInput = { width = Option[Int32], height = Option[Int32], alt = Option[String] }
+
+    /// AssetConfirmInput の Codec
+    pub def assetConfirmInputCodec(): GqlCodec[AssetConfirmInput] =
+        let f0 = Schema.arg("width", GqlCodec.option(GqlCodec.int32()));
+        let f1 = Schema.arg("height", GqlCodec.option(GqlCodec.int32()));
+        let f2 = Schema.arg("alt", GqlCodec.option(GqlCodec.string()));
+        GqlCodec.inputObject("AssetConfirmInput", Arg.info(f0) :: Arg.info(f1) :: Arg.info(f2) :: Nil, fields ->
+            forM (v0 <- Arg.decodeField(f0, fields); v1 <- Arg.decodeField(f1, fields); v2 <- Arg.decodeField(f2, fields)) yield { width = v0, height = v1, alt = v2 })
+
+    /// input AssetPatch
+    pub type alias AssetPatch = { alt = String }
+
+    /// AssetPatch の Codec
+    pub def assetPatchCodec(): GqlCodec[AssetPatch] =
+        let f0 = Schema.arg("alt", GqlCodec.string());
+        GqlCodec.inputObject("AssetPatch", Arg.info(f0) :: Nil, fields ->
+            forM (v0 <- Arg.decodeField(f0, fields)) yield { alt = v0 })
 
     /// input ContentTypeInput
     pub type alias ContentTypeInput = { apiId = String, kind = Option[TypeKind], name = String, singular = Option[String], plural = Option[String], previewUrl = Option[String] }
@@ -152,6 +195,10 @@ mod GeneratedAdmin {
     pub type alias QueryEntriesResolver[ef: Eff] = Context -> Id -> Option[String] -> Option[Int32] -> Option[Int32] -> Result[FieldError, EntryPage] \ ef
     /// Query.entry
     pub type alias QueryEntryResolver[ef: Eff] = Context -> Id -> Result[FieldError, Option[Entry]] \ ef
+    /// Query.assets
+    pub type alias QueryAssetsResolver[ef: Eff] = Context -> Option[Int32] -> Option[Int32] -> Result[FieldError, AssetPage] \ ef
+    /// Query.asset
+    pub type alias QueryAssetResolver[ef: Eff] = Context -> Id -> Result[FieldError, Option[Asset]] \ ef
     /// Mutation.createContentType
     pub type alias MutationCreateContentTypeResolver[ef: Eff] = Context -> ContentTypeInput -> Result[FieldError, ContentType] \ ef
     /// Mutation.updateContentType
@@ -180,6 +227,44 @@ mod GeneratedAdmin {
     pub type alias MutationSaveVersionResolver[ef: Eff] = Context -> Id -> Result[FieldError, EntryVersion] \ ef
     /// Mutation.restoreVersion
     pub type alias MutationRestoreVersionResolver[ef: Eff] = Context -> Id -> Id -> Int32 -> Result[FieldError, Entry] \ ef
+    /// Mutation.createUploadUrl
+    pub type alias MutationCreateUploadUrlResolver[ef: Eff] = Context -> UploadInput -> Result[FieldError, Upload] \ ef
+    /// Mutation.confirmAsset
+    pub type alias MutationConfirmAssetResolver[ef: Eff] = Context -> Id -> Option[AssetConfirmInput] -> Result[FieldError, Asset] \ ef
+    /// Mutation.updateAsset
+    pub type alias MutationUpdateAssetResolver[ef: Eff] = Context -> Id -> AssetPatch -> Result[FieldError, Asset] \ ef
+    /// Mutation.deleteAsset
+    pub type alias MutationDeleteAssetResolver[ef: Eff] = Context -> Id -> Result[FieldError, Id] \ ef
+    /// Asset.id
+    pub type alias AssetIdResolver[ef: Eff] = Context -> Asset -> Result[FieldError, Id] \ ef
+    /// Asset.url
+    pub type alias AssetUrlResolver[ef: Eff] = Context -> Asset -> Result[FieldError, String] \ ef
+    /// Asset.fileName
+    pub type alias AssetFileNameResolver[ef: Eff] = Context -> Asset -> Result[FieldError, String] \ ef
+    /// Asset.mime
+    pub type alias AssetMimeResolver[ef: Eff] = Context -> Asset -> Result[FieldError, String] \ ef
+    /// Asset.size
+    pub type alias AssetSizeResolver[ef: Eff] = Context -> Asset -> Result[FieldError, Int32] \ ef
+    /// Asset.width
+    pub type alias AssetWidthResolver[ef: Eff] = Context -> Asset -> Result[FieldError, Option[Int32]] \ ef
+    /// Asset.height
+    pub type alias AssetHeightResolver[ef: Eff] = Context -> Asset -> Result[FieldError, Option[Int32]] \ ef
+    /// Asset.alt
+    pub type alias AssetAltResolver[ef: Eff] = Context -> Asset -> Result[FieldError, String] \ ef
+    /// Asset.status
+    pub type alias AssetStatusResolver[ef: Eff] = Context -> Asset -> Result[FieldError, AssetStatus] \ ef
+    /// Asset.createdAt
+    pub type alias AssetCreatedAtResolver[ef: Eff] = Context -> Asset -> Result[FieldError, String] \ ef
+    /// AssetPage.nodes
+    pub type alias AssetPageNodesResolver[ef: Eff] = Context -> AssetPage -> Result[FieldError, List[Asset]] \ ef
+    /// AssetPage.totalCount
+    pub type alias AssetPageTotalCountResolver[ef: Eff] = Context -> AssetPage -> Result[FieldError, Int32] \ ef
+    /// Upload.asset
+    pub type alias UploadAssetResolver[ef: Eff] = Context -> Upload -> Result[FieldError, Asset] \ ef
+    /// Upload.uploadUrl
+    pub type alias UploadUploadUrlResolver[ef: Eff] = Context -> Upload -> Result[FieldError, String] \ ef
+    /// Upload.expiresInSeconds
+    pub type alias UploadExpiresInSecondsResolver[ef: Eff] = Context -> Upload -> Result[FieldError, Int32] \ ef
     /// Entry.id
     pub type alias EntryIdResolver[ef: Eff] = Context -> Entry -> Result[FieldError, Id] \ ef
     /// Entry.typeId
@@ -278,7 +363,9 @@ mod GeneratedAdmin {
         contentTypes = QueryContentTypesResolver[ef],
         contentType = QueryContentTypeResolver[ef],
         entries = QueryEntriesResolver[ef],
-        entry = QueryEntryResolver[ef]
+        entry = QueryEntryResolver[ef],
+        assets = QueryAssetsResolver[ef],
+        asset = QueryAssetResolver[ef]
     }
 
     /// type Mutation のリゾルバ一式。ef はリゾルバの効果
@@ -296,7 +383,38 @@ mod GeneratedAdmin {
         publishEntry = MutationPublishEntryResolver[ef],
         unpublishEntry = MutationUnpublishEntryResolver[ef],
         saveVersion = MutationSaveVersionResolver[ef],
-        restoreVersion = MutationRestoreVersionResolver[ef]
+        restoreVersion = MutationRestoreVersionResolver[ef],
+        createUploadUrl = MutationCreateUploadUrlResolver[ef],
+        confirmAsset = MutationConfirmAssetResolver[ef],
+        updateAsset = MutationUpdateAssetResolver[ef],
+        deleteAsset = MutationDeleteAssetResolver[ef]
+    }
+
+    /// type Asset のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
+    pub type alias AssetResolvers[ef: Eff] = {
+        id = AssetIdResolver[ef],
+        url = AssetUrlResolver[ef],
+        fileName = AssetFileNameResolver[ef],
+        mime = AssetMimeResolver[ef],
+        size = AssetSizeResolver[ef],
+        width = AssetWidthResolver[ef],
+        height = AssetHeightResolver[ef],
+        alt = AssetAltResolver[ef],
+        status = AssetStatusResolver[ef],
+        createdAt = AssetCreatedAtResolver[ef]
+    }
+
+    /// type AssetPage のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
+    pub type alias AssetPageResolvers[ef: Eff] = {
+        nodes = AssetPageNodesResolver[ef],
+        totalCount = AssetPageTotalCountResolver[ef]
+    }
+
+    /// type Upload のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
+    pub type alias UploadResolvers[ef: Eff] = {
+        asset = UploadAssetResolver[ef],
+        uploadUrl = UploadUploadUrlResolver[ef],
+        expiresInSeconds = UploadExpiresInSecondsResolver[ef]
     }
 
     /// type Entry のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
@@ -367,6 +485,47 @@ mod GeneratedAdmin {
         max = FieldConfigMaxResolver[ef],
         integer = FieldConfigIntegerResolver[ef],
         options = FieldConfigOptionsResolver[ef]
+    }
+
+    /// type Asset の既定リゾルバ。source の同名ラベルをそのまま返す
+    pub def assetDefaults(): {
+        id = Context -> { id = Id | r0 } -> Result[FieldError, Id] \ ef,
+        url = Context -> { url = String | r1 } -> Result[FieldError, String] \ ef,
+        fileName = Context -> { fileName = String | r2 } -> Result[FieldError, String] \ ef,
+        mime = Context -> { mime = String | r3 } -> Result[FieldError, String] \ ef,
+        size = Context -> { size = Int32 | r4 } -> Result[FieldError, Int32] \ ef,
+        width = Context -> { width = Option[Int32] | r5 } -> Result[FieldError, Option[Int32]] \ ef,
+        height = Context -> { height = Option[Int32] | r6 } -> Result[FieldError, Option[Int32]] \ ef,
+        alt = Context -> { alt = String | r7 } -> Result[FieldError, String] \ ef,
+        status = Context -> { status = AssetStatus | r8 } -> Result[FieldError, AssetStatus] \ ef,
+        createdAt = Context -> { createdAt = String | r9 } -> Result[FieldError, String] \ ef
+    } = {
+        id = (_context, src) -> Ok(src#id),
+        url = (_context, src) -> Ok(src#url),
+        fileName = (_context, src) -> Ok(src#fileName),
+        mime = (_context, src) -> Ok(src#mime),
+        size = (_context, src) -> Ok(src#size),
+        width = (_context, src) -> Ok(src#width),
+        height = (_context, src) -> Ok(src#height),
+        alt = (_context, src) -> Ok(src#alt),
+        status = (_context, src) -> Ok(src#status),
+        createdAt = (_context, src) -> Ok(src#createdAt)
+    }
+
+    /// type AssetPage の既定リゾルバ。source の同名ラベルをそのまま返す。nodes は含まない（オブジェクト型を返すか、引数を持つ）
+    pub def assetPageDefaults(): {
+        totalCount = Context -> { totalCount = Int32 | r0 } -> Result[FieldError, Int32] \ ef
+    } = {
+        totalCount = (_context, src) -> Ok(src#totalCount)
+    }
+
+    /// type Upload の既定リゾルバ。source の同名ラベルをそのまま返す。asset は含まない（オブジェクト型を返すか、引数を持つ）
+    pub def uploadDefaults(): {
+        uploadUrl = Context -> { uploadUrl = String | r0 } -> Result[FieldError, String] \ ef,
+        expiresInSeconds = Context -> { expiresInSeconds = Int32 | r1 } -> Result[FieldError, Int32] \ ef
+    } = {
+        uploadUrl = (_context, src) -> Ok(src#uploadUrl),
+        expiresInSeconds = (_context, src) -> Ok(src#expiresInSeconds)
     }
 
     /// type Entry の既定リゾルバ。source の同名ラベルをそのまま返す。versions は含まない（オブジェクト型を返すか、引数を持つ）
@@ -485,6 +644,9 @@ mod GeneratedAdmin {
     pub type alias Resolvers[ef: Eff] = {
         queryRoot = QueryResolvers[ef],
         mutationRoot = MutationResolvers[ef],
+        asset = AssetResolvers[ef],
+        assetPage = AssetPageResolvers[ef],
+        upload = UploadResolvers[ef],
         entry = EntryResolvers[ef],
         entryVersion = EntryVersionResolvers[ef],
         entryPage = EntryPageResolvers[ef],
@@ -522,6 +684,17 @@ mod GeneratedAdmin {
                 let arg0 = Schema.arg("id", GqlCodec.id());
                 Schema.fieldRaw("entry", Arg.info(arg0) :: Nil, Out.option(Out.obj(entryType(resolvers))), (context, _src, args) ->
                     forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#queryRoot#entry)(context, v0)) yield result) |> Field.withDescription("entry 1 つ。無ければ null")
+            } ::
+            {
+                let arg0 = Schema.arg("first", GqlCodec.option(GqlCodec.int32())) |> Arg.withDefaultValue(Value.Int(50));
+                let arg1 = Schema.arg("skip", GqlCodec.option(GqlCodec.int32())) |> Arg.withDefaultValue(Value.Int(0));
+                Schema.fieldRaw("assets", Arg.info(arg0) :: Arg.info(arg1) :: Nil, Out.obj(assetPageType(resolvers)), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); v1 <- Arg.decode(arg1, args); result <- (resolvers#queryRoot#assets)(context, v0, v1)) yield result) |> Field.withDescription("asset の一覧。新しい順。アップロード途中（PENDING）の物も出る")
+            } ::
+            {
+                let arg0 = Schema.arg("id", GqlCodec.id());
+                Schema.fieldRaw("asset", Arg.info(arg0) :: Nil, Out.option(Out.obj(assetType(resolvers))), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#queryRoot#asset)(context, v0)) yield result) |> Field.withDescription("asset 1 つ。無ければ null")
             } ::
             Nil) |> ObjectType.withDescription("管理 API。content type とフィールドの定義と、entry を読み書きする。形は固定で、コンテンツ API は定義から実行時に組む")
 
@@ -609,7 +782,104 @@ mod GeneratedAdmin {
                 Schema.fieldRaw("restoreVersion", Arg.info(arg0) :: Arg.info(arg1) :: Arg.info(arg2) :: Nil, Out.obj(entryType(resolvers)), (context, _src, args) ->
                     forM (v0 <- Arg.decode(arg0, args); v1 <- Arg.decode(arg1, args); v2 <- Arg.decode(arg2, args); result <- (resolvers#mutationRoot#restoreVersion)(context, v0, v1, v2)) yield result) |> Field.withDescription("版の中身を下書きに戻す。expectedVersion は updateEntry と同じ")
             } ::
+            {
+                let arg0 = Schema.arg("input", uploadInputCodec());
+                Schema.fieldRaw("createUploadUrl", Arg.info(arg0) :: Nil, Out.obj(uploadType(resolvers)), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#createUploadUrl)(context, v0)) yield result) |> Field.withDescription("asset の置き先（署名付き PUT URL）を発行する。ブラウザが Content-Type / Content-Length を宣言どおりにして PUT し、\n終わったら confirmAsset を呼ぶ。URL は expiresInSeconds で切れる")
+            } ::
+            {
+                let arg0 = Schema.arg("id", GqlCodec.id());
+                let arg1 = Schema.arg("input", GqlCodec.option(assetConfirmInputCodec()));
+                Schema.fieldRaw("confirmAsset", Arg.info(arg0) :: Arg.info(arg1) :: Nil, Out.obj(assetType(resolvers)), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); v1 <- Arg.decode(arg1, args); result <- (resolvers#mutationRoot#confirmAsset)(context, v0, v1)) yield result) |> Field.withDescription("置いた事をストレージで確かめて READY にする。画像なら寸法を渡す。置かれていなければエラー")
+            } ::
+            {
+                let arg0 = Schema.arg("id", GqlCodec.id());
+                let arg1 = Schema.arg("input", assetPatchCodec());
+                Schema.fieldRaw("updateAsset", Arg.info(arg0) :: Arg.info(arg1) :: Nil, Out.obj(assetType(resolvers)), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); v1 <- Arg.decode(arg1, args); result <- (resolvers#mutationRoot#updateAsset)(context, v0, v1)) yield result) |> Field.withDescription("alt を変える。ファイルの差し替えは新しい asset を作る")
+            } ::
+            {
+                let arg0 = Schema.arg("id", GqlCodec.id());
+                Schema.fieldRaw("deleteAsset", Arg.info(arg0) :: Nil, Out.id(), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#deleteAsset)(context, v0)) yield result) |> Field.withDescription("消す。entry（下書き・公開・richText の画像を含む）が使っていればエラー")
+            } ::
             Nil)
+
+    /// type Asset
+    def assetType(resolvers: Resolvers[ef]): ObjectType[Asset, ef] =
+        Schema.objectType("Asset", () ->
+            {
+                Schema.fieldRaw("id", Nil, Out.id(), (context, src, _args) ->
+                    (resolvers#asset#id)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("url", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#asset#url)(context, src)) |> Field.withDescription("配信 URL")
+            } ::
+            {
+                Schema.fieldRaw("fileName", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#asset#fileName)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("mime", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#asset#mime)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("size", Nil, Out.int32(), (context, src, _args) ->
+                    (resolvers#asset#size)(context, src)) |> Field.withDescription("バイト数")
+            } ::
+            {
+                Schema.fieldRaw("width", Nil, Out.option(Out.int32()), (context, src, _args) ->
+                    (resolvers#asset#width)(context, src)) |> Field.withDescription("画像の幅。画像でなければ null")
+            } ::
+            {
+                Schema.fieldRaw("height", Nil, Out.option(Out.int32()), (context, src, _args) ->
+                    (resolvers#asset#height)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("alt", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#asset#alt)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("status", Nil, Out.scalar(assetStatusCodec()), (context, src, _args) ->
+                    (resolvers#asset#status)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("createdAt", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#asset#createdAt)(context, src))
+            } ::
+            Nil) |> ObjectType.withDescription("画像やファイル。中身はストレージにあり、url で配信する")
+
+    /// type AssetPage
+    def assetPageType(resolvers: Resolvers[ef]): ObjectType[AssetPage, ef] =
+        Schema.objectType("AssetPage", () ->
+            {
+                Schema.fieldRaw("nodes", Nil, Out.list(Out.obj(assetType(resolvers))), (context, src, _args) ->
+                    (resolvers#assetPage#nodes)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("totalCount", Nil, Out.int32(), (context, src, _args) ->
+                    (resolvers#assetPage#totalCount)(context, src))
+            } ::
+            Nil) |> ObjectType.withDescription("asset の一覧の 1 ページ")
+
+    /// type Upload
+    def uploadType(resolvers: Resolvers[ef]): ObjectType[Upload, ef] =
+        Schema.objectType("Upload", () ->
+            {
+                Schema.fieldRaw("asset", Nil, Out.obj(assetType(resolvers)), (context, src, _args) ->
+                    (resolvers#upload#asset)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("uploadUrl", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#upload#uploadUrl)(context, src)) |> Field.withDescription("ここへ PUT する")
+            } ::
+            {
+                Schema.fieldRaw("expiresInSeconds", Nil, Out.int32(), (context, src, _args) ->
+                    (resolvers#upload#expiresInSeconds)(context, src)) |> Field.withDescription("URL の有効期限（秒）")
+            } ::
+            Nil) |> ObjectType.withDescription("署名付き URL の発行結果")
 
     /// type Entry
     def entryType(resolvers: Resolvers[ef]): ObjectType[Entry, ef] =

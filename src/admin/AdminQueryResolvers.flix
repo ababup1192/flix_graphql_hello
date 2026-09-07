@@ -27,8 +27,19 @@ mod AdminQueryResolvers {
     pub def entry(): GeneratedAdmin.QueryEntryResolver[AdminEff] =
         (_context, id) -> Ok(ContentEntries.find(AdminMapping.entryId("id", id)))
 
+    /// Query.assets。first は 0 〜 200 に丸める
+    pub def assets(): GeneratedAdmin.QueryAssetsResolver[AdminEff] =
+        (_context, first, skip) -> {
+            let (limit, offset) = EntryPage.clamp(50, first, skip);
+            Ok(Assets.list(limit, offset))
+        }
+
+    /// Query.asset
+    pub def asset(): GeneratedAdmin.QueryAssetResolver[AdminEff] =
+        (_context, id) -> Ok(Assets.find(AdminMapping.assetId("id", id)))
+
     /// type Query のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.QueryResolvers[AdminEff] =
-        { contentTypes = contentTypes(), contentType = contentType(), entries = entries(), entry = entry() }
+        { contentTypes = contentTypes(), contentType = contentType(), entries = entries(), entry = entry(), assets = assets(), asset = asset() }
 
 }
