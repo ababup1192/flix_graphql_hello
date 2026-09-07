@@ -24,11 +24,7 @@ mod ContentRunner {
                         guardVisibility(projectId, actor);
                         Session.runWith(actor, f)
                     }))))));
-        match outcome {
-            case Err(failure)     => Err(DbRunner.failureMessage(failure))
-            case Ok(Err(failure)) => Err(CmsErr.toMessage(failure))
-            case Ok(Ok(result))   => result
-        }
+        DbRunner.toFieldResult(outcome)
 
     ///
     /// private なプロジェクトは、鍵か役割を持つ人しか読めない。

@@ -38,7 +38,7 @@ mod PgTestSupport {
     pub def withDb(body: Unit -> a \ ef): Result[DbFailure, Result[CmsErr.CmsFailure, a]] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr, IdGen, Tenant, Session, ObjectStore}) + IO =
         DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(config(), _ -> {
             resetSchema();
-            TenantTx.stampSession(ProjectId.default());
+            TenantTx.stampConnection(ProjectId.default());
             CmsErr.runWithResult(() -> Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() -> withStorage(body)))))
         })))
 
@@ -46,9 +46,9 @@ mod PgTestSupport {
     /// withDb の中で別のプロジェクトとして走らせる。Tenant と RLS の印（接続に効く物）を両方切り替え、終わったら既定に戻す。
     ///
     pub def asProject(projectId: ProjectId, thunk: Unit -> a \ ef): a \ (ef - Tenant) + DbRead =
-        TenantTx.stampSession(projectId);
+        TenantTx.stampConnection(projectId);
         let result = Tenant.runWith(projectId, thunk);
-        TenantTx.stampSession(ProjectId.default());
+        TenantTx.stampConnection(ProjectId.default());
         result
 
     ///

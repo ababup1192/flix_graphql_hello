@@ -42,41 +42,59 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
             let adminConfig = { cors = cors, graphqlPath = "/admin/graphql", version = version, jobsToken = jobsToken };
             let accountConfig = { cors = cors, graphqlPath = "/account/graphql", version = version, jobsToken = jobsToken };
             let engineCache = ContentEngine.create(deps);
-            // WhyNot: コンテンツ API を実行する時以外（/health、404、preflight、GET）でエンジンを組まないのは、型定義が壊れた時に
-            // 死活監視や preflight まで 503 になり、404 ごとに目印の SELECT が走るため。GraphQL を実行しない道なので管理 API のエンジンで受ける
             // WhyNot: 開発モード（X-Dev-User を信じる）で 127.0.0.1 にしか bind しないのは、ヘッダで人になれる経路を LAN に開けないため
             let bind = match deps#auth#mode { case AuthConfig.Mode.Dev => Some("127.0.0.1") case _ => None };
             // 予約公開と Webhook の配信はプロセス内のワーカーで回す。積むのはリクエストの Tx（outbox）、拾って実行するのはここ
             region rc {
             BackgroundJobs.installShutdownHook(jobs);
             if (jobsOn) spawn BackgroundJobs.runForever(pool, jobs) @ rc else println("jobs: CMS_JOBS=off なのでプロセス内のワーカーは回しません（POST /jobs/tick か別の worker で回してください）");
-            HttpServer.listen(bind, 8080, request ->
-                Health.runWithPool(pool, jobs, () -> {
-                    let (projectSlug, path) = Server.projectOf(baseDomain, request);
-                    let scoped = { path = path | request };
-                    let credential = credentialOf(deps#auth, jwks, request);
-                    // WhyNot: プロジェクト slug 無しで既定プロジェクトも無い時に Account API のエンジンで受けるのは、/health と 404 を
-                    // プロジェクト無しで返すため（Account API は GraphQL のパス以外を実行しない）
-                    if (Option.isEmpty(projectSlug) and (Server.pathOf(path) == accountConfig#graphqlPath or Option.isEmpty(defaultProject)))
-                        Graphql.runWithEngine(accountEngine, () -> Server.handle(accountConfig, credential, scoped))
-                    else
-                    match resolveProject(pool, defaultProject, projectSlug) {
-                        case Err(message)      => Server.unavailable(message)
-                        case Ok(None)          => Server.notFound("プロジェクト '${projectSlug |> Option.getWithDefault("")}' がありません")
-                        case Ok(Some(projectId)) =>
-                            if (Server.needsGraphqlEngine(contentConfig, scoped))
-                                match ContentEngine.current(engineCache, pool, projectId) {
-                                    case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(contentConfig, credential, scoped))
-                                    case Err(message) => Server.unavailable(message)
-                                }
-                            else
-                                match AdminEngine.current(adminEngines, pool, projectId) {
-                                    case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(adminConfig, credential, scoped))
-                                    case Err(message) => Server.unavailable(message)
-                                }
-                    }
-                }))
+            let runtime = {
+                pool = pool, deps = deps, jwks = jwks, baseDomain = baseDomain, defaultProject = defaultProject,
+                accountEngine = accountEngine, adminEngines = adminEngines, engineCache = engineCache,
+                contentConfig = contentConfig, adminConfig = adminConfig, accountConfig = accountConfig };
+            HttpServer.listen(bind, 8080, request -> Health.runWithPool(pool, jobs, () -> dispatch(runtime, request)))
             }
+    }
+
+///
+/// 起動後にリクエストごとに使う物の束。
+///
+type alias Runtime = {
+    pool = Pool, deps = Deps, jwks = TokenVerifier.JwksCache, baseDomain = Option[String], defaultProject = Option[ProjectId],
+    accountEngine = Graphql.Engine, adminEngines = AdminEngine.Cache, engineCache = ContentEngine.Cache,
+    contentConfig = ServerConfig, adminConfig = ServerConfig, accountConfig = ServerConfig }
+
+///
+/// 1 リクエストをどのエンジンで受けるか決めて実行する。
+/// プロジェクト slug 無しの /account/graphql（か、既定プロジェクトが無い時の全部）は Account API、
+/// それ以外はプロジェクト slug を id に解き、POST /graphql ならコンテンツ API、他は管理 API。
+///
+/// WhyNot: プロジェクト slug 無しで既定プロジェクトも無い時に Account API のエンジンで受けるのは、/health と 404 を
+/// プロジェクト無しで返すため（Account API は GraphQL のパス以外を実行しない）。
+/// WhyNot: コンテンツ API を実行する時以外（/health、404、preflight、GET）でエンジンを組まないのは、型定義が壊れた時に
+/// 死活監視や preflight まで 503 になり、404 ごとに目印の SELECT が走るため。GraphQL を実行しない道なので管理 API のエンジンで受ける。
+///
+def dispatch(runtime: Runtime, request: HttpRequest): HttpResponse \ {IO, Health} =
+    let (projectSlug, path) = Server.splitProjectSlug(runtime#baseDomain, request);
+    let scoped = { path = path | request };
+    let credential = credentialOf(runtime#deps#auth, runtime#jwks, request);
+    if (Option.isEmpty(projectSlug) and (Server.pathOf(path) == runtime#accountConfig#graphqlPath or Option.isEmpty(runtime#defaultProject)))
+        Graphql.runWithEngine(runtime#accountEngine, () -> Server.handle(runtime#accountConfig, credential, scoped))
+    else
+    match resolveProject(runtime#pool, runtime#defaultProject, projectSlug) {
+        case Err(message)        => Server.unavailable(message)
+        case Ok(None)            => Server.notFound("プロジェクト '${projectSlug |> Option.getWithDefault("")}' がありません")
+        case Ok(Some(projectId)) =>
+            if (Server.needsGraphqlEngine(runtime#contentConfig, scoped))
+                match ContentEngine.current(runtime#engineCache, runtime#pool, projectId) {
+                    case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(runtime#contentConfig, credential, scoped))
+                    case Err(message) => Server.unavailable(message)
+                }
+            else
+                match AdminEngine.current(runtime#adminEngines, runtime#pool, projectId) {
+                    case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(runtime#adminConfig, credential, scoped))
+                    case Err(message) => Server.unavailable(message)
+                }
     }
 
 ///

@@ -11,18 +11,18 @@ mod TenantTx {
     /// projectId の印を BEGIN の直後に置いて thunk を 1 つの遅延 Tx で走らせる。SQL を出さない thunk は印も置かない。
     ///
     pub def withLazyTx(pool: Pool, projectId: ProjectId, thunk: Unit -> a \ ef): a \ (ef - {SqlRead, SqlWrite}) + {IO, TransientDbErr, DbErr} =
-        Pool.withLazyTxAfterBegin(pool, () -> stamp(projectId), thunk)
+        Pool.withLazyTxAfterBegin(pool, () -> stampTx(projectId), thunk)
 
     ///
     /// 今の Tx にだけ効く印。
     ///
-    pub def stamp(projectId: ProjectId): Unit \ DbRead =
+    pub def stampTx(projectId: ProjectId): Unit \ DbRead =
         discard TenantQueries.stampProject("${projectId}")
 
     ///
     /// 接続の間ずっと効く印。Tx を使わない専用の接続（テスト）用。
     ///
-    pub def stampSession(projectId: ProjectId): Unit \ DbRead =
+    pub def stampConnection(projectId: ProjectId): Unit \ DbRead =
         discard TenantQueries.stampProjectSession("${projectId}")
 
 }

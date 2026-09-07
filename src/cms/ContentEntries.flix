@@ -132,6 +132,7 @@ mod ContentEntries {
         Session.require(Permission.PublishEntries);
         publishWithin(Nil, id, author, withDependencies)
 
+    /// 公開の本体。visited は withDependencies で辿った entry（循環を 1 度で止める）。権限は publish が見る。
     def publishWithin(visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant =
         let existing = get(id);
         let owner = ContentTypes.get(existing#typeId);

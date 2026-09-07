@@ -40,6 +40,15 @@ mod DbRunner {
         }
 
     ///
+    /// transact の結果を GraphQL のフィールドの結果に。DB の失敗と業務エラーはそれぞれの文言、成功はリゾルバの戻りをそのまま。
+    ///
+    pub def toFieldResult(outcome: Result[DbFailure, Result[CmsFailure, Result[FieldError, a]]]): Result[FieldError, a] = match outcome {
+        case Err(failure)     => Err(failureMessage(failure))
+        case Ok(Err(failure)) => Err(CmsErr.toMessage(failure))
+        case Ok(Ok(result))   => result
+    }
+
+    ///
     /// 一時的な失敗は 3 回まで再試行し、DbFailure を Result にする。業務エラーを Tx の中で使わない所（プロジェクトの解決など）用。
     ///
     pub def retrying(thunk: Unit -> a \ ef): Result[DbFailure, a] \ ef - {TransientDbErr, DbErr} =

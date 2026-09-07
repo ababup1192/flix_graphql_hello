@@ -59,12 +59,13 @@ src/generated/graphql/ schemagen の生成物（触らない）。GeneratedAdmin
 src/generated/sql/     sqlfx の生成物（触らない）。*Queries / Tables
 src/cms/model/         ドメインの型。Auth（UserId / OrgId / Role / Permission / Actor / ApiKeyScope / Visibility）、Webhook（WebhookEvent / DeliveryStatus / Webhook / WebhookDelivery）、Schedule（ScheduleAction / ScheduleStatus / Schedule）、Ulid（配信記録など時刻順の記録の id）、Ids（TypeId / FieldId / ApiId / TypeName）、ContentType（enum・レコード・Draft / Changes・FieldConfig）、Entry（EntryId / Stage / EntryData / IdGen）、Asset（AssetId / AssetStatus / Upload）
 src/cms/rules/         純粋な規則。Authz（役割 → 権限の Datalog。`can` は resource も受ける）、Naming（予約名・衝突・kind と config）、EntryValidation（下書きは緩く、公開は required まで）、EntryLinks（中身から参照を取り出す）、AssetRules（置いてよい mime と大きさ）、RichText（doc の検査・平文・HTML）、AssetRefs（中身から asset を取り出す）
-src/cms/db/            行とドメインの値の変換と、絞り込みの SQL 化（EntryFilterSql）。列名と JSONB の式を知るのはここだけ
+src/cms/db/            行とドメインの値の変換（EntryRows / ContentTypeRows / AssetRows / AuthRows / WebhookRows / ScheduleRows）と、絞り込みの SQL 化（EntryFilterSql）。列名と JSONB の式を知るのはここだけ
 src/cms/               ユースケース（ContentTypes / ContentEntries / Projects / Assets / Accounts / Members / ApiKeys / Webhooks / PreviewTokens / Schedules。Webhooks.emit は公開などと同じ Tx に配信行を積む outbox）と業務エラー（CmsErr）、今のプロジェクト（Tenant effect）、今の主体（Session effect。`Session.require(permission)` が既定拒否の入口）
 src/account/           Account API（/account/graphql。プロジェクトを選ぶ前の操作: me / 組織 / プロジェクト作成 / 組織のメンバー）。Runner は Tenant を入れない
 src/admin/             管理 API。AdminMapping（GraphQL の型 ↔ ドメイン）、リゾルバ、AdminRunner（最初の SQL で借りる Tx）、AdminEngine（プロジェクトごとのエンジン）
 src/content/           コンテンツ API。ContentSchemaBuilder（定義 → Schema）、ContentEngine（目印で組み直す置き場）、ContentRunner（読むだけ）
-src/app/               Server（ルーティング・CORS・/health・Host の slug）、DbConfig（所有者とアプリ用ロール）、TenantTx（RLS の印付き Tx）、AppRole（cms_app の作成）、BackgroundJobs（プロセス内のバックグラウンドワーカー。2 秒ごとに回復・掃除 → Scheduler.tick → WebhookDispatcher.tick。外部トリガー POST /jobs/tick も同じ tick）、Scheduler（予約公開の実行）、WebhookDispatcher（配信行を拾って POST）、DbRunner（Tx と業務エラー）、StorageConfig（ASSET_*。無ければ asset 無し）、AuthConfig（CMS_AUTH=jwks|dev|none）、Deps、Health
+src/app/               Server（ルーティング・CORS・/health・Host の slug）、DbConfig（所有者とアプリ用ロール）、TenantTx（RLS の印付き Tx）、AppRole（cms_app の作成）、BackgroundJobs（プロセス内のバックグラウンドワーカー。2 秒ごとに回復・掃除 → Scheduler.tick → WebhookDispatcher.tick。外部トリガー POST /jobs/tick も同じ tick）、Scheduler（予約公開の実行）、WebhookDispatcher（配信行を拾って POST）、JobLog（仕事 1 件の 1 行ログ）、DbRunner（Tx と業務エラー。transact / toFieldResult）、StorageConfig（ASSET_*。無ければ asset 無し）、AuthConfig（CMS_AUTH=jwks|dev|none）、Deps、Health
+src/crypto/            Sha256（sha256 / HMAC / 16 進）と Base64Url。署名と鍵のハッシュが共通で使う。ドメインは storage や auth に依存しない
 src/auth/              JWT の検証（RS256 固定。kid / iss / aud / exp / nbf）と TokenVerifier effect（JWKS の取得とキャッシュ）
 src/storage/           asset の置き先。SigV4（純粋な署名）、ObjectStore effect（署名付き URL / HEAD / DELETE。MinIO と R2 は同じ handler）
 src/http/              手書き HTTP/1.1 と Cors

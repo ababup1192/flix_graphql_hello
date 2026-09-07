@@ -215,9 +215,9 @@ mod TestServer {
              Server.projectSlugFromHost(base, hostOf("example.com")),
              Server.projectSlugFromHost(base, hostOf("consumer.other.com")),
              Server.projectSlugFromHost(None, hostOf("consumer.example.com")),
-             Server.projectOf(base, { method = "GET", path = "/p/shop/graphql", headers = hostOf("consumer.example.com"), body = "" }),
-             Server.projectOf(base, { method = "GET", path = "/admin/graphql", headers = hostOf("business.example.com"), body = "" }),
-             Server.projectOf(None, { method = "GET", path = "/graphql", headers = hostOf("business.example.com"), body = "" })))
+             Server.splitProjectSlug(base, { method = "GET", path = "/p/shop/graphql", headers = hostOf("consumer.example.com"), body = "" }),
+             Server.splitProjectSlug(base, { method = "GET", path = "/admin/graphql", headers = hostOf("business.example.com"), body = "" }),
+             Server.splitProjectSlug(None, { method = "GET", path = "/graphql", headers = hostOf("business.example.com"), body = "" })))
 
 
     /// POST /jobs/tick は、トークンが設定されていなければ 404、違えば 403、合えば 200 で失敗の一覧（空）を返す。

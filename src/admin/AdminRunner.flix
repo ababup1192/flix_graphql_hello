@@ -31,11 +31,7 @@ mod AdminRunner {
                                     let actor = Deps.actorOf(deps, projectId, credential);
                                     Session.runWith(actor, f)
                                 }))))));
-                match outcome {
-                    case Err(failure)      => Err(DbRunner.failureMessage(failure))
-                    case Ok(Err(failure))  => Err(CmsErr.toMessage(failure))
-                    case Ok(Ok(result))    => result
-                }
+                DbRunner.toFieldResult(outcome)
         }
 
 }
