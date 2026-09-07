@@ -33,6 +33,21 @@ mod AccountMapping {
         case OrgRole.Owner  => GeneratedAccount.OrgRole.Owner
     }
 
+    pub def patScopeOf(scope: GeneratedAccount.PatScope): PatScope = match scope {
+        case GeneratedAccount.PatScope.Read  => PatScope.Read
+        case GeneratedAccount.PatScope.Write => PatScope.Write
+    }
+
+    pub def patScopeToGql(scope: PatScope): GeneratedAccount.PatScope = match scope {
+        case PatScope.Read  => GeneratedAccount.PatScope.Read
+        case PatScope.Write => GeneratedAccount.PatScope.Write
+    }
+
+    /// ID（public_id）の中の文字列。
+    pub def publicIdOf(id: Id): String =
+        let Id.Id(text) = id;
+        text
+
     pub def visibilityToGql(visibility: Visibility): GeneratedAccount.Visibility = match visibility {
         case Visibility.Public  => GeneratedAccount.Visibility.Public
         case Visibility.Private => GeneratedAccount.Visibility.Private

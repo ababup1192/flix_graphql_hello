@@ -51,7 +51,8 @@ Docker（起動時 migration、JSON ログ、/health の版）、deploy/ の com
 | # | 機能 | 時間 | 備考 |
 |---|---|---|---|
 | 21 | 多言語（locale） | 1 日 | `localized` フラグは済み。値の持ち方と `locale` 引数 |
-| 22 | レビュー・承認ワークフロー | 1 日 | 役割が入ってから |
+| 22 | API キーの write（役割付き・期限・最終使用時刻）と Personal Access Token（2026-09-07 に実装済み） | 済み | `createApiKey(scope: WRITE, role, expiresAt)` で CI から管理 API を叩ける（メンバー・鍵・プロジェクトの管理は不可）。`createPersonalAccessToken` → `Authorization: Bearer cmspat_...` で本人として叩く（READ は読むだけ、既定 90 日・最長 365 日）。[auth-and-organizations.md](auth-and-organizations.md) |
+| 22a | レビュー・承認ワークフロー | 1 日 | 役割が入ってから |
 | 22b | 属性ベースの権限（記事のグルーピング: 「このタグの記事だけこのユーザー / キーに」） | 1 日 | `access_rules(project_id, subject, field, allowed_values)` を足し、Datalog の事実と `Authz.readFilter` の SQL 条件で。参照展開と impact にも通す |
 | 23 | 読み取り REST + OpenAPI | 半日 + 1 時間 | [read-only-rest.md](read-only-rest.md) |
 | 24 | MCP サーバ（AI エージェントから読み書き） | 半日 | 管理 API を tool に写す |

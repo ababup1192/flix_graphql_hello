@@ -152,6 +152,8 @@ mod Permission {
 ///
 pub enum Actor with Eq, Order, ToString {
     case User(UserId, String, List[Role])
+    /// read の PAT で来た人。役割は本人の物だが、読む操作しかできない（Authz が viewer に落とす。書く操作の入口 Session.currentUser は拒む）
+    case ReadOnlyUser(UserId, String, List[Role])
     case ApiKey(ApiKeyScope)
     case Anonymous
     /// プレビュートークンの持ち主。その entry（と参照先）の下書きだけ読める
@@ -168,18 +170,56 @@ pub enum ApiKeyScope with Eq, Order, ToString {
     case Read
     /// 下書きも
     case ReadDraft
+    /// 管理 API をこの役割で叩ける（CI やスクリプト用）。メンバー・鍵・プロジェクトの管理はできない
+    case Write(Role)
 }
 
 mod ApiKeyScope {
+    /// DB の scope 列。役割は別の列（role）。
     pub def text(scope: ApiKeyScope): String = match scope {
         case ApiKeyScope.Read      => "read"
         case ApiKeyScope.ReadDraft => "readDraft"
+        case ApiKeyScope.Write(_)  => "write"
     }
 
-    pub def parse(text: String): Option[ApiKeyScope] = match text {
-        case "read"      => Some(ApiKeyScope.Read)
-        case "readDraft" => Some(ApiKeyScope.ReadDraft)
-        case _           => None
+    /// DB の role 列。write の鍵だけ Some。
+    pub def roleOf(scope: ApiKeyScope): Option[Role] = match scope {
+        case ApiKeyScope.Write(role) => Some(role)
+        case _                       => None
+    }
+
+    /// scope 列と role 列から。write に役割が無い、read に役割がある、write の役割が viewer、知らない物は None。
+    pub def parse(text: String, role: Option[String]): Option[ApiKeyScope] = match (text, role) {
+        case ("read", None)             => Some(ApiKeyScope.Read)
+        case ("readDraft", None)        => Some(ApiKeyScope.ReadDraft)
+        case ("write", Some(roleText))  => Role.parse(roleText) |> Option.filter(isWritingRole) |> Option.map(ApiKeyScope.Write)
+        case _                          => None
+    }
+
+    /// write の鍵に付けられる役割か（writer 以上。viewer の write は readDraft の鍵と同じなので作らせない）。
+    pub def isWritingRole(role: Role): Bool = role >= Role.Writer
+}
+
+///
+/// Personal Access Token（PAT）の範囲。人の代わりに使うトークンで、役割は本人の物。
+///
+pub enum PatScope with Eq, Order, ToString {
+    /// 読むだけ（役割は viewer に落ちる）
+    case Read
+    /// 本人の役割のまま
+    case Write
+}
+
+mod PatScope {
+    pub def text(scope: PatScope): String = match scope {
+        case PatScope.Read  => "read"
+        case PatScope.Write => "write"
+    }
+
+    pub def parse(text: String): Option[PatScope] = match text {
+        case "read"  => Some(PatScope.Read)
+        case "write" => Some(PatScope.Write)
+        case _       => None
     }
 }
 
@@ -255,9 +295,36 @@ pub type alias Invitation = { id = Int64, publicId = String, email = String, rol
 ///
 /// API キーの 1 行。生の鍵は持たない。
 ///
-pub type alias ApiKey = { id = Int64, publicId = String, name = String, scope = ApiKeyScope, createdAt = Timestamp.Timestamp, revokedAt = Option[Timestamp.Timestamp] }
+pub type alias ApiKey = { id = Int64, publicId = String, name = String, scope = ApiKeyScope, createdAt = Timestamp.Timestamp,
+                          expiresAt = Option[Timestamp.Timestamp], lastUsedAt = Option[Timestamp.Timestamp], revokedAt = Option[Timestamp.Timestamp] }
 
 ///
 /// 発行した鍵。key はこの時だけ見える。
 ///
-pub type alias IssuedApiKey = { id = Int64, publicId = String, name = String, scope = ApiKeyScope, key = String }
+pub type alias IssuedApiKey = { id = Int64, publicId = String, name = String, scope = ApiKeyScope, expiresAt = Option[Timestamp.Timestamp], key = String }
+
+///
+/// API キーの発行の入力。expiresAt が無ければ期限無し。
+///
+pub type alias ApiKeyDraft = { name = String, scope = ApiKeyScope, expiresAt = Option[Timestamp.Timestamp] }
+
+///
+/// PAT の 1 行。生のトークンは持たない。
+///
+pub type alias PersonalAccessToken = { id = Int64, publicId = String, name = String, scope = PatScope, createdAt = Timestamp.Timestamp,
+                                       expiresAt = Timestamp.Timestamp, lastUsedAt = Option[Timestamp.Timestamp], revokedAt = Option[Timestamp.Timestamp] }
+
+///
+/// 発行した PAT。token はこの時だけ見える。
+///
+pub type alias IssuedPersonalAccessToken = { id = Int64, publicId = String, name = String, scope = PatScope, expiresAt = Timestamp.Timestamp, token = String }
+
+///
+/// PAT の発行の入力。ttlDays が無ければ既定（90 日）。
+///
+pub type alias PersonalTokenDraft = { name = String, scope = PatScope, ttlDays = Option[Int32] }
+
+///
+/// hash で解決した PAT。主体を組むのに要る物だけ。
+///
+pub type alias ResolvedPersonalToken = { id = Int64, userId = UserId, scope = PatScope }

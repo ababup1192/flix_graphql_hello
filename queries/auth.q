@@ -150,20 +150,55 @@ query deleteInvitationByPublicId(publicId: String, projectId: Int64) -> exec {
 
 // ---- api_keys ----
 
-query insertApiKey(publicId: String, projectId: Int64, name: String, keyHash: String, pepperId: String, scope: String) -> one {
-    INSERT INTO api_keys (public_id, project_id, name, key_hash, pepper_id, scope) VALUES (:publicId, :projectId, :name, :keyHash, :pepperId, :scope) RETURNING id
+// role は write の鍵だけ（空なら NULL）。expiresAtMillis は 0 なら期限無し
+query insertApiKey(publicId: String, projectId: Int64, name: String, keyHash: String, pepperId: String, scope: String, role: String, expiresAtMillis: Int64) -> one {
+    INSERT INTO api_keys (public_id, project_id, name, key_hash, pepper_id, scope, role, expires_at)
+    VALUES (:publicId, :projectId, :name, :keyHash, :pepperId, :scope, nullif(:role, ''), to_timestamp(nullif(:expiresAtMillis, 0) / 1000.0))
+    RETURNING id
 }
 
 // hash で引く。プロジェクトの一致は呼ぶ側が確かめる（鍵がプロジェクトを決めない）
 // unscoped: 鍵はプロジェクトを知らないので hash で引き、呼ぶ側が project_id を照合する
 query findApiKeyByHash(keyHash: String) -> one {
-    SELECT id, project_id, name, scope, revoked_at FROM api_keys WHERE key_hash = :keyHash
+    SELECT id, project_id, name, scope, role, expires_at, revoked_at FROM api_keys WHERE key_hash = :keyHash
 }
 
 query listApiKeys(projectId: Int64) -> many {
-    SELECT id, public_id, name, scope, created_at, revoked_at FROM api_keys WHERE project_id = :projectId ORDER BY id
+    SELECT id, public_id, name, scope, role, created_at, expires_at, last_used_at, revoked_at FROM api_keys WHERE project_id = :projectId ORDER BY id
 }
 
 query revokeApiKey(publicId: String, projectId: Int64) -> exec {
     UPDATE api_keys SET revoked_at = now() WHERE public_id = :publicId AND project_id = :projectId AND revoked_at IS NULL
+}
+
+// 最終使用時刻。前回から 60 秒より古い時だけ書く（リクエストごとに UPDATE しない）
+query touchApiKey(id: Int64, projectId: Int64) -> exec {
+    UPDATE api_keys SET last_used_at = now()
+    WHERE id = :id AND project_id = :projectId AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds')
+}
+
+// ---- personal_access_tokens ----
+
+query insertPersonalToken(publicId: String, userId: Int64, name: String, tokenHash: String, pepperId: String, scope: String, expiresAt: Timestamp) -> one {
+    INSERT INTO personal_access_tokens (public_id, user_id, name, token_hash, pepper_id, scope, expires_at)
+    VALUES (:publicId, :userId, :name, :tokenHash, :pepperId, :scope, :expiresAt) RETURNING id
+}
+
+// hash で引く。RLS は app.token_hash の印（TenantQueries.stampTokenHash）でこの 1 行だけ見せる
+query findPersonalTokenByHash(tokenHash: String) -> one {
+    SELECT id, user_id, scope, expires_at, revoked_at FROM personal_access_tokens WHERE token_hash = :tokenHash
+}
+
+query listPersonalTokens(userId: Int64) -> many {
+    SELECT id, public_id, name, scope, created_at, expires_at, last_used_at, revoked_at FROM personal_access_tokens WHERE user_id = :userId ORDER BY id
+}
+
+query revokePersonalToken(publicId: String, userId: Int64) -> exec {
+    UPDATE personal_access_tokens SET revoked_at = now() WHERE public_id = :publicId AND user_id = :userId AND revoked_at IS NULL
+}
+
+// 最終使用時刻。前回から 60 秒より古い時だけ書く
+query touchPersonalToken(id: Int64) -> exec {
+    UPDATE personal_access_tokens SET last_used_at = now()
+    WHERE id = :id AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds')
 }

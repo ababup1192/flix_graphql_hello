@@ -7,7 +7,7 @@ mod TenantQueries {
     ///
     /// 生成元 tenant.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -1737371365
+    pub def sourceHash(): Int32 = 1960673228
 
     ///
     /// stampProject の 1 行。
@@ -44,6 +44,24 @@ mod TenantQueries {
         let sql = "SELECT set_config('app.project_id', $1, false)::text AS applied";
         let params = List#{SqlValue.Str(projectId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(stampProjectSessionDecoder(), sql, params))
+
+    ///
+    /// stampTokenHash の 1 行。
+    ///
+    pub type alias StampTokenHashRow = { applied = Option[String] }
+
+    def stampTokenHashDecoder(): Decoder[StampTokenHashRow] =
+        forA (
+            applied <- Decoder.opt(Decoder.str("applied"))
+        ) yield { applied = applied }
+
+    ///
+    /// stampTokenHash: SELECT set_config('app.token_hash', $1, true)::text AS applied
+    ///
+    pub def stampTokenHash(tokenHash: String): Option[StampTokenHashRow] \ DbRead =
+        let sql = "SELECT set_config('app.token_hash', $1, true)::text AS applied";
+        let params = List#{SqlValue.Str(tokenHash)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(stampTokenHashDecoder(), sql, params))
 
     ///
     /// stampUser の 1 行。

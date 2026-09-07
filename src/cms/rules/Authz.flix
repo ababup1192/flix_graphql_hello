@@ -40,16 +40,41 @@ mod Authz {
     }
 
     ///
-    /// 主体がこの操作をできるか。人は役割の表で引き、鍵は読み取りだけ、誰でもない人は何もできない。
+    /// 主体がこの操作をできるか。人は役割の表で引き、read の PAT の人は viewer に落とし、write の鍵はその役割で引く（ただし管理は不可）、
+    /// 読む鍵は読み取りだけ、誰でもない人は何もできない。
     ///
     pub def can(actor: Actor, permission: Permission, resource: Resource): Bool = match actor {
         case Actor.User(_, _, roles)             => canWithRoles(roles, permission)
+        case Actor.ReadOnlyUser(_, _, roles)     => canWithRoles(capToViewer(roles), permission)
         case Actor.Preview(id)                   => permission == Permission.ReadDraft and resource#entryId == Some(id)
+        case Actor.ApiKey(ApiKeyScope.Write(role)) => not isManagement(permission) and canWithRoles(role :: Nil, permission)
         case Actor.ApiKey(ApiKeyScope.ReadDraft) => permission == Permission.ReadDraft
         case Actor.ApiKey(ApiKeyScope.Read)      => false
         case Actor.Anonymous                     => false
         case Actor.System                        => true
     }
+
+    ///
+    /// メンバー・鍵・プロジェクトの管理。API キーではできない（鍵で鍵やメンバーを作る道を作らない）。
+    ///
+    pub def isManagement(permission: Permission): Bool = match permission {
+        case Permission.ManageMembers => true
+        case Permission.ManageApiKeys => true
+        case Permission.ManageProject => true
+        case _                        => false
+    }
+
+    ///
+    /// 役割の並びを読むだけ（viewer）に落とす。役割が無ければ無いまま（メンバーでない人は viewer にもならない）。
+    ///
+    pub def capToViewer(roles: List[Role]): List[Role] =
+        if (List.isEmpty(roles)) Nil else Role.Viewer :: Nil
+
+    ///
+    /// 役割の並びの中で一番高い物。無ければ None。発行者より高い鍵を作らせない検査に使う。
+    ///
+    pub def highestRole(roles: List[Role]): Option[Role] =
+        List.maximum(roles)
 
     ///
     /// 役割の並びで引く。包含は Datalog が閉じる。

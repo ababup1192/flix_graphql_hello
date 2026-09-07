@@ -96,15 +96,26 @@ mod AdminMapping {
         case OrgRole.Owner  => GeneratedAdmin.OrgRole.Owner
     }
 
-    pub def apiKeyScopeOf(scope: GeneratedAdmin.ApiKeyScope): ApiKeyScope = match scope {
-        case GeneratedAdmin.ApiKeyScope.Read      => ApiKeyScope.Read
-        case GeneratedAdmin.ApiKeyScope.ReadDraft => ApiKeyScope.ReadDraft
+    ///
+    /// scope と role の組から API キーの範囲。WRITE は role が必須、それ以外で role を渡すと invalid。
+    ///
+    pub def apiKeyScopeOf(scope: GeneratedAdmin.ApiKeyScope, role: Option[GeneratedAdmin.Role]): ApiKeyScope \ CmsErr = match (scope, role) {
+        case (GeneratedAdmin.ApiKeyScope.Read, None)       => ApiKeyScope.Read
+        case (GeneratedAdmin.ApiKeyScope.ReadDraft, None)  => ApiKeyScope.ReadDraft
+        case (GeneratedAdmin.ApiKeyScope.Write, Some(found)) => ApiKeyScope.Write(roleOf(found))
+        case (GeneratedAdmin.ApiKeyScope.Write, None)      => CmsErr.invalid(Violation.Violation("role", "scope が WRITE の鍵には role が要ります（WRITER / EDITOR / OWNER）") :: Nil)
+        case (_, Some(_))                                  => CmsErr.invalid(Violation.Violation("role", "role は scope が WRITE の鍵にだけ渡せます") :: Nil)
     }
 
     pub def apiKeyScopeToGql(scope: ApiKeyScope): GeneratedAdmin.ApiKeyScope = match scope {
         case ApiKeyScope.Read      => GeneratedAdmin.ApiKeyScope.Read
         case ApiKeyScope.ReadDraft => GeneratedAdmin.ApiKeyScope.ReadDraft
+        case ApiKeyScope.Write(_)  => GeneratedAdmin.ApiKeyScope.Write
     }
+
+    /// WRITE の鍵の役割。それ以外は None。
+    pub def apiKeyRoleToGql(scope: ApiKeyScope): Option[GeneratedAdmin.Role] =
+        ApiKeyScope.roleOf(scope) |> Option.map(roleToGql)
 
     pub def visibilityOf(visibility: GeneratedAdmin.Visibility): Visibility = match visibility {
         case GeneratedAdmin.Visibility.Public  => Visibility.Public

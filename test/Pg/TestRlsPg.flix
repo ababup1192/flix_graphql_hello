@@ -91,11 +91,11 @@ mod TestRlsPg {
             asOwner(ProjectId.default(), () -> {
                 discard Members.invite("a@test.dev", Role.Editor);
                 discard Members.invite("b@test.dev", Role.Viewer);
-                discard ApiKeys.create(pepper, "default-key", ApiKeyScope.Read)
+                discard ApiKeys.create(pepper, { name = "default-key", scope = ApiKeyScope.Read, expiresAt = None })
             });
             asOwner(shop, () -> {
                 discard Members.invite("a@test.dev", Role.Writer);
-                discard ApiKeys.create(pepper, "shop-key", ApiKeyScope.Read)
+                discard ApiKeys.create(pepper, { name = "shop-key", scope = ApiKeyScope.Read, expiresAt = None })
             });
             let alice = Accounts.resolveUser(bootstrap, { issuer = "test", subject = "a", email = "a@test.dev", name = "a" });
             (shop, alice)

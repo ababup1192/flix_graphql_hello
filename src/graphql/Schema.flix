@@ -9,12 +9,14 @@ pub type alias Context = { credential = Credential }
 ///
 /// - Bearer(issuer, subject, email, name): 発行元の JWT を検証済みの本人
 /// - ApiKey(生の鍵): 公開 API の鍵。hash はここではしない
+/// - PersonalToken(生のトークン): `Authorization: Bearer cmspat_...` の Personal Access Token。hash はここではしない
 /// - Missing: 何も付いていない（公開の読み取り、または未ログイン）
 /// - Invalid(理由): 付いていたが検証に落ちた。中身は含めない
 ///
 pub enum Credential with Eq, Order, ToString {
     case Bearer(String, String, String, String)
     case ApiKey(String)
+    case PersonalToken(String)
     /// X-Preview-Token の生の値
     case Preview(String)
     case Missing

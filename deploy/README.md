@@ -26,6 +26,39 @@ curl -s localhost:8080/health # {"status":"ok","version":"..."}
 サイトはその token を `X-Preview-Token` ヘッダに付けてコンテンツ API に `stage: DRAFT` で問い合わせる。読めるのはその entry と参照先の下書きだけで、一覧の下書きや他の entry は読めない。
 既定 1 時間、最長 1 日で切れる。無状態（表を持たない）なので、鍵（`CMS_API_KEY_PEPPER`）を回せば全部無効になる。
 
+## CI 用の API キー（WRITE）と自分の Personal Access Token（PAT）
+
+人の代わりに叩く身元は 2 種類。**プロジェクトの API キー**（CI やビルド。`X-Api-Key`）と、**自分の PAT**（CLI やスクリプト。`Authorization: Bearer cmspat_...`）。
+どちらも生の値は発行した応答でしか見えず、DB には `CMS_API_KEY_PEPPER` を混ぜたハッシュだけ置く。
+
+**CI 用の API キー**は owner が管理 API で作る。`scope: WRITE` に役割を付けると、その役割の範囲で管理 API の mutation を叩ける（entry の作成・公開、型の編集など）。
+メンバー・鍵・プロジェクトの管理は owner の役割の鍵でもできない（鍵で鍵やメンバーを作る道を作らない）。`expiresAt` を付けるとその時刻で切れ、`apiKeys` の `lastUsedAt` に最後に管理 API で使った時刻（1 分の粒度）が出る。
+
+```bash
+# owner がログインした状態（ログインの JWT か PAT）で発行。key はこの応答でしか見えない
+curl -s -X POST https://cms.example.com/p/blog/admin/graphql -H "Authorization: Bearer $PAT" -H 'Content-Type: application/json' \
+  -d '{"query": "mutation { createApiKey(name: \"github-actions\", scope: WRITE, role: EDITOR, expiresAt: \"2027-01-01T00:00:00Z\") { id key expiresAt } }"}'
+
+# CI からはその鍵を X-Api-Key で渡す
+curl -s -X POST https://cms.example.com/p/blog/admin/graphql -H "X-Api-Key: $CMS_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"query": "mutation { publishEntry(id: \"post-1\") { stage } }"}'
+```
+
+**自分の PAT**は Account API（`/account/graphql`）で作る。本人の役割で動き（プロジェクトごとに違ってよい）、`scope: READ` なら読むだけ。期限は必須（`ttlDays`。既定 90 日、最長 365 日）。
+`me { personalAccessTokens { ... } }` で自分の分だけ見え、`revokePersonalAccessToken(id)` で失効できる（他人の物は見えない・失効できない）。
+
+```bash
+# ログインの JWT で 1 回だけ発行
+curl -s -X POST https://cms.example.com/account/graphql -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
+  -d '{"query": "mutation { createPersonalAccessToken(name: \"laptop\", scope: WRITE, ttlDays: 30) { token expiresAt } }"}'
+
+# 以後は Authorization: Bearer cmspat_... で管理 API と Account API を自分として叩ける
+curl -s -X POST https://cms.example.com/p/blog/admin/graphql -H "Authorization: Bearer $PAT" -H 'Content-Type: application/json' \
+  -d '{"query": "{ me { email roles } }"}'
+```
+
+`CMS_AUTH_HEADER` が `Cf-Access-Jwt-Assertion` の環境でも、PAT は `Authorization` から読む（`cmspat_` で始まる Bearer だけ。それ以外の Bearer はログインの JWT として検証する）。
+
 ## CDN に乗せる（GET）
 
 コンテンツ API は `GET /graphql?query=...&variables=...` でも読める（mutation は 405）。鍵もプレビュートークンも無い問い合わせで errors が無ければ
@@ -139,5 +172,5 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_JOBS_DRAIN_SECONDS` | 停止時に実行中の仕事を待つ秒数 | 15 |
 | `CMS_CACHE_MAX_AGE` | コンテンツ API の GET で、鍵もトークンも無い応答に付ける `Cache-Control` の秒数（CDN 用）。0 で no-store | 60 |
 | `CMS_BASE_DOMAIN` | `{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。無ければ `/p/{プロジェクト slug}/` だけ | 無し |
-| `CMS_API_KEY_PEPPER` / `CMS_API_KEY_PEPPER_ID` | 公開 API の鍵のハッシュに混ぜる秘密と版。無ければ鍵を発行できない | 無し / v1 |
+| `CMS_API_KEY_PEPPER` / `CMS_API_KEY_PEPPER_ID` | API キーと PAT のハッシュ、プレビュートークンの署名に混ぜる秘密と版。無ければ鍵と PAT を発行できない | 無し / v1 |
 | `JAVA_OPTS` | JVM の引数 | `-Xss32m -XX:MaxRAMPercentage=70` |

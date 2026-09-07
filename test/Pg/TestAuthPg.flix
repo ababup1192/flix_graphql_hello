@@ -81,18 +81,22 @@ mod TestAuthPg {
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1", "k2"}, () -> {
             let owner = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
             let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
-            let issued = runAs(owner, () -> ApiKeys.create(pepper, "site", ApiKeyScope.Read));
-            let resolved = ApiKeys.resolve(pepper, issued#key, ProjectId.default());
-            let otherProject = ApiKeys.resolve(pepper, issued#key, shop);
-            let wrongKey = ApiKeys.resolve(pepper, "cms_nope", ProjectId.default());
+            let issued = runAs(owner, () -> ApiKeys.create(pepper, readKey("site")));
+            let scopeOf = found -> found |> Option.map(key -> key#scope);
+            let resolved = ApiKeys.resolve(pepper, issued#key, ProjectId.default(), 0i64) |> scopeOf;
+            let otherProject = ApiKeys.resolve(pepper, issued#key, shop, 0i64) |> scopeOf;
+            let wrongKey = ApiKeys.resolve(pepper, "cms_nope", ProjectId.default(), 0i64) |> scopeOf;
             runAs(owner, () -> ApiKeys.revoke(issued#publicId));
-            let afterRevoke = ApiKeys.resolve(pepper, issued#key, ProjectId.default());
+            let afterRevoke = ApiKeys.resolve(pepper, issued#key, ProjectId.default(), 0i64) |> scopeOf;
             let listed = runAs(owner, () -> ApiKeys.list() |> List.map(key -> (key#name, Option.nonEmpty(key#revokedAt))));
             (String.startsWith(prefix = "cms_", issued#key), resolved, otherProject, wrongKey, afterRevoke, listed)
         }));
         Assert.assertEq(
             expected = Ok(Ok((true, Some(ApiKeyScope.Read), None, None, None, List#{ ("site", true) }))),
             result)
+
+    /// 期限無しの read の鍵の入力。
+    def readKey(name: String): ApiKeyDraft = { name = name, scope = ApiKeyScope.Read, expiresAt = None }
 
     ///
     /// 管理 API を通した形。owner の me に役割と組織とプロジェクトが出て、身元が無ければ me は null で mutation は権限エラー。
@@ -133,7 +137,7 @@ mod TestAuthPg {
             discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             let entry = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("e1")), CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
             discard ContentEntries.publish(entry#id, "tester", false);
-            runAs(owner, () -> ApiKeys.create(pepper, "site", ApiKeyScope.Read))#key
+            runAs(owner, () -> ApiKeys.create(pepper, readKey("site")))#key
         });
         let (publicRead, anonymousDraft, ownerDraft, privateAnonymous, privateWithKey) = PgTestSupport.withContentApiAndPool(seed, (pool, askOwner) -> {
             let cache = ContentEngine.create(PgTestSupport.deps());
@@ -146,7 +150,7 @@ mod TestAuthPg {
             let privateAnonymous = anonymous("{ blogs { totalCount } }") |> snd;
             let key = match PgTestSupport.mutate(pool, () -> CmsTestKit.withIds(List#{"k9"}, () -> {
                 let owner = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
-                runAs(owner, () -> ApiKeys.create(pepper, "site2", ApiKeyScope.Read))#key
+                runAs(owner, () -> ApiKeys.create(pepper, readKey("site2")))#key
             })) { case Ok(Ok(found)) => found case other => bug!("${other}") };
             let privateWithKey = GraphqlTestKit.askEngineWith(engine, Context.withCredential(Credential.ApiKey(key)), "{ blogs { totalCount } }");
             (publicRead, anonymousDraft, ownerDraft, privateAnonymous, privateWithKey)

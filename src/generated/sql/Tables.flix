@@ -20,6 +20,9 @@ mod ApiKeysTable {
     pub def createdAt(): Fragment.Col[ApiKeysTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("created_at", SqlValue.ofTimestamp)
     pub def revokedAt(): Fragment.Col[ApiKeysTable, Timestamp.Timestamp, Fragment.Nullable] = Fragment.Col.Col("revoked_at", SqlValue.ofTimestamp)
     pub def publicId(): Fragment.Col[ApiKeysTable, String, Fragment.NotNull] = Fragment.Col.Col("public_id", SqlValue.Str)
+    pub def role(): Fragment.Col[ApiKeysTable, String, Fragment.Nullable] = Fragment.Col.Col("role", SqlValue.Str)
+    pub def expiresAt(): Fragment.Col[ApiKeysTable, Timestamp.Timestamp, Fragment.Nullable] = Fragment.Col.Col("expires_at", SqlValue.ofTimestamp)
+    pub def lastUsedAt(): Fragment.Col[ApiKeysTable, Timestamp.Timestamp, Fragment.Nullable] = Fragment.Col.Col("last_used_at", SqlValue.ofTimestamp)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
@@ -27,12 +30,16 @@ mod ApiKeysTable {
     pub enum Constraint with Eq, Order, ToString {
         /// api_keys_key_hash_key (unique)
         case KeyHashKey
-        /// api_keys_scope_check (check)
-        case ScopeCheck
         /// api_keys_project_id_fkey (foreign key)
         case ProjectIdFkey
         /// api_keys_public_id_key (unique)
         case PublicIdKey
+        /// api_keys_scope_check (check)
+        case ScopeCheck
+        /// api_keys_role_check (check)
+        case RoleCheck
+        /// api_keys_write_has_role_check (check)
+        case WriteHasRoleCheck
     }
 
     ///
@@ -48,16 +55,20 @@ mod ApiKeysTable {
     ///
     pub def raiseConstraint(constraint: Constraint): a \ DbErr = match constraint {
         case Constraint.KeyHashKey => DbErr.uniqueViolation("api_keys_key_hash_key")
-        case Constraint.ScopeCheck => DbErr.checkViolation("api_keys_scope_check")
         case Constraint.ProjectIdFkey => DbErr.foreignKeyViolation("api_keys_project_id_fkey")
         case Constraint.PublicIdKey => DbErr.uniqueViolation("api_keys_public_id_key")
+        case Constraint.ScopeCheck => DbErr.checkViolation("api_keys_scope_check")
+        case Constraint.RoleCheck => DbErr.checkViolation("api_keys_role_check")
+        case Constraint.WriteHasRoleCheck => DbErr.checkViolation("api_keys_write_has_role_check")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
         case "api_keys_key_hash_key" => Some(Constraint.KeyHashKey)
-        case "api_keys_scope_check" => Some(Constraint.ScopeCheck)
         case "api_keys_project_id_fkey" => Some(Constraint.ProjectIdFkey)
         case "api_keys_public_id_key" => Some(Constraint.PublicIdKey)
+        case "api_keys_scope_check" => Some(Constraint.ScopeCheck)
+        case "api_keys_role_check" => Some(Constraint.RoleCheck)
+        case "api_keys_write_has_role_check" => Some(Constraint.WriteHasRoleCheck)
         case _ => None
     }
 
@@ -162,10 +173,10 @@ mod ContentFieldsTable {
         case TargetTypeIdFkey
         /// content_fields_parent_field_id_fkey (foreign key)
         case ParentFieldIdFkey
-        /// content_fields_kind_check (check)
-        case KindCheck
         /// content_fields_project_id_fkey (foreign key)
         case ProjectIdFkey
+        /// content_fields_kind_check (check)
+        case KindCheck
     }
 
     ///
@@ -184,8 +195,8 @@ mod ContentFieldsTable {
         case Constraint.ApiIdKey => DbErr.uniqueViolation("content_fields_api_id_key")
         case Constraint.TargetTypeIdFkey => DbErr.foreignKeyViolation("content_fields_target_type_id_fkey")
         case Constraint.ParentFieldIdFkey => DbErr.foreignKeyViolation("content_fields_parent_field_id_fkey")
-        case Constraint.KindCheck => DbErr.checkViolation("content_fields_kind_check")
         case Constraint.ProjectIdFkey => DbErr.foreignKeyViolation("content_fields_project_id_fkey")
+        case Constraint.KindCheck => DbErr.checkViolation("content_fields_kind_check")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
@@ -193,8 +204,8 @@ mod ContentFieldsTable {
         case "content_fields_api_id_key" => Some(Constraint.ApiIdKey)
         case "content_fields_target_type_id_fkey" => Some(Constraint.TargetTypeIdFkey)
         case "content_fields_parent_field_id_fkey" => Some(Constraint.ParentFieldIdFkey)
-        case "content_fields_kind_check" => Some(Constraint.KindCheck)
         case "content_fields_project_id_fkey" => Some(Constraint.ProjectIdFkey)
+        case "content_fields_kind_check" => Some(Constraint.KindCheck)
         case _ => None
     }
 
@@ -701,6 +712,71 @@ mod OrganizationsTable {
 
     def constraintOf(name: String): Option[Constraint] = match name {
         case "organizations_public_id_key" => Some(Constraint.PublicIdKey)
+        case _ => None
+    }
+
+}
+
+///
+/// personal_access_tokens テーブル。enum は断片 DSL の型に付ける印、関数は列。
+///
+mod PersonalAccessTokensTable {
+
+    use SqlValue.SqlValue
+
+    pub enum PersonalAccessTokensTable {
+        case PersonalAccessTokensTable
+    }
+
+    pub def id(): Fragment.Col[PersonalAccessTokensTable, Int64, Fragment.NotNull] = Fragment.Col.Col("id", SqlValue.Int64)
+    pub def publicId(): Fragment.Col[PersonalAccessTokensTable, String, Fragment.NotNull] = Fragment.Col.Col("public_id", SqlValue.Str)
+    pub def userId(): Fragment.Col[PersonalAccessTokensTable, Int64, Fragment.NotNull] = Fragment.Col.Col("user_id", SqlValue.Int64)
+    pub def name(): Fragment.Col[PersonalAccessTokensTable, String, Fragment.NotNull] = Fragment.Col.Col("name", SqlValue.Str)
+    pub def tokenHash(): Fragment.Col[PersonalAccessTokensTable, String, Fragment.NotNull] = Fragment.Col.Col("token_hash", SqlValue.Str)
+    pub def pepperId(): Fragment.Col[PersonalAccessTokensTable, String, Fragment.NotNull] = Fragment.Col.Col("pepper_id", SqlValue.Str)
+    pub def scope(): Fragment.Col[PersonalAccessTokensTable, String, Fragment.NotNull] = Fragment.Col.Col("scope", SqlValue.Str)
+    pub def expiresAt(): Fragment.Col[PersonalAccessTokensTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("expires_at", SqlValue.ofTimestamp)
+    pub def lastUsedAt(): Fragment.Col[PersonalAccessTokensTable, Timestamp.Timestamp, Fragment.Nullable] = Fragment.Col.Col("last_used_at", SqlValue.ofTimestamp)
+    pub def createdAt(): Fragment.Col[PersonalAccessTokensTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("created_at", SqlValue.ofTimestamp)
+    pub def revokedAt(): Fragment.Col[PersonalAccessTokensTable, Timestamp.Timestamp, Fragment.Nullable] = Fragment.Col.Col("revoked_at", SqlValue.ofTimestamp)
+
+    ///
+    /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
+    ///
+    pub enum Constraint with Eq, Order, ToString {
+        /// personal_access_tokens_public_id_key (unique)
+        case PublicIdKey
+        /// personal_access_tokens_token_hash_key (unique)
+        case TokenHashKey
+        /// personal_access_tokens_scope_check (check)
+        case ScopeCheck
+        /// personal_access_tokens_user_id_fkey (foreign key)
+        case UserIdFkey
+    }
+
+    ///
+    /// このテーブルへの書き込みを、制約違反を `translate` で翻訳しながら実行する。
+    /// translate は thunk と同じ型の値を返すか、業務エラーのエフェクトを投げる。翻訳しない case は `raiseConstraint`。
+    /// enum に無い名前の違反と、制約違反以外の DbErr はそのまま上へ。Tx の外で呼ぶ（違反で abort した Tx に COMMIT を出さない）。
+    ///
+    pub def onConstraint(translate: Constraint -> a \ ef1, thunk: Unit -> a \ ef2): a \ ef1 + ef2 + {TransientDbErr, DbErr} =
+        DbError.onConstraintWith(constraintOf, translate, thunk)
+
+    ///
+    /// 翻訳しない制約を元の DbErr に戻す。`onConstraint` に渡す関数の中で使う。
+    ///
+    pub def raiseConstraint(constraint: Constraint): a \ DbErr = match constraint {
+        case Constraint.PublicIdKey => DbErr.uniqueViolation("personal_access_tokens_public_id_key")
+        case Constraint.TokenHashKey => DbErr.uniqueViolation("personal_access_tokens_token_hash_key")
+        case Constraint.ScopeCheck => DbErr.checkViolation("personal_access_tokens_scope_check")
+        case Constraint.UserIdFkey => DbErr.foreignKeyViolation("personal_access_tokens_user_id_fkey")
+    }
+
+    def constraintOf(name: String): Option[Constraint] = match name {
+        case "personal_access_tokens_public_id_key" => Some(Constraint.PublicIdKey)
+        case "personal_access_tokens_token_hash_key" => Some(Constraint.TokenHashKey)
+        case "personal_access_tokens_scope_check" => Some(Constraint.ScopeCheck)
+        case "personal_access_tokens_user_id_fkey" => Some(Constraint.UserIdFkey)
         case _ => None
     }
 

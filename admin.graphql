@@ -139,8 +139,9 @@ type Mutation {
   changeMemberRole(userId: ID!, role: Role!): Member!
   """外す（owner だけ）。最後の owner は外せない"""
   removeMember(userId: ID!): ID!
-  """API キーを発行する（owner だけ）。key はこの応答でしか見えない"""
-  createApiKey(name: String!, scope: ApiKeyScope!): IssuedApiKey!
+  """API キーを発行する（owner だけ）。key はこの応答でしか見えない。scope が WRITE なら role が必須（自分の役割より高くはできない）、
+  それ以外で role を渡すとエラー。expiresAt（ISO 8601）を渡すとその時刻で切れる。無ければ期限無し"""
+  createApiKey(name: String!, scope: ApiKeyScope!, role: Role, expiresAt: String): IssuedApiKey!
   """失効する（owner だけ）"""
   revokeApiKey(id: ID!): ID!
 
@@ -272,12 +273,14 @@ enum OrgRole {
   OWNER
 }
 
-"""公開 API の鍵の範囲"""
+"""API キーの範囲"""
 enum ApiKeyScope {
   """公開中の中身"""
   READ
   """下書きも"""
   READ_DRAFT
+  """管理 API を role の範囲で叩ける（CI やスクリプト用）。メンバー・鍵・プロジェクトの管理はできない"""
+  WRITE
 }
 
 """プロジェクトの見え方"""
@@ -340,7 +343,13 @@ type ApiKey {
   id: ID!
   name: String!
   scope: ApiKeyScope!
+  """WRITE の鍵の役割。それ以外は null"""
+  role: Role
   createdAt: String!
+  """期限。無ければ null"""
+  expiresAt: String
+  """最後に管理 API で使った時刻（1 分の粒度）。公開 API の読み取りでは更新しない"""
+  lastUsedAt: String
   revokedAt: String
 }
 
@@ -349,6 +358,8 @@ type IssuedApiKey {
   id: ID!
   name: String!
   scope: ApiKeyScope!
+  role: Role
+  expiresAt: String
   key: String!
 }
 

@@ -10,6 +10,11 @@ query stampProjectSession(projectId: String) -> one {
     SELECT set_config('app.project_id', :projectId, false)::text AS applied
 }
 
+// PAT の hash の印。personal_access_tokens の policy が、本人が分かる前の解決（hash で引く）にその 1 行だけ見せるのに使う
+query stampTokenHash(tokenHash: String) -> one {
+    SELECT set_config('app.token_hash', :tokenHash, true)::text AS applied
+}
+
 // ログインした人の印。memberships / invitations の policy が「自分の行」を跨いで見せるのに使う（招待の受け入れ、自分のプロジェクト一覧）
 query stampUser(userId: String, email: String) -> one {
     SELECT set_config('app.user_id', :userId, true)::text AS applied, set_config('app.email', :email, true)::text AS email_applied

@@ -1,5 +1,5 @@
-"""プロジェクトを選ぶ前の操作。/account/graphql で受け、Tenant を持たない。組織とプロジェクトを作り、組織のメンバーを管理する。
-ログイン（Bearer）が要り、API キーは使えない"""
+"""プロジェクトを選ぶ前の操作。/account/graphql で受け、Tenant を持たない。組織とプロジェクトを作り、組織のメンバーを管理し、自分の Personal Access Token（PAT）を発行する。
+ログイン（Bearer の JWT か PAT）が要り、API キーは使えない"""
 type Query {
   """自分。ログインしていなければ null。organizations と projects は自分が触れる物だけ"""
   me: Me
@@ -16,6 +16,41 @@ type Mutation {
   addOrganizationMember(orgId: ID!, email: String!, role: OrgRole!): OrganizationMember!
   """組織から外す（owner だけ）。最後の owner は外せない。外した userId を返す"""
   removeOrganizationMember(orgId: ID!, userId: ID!): ID!
+
+  """自分の Personal Access Token を発行する。token はこの応答でしか見えない。ttlDays は 1 〜 365（省くと 90）。
+  `Authorization: Bearer cmspat_...` で管理 API と Account API を自分として叩ける（READ なら読むだけ）"""
+  createPersonalAccessToken(name: String!, scope: PatScope!, ttlDays: Int): IssuedPersonalAccessToken!
+  """自分の Personal Access Token を失効する。他人の物は見つからない"""
+  revokePersonalAccessToken(id: ID!): Boolean!
+}
+
+"""Personal Access Token の範囲"""
+enum PatScope {
+  """読むだけ（役割は viewer に落ちる）"""
+  READ
+  """本人の役割のまま"""
+  WRITE
+}
+
+"""自分の Personal Access Token。生のトークンは出ない"""
+type PersonalAccessToken {
+  id: ID!
+  name: String!
+  scope: PatScope!
+  createdAt: String!
+  expiresAt: String!
+  """最後に使った時刻（1 分の粒度）"""
+  lastUsedAt: String
+  revokedAt: String
+}
+
+"""発行した Personal Access Token。token はこの時だけ"""
+type IssuedPersonalAccessToken {
+  id: ID!
+  name: String!
+  scope: PatScope!
+  expiresAt: String!
+  token: String!
 }
 
 """プロジェクトでの役割。上が下を含む"""
@@ -47,6 +82,8 @@ type Me {
   name: String!
   organizations: [OrganizationMembership!]!
   projects: [ProjectMembership!]!
+  """自分の Personal Access Token（失効した物も）"""
+  personalAccessTokens: [PersonalAccessToken!]!
 }
 
 type Organization {

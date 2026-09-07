@@ -97,7 +97,10 @@ mod ApiKeyResolvers {
             id        = (_context, source) -> Ok(AdminMapping.idOfPublic(source#publicId)),
             name      = (_context, source) -> Ok(source#name),
             scope     = (_context, source) -> Ok(AdminMapping.apiKeyScopeToGql(source#scope)),
+            role      = (_context, source) -> Ok(AdminMapping.apiKeyRoleToGql(source#scope)),
             createdAt = (_context, source) -> Ok(Timestamp.toIso8601(source#createdAt)),
+            expiresAt = (_context, source) -> Ok(source#expiresAt |> Option.map(Timestamp.toIso8601)),
+            lastUsedAt = (_context, source) -> Ok(source#lastUsedAt |> Option.map(Timestamp.toIso8601)),
             revokedAt = (_context, source) -> Ok(source#revokedAt |> Option.map(Timestamp.toIso8601))
         }
 
@@ -111,6 +114,8 @@ mod IssuedApiKeyResolvers {
             id    = (_context, source) -> Ok(AdminMapping.idOfPublic(source#publicId)),
             name  = (_context, source) -> Ok(source#name),
             scope = (_context, source) -> Ok(AdminMapping.apiKeyScopeToGql(source#scope)),
+            role  = (_context, source) -> Ok(AdminMapping.apiKeyRoleToGql(source#scope)),
+            expiresAt = (_context, source) -> Ok(source#expiresAt |> Option.map(Timestamp.toIso8601)),
             key   = (_context, source) -> Ok(source#key)
         }
 

@@ -30,6 +30,17 @@ mod Accounts {
         bootstrapOwner(bootstrap, user);
         user
 
+    ///
+    /// PAT で来た人。users を引いて RLS の印を置く。招待の受け入れと bootstrap はしない（PAT は既にログインした人が作る物）。
+    /// 無ければ None（ユーザーが消えていれば PAT も効かない）。
+    ///
+    pub def resolveUserById(userId: UserId): Option[User] \ DbRead =
+        AuthQueries.findUserById(UserId.toInt64(userId)) |> Option.map(row -> {
+            let user = AuthRows.toUser(row);
+            discard TenantQueries.stampUser({ userId = "${user#id}", email = user#email });
+            user
+        })
+
     /// この email 宛の招待を membership に写して消す。
     def acceptInvitations(user: User): Unit \ Db =
         AuthQueries.listInvitationsForEmail(user#email) |> List.forEach(invitation -> {
@@ -66,6 +77,14 @@ mod Accounts {
     ///
     pub def actorWithoutProject(user: User): Actor =
         Actor.User(user#id, user#email, Nil)
+
+    ///
+    /// PAT の範囲で主体を落とす。read なら読むだけの人（ReadOnlyUser）、write ならそのまま。
+    ///
+    pub def withPatScope(scope: PatScope, actor: Actor): Actor = match (scope, actor) {
+        case (PatScope.Read, Actor.User(id, email, roles)) => Actor.ReadOnlyUser(id, email, roles)
+        case _                                             => actor
+    }
 
     ///
     /// email で 1 人。誰も居なければ None、同じ email が発行元をまたいで複数居れば invalid（どちらか決められない）。
@@ -117,10 +136,13 @@ mod Accounts {
     /// 自分。人でなければ None。
     ///
     pub def me(): Option[Me] \ DbRead + DbErr + Session = match Session.current() {
-        case Actor.User(id, _, roles) =>
-            AuthQueries.findUserById(UserId.toInt64(id)) |> Option.map(row ->
-                { user = AuthRows.toUser(row), roles = roles, organizations = organizationsOf(id), projects = projectsOf(id) })
-        case _ => None
+        case Actor.User(id, _, roles)         => meOf(id, roles)
+        case Actor.ReadOnlyUser(id, _, roles) => meOf(id, Authz.capToViewer(roles))
+        case _                                => None
     }
+
+    def meOf(id: UserId, roles: List[Role]): Option[Me] \ DbRead + DbErr =
+        AuthQueries.findUserById(UserId.toInt64(id)) |> Option.map(row ->
+            { user = AuthRows.toUser(row), roles = roles, organizations = organizationsOf(id), projects = projectsOf(id) })
 
 }

@@ -108,7 +108,7 @@ def dispatch(runtime: Runtime, request: HttpRequest): HttpResponse \ {IO, Health
     }
 
 ///
-/// リクエストの身元。トークンのヘッダがあれば発行元で検証し、無ければ X-Api-Key、無ければ X-Preview-Token、どれも無ければ Missing。
+/// リクエストの身元。PAT（Authorization: Bearer cmspat_...）、トークンのヘッダ（発行元で検証）、X-Api-Key、X-Preview-Token の順（Credentials）。
 /// dev モードは X-Dev-User の email を信じる（AuthConfig が CMS_VERSION=dev の時にしか許さない）。
 ///
 def credentialOf(auth: AuthConfig.AuthConfig, jwks: TokenVerifier.JwksCache, request: HttpRequest): Credential \ IO =
@@ -118,15 +118,7 @@ def credentialOf(auth: AuthConfig.AuthConfig, jwks: TokenVerifier.JwksCache, req
         case AuthConfig.Mode.Closed       => Err("管理 API は閉じています（CMS_AUTH=none）")
     };
     let headerName = match auth#mode { case AuthConfig.Mode.Dev => "X-Dev-User" case _ => auth#tokenHeader };
-    match (AuthConfig.tokenOf(headerName, request#headers), AuthConfig.apiKeyOf(request#headers), AuthConfig.previewTokenOf(request#headers)) {
-        case (Some(token), _, _) => match verified(token) {
-            case Ok(principal) => Credential.Bearer(principal#issuer, principal#subject, principal#email, principal#name)
-            case Err(reason)   => Credential.Invalid(reason)
-        }
-        case (None, Some(key), _)     => Credential.ApiKey(key)
-        case (None, None, Some(raw))  => Credential.Preview(raw)
-        case (None, None, None)       => Credential.Missing
-    }
+    Credentials.ofHeaders(headerName, verified, request#headers)
 
 ///
 /// パスか Host のプロジェクト slug からプロジェクトを決める。無ければ既定プロジェクト（SQL を出さない）。

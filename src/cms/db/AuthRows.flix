@@ -28,9 +28,20 @@ mod AuthRows {
     pub def toInvitation(row: { id = Int64, publicId = String, email = String, role = String, createdAt = Timestamp.Timestamp | r }): Invitation \ DbErr =
         { id = row#id, publicId = row#publicId, email = row#email, role = Role.parse(row#role) |> Rows.orRaise("invitations.role", row#role), createdAt = row#createdAt }
 
-    pub def toApiKey(row: { id = Int64, publicId = String, name = String, scope = String, createdAt = Timestamp.Timestamp, revokedAt = Option[Timestamp.Timestamp] | r }): ApiKey \ DbErr =
+    pub def toApiKey(row: { id = Int64, publicId = String, name = String, scope = String, role = Option[String], createdAt = Timestamp.Timestamp,
+                            expiresAt = Option[Timestamp.Timestamp], lastUsedAt = Option[Timestamp.Timestamp], revokedAt = Option[Timestamp.Timestamp] | r }): ApiKey \ DbErr =
         { id = row#id, publicId = row#publicId, name = row#name,
-          scope = ApiKeyScope.parse(row#scope) |> Rows.orRaise("api_keys.scope", row#scope),
-          createdAt = row#createdAt, revokedAt = row#revokedAt }
+          scope = toApiKeyScope(row),
+          createdAt = row#createdAt, expiresAt = row#expiresAt, lastUsedAt = row#lastUsedAt, revokedAt = row#revokedAt }
+
+    /// scope 列と role 列の組から。組が合わなければ DB の壊れ。
+    pub def toApiKeyScope(row: { scope = String, role = Option[String] | r }): ApiKeyScope \ DbErr =
+        ApiKeyScope.parse(row#scope, row#role) |> Rows.orRaise("api_keys.scope", "${row#scope}/${row#role}")
+
+    pub def toPersonalAccessToken(row: { id = Int64, publicId = String, name = String, scope = String, createdAt = Timestamp.Timestamp,
+                                         expiresAt = Timestamp.Timestamp, lastUsedAt = Option[Timestamp.Timestamp], revokedAt = Option[Timestamp.Timestamp] | r }): PersonalAccessToken \ DbErr =
+        { id = row#id, publicId = row#publicId, name = row#name,
+          scope = PatScope.parse(row#scope) |> Rows.orRaise("personal_access_tokens.scope", row#scope),
+          createdAt = row#createdAt, expiresAt = row#expiresAt, lastUsedAt = row#lastUsedAt, revokedAt = row#revokedAt }
 
 }

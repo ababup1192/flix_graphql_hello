@@ -10,6 +10,7 @@ pub enum Entity with Eq, Order, ToString {
     case Member
     case Invitation
     case ApiKey
+    case PersonalAccessToken
     case Organization
     case Webhook
     case WebhookDelivery
@@ -117,6 +118,7 @@ mod CmsErr {
         case Entity.Member      => "member"
         case Entity.Invitation  => "invitation"
         case Entity.ApiKey      => "api key"
+        case Entity.PersonalAccessToken => "personal access token"
         case Entity.Organization => "organization"
         case Entity.Webhook      => "webhook"
         case Entity.WebhookDelivery => "delivery"

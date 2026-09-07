@@ -34,6 +34,7 @@ mod ContentRunner {
             case (Visibility.Public, _)                => ()
             case (Visibility.Private, Actor.Anonymous) => CmsErr.invalid(Violation.Violation("auth", "このプロジェクトは非公開です。API キーを X-Api-Key で渡してください") :: Nil)
             case (Visibility.Private, Actor.User(_, _, Nil)) => CmsErr.invalid(Violation.Violation("auth", "このプロジェクトのメンバーではありません") :: Nil)
+            case (Visibility.Private, Actor.ReadOnlyUser(_, _, Nil)) => CmsErr.invalid(Violation.Violation("auth", "このプロジェクトのメンバーではありません") :: Nil)
             case (Visibility.Private, _)               => ()
         }
 

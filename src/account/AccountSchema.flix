@@ -10,6 +10,8 @@ mod AccountSchema {
         GeneratedAccount.schema({
             queryRoot              = AccountQueryResolvers.resolvers(),
             mutationRoot           = AccountMutationResolvers.resolvers(deps),
+            personalAccessToken    = AccountPersonalAccessTokenResolvers.resolvers(),
+            issuedPersonalAccessToken = AccountIssuedPersonalAccessTokenResolvers.resolvers(),
             me                     = AccountMeResolvers.resolvers(),
             organization           = AccountOrganizationResolvers.resolvers(),
             organizationMember     = AccountOrganizationMemberResolvers.resolvers(),

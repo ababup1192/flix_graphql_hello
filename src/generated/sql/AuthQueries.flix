@@ -7,7 +7,7 @@ mod AuthQueries {
     ///
     /// 生成元 auth.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -342105369
+    pub def sourceHash(): Int32 = -406705086
 
     ///
     /// findUserByIdentity の 1 行。
@@ -503,17 +503,17 @@ mod AuthQueries {
         ) yield { id = id }
 
     ///
-    /// insertApiKey: INSERT INTO api_keys (public_id, project_id, name, key_hash, pepper_id, scope) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
+    /// insertApiKey: INSERT INTO api_keys (public_id, project_id, name, key_hash, pepper_id, scope, role, expires_at) VALUES ($1, $2, $3, $4, $5, $6, nullif($7, ''), to_timestamp(nullif($8, 0) / 1000.0)) RETURNING id
     ///
-    pub def insertApiKey(args: { publicId = String, projectId = Int64, name = String, keyHash = String, pepperId = String, scope = String }): Option[InsertApiKeyRow] \ DbWrite =
-        let sql = "INSERT INTO api_keys (public_id, project_id, name, key_hash, pepper_id, scope) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id";
-        let params = List#{SqlValue.Str(args#publicId), SqlValue.Int64(args#projectId), SqlValue.Str(args#name), SqlValue.Str(args#keyHash), SqlValue.Str(args#pepperId), SqlValue.Str(args#scope)};
+    pub def insertApiKey(args: { publicId = String, projectId = Int64, name = String, keyHash = String, pepperId = String, scope = String, role = String, expiresAtMillis = Int64 }): Option[InsertApiKeyRow] \ DbWrite =
+        let sql = "INSERT INTO api_keys (public_id, project_id, name, key_hash, pepper_id, scope, role, expires_at)\n    VALUES ($1, $2, $3, $4, $5, $6, nullif($7, ''), to_timestamp(nullif($8, 0) / 1000.0))\n    RETURNING id";
+        let params = List#{SqlValue.Str(args#publicId), SqlValue.Int64(args#projectId), SqlValue.Str(args#name), SqlValue.Str(args#keyHash), SqlValue.Str(args#pepperId), SqlValue.Str(args#scope), SqlValue.Str(args#role), SqlValue.Int64(args#expiresAtMillis)};
         RawSql.runWithAllow(() -> Sql.executeReturningOneAs(insertApiKeyDecoder(), sql, params))
 
     ///
     /// findApiKeyByHash の 1 行。
     ///
-    pub type alias FindApiKeyByHashRow = { id = Int64, projectId = Int64, name = String, scope = String, revokedAt = Option[Timestamp.Timestamp] }
+    pub type alias FindApiKeyByHashRow = { id = Int64, projectId = Int64, name = String, scope = String, role = Option[String], expiresAt = Option[Timestamp.Timestamp], revokedAt = Option[Timestamp.Timestamp] }
 
     def findApiKeyByHashDecoder(): Decoder[FindApiKeyByHashRow] =
         forA (
@@ -521,21 +521,23 @@ mod AuthQueries {
             projectId <- Decoder.int64("project_id");
             name <- Decoder.str("name");
             scope <- Decoder.str("scope");
+            role <- Decoder.opt(Decoder.str("role"));
+            expiresAt <- Decoder.opt(Decoder.timestamp("expires_at"));
             revokedAt <- Decoder.opt(Decoder.timestamp("revoked_at"))
-        ) yield { id = id, projectId = projectId, name = name, scope = scope, revokedAt = revokedAt }
+        ) yield { id = id, projectId = projectId, name = name, scope = scope, role = role, expiresAt = expiresAt, revokedAt = revokedAt }
 
     ///
-    /// findApiKeyByHash: SELECT id, project_id, name, scope, revoked_at FROM api_keys WHERE key_hash = $1
+    /// findApiKeyByHash: SELECT id, project_id, name, scope, role, expires_at, revoked_at FROM api_keys WHERE key_hash = $1
     ///
     pub def findApiKeyByHash(keyHash: String): Option[FindApiKeyByHashRow] \ DbRead =
-        let sql = "SELECT id, project_id, name, scope, revoked_at FROM api_keys WHERE key_hash = $1";
+        let sql = "SELECT id, project_id, name, scope, role, expires_at, revoked_at FROM api_keys WHERE key_hash = $1";
         let params = List#{SqlValue.Str(keyHash)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findApiKeyByHashDecoder(), sql, params))
 
     ///
     /// listApiKeys の 1 行。
     ///
-    pub type alias ListApiKeysRow = { id = Int64, publicId = String, name = String, scope = String, createdAt = Timestamp.Timestamp, revokedAt = Option[Timestamp.Timestamp] }
+    pub type alias ListApiKeysRow = { id = Int64, publicId = String, name = String, scope = String, role = Option[String], createdAt = Timestamp.Timestamp, expiresAt = Option[Timestamp.Timestamp], lastUsedAt = Option[Timestamp.Timestamp], revokedAt = Option[Timestamp.Timestamp] }
 
     def listApiKeysDecoder(): Decoder[ListApiKeysRow] =
         forA (
@@ -543,15 +545,18 @@ mod AuthQueries {
             publicId <- Decoder.str("public_id");
             name <- Decoder.str("name");
             scope <- Decoder.str("scope");
+            role <- Decoder.opt(Decoder.str("role"));
             createdAt <- Decoder.timestamp("created_at");
+            expiresAt <- Decoder.opt(Decoder.timestamp("expires_at"));
+            lastUsedAt <- Decoder.opt(Decoder.timestamp("last_used_at"));
             revokedAt <- Decoder.opt(Decoder.timestamp("revoked_at"))
-        ) yield { id = id, publicId = publicId, name = name, scope = scope, createdAt = createdAt, revokedAt = revokedAt }
+        ) yield { id = id, publicId = publicId, name = name, scope = scope, role = role, createdAt = createdAt, expiresAt = expiresAt, lastUsedAt = lastUsedAt, revokedAt = revokedAt }
 
     ///
-    /// listApiKeys: SELECT id, public_id, name, scope, created_at, revoked_at FROM api_keys WHERE project_id = $1 ORDER BY id
+    /// listApiKeys: SELECT id, public_id, name, scope, role, created_at, expires_at, last_used_at, revoked_at FROM api_keys WHERE project_id = $1 ORDER BY id
     ///
     pub def listApiKeys(projectId: Int64): List[ListApiKeysRow] \ DbRead =
-        let sql = "SELECT id, public_id, name, scope, created_at, revoked_at FROM api_keys WHERE project_id = $1 ORDER BY id";
+        let sql = "SELECT id, public_id, name, scope, role, created_at, expires_at, last_used_at, revoked_at FROM api_keys WHERE project_id = $1 ORDER BY id";
         let params = List#{SqlValue.Int64(projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listApiKeysDecoder(), sql, params))
 
@@ -561,6 +566,95 @@ mod AuthQueries {
     pub def revokeApiKey(args: { publicId = String, projectId = Int64 }): Int32 \ DbWrite =
         let sql = "UPDATE api_keys SET revoked_at = now() WHERE public_id = $1 AND project_id = $2 AND revoked_at IS NULL";
         let params = List#{SqlValue.Str(args#publicId), SqlValue.Int64(args#projectId)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// touchApiKey: UPDATE api_keys SET last_used_at = now() WHERE id = $1 AND project_id = $2 AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds')
+    ///
+    pub def touchApiKey(args: { id = Int64, projectId = Int64 }): Int32 \ DbWrite =
+        let sql = "UPDATE api_keys SET last_used_at = now()\n    WHERE id = $1 AND project_id = $2 AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds')";
+        let params = List#{SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// insertPersonalToken の 1 行。
+    ///
+    pub type alias InsertPersonalTokenRow = { id = Int64 }
+
+    def insertPersonalTokenDecoder(): Decoder[InsertPersonalTokenRow] =
+        forA (
+            id <- Decoder.int64("id")
+        ) yield { id = id }
+
+    ///
+    /// insertPersonalToken: INSERT INTO personal_access_tokens (public_id, user_id, name, token_hash, pepper_id, scope, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+    ///
+    pub def insertPersonalToken(args: { publicId = String, userId = Int64, name = String, tokenHash = String, pepperId = String, scope = String, expiresAt = Timestamp.Timestamp }): Option[InsertPersonalTokenRow] \ DbWrite =
+        let sql = "INSERT INTO personal_access_tokens (public_id, user_id, name, token_hash, pepper_id, scope, expires_at)\n    VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id";
+        let params = List#{SqlValue.Str(args#publicId), SqlValue.Int64(args#userId), SqlValue.Str(args#name), SqlValue.Str(args#tokenHash), SqlValue.Str(args#pepperId), SqlValue.Str(args#scope), SqlValue.ofTimestamp(args#expiresAt)};
+        RawSql.runWithAllow(() -> Sql.executeReturningOneAs(insertPersonalTokenDecoder(), sql, params))
+
+    ///
+    /// findPersonalTokenByHash の 1 行。
+    ///
+    pub type alias FindPersonalTokenByHashRow = { id = Int64, userId = Int64, scope = String, expiresAt = Timestamp.Timestamp, revokedAt = Option[Timestamp.Timestamp] }
+
+    def findPersonalTokenByHashDecoder(): Decoder[FindPersonalTokenByHashRow] =
+        forA (
+            id <- Decoder.int64("id");
+            userId <- Decoder.int64("user_id");
+            scope <- Decoder.str("scope");
+            expiresAt <- Decoder.timestamp("expires_at");
+            revokedAt <- Decoder.opt(Decoder.timestamp("revoked_at"))
+        ) yield { id = id, userId = userId, scope = scope, expiresAt = expiresAt, revokedAt = revokedAt }
+
+    ///
+    /// findPersonalTokenByHash: SELECT id, user_id, scope, expires_at, revoked_at FROM personal_access_tokens WHERE token_hash = $1
+    ///
+    pub def findPersonalTokenByHash(tokenHash: String): Option[FindPersonalTokenByHashRow] \ DbRead =
+        let sql = "SELECT id, user_id, scope, expires_at, revoked_at FROM personal_access_tokens WHERE token_hash = $1";
+        let params = List#{SqlValue.Str(tokenHash)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(findPersonalTokenByHashDecoder(), sql, params))
+
+    ///
+    /// listPersonalTokens の 1 行。
+    ///
+    pub type alias ListPersonalTokensRow = { id = Int64, publicId = String, name = String, scope = String, createdAt = Timestamp.Timestamp, expiresAt = Timestamp.Timestamp, lastUsedAt = Option[Timestamp.Timestamp], revokedAt = Option[Timestamp.Timestamp] }
+
+    def listPersonalTokensDecoder(): Decoder[ListPersonalTokensRow] =
+        forA (
+            id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
+            name <- Decoder.str("name");
+            scope <- Decoder.str("scope");
+            createdAt <- Decoder.timestamp("created_at");
+            expiresAt <- Decoder.timestamp("expires_at");
+            lastUsedAt <- Decoder.opt(Decoder.timestamp("last_used_at"));
+            revokedAt <- Decoder.opt(Decoder.timestamp("revoked_at"))
+        ) yield { id = id, publicId = publicId, name = name, scope = scope, createdAt = createdAt, expiresAt = expiresAt, lastUsedAt = lastUsedAt, revokedAt = revokedAt }
+
+    ///
+    /// listPersonalTokens: SELECT id, public_id, name, scope, created_at, expires_at, last_used_at, revoked_at FROM personal_access_tokens WHERE user_id = $1 ORDER BY id
+    ///
+    pub def listPersonalTokens(userId: Int64): List[ListPersonalTokensRow] \ DbRead =
+        let sql = "SELECT id, public_id, name, scope, created_at, expires_at, last_used_at, revoked_at FROM personal_access_tokens WHERE user_id = $1 ORDER BY id";
+        let params = List#{SqlValue.Int64(userId)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listPersonalTokensDecoder(), sql, params))
+
+    ///
+    /// revokePersonalToken: UPDATE personal_access_tokens SET revoked_at = now() WHERE public_id = $1 AND user_id = $2 AND revoked_at IS NULL
+    ///
+    pub def revokePersonalToken(args: { publicId = String, userId = Int64 }): Int32 \ DbWrite =
+        let sql = "UPDATE personal_access_tokens SET revoked_at = now() WHERE public_id = $1 AND user_id = $2 AND revoked_at IS NULL";
+        let params = List#{SqlValue.Str(args#publicId), SqlValue.Int64(args#userId)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// touchPersonalToken: UPDATE personal_access_tokens SET last_used_at = now() WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds')
+    ///
+    pub def touchPersonalToken(id: Int64): Int32 \ DbWrite =
+        let sql = "UPDATE personal_access_tokens SET last_used_at = now()\n    WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds')";
+        let params = List#{SqlValue.Int64(id)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
 }
