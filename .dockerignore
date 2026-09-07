@@ -1,0 +1,10 @@
+.git
+build
+lib
+artifact
+counter.db
+deploy
+docs
+.github
+.claude
+*.md

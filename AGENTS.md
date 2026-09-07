@@ -36,7 +36,12 @@ make migrate   # migrations/ を当てる
 make run       # サーバ起動（CMS_DSN 等は Makefile が渡す）
 make generate  # admin.graphql → src/generated/graphql/、schema.graphql（見本）→ test/sample/（schemagen）
 make gen       # migrations/ + queries/*.q → src/generated/sql/（sqlfx の生成器。flix_db 側で動く）
+make fatjar    # 実行可能な jar（artifact/）
+make image     # Docker イメージ（手元用。CI は ghcr.io に amd64 / arm64）
 ```
+
+本番と セルフホストは `deploy/`（docker compose + Caddy / Alloy の例、README）。イメージは起動時に migrations/ を当てる（`CMS_MIGRATE=apply`）。
+ログは 1 行 1 JSON、`/health` に `version`（git の sha）が出る。
 
 実 PG が要るテストは `test/Pg/` に置く。`make test` はそれを除いた写しを `build/unit/` に作って回す。
 

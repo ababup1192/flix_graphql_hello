@@ -1,0 +1,30 @@
+// Grafana Alloy。この compose の全コンテナのログ（stdout）を Grafana Cloud の Loki へ送る。
+// cms のログは 1 行 1 JSON（{"time","method","path","status","ms"}）なので、Loki 側で `| json` でそのまま引ける。
+
+discovery.docker "compose" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "compose" {
+  targets = discovery.docker.compose.targets
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "compose" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.compose.output
+  forward_to = [loki.write.cloud.receiver]
+}
+
+loki.write "cloud" {
+  endpoint {
+    url = env("GRAFANA_LOKI_URL")
+    basic_auth {
+      username = env("GRAFANA_LOKI_USER")
+      password = env("GRAFANA_API_KEY")
+    }
+  }
+}

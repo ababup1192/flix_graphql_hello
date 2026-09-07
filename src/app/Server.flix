@@ -3,8 +3,9 @@
 ///
 /// - cors: 許すオリジン
 /// - graphqlPath: GraphQL を受けるパス（"/graphql" か "/admin/graphql"）
+/// - version: /health に出す版（イメージの git の sha など）
 ///
-pub type alias ServerConfig = { cors = CorsConfig, graphqlPath = String }
+pub type alias ServerConfig = { cors = CorsConfig, graphqlPath = String, version = String }
 
 ///
 /// HTTP リクエストを GraphQL の実行と死活監視に橋渡しするルーティング。
@@ -15,7 +16,7 @@ mod Server {
     ///
     /// CORS 無しの設定。テストと、同一オリジンだけで使うとき。
     ///
-    pub def defaultConfig(): ServerConfig = { cors = Cors.none(), graphqlPath = "/graphql" }
+    pub def defaultConfig(): ServerConfig = { cors = Cors.none(), graphqlPath = "/graphql", version = "dev" }
 
     ///
     /// リクエストを 1 つ処理する。
@@ -36,7 +37,7 @@ mod Server {
             case ("OPTIONS", path) if path == config#graphqlPath or path == "/health" => Cors.preflight(config#cors, request)
             case ("POST", path) if path == config#graphqlPath => executeBody(request#body)
             case (_, path) if path == config#graphqlPath      => errorResponse(405, ("Allow", "POST") :: Nil, "POST only")
-            case ("GET", "/health")   => health()
+            case ("GET", "/health")   => health(config#version)
             case (_, "/health")       => errorResponse(405, ("Allow", "GET") :: Nil, "GET only")
             case _                    => errorResponse(404, Nil, "not found")
         }
@@ -77,12 +78,12 @@ mod Server {
         String.splitOn(substr = "?", path) |> List.head |> Option.getWithDefault(path)
 
     ///
-    /// GET /health。DB に届けば {"status": "ok"}、届かなければ 503 で理由を付ける。
+    /// GET /health。DB に届けば {"status": "ok", "version": "..."}、届かなければ 503 で理由を付ける。
     ///
-    def health(): HttpResponse \ Health =
+    def health(version: String): HttpResponse \ Health =
         match Health.checkDb() {
-            case Ok(())       => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("ok") })) }
-            case Err(message) => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("error"), "db" => Value.Str(message) })) }
+            case Ok(())       => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str(version) })) }
+            case Err(message) => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str(version), "db" => Value.Str(message) })) }
         }
 
     ///

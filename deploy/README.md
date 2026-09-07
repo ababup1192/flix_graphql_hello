@@ -1,0 +1,71 @@
+# 動かし方（VPS 1 台・セルフホスト）
+
+Hetzner や自宅のサーバに Docker と docker compose があれば、この 4 手順で動く。ラズパイ（arm64）も同じ。
+
+```bash
+git clone https://github.com/ababup1192/flix_graphql_hello.git && cd flix_graphql_hello/deploy
+cp .env.example .env          # POSTGRES_PASSWORD / MINIO_ROOT_PASSWORD / ASSET_PUBLIC_URL を入れる
+docker compose up -d          # cms が起動時に migrations/ を当てる
+curl -s localhost:8080/health # {"status":"ok","version":"..."}
+```
+
+外へ出す入口は 2 通り。
+
+- **Cloudflare Tunnel（おすすめ。ポートを開けない）**: cloudflared をこの VPS に入れ、`cms.example.com → http://localhost:8080`、`assets.example.com → http://localhost:9000` の 2 本を向ける。`ASSET_PUBLIC_URL=https://assets.example.com/cms`
+- **Caddy**: `docker compose --profile caddy up -d`。`CMS_DOMAIN` と `ASSET_DOMAIN` の DNS をこの VPS に向ければ TLS は自動
+
+## 更新
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+新しいイメージが未適用の migration を持っていれば、起動時に advisory lock を取って順に当てる。2 台以上が同時に上がっても 1 台だけが当て、他は待ってから起動する。適用済みのファイルが書き換わっていれば起動しない（`checksum` の不一致）。
+
+## バックアップ
+
+`backup` サービスが毎晩 `pg_dump` を `./backups/` に置き、7 日分残す。外へ逃がすなら rclone で R2 へ同期する。
+
+```bash
+rclone sync ./backups r2:cms-backups   # cron で毎晩
+```
+
+戻す時:
+
+```bash
+gunzip -c backups/cms-20260907-0300.sql.gz | docker compose exec -T postgres psql -U cms cms
+```
+
+## ログと監視
+
+cms のログは 1 行 1 JSON。`docker compose logs -f cms` で見られる。
+
+```json
+{"time":"2026-09-07T12:00:00.123Z","method":"POST","path":"/graphql","status":200,"ms":12}
+```
+
+Grafana Cloud（無料枠）へ送るなら `.env` に `GRAFANA_*` を入れて `docker compose --profile alloy up -d`。外形監視は Better Stack や UptimeRobot で `/health` を叩く。
+
+## クラウド版（R2）にする時
+
+compose の `minio` / `minio-init` を消し、`ASSET_*` を R2 の値にする。
+
+```
+ASSET_ENDPOINT=https://<accountId>.r2.cloudflarestorage.com
+ASSET_BUCKET=cms
+ASSET_ACCESS_KEY=...
+ASSET_SECRET_KEY=...
+ASSET_REGION=auto
+ASSET_PUBLIC_URL=https://assets.example.com
+```
+
+## 環境変数
+
+| 名前 | 意味 | 既定 |
+|---|---|---|
+| `CMS_DSN` / `CMS_DB_USER` / `CMS_DB_PASSWORD` | PostgreSQL | 必須 / cms / cms |
+| `CMS_MIGRATE` | `apply`（起動時に当てる）か `check`（未適用なら起動しない） | イメージは apply、手元は check |
+| `CMS_CORS_ORIGINS` | 許すオリジン（カンマ区切り） | 無し |
+| `CMS_VERSION` | `/health` に出す版 | イメージのビルド時に git の sha |
+| `ASSET_ENDPOINT` ほか | asset の置き先。無ければ asset の機能だけ使えない | 無し |
+| `JAVA_OPTS` | JVM の引数 | `-Xss32m -XX:MaxRAMPercentage=70` |

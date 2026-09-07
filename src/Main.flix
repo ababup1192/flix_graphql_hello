@@ -5,14 +5,15 @@
 /// 起動に失敗したらメッセージを出して終了コード 1 で終わる。
 ///
 /// 環境変数: CMS_DSN / CMS_DB_USER / CMS_DB_PASSWORD（DbConfig）、ASSET_*（StorageConfig。省略時は asset 無し）、
-/// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）
+/// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
+/// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health に出す版。省略時は dev）
 ///
 def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
     let started = forM (
         _           <- checkGenerated(GeneratedCheck.admin());
         connection  <- DbConfig.fromEnv();
         pool        <- openPool(connection);
-        _           <- checkMigrations(connection);
+        _           <- prepareMigrations(connection, Sys.Env.getVar("CMS_MIGRATE"));
         storage     <- StorageConfig.fromEnv();
         adminEngines <- Ok(AdminEngine.create(storage));
         _           <- AdminEngine.current(adminEngines, pool, ProjectId.default())
@@ -21,8 +22,9 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
         case Err(message) => { println(message); Sys.Exit.exit(1) }
         case Ok((pool, adminEngines, storage)) =>
             let cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins };
-            let contentConfig = { cors = cors, graphqlPath = "/graphql" };
-            let adminConfig = { cors = cors, graphqlPath = "/admin/graphql" };
+            let version = Sys.Env.getVar("CMS_VERSION") |> Option.getWithDefault("dev");
+            let contentConfig = { cors = cors, graphqlPath = "/graphql", version = version };
+            let adminConfig = { cors = cors, graphqlPath = "/admin/graphql", version = version };
             let engineCache = ContentEngine.create(storage);
             // WhyNot: コンテンツ API を実行する時以外（/health、404、preflight、GET）でエンジンを組まないのは、型定義が壊れた時に
             // 死活監視や preflight まで 503 になり、404 ごとに目印の SELECT が走るため。GraphQL を実行しない道なので管理 API のエンジンで受ける
@@ -70,20 +72,25 @@ def openPool(connection: Jdbc.ConnectionConfig): Result[String, Pool] \ IO =
     }
 
 ///
-/// migrations/ が全部適用済みか。未適用や改変があれば Err（`make migrate` を促す）。
+/// migrations/ の扱い。CMS_MIGRATE が apply なら未適用の物を当て（advisory lock 付きなので複数台の同時起動でも 1 台だけが当てる）、
+/// それ以外なら全部適用済みかを確かめて、未適用や改変があれば Err（`make migrate` を促す）。
 ///
-/// WhyNot: 起動時に apply しないのは、複数台が同時に起動した時の順序と、失敗した migration の扱いを
-/// デプロイの手順に置きたいため。起動は check だけにする。
+/// WhyNot: 手元の既定を check にするのは、DSN の打ち間違いで別の DB に migration を当ててしまうのを避けるため。
+/// イメージ（Dockerfile）は apply を既定にし、`docker compose pull && up` だけで更新が終わるようにする。
 ///
-def checkMigrations(connection: Jdbc.ConnectionConfig): Result[String, Unit] \ {IO, Fs.FileRead} =
+def prepareMigrations(connection: Jdbc.ConnectionConfig, mode: Option[String]): Result[String, Unit] \ {IO, Fs.FileRead} =
     let outcome = run {
-        Migrate.runWithResult(() -> DbError.runWithFailure(() -> Jdbc.withConnection(connection, conn -> Migrate.check(conn, "migrations"))))
+        Migrate.runWithResult(() -> DbError.runWithFailure(() ->
+            if (mode == Some("apply"))
+                Migrate.apply(Migrate.defaultConfig(connection), "migrations") |> List.forEach(version -> println("migration applied: ${version}"))
+            else
+                Jdbc.withConnection(connection, conn -> Migrate.check(conn, "migrations"))))
     } with Fs.ReadFile.runWithFileRead
       with Fs.DirList.runWithIO;
     match outcome {
         case Ok(Ok(()))       => Ok(())
-        case Ok(Err(failure)) => Err("migrations を確かめられません: ${failure}")
-        case Err(message)     => Err("migrations が当たっていません（`make migrate` で当ててください）: ${message}")
+        case Ok(Err(failure)) => Err("migrations を当てられません: ${failure}")
+        case Err(message)     => if (mode == Some("apply")) Err("migrations が壊れています: ${message}") else Err("migrations が当たっていません（`make migrate` で当ててください）: ${message}")
     }
 
 ///

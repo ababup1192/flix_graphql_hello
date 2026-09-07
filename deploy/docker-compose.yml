@@ -1,0 +1,134 @@
+# セルフホストと段階 1（VPS 1 台）の構成。`cp .env.example .env` で値を入れて `docker compose up -d`。
+# cms は起動時に migrations/ を当てる（CMS_MIGRATE=apply）ので、更新は `docker compose pull && docker compose up -d` だけ。
+#
+# profiles:
+#   caddy   Cloudflare Tunnel を使わず、Caddy で TLS を終端して公開する時
+#   alloy   Grafana Cloud にログとメトリクスを送る時（.env に GRAFANA_* が要る）
+services:
+  cms:
+    image: ${CMS_IMAGE:-ghcr.io/ababup1192/flix_graphql_hello:latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      CMS_DSN: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-cms}
+      CMS_DB_USER: ${POSTGRES_USER:-cms}
+      CMS_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD を .env に入れてください}
+      CMS_MIGRATE: apply
+      CMS_CORS_ORIGINS: ${CMS_CORS_ORIGINS:-}
+      ASSET_ENDPOINT: http://minio:9000
+      ASSET_BUCKET: ${ASSET_BUCKET:-cms}
+      ASSET_ACCESS_KEY: ${MINIO_ROOT_USER:-cms}
+      ASSET_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD を .env に入れてください}
+      ASSET_REGION: us-east-1
+      ASSET_PUBLIC_URL: ${ASSET_PUBLIC_URL:?ASSET_PUBLIC_URL（画像の配信 URL）を .env に入れてください}
+    ports:
+      - "127.0.0.1:8080:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cms}
+      POSTGRES_USER: ${POSTGRES_USER:-cms}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cms} -d ${POSTGRES_DB:-cms}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # asset の置き先。クラウド版で R2 を使う時はこの 2 つを消し、ASSET_* を R2 の値にする
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-cms}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+    volumes:
+      - miniodata:/data
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-cms} ${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing local/${ASSET_BUCKET:-cms} &&
+      mc anonymous set download local/${ASSET_BUCKET:-cms}
+      "
+
+  # 毎晩 pg_dump を取り、7 日分残す。R2 へ送るなら backups/ を rclone 等で同期する
+  backup:
+    image: postgres:16
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes:
+      - ./backups:/backups
+    entrypoint: >
+      /bin/sh -c "
+      while true; do
+        pg_dump -h postgres -U ${POSTGRES_USER:-cms} ${POSTGRES_DB:-cms} | gzip > /backups/cms-$$(date +%Y%m%d-%H%M).sql.gz &&
+        find /backups -name 'cms-*.sql.gz' -mtime +7 -delete;
+        sleep 86400;
+      done
+      "
+
+  caddy:
+    image: caddy:2
+    profiles: ["caddy"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    environment:
+      CMS_DOMAIN: ${CMS_DOMAIN:-cms.example.com}
+      ASSET_DOMAIN: ${ASSET_DOMAIN:-assets.example.com}
+
+  alloy:
+    image: grafana/alloy:latest
+    profiles: ["alloy"]
+    restart: unless-stopped
+    command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy/data"]
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloydata:/var/lib/alloy/data
+    environment:
+      GRAFANA_LOKI_URL: ${GRAFANA_LOKI_URL:-}
+      GRAFANA_LOKI_USER: ${GRAFANA_LOKI_USER:-}
+      GRAFANA_API_KEY: ${GRAFANA_API_KEY:-}
+
+volumes:
+  pgdata:
+  miniodata:
+  caddydata:
+  alloydata:

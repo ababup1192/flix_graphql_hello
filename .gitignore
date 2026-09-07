@@ -2,3 +2,5 @@ build/
 lib/
 artifact/
 counter.db
+deploy/.env
+deploy/backups/

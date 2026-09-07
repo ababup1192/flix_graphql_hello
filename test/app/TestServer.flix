@@ -25,7 +25,7 @@ mod TestServer {
     ///
     /// 管理画面のオリジンだけ許す設定。
     ///
-    def adminConfig(): ServerConfig = { cors = { allowedOrigins = "https://admin.example.com" :: Nil }, graphqlPath = "/graphql" }
+    def adminConfig(): ServerConfig = { cors = { allowedOrigins = "https://admin.example.com" :: Nil }, graphqlPath = "/graphql", version = "dev" }
 
     ///
     /// runWithEcho が data に入れて返す形。variables が無いリクエストは空の Obj、operationName が無ければ Null。
@@ -126,7 +126,7 @@ mod TestServer {
     /// DB に届けば 200 と {"status": "ok"}。クエリ文字列が付いていても同じ。
     @Test
     def testServerHealthOk(): Unit \ Assert =
-        Assert.assertEq(expected = ((200, Ok(Value.Obj(Map#{ "status" => Value.Str("ok") }))), 200),
+        Assert.assertEq(expected = ((200, Ok(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str("dev") }))), 200),
             GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> {
                 let response = Server.handle(Server.defaultConfig(), { method = "GET", path = "/health", headers = Nil, body = "" });
                 ((response#status, JsonValue.parse(response#body)),
@@ -138,7 +138,7 @@ mod TestServer {
     def testServerHealthFailure(): Unit \ Assert =
         let response = GraphqlFake.runWithEcho(() -> HealthFake.runWithFailure("connection refused", () ->
             Server.handle(Server.defaultConfig(), { method = "GET", path = "/health", headers = Nil, body = "" })));
-        Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "db" => Value.Str("connection refused") }))),
+        Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused") }))),
             (response#status, JsonValue.parse(response#body)))
 
     /// /health への POST は 405 で Allow: GET。

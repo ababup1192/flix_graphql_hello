@@ -1,4 +1,4 @@
-.PHONY: run check test test-unit test-pg db-up db-down query generate scaffold gen gen-check migrate migrate-status migrate-new
+.PHONY: run check test test-unit test-pg db-up db-down query generate scaffold gen gen-check migrate migrate-status migrate-new fatjar image
 
 # 実 PG と MinIO 用の接続。docker-compose.yml と同じ値。run と test-pg の両方で使う
 PG_ENV = CMS_DSN=jdbc:postgresql://127.0.0.1:5432/cms CMS_DB_USER=cms CMS_DB_PASSWORD=cms \
@@ -80,6 +80,14 @@ migrate-new:   # make migrate-new NAME=add_entries
 #   make scaffold DEFAULTS=no     既定リゾルバを使わず全フィールドを吐く（source が enum の型向け）
 scaffold:
 	cd schemagen && SCHEMAGEN_MODE=scaffold SCAFFOLD_TYPE=$(TYPE) SCAFFOLD_DEFAULTS=$(DEFAULTS) ../bin/flix run
+
+# 実行可能な fat jar（artifact/flix_graphql_hello.jar）。Dockerfile の build 段と同じ物
+fatjar:
+	bin/flix build-fatjar
+
+# 手元でイメージを作る。CI（.github/workflows/image.yml）は amd64 / arm64 の両方を ghcr.io に置く
+image:
+	docker build --build-arg CMS_VERSION=$$(git rev-parse --short HEAD) -t flix_graphql_hello:local .
 
 # 起動中のサーバへ /health と、管理 API・コンテンツ API のサンプルを投げる
 query:

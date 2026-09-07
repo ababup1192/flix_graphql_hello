@@ -1,0 +1,14 @@
+# Cloudflare Tunnel を使わない時の入口。TLS は Let's Encrypt で自動。
+# {$CMS_DOMAIN} は API、{$ASSET_DOMAIN} は MinIO の画像配信（バケットは匿名の読み取りだけ）。
+# サブドメインでプロジェクトを分ける（{slug}.{$CMS_DOMAIN}）のは認証の段で足す。
+
+{$CMS_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy cms:8080
+}
+
+{$ASSET_DOMAIN} {
+	encode zstd gzip
+	header Cache-Control "public, max-age=31536000, immutable"
+	reverse_proxy minio:9000
+}

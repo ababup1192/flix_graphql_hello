@@ -17,7 +17,9 @@ mod HttpServer {
     import java.io.OutputStreamWriter
     import java.io.PrintWriter
     import java.lang.Exception
+    import java.lang.System
     import java.net.ServerSocket
+    import java.time.Instant
     import java.net.Socket
 
     ///
@@ -71,11 +73,12 @@ mod HttpServer {
             let writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
             try {
                 let input: InputStream = checked_cast(new BufferedInputStream(socket.getInputStream()));
-                let (label, response) = match readRequest(input) {
-                    case Ok(request) => (logLabel(request#method, request#path), handle(request))
-                    case Err(status) => ("(bad request)", { status = status, headers = Nil, body = "" })
+                let started = System.currentTimeMillis();
+                let (method, path, response) = match readRequest(input) {
+                    case Ok(request) => (request#method, request#path, handle(request))
+                    case Err(status) => ("-", "-", { status = status, headers = Nil, body = "" })
                 };
-                Channel.send("${label} -> ${response#status}", log);
+                Channel.send(logLine(method, path, response#status, System.currentTimeMillis() - started), log);
                 write(writer, response, log)
             } catch {
                 case e: Exception =>
@@ -107,14 +110,19 @@ mod HttpServer {
             ()
 
     ///
-    /// ログに出すリクエストの見出し。メソッドと、制御文字を取り除いたパスをつなぐ。
+    /// リクエスト 1 本のログ。1 行 1 JSON（time / method / path / status / ms）。ログ基盤（Loki 等）が `| json` で引ける形。
     ///
-    /// WhyNot: パスをそのまま出さないのは、改行などの制御文字が入っていると偽のログ行を
-    /// 作れてしまうため（log injection）。保証するのは「ログ 1 行が複数行に割れない・
-    /// 端末のエスケープシーケンスが混ざらない」ことだけで、パスの見た目の正しさは保証しない。
+    /// WhyNot: パスをそのまま出さないのは、改行などの制御文字が入っていると偽のログ行を作れてしまうため（log injection）。
+    /// JSON の escape で改行は割れないが、端末のエスケープシーケンスは通るので制御文字ごと落とす。
     ///
-    def logLabel(method: String, path: String): String =
-        "${method} ${String.replaceMatches(regex = "\\p{Cntrl}", to = "", path)}"
+    pub def logLine(method: String, path: String, status: Int32, elapsedMs: Int64): String \ IO =
+        JsonValue.toJsonString(Value.Obj(Map#{
+            "time" => Value.Str(Instant.now().toString()),
+            "method" => Value.Str(method),
+            "path" => Value.Str(String.replaceMatches(regex = "\\p{Cntrl}", to = "", path)),
+            "status" => Value.Int(status),
+            "ms" => Value.Int(Int64.clampToInt32(min = 0, max = Int32.maxValue(), elapsedMs))
+        }))
 
     ///
     /// リクエスト行・ヘッダ・ボディを読んで HttpRequest にする。
