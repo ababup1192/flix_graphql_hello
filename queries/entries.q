@@ -79,30 +79,21 @@ query deleteContent(entryId: String, stage: String) -> exec {
 }
 
 // ---- 一意 ----
+// 一意は写しの表を持たず、公開中の中身（JSONB）を直接引く。jsonb の = は数値を数値として比べる（1 と 1.0 は同じ）
 
-query findUniqueOwner(typeId: Int64, fieldId: Int64, value: String) -> one {
-    SELECT entry_id FROM entry_unique_values WHERE type_id = :typeId AND field_id = :fieldId AND value = :value
+// 同じ（型, フィールド, 値）を公開する Tx を直列にする。値ごとの悲観ロックで、commit / rollback で外れる。
+// 検査の前に取るので、先に取った方の公開を後の方が見て invalid になる
+query lockUniqueValue(typeId: Int64, fieldId: Int64, value: Json) -> one {
+    SELECT (pg_advisory_xact_lock(hashtext(concat_ws(':', :typeId, :fieldId, :value))) IS NULL)::boolean AS locked
 }
 
-query deleteUniquesOfEntry(entryId: String) -> exec {
-    DELETE FROM entry_unique_values WHERE entry_id = :entryId
-}
-
-// unique を外した時に写しを消す
-query deleteUniquesOfField(fieldId: Int64) -> exec {
-    DELETE FROM entry_unique_values WHERE field_id = :fieldId
-}
-
-// unique を後から付けた時に公開中の値を写す用。型の公開中の中身
-query publishedContentsOfType(typeId: Int64) -> many {
-    SELECT e.id AS entry_id, c.data
+// 公開中でその値を持つ entry（1 つ）
+query findUniqueHolder(typeId: Int64, apiId: String, value: Json) -> one {
+    SELECT e.id
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'published'
-    WHERE e.type_id = :typeId AND e.deleted_at IS NULL
-}
-
-query insertUnique(typeId: Int64, fieldId: Int64, value: String, entryId: String) -> exec {
-    INSERT INTO entry_unique_values (type_id, field_id, value, entry_id) VALUES (:typeId, :fieldId, :value, :entryId)
+    WHERE e.type_id = :typeId AND e.deleted_at IS NULL AND c.data -> :apiId = :value
+    ORDER BY e.id LIMIT 1
 }
 
 // ---- 版 ----

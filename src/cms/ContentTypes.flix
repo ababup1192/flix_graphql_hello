@@ -126,27 +126,9 @@ mod ContentTypes {
         let unique = changes#unique |> Option.getWithDefault(existing#unique);
         let required = changes#required |> Option.getWithDefault(existing#required);
         CmsErr.raiseIfAny(Naming.validateFlags(existing#kind, existing#many, unique) ::: Naming.validateChildFlags(Option.nonEmpty(existing#parent), required, unique) ::: Naming.validateConfig(taken, existing#kind, config));
-        match (changes#unique, existing#unique) {
-            case (Some(true), false) => enableUnique(existing)
-            case (Some(false), true) => discard EntriesQueries.deleteUniquesOfField(FieldId.toInt64(id))
-            case _                   => ()
-        };
         discard ContentFieldsQueries.updateField(FieldId.toInt64(id), ContentTypeRows.fieldChanges(changes));
         touch(existing#typeId);
         getField(id)
-
-    ///
-    /// unique を後から付ける。公開中の値に重複があれば invalid、無ければ写し（entry_unique_values）を埋める。
-    /// 埋めないと、後で再公開した 1 件だけが写しに入り、既に公開中の他の entry が再公開できなくなる。
-    ///
-    def enableUnique(field: FieldDef): Unit \ Db + CmsErr =
-        let values = EntriesQueries.publishedContentsOfType(TypeId.toInt64(field#typeId)) |> List.filterMap(row ->
-            Map.get(field#apiId, EntryRows.dataFromJson(row#data)) |> Option.flatMap(EntryRows.uniqueValueText) |> Option.map(value -> (value, row#entryId)));
-        let byValue = values |> List.foldLeft((acc, pair) -> { let (value, entryId) = pair; Map.insertWith((_, older) -> entryId :: older, value, entryId :: Nil, acc) }, Map.empty());
-        CmsErr.raiseIfAny(byValue |> Map.toList |> List.filter(match (_, holders) -> List.length(holders) > 1) |> List.map(match (value, holders) ->
-            Violation.Violation("unique", "'${value}' を公開中の entry ${holders |> List.reverse |> List.map(id -> "'${id}'") |> List.join(", ")} が持っています。先に値を分けてください")));
-        discard EntriesQueries.deleteUniquesOfField(FieldId.toInt64(field#id));
-        List.forEach(match (value, entryId) -> discard EntriesQueries.insertUnique({ typeId = TypeId.toInt64(field#typeId), fieldId = FieldId.toInt64(field#id), value = value, entryId = entryId }), values)
 
     ///
     /// フィールドを消す。無ければ notFound。

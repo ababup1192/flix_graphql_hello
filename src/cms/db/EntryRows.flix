@@ -106,20 +106,4 @@ mod EntryRows {
     ///
     pub def referrerText(row: { fromEntryId = String | r }): String = row#fromEntryId
 
-    ///
-    /// entry_unique_values の持ち主（entry_id）の文字列。
-    ///
-    pub def uniqueOwnerText(row: { entryId = String | r }): String = row#entryId
-
-    ///
-    /// unique なフィールドの値を entry_unique_values.value の文字列にする。配列や null は None（一意の対象にしない）。
-    ///
-    pub def uniqueValueText(json: Json): Option[String] = match json {
-        case Json.JString(s) => Some(s)
-        // WhyNot: "${n}" にしないのは、1 と 1.0 が別の文字列になって一意が効かないため
-        case Json.JNumber(n) => Some(unsafe IO { n.stripTrailingZeros().toPlainString() })
-        case Json.JBool(b)   => Some(if (b) "true" else "false")
-        case _               => None
-    }
-
 }

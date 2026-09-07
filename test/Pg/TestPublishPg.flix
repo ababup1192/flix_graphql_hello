@@ -103,35 +103,27 @@ mod TestPublishPg {
                 Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }) })),
             outcome)
 
-    /// unique を後から付けると公開中の値が写され、既に公開中の entry は再公開できる。値が重なっていれば付けられない。外せば同じ値を公開できる。
+    /// unique は後から付け外しできる。付ける時に既存の重複は見ず、次に公開する entry がその時点で引っかかる。外せば同じ値を公開できる。
     ///
-    ///   A(same) B(other) を公開 → unique ON ✓ → A 再公開 ✓ → C(same) 公開 ✗ → unique OFF → C 公開 ✓ → unique ON ✗（same を A と C が持つ）
+    ///   A(same) を公開 → unique ON → C(same) 公開 ✗ → unique OFF → C 公開 ✓ → unique ON ✓（重複があっても付けられる）
     @Test
     def testPgUniqueToggle(): Unit \ {IO, Assert} =
-        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"a", "b", "c"}, () -> {
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"a", "c"}, () -> {
             let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
             discard ContentTypes.addField(blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
             let slug = ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = CmsTestKit.apiId("title") |> Some | FieldConfig.empty() }));
             let toggle = flag -> { name = None, required = None, unique = Some(flag), localized = None, config = None };
             let a = ContentEntries.create(blogs#id, None, titled("A", "same"));
-            let b = ContentEntries.create(blogs#id, None, titled("B", "other"));
             let c = ContentEntries.create(blogs#id, None, titled("C", "same"));
             discard ContentEntries.publish(a#id, "tester", false);
-            discard ContentEntries.publish(b#id, "tester", false);
-            let turnedOn = CmsTestKit.messageOr(field -> field#unique, () -> ContentTypes.updateField(slug#id, toggle(true)));
-            let republished = CmsTestKit.messageOr(entry -> entry#stage, () -> ContentEntries.publish(a#id, "tester", false));
+            let turnedOn = ContentTypes.updateField(slug#id, toggle(true)) |> (field -> field#unique);
             let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(c#id, "tester", false));
             discard ContentTypes.updateField(slug#id, toggle(false));
             let freed = CmsTestKit.messageOr(entry -> entry#stage, () -> ContentEntries.publish(c#id, "tester", false));
-            let refused = CmsTestKit.failureMessage(() -> ContentTypes.updateField(slug#id, toggle(true)));
-            (turnedOn, republished, blocked, freed, refused)
+            let again = ContentTypes.updateField(slug#id, toggle(true)) |> (field -> field#unique);
+            (turnedOn, blocked, freed, again)
         }));
-        Assert.assertEq(expected = Ok(Ok((
-            Ok(true),
-            Ok(Stage.Published),
-            Err("fields.slug: 'same' は公開中の entry 'a' が使っています"),
-            Ok(Stage.Published),
-            Err("unique: 'same' を公開中の entry 'a', 'c' が持っています。先に値を分けてください")))), result)
+        Assert.assertEq(expected = Ok(Ok((true, Err("fields.slug: 'same' は公開中の entry 'a' が使っています"), Ok(Stage.Published), true))), result)
 
     /// 未公開の entry への unpublish は何もしない（updated_at も動かさない）。数値の unique は 1 と 1.0 を同じ値と見る。
     @Test

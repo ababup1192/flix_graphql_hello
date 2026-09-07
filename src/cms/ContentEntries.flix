@@ -119,8 +119,6 @@ mod ContentEntries {
             List.forEach(dependency -> if (List.memberOf(dependency, id :: visited)) () else discard publishWithin(id :: visited, dependency, author, true), pending)
         else
             CmsErr.raiseIfAny(pending |> List.map(dependency -> Violation.Violation("references", "参照先 '${dependency}' が未公開です（withDependencies: true で一緒に公開できます）")));
-        discard EntriesQueries.deleteUniquesOfEntry(key);
-        List.forEach(match (field, value) -> discard EntriesQueries.insertUnique({ typeId = TypeId.toInt64(owner#id), fieldId = FieldId.toInt64(field#id), value = value, entryId = key }), uniqueValues(owner, existing));
         writeContent(id, Stage.Published, owner, data);
         discard EntriesQueries.insertVersion(EntryRows.versionInsert(existing, author, VersionReason.Publish));
         discard EntriesQueries.markPublished(key);
@@ -137,7 +135,6 @@ mod ContentEntries {
         CmsErr.raiseIfAny(referrers |> List.map(referrer -> Violation.Violation("references", "公開中の entry '${referrer}' が参照しています。先にそちらを取り下げるか、参照を外してください")));
         discard EntriesQueries.deleteLinks({ fromEntryId = key, stage = published });
         discard EntriesQueries.deleteContent({ entryId = key, stage = published });
-        discard EntriesQueries.deleteUniquesOfEntry(key);
         discard EntriesQueries.markUnpublished(key);
         get(id)
 
@@ -217,20 +214,40 @@ mod ContentEntries {
         }
 
     ///
-    /// unique なフィールドの (フィールド, 値の文字列)。値が無いフィールドは含めない。
+    /// unique なフィールドの (フィールド, 値)。一意の対象は文字列・数値・真偽値だけで、null や配列のフィールドは含めない。
     ///
-    def uniqueValues(owner: ContentType, entry: Entry): List[(FieldDef, String)] =
+    def uniqueValues(owner: ContentType, entry: Entry): List[(FieldDef, Util.Json.Json)] =
         owner#fields |> List.filter(field -> field#unique) |> List.filterMap(field ->
-            Map.get(field#apiId, entry#data) |> Option.flatMap(EntryRows.uniqueValueText) |> Option.map(value -> (field, value)))
+            Map.get(field#apiId, entry#data) |> Option.filter(isScalar) |> Option.map(value -> (field, value)))
+
+    def isScalar(json: Util.Json.Json): Bool = match json {
+        case Util.Json.Json.JString(_) => true
+        case Util.Json.Json.JNumber(_) => true
+        case Util.Json.Json.JBool(_)   => true
+        case _                         => false
+    }
 
     ///
     /// 他の公開中の entry が同じ値を持っていれば違反。自分の値は構わない（再公開）。
+    /// 検査の前に値ごとの advisory lock を取り、同じ値を同時に公開する Tx を直列にする（後の方が先の公開を見る）。
     ///
     def uniqueViolations(owner: ContentType, entry: Entry): List[Violation] \ DbRead =
-        uniqueValues(owner, entry) |> List.filterMap(match (field, value) ->
-            EntriesQueries.findUniqueOwner({ typeId = TypeId.toInt64(owner#id), fieldId = FieldId.toInt64(field#id), value = value })
-                |> Option.map(EntryRows.uniqueOwnerText)
+        uniqueValues(owner, entry) |> List.filterMap(match (field, value) -> {
+            discard EntriesQueries.lockUniqueValue({ typeId = TypeId.toInt64(owner#id), fieldId = FieldId.toInt64(field#id), value = value });
+            EntriesQueries.findUniqueHolder({ typeId = TypeId.toInt64(owner#id), apiId = ApiId.text(field#apiId), value = value })
+                |> Option.map(row -> row#id)
                 |> Option.filter(holder -> holder != EntryId.text(entry#id))
-                |> Option.map(holder -> Violation.Violation("fields.${field#apiId}", "'${value}' は公開中の entry '${holder}' が使っています")))
+                |> Option.map(holder -> Violation.Violation("fields.${field#apiId}", "'${scalarText(value)}' は公開中の entry '${holder}' が使っています"))
+        })
+
+    ///
+    /// メッセージに出す値。数値は 1.0 も 1 と出す（一意では同じ値なので）。
+    ///
+    def scalarText(json: Util.Json.Json): String = match json {
+        case Util.Json.Json.JString(s) => s
+        case Util.Json.Json.JNumber(n) => unsafe IO { n.stripTrailingZeros().toPlainString() }
+        case Util.Json.Json.JBool(b)   => if (b) "true" else "false"
+        case other                     => "${other}"
+    }
 
 }

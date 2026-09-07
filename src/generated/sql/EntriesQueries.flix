@@ -7,7 +7,7 @@ mod EntriesQueries {
     ///
     /// 生成元 entries.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -1239908240
+    pub def sourceHash(): Int32 = -906867573
 
     ///
     /// entryExists の 1 行。
@@ -187,65 +187,40 @@ mod EntriesQueries {
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
-    /// findUniqueOwner の 1 行。
+    /// lockUniqueValue の 1 行。
     ///
-    pub type alias FindUniqueOwnerRow = { entryId = String }
+    pub type alias LockUniqueValueRow = { locked = Option[Bool] }
 
-    def findUniqueOwnerDecoder(): Decoder[FindUniqueOwnerRow] =
+    def lockUniqueValueDecoder(): Decoder[LockUniqueValueRow] =
         forA (
-            entryId <- Decoder.str("entry_id")
-        ) yield { entryId = entryId }
+            locked <- Decoder.opt(Decoder.bool("locked"))
+        ) yield { locked = locked }
 
     ///
-    /// findUniqueOwner: SELECT entry_id FROM entry_unique_values WHERE type_id = $1 AND field_id = $2 AND value = $3
+    /// lockUniqueValue: SELECT (pg_advisory_xact_lock(hashtext(concat_ws(':', $1, $2, $3))) IS NULL)::boolean AS locked
     ///
-    pub def findUniqueOwner(args: { typeId = Int64, fieldId = Int64, value = String }): Option[FindUniqueOwnerRow] \ DbRead =
-        let sql = "SELECT entry_id FROM entry_unique_values WHERE type_id = $1 AND field_id = $2 AND value = $3";
-        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#fieldId), SqlValue.Str(args#value)};
-        RawSql.runWithAllow(() -> Sql.fetchOneAs(findUniqueOwnerDecoder(), sql, params))
+    pub def lockUniqueValue(args: { typeId = Int64, fieldId = Int64, value = Util.Json.Json }): Option[LockUniqueValueRow] \ DbRead =
+        let sql = "SELECT (pg_advisory_xact_lock(hashtext(concat_ws(':', $1, $2, $3))) IS NULL)::boolean AS locked";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#fieldId), SqlValue.ofJson(args#value)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(lockUniqueValueDecoder(), sql, params))
 
     ///
-    /// deleteUniquesOfEntry: DELETE FROM entry_unique_values WHERE entry_id = $1
+    /// findUniqueHolder の 1 行。
     ///
-    pub def deleteUniquesOfEntry(entryId: String): Int32 \ DbWrite =
-        let sql = "DELETE FROM entry_unique_values WHERE entry_id = $1";
-        let params = List#{SqlValue.Str(entryId)};
-        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+    pub type alias FindUniqueHolderRow = { id = String }
 
-    ///
-    /// deleteUniquesOfField: DELETE FROM entry_unique_values WHERE field_id = $1
-    ///
-    pub def deleteUniquesOfField(fieldId: Int64): Int32 \ DbWrite =
-        let sql = "DELETE FROM entry_unique_values WHERE field_id = $1";
-        let params = List#{SqlValue.Int64(fieldId)};
-        RawSql.runWithAllow(() -> Sql.execute(sql, params))
-
-    ///
-    /// publishedContentsOfType の 1 行。
-    ///
-    pub type alias PublishedContentsOfTypeRow = { entryId = String, data = Util.Json.Json }
-
-    def publishedContentsOfTypeDecoder(): Decoder[PublishedContentsOfTypeRow] =
+    def findUniqueHolderDecoder(): Decoder[FindUniqueHolderRow] =
         forA (
-            entryId <- Decoder.str("entry_id");
-            data <- Decoder.json("data")
-        ) yield { entryId = entryId, data = data }
+            id <- Decoder.str("id")
+        ) yield { id = id }
 
     ///
-    /// publishedContentsOfType: SELECT e.id AS entry_id, c.data FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'published' WHERE e.type_id = $1 AND e.deleted_at IS NULL
+    /// findUniqueHolder: SELECT e.id FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'published' WHERE e.type_id = $1 AND e.deleted_at IS NULL AND c.data -> $2 = $3 ORDER BY e.id LIMIT 1
     ///
-    pub def publishedContentsOfType(typeId: Int64): List[PublishedContentsOfTypeRow] \ DbRead =
-        let sql = "SELECT e.id AS entry_id, c.data\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'published'\n    WHERE e.type_id = $1 AND e.deleted_at IS NULL";
-        let params = List#{SqlValue.Int64(typeId)};
-        RawSql.runWithAllow(() -> Sql.fetchAs(publishedContentsOfTypeDecoder(), sql, params))
-
-    ///
-    /// insertUnique: INSERT INTO entry_unique_values (type_id, field_id, value, entry_id) VALUES ($1, $2, $3, $4)
-    ///
-    pub def insertUnique(args: { typeId = Int64, fieldId = Int64, value = String, entryId = String }): Int32 \ DbWrite =
-        let sql = "INSERT INTO entry_unique_values (type_id, field_id, value, entry_id) VALUES ($1, $2, $3, $4)";
-        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#fieldId), SqlValue.Str(args#value), SqlValue.Str(args#entryId)};
-        RawSql.runWithAllow(() -> Sql.execute(sql, params))
+    pub def findUniqueHolder(args: { typeId = Int64, apiId = String, value = Util.Json.Json }): Option[FindUniqueHolderRow] \ DbRead =
+        let sql = "SELECT e.id\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'published'\n    WHERE e.type_id = $1 AND e.deleted_at IS NULL AND c.data -> $2 = $3\n    ORDER BY e.id LIMIT 1";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Str(args#apiId), SqlValue.ofJson(args#value)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(findUniqueHolderDecoder(), sql, params))
 
     ///
     /// insertVersion の 1 行。

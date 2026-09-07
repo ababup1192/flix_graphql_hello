@@ -26,18 +26,6 @@ mod TestRows {
              EntryRows.reasonFromDb(EntryRows.reasonToDb(VersionReason.Publish)),
              EntryRows.reasonFromDb("restore")))
 
-    /// 一意の値は文字列・数値・真偽値だけ。数値は 1 と 1.0 と 1.00 が同じ文字列になり、null と配列は値なし。
-    @Test
-    def testRowsUniqueValueText(): Unit \ Assert =
-        Assert.assertEq(expected = (Some("x"), Some("1"), Some("1"), Some("0.5"), Some("true"), None, None),
-            (EntryRows.uniqueValueText(Json.JString("x")),
-             EntryRows.uniqueValueText(CmsTestKit.intJson(1)),
-             EntryRows.uniqueValueText(CmsTestKit.floatJson(1.0)),
-             EntryRows.uniqueValueText(CmsTestKit.floatJson(0.5)),
-             EntryRows.uniqueValueText(Json.JBool(true)),
-             EntryRows.uniqueValueText(Json.JNull),
-             EntryRows.uniqueValueText(Json.JArray(Vector#{Json.JString("x")}))))
-
     /// count と position の行は無ければ 0。RETURNING の行が無い、値が読めない、は DbErr（結果の Err）になる。
     @Test
     def testRowsMissing(): Unit \ {Assert, IO} =
