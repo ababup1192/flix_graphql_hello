@@ -24,6 +24,12 @@ mod Credentials {
         }
 
     ///
+    /// 身元を読む middleware。ヘッダから Credential を組んで RouteRequest に入れ、next に渡す。
+    ///
+    pub def wrap(tokenHeader: String, verify: String -> Result[String, Principal] \ ef1, next: Handler[ef2]): Handler[ef1 + ef2] =
+        routeRequest -> next({ credential = ofHeaders(tokenHeader, verify, routeRequest#request#headers) | routeRequest })
+
+    ///
     /// `Authorization: Bearer cmspat_...` の生のトークン。その形でなければ None。
     ///
     pub def personalTokenOf(headers: List[(String, String)]): Option[String] =

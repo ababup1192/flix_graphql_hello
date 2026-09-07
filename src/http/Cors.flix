@@ -57,17 +57,31 @@ mod Cors {
         { status = response#status, headers = response#headers ::: responseHeaders(config, request), body = response#body }
 
     ///
-    /// preflight（OPTIONS）への応答。許したオリジンなら許すメソッド・ヘッダ・キャッシュ時間を返し、
+    /// preflight（OPTIONS）への応答。許したオリジンなら許すメソッド（表から。OPTIONS を足す）・ヘッダ・キャッシュ時間を返し、
     /// そうでなければ何も付けない 204。Allow-Origin と Vary は他のレスポンスと同じく withHeaders が足す。
     ///
-    pub def preflight(config: CorsConfig, request: HttpRequest): HttpResponse =
+    pub def preflight(config: CorsConfig, methods: List[Method], request: HttpRequest): HttpResponse =
         let allowed = originOf(request) |> Option.exists(origin -> isAllowed(config, origin));
         let allowHeaders =
             if (allowed)
-                ("Access-Control-Allow-Methods", "GET, POST, OPTIONS") ::
-                ("Access-Control-Allow-Headers", "Content-Type, Authorization") ::
+                ("Access-Control-Allow-Methods", Method.join(methods ::: (Method.Options :: Nil))) ::
+                ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Api-Key, X-Preview-Token") ::
                 ("Access-Control-Max-Age", "86400") :: Nil
             else Nil;
         { status = 204, headers = allowHeaders, body = "" }
+
+    ///
+    /// CORS の middleware。OPTIONS でそのパスに受けるメソッドがあれば preflight を返し（next は呼ばない）、
+    /// それ以外は next の応答に CORS ヘッダを足す。404 / 503 にも付く。
+    /// allowedMethods はパス → 受けるメソッド（`Router.allowedMethods(routes)`）。
+    ///
+    pub def wrap(config: CorsConfig, allowedMethods: String -> List[Method], next: Handler[ef]): Handler[ef] =
+        routeRequest ->
+            let request = routeRequest#request;
+            let methods = allowedMethods(request#path);
+            if (request#method == "OPTIONS" and not List.isEmpty(methods))
+                preflight(config, methods, request) |> withHeaders(config, request)
+            else
+                next(routeRequest) |> withHeaders(config, request)
 
 }

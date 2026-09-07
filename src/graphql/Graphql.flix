@@ -106,6 +106,15 @@ import graphql.analysis.MaxQueryDepthInstrumentation
         }
 
     ///
+    /// エンジンの要らない道（/health など）で `Graphql` effect を剥がすハンドラ。実行を求められたらエラーの応答を返す。
+    ///
+    pub def runWithoutEngine(f: Unit -> a \ ef): a \ ef - Graphql =
+        run f() with handler Graphql {
+            def execute(_request, _context, resume) =
+                resume({ data = Value.Null, errors = Value.Obj(Map#{ "message" => Value.Str("この経路に GraphQL のエンジンはありません") }) :: Nil })
+        }
+
+    ///
     /// GraphqlRequest を graphql-java の ExecutionInput に組み立てる。
     /// context は root オブジェクトに (Context, ()) として載せ、ルート型のフィールドが source として受け取る。
     /// operationName は Some のときだけ渡す。

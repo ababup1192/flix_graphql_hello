@@ -48,9 +48,7 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
             let drainSeconds = Sys.Env.getVar("CMS_JOBS_DRAIN_SECONDS") |> Option.flatMap(Int64.fromString) |> Option.getWithDefault(15i64);
             let jobs = BackgroundJobs.createState(drainSeconds);
             let cacheMaxAge = Sys.Env.getVar("CMS_CACHE_MAX_AGE") |> Option.flatMap(Int32.fromString) |> Option.getWithDefault(60);
-            let contentConfig = { cors = cors, graphqlPath = "/graphql", version = version, jobsToken = jobsToken, cacheMaxAge = if (cacheMaxAge > 0) Some(cacheMaxAge) else None };
-            let adminConfig = { cors = cors, graphqlPath = "/admin/graphql", version = version, jobsToken = jobsToken, cacheMaxAge = (None: Option[Int32]) };
-            let accountConfig = { cors = cors, graphqlPath = "/account/graphql", version = version, jobsToken = jobsToken, cacheMaxAge = (None: Option[Int32]) };
+            let config = { cors = cors, version = version, jobsToken = jobsToken, cacheMaxAge = if (cacheMaxAge > 0) Some(cacheMaxAge) else None };
             let engineCache = ContentEngine.create(deps);
             // WhyNot: 開発モード（X-Dev-User を信じる）で 127.0.0.1 にしか bind しないのは、ヘッダで人になれる経路を LAN に開けないため
             let bind = match deps#auth#mode { case AuthConfig.Mode.Dev => Some("127.0.0.1") case _ => None };
@@ -61,7 +59,7 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
             let runtime = {
                 pool = pool, deps = deps, jwks = jwks, baseDomain = baseDomain, defaultProject = defaultProject,
                 accountEngine = accountEngine, adminEngines = adminEngines, engineCache = engineCache,
-                contentConfig = contentConfig, adminConfig = adminConfig, accountConfig = accountConfig };
+                config = config, routes = Server.routes(config) |> Router.withProjectPrefix };
             let maxConnections = Sys.Env.getVar("CMS_MAX_CONNECTIONS") |> Option.flatMap(Int32.fromString) |> Option.filter(n -> n > 0) |> Option.getWithDefault(256);
             let listener = HttpServer.open({ bind = bind, maxConnections = maxConnections | HttpServer.defaultConfig() });
             HttpServer.listen(listener, request -> Health.runWithPool(pool, jobs, listener, () -> dispatch(runtime, request)))
@@ -74,53 +72,67 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
 type alias Runtime = {
     pool = Pool, deps = Deps, jwks = TokenVerifier.JwksCache, baseDomain = Option[String], defaultProject = Option[ProjectId],
     accountEngine = Graphql.Engine, adminEngines = AdminEngine.Cache, engineCache = ContentEngine.Cache,
-    contentConfig = ServerConfig, adminConfig = ServerConfig, accountConfig = ServerConfig }
+    config = ServerConfig, routes = List[Route[{Graphql, Health}]] }
 
 ///
-/// 1 リクエストをどのエンジンで受けるか決めて実行する。
-/// プロジェクト slug 無しの /account/graphql（か、既定プロジェクトが無い時の全部）は Account API、
-/// それ以外はプロジェクト slug を id に解き、POST /graphql ならコンテンツ API、他は管理 API。
-///
-/// WhyNot: プロジェクト slug 無しで既定プロジェクトも無い時に Account API のエンジンで受けるのは、/health と 404 を
-/// プロジェクト無しで返すため（Account API は GraphQL のパス以外を実行しない）。
-/// WhyNot: コンテンツ API を実行する時以外（/health、404、preflight、GET）でエンジンを組まないのは、型定義が壊れた時に
-/// 死活監視や preflight まで 503 になり、404 ごとに目印の SELECT が走るため。GraphQL を実行しない道なので管理 API のエンジンで受ける。
+/// 1 リクエストを middleware（CORS → Host のプロジェクト → 身元）を通してルート表で振り分け、行の engine に合わせてエンジンを入れて実行する。
+/// 404 / 405 / 503 も CORS を通る。
 ///
 def dispatch(runtime: Runtime, request: HttpRequest): HttpResponse \ {IO, Health} =
-    let (projectSlug, path) = Server.splitProjectSlug(runtime#baseDomain, request);
-    let scoped = { path = path | request };
-    let credential = credentialOf(runtime#deps#auth, runtime#jwks, request);
-    if (Option.isEmpty(projectSlug) and (Server.pathOf(path) == runtime#accountConfig#graphqlPath or Option.isEmpty(runtime#defaultProject)))
-        Graphql.runWithEngine(runtime#accountEngine, () -> Server.handle(runtime#accountConfig, credential, scoped))
-    else
-    match resolveProject(runtime#pool, runtime#defaultProject, projectSlug) {
-        case Err(message)        => Server.unavailable(message)
-        case Ok(None)            => Server.notFound("プロジェクト '${projectSlug |> Option.getWithDefault("")}' がありません")
-        case Ok(Some(projectId)) =>
-            if (Server.needsGraphqlEngine(runtime#contentConfig, scoped))
-                match ContentEngine.current(runtime#engineCache, runtime#pool, projectId) {
-                    case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(runtime#contentConfig, credential, scoped))
+    let pipeline =
+        Cors.wrap(runtime#config#cors, Router.allowedMethods(runtime#routes),
+            Server.wrapProjectFromHost(runtime#baseDomain,
+                Credentials.wrap(tokenHeaderOf(runtime#deps#auth), verifierOf(runtime#deps#auth, runtime#jwks),
+                    Server.dispatch(runtime#routes, (found, routeRequest) -> runRoute(runtime, found, routeRequest)))));
+    pipeline({ request = request, params = Map.empty(), credential = Credential.Missing })
+
+///
+/// 一致した行を実行する。engine が None ならエンジン無し、Account ならプロジェクトを見ない。
+/// Content / Admin は params の projectSlug（無ければ既定プロジェクト）を id に解き、無ければ 404、エンジンを組めなければ 503。
+///
+/// WhyNot: エンジンの要らない道（/health、/jobs/tick）でエンジンを組まないのは、型定義が壊れた時に死活監視まで 503 になり、
+/// プロジェクトの SELECT が余分に走るため。
+///
+def runRoute(runtime: Runtime, found: Route[{Graphql, Health}], routeRequest: RouteRequest): HttpResponse \ {IO, Health} =
+    let execute = () -> (found#handle)(routeRequest);
+    match found#engine {
+        case None                 => Graphql.runWithoutEngine(execute)
+        case Some(Engine.Account) => Graphql.runWithEngine(runtime#accountEngine, execute)
+        case Some(engine)         =>
+            let projectSlug = Map.get(Router.projectSlugParam(), routeRequest#params);
+            match resolveProject(runtime#pool, runtime#defaultProject, projectSlug) {
+                case Err(message)        => Server.unavailable(message)
+                case Ok(None)            => Server.notFound("プロジェクト '${projectSlug |> Option.getWithDefault("")}' がありません")
+                case Ok(Some(projectId)) => match engineOf(runtime, engine, projectId) {
+                    case Ok(built)    => Graphql.runWithEngine(built, execute)
                     case Err(message) => Server.unavailable(message)
                 }
-            else
-                match AdminEngine.current(runtime#adminEngines, runtime#pool, projectId) {
-                    case Ok(engine)   => Graphql.runWithEngine(engine, () -> Server.handle(runtime#adminConfig, credential, scoped))
-                    case Err(message) => Server.unavailable(message)
-                }
+            }
     }
 
 ///
-/// リクエストの身元。PAT（Authorization: Bearer cmspat_...）、トークンのヘッダ（発行元で検証）、X-Api-Key、X-Preview-Token の順（Credentials）。
-/// dev モードは X-Dev-User の email を信じる（AuthConfig が CMS_VERSION=dev の時にしか許さない）。
+/// 行の engine に合う、このプロジェクトのエンジン。コンテンツ API は型の定義から組み（目印で組み直す）、管理 API はプロジェクトごとに 1 つ。
 ///
-def credentialOf(auth: AuthConfig.AuthConfig, jwks: TokenVerifier.JwksCache, request: HttpRequest): Credential \ IO =
-    let verified = token -> match auth#mode {
-        case AuthConfig.Mode.Jwks(config) => Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> TokenVerifier.runWithJwks(config, jwks, () -> TokenVerifier.verify(token))))
-        case AuthConfig.Mode.Dev          => TokenVerifier.runDev(() -> TokenVerifier.verify(token))
-        case AuthConfig.Mode.Closed       => Err("管理 API は閉じています（CMS_AUTH=none）")
-    };
-    let headerName = match auth#mode { case AuthConfig.Mode.Dev => "X-Dev-User" case _ => auth#tokenHeader };
-    Credentials.ofHeaders(headerName, verified, request#headers)
+def engineOf(runtime: Runtime, engine: Engine, projectId: ProjectId): Result[String, Graphql.Engine] \ IO = match engine {
+    case Engine.Content => ContentEngine.current(runtime#engineCache, runtime#pool, projectId)
+    case Engine.Admin   => AdminEngine.current(runtime#adminEngines, runtime#pool, projectId)
+    case Engine.Account => Ok(runtime#accountEngine)
+}
+
+///
+/// ログインのトークンを読むヘッダ。dev モードは X-Dev-User の email を信じる（AuthConfig が CMS_VERSION=dev の時にしか許さない）。
+///
+def tokenHeaderOf(auth: AuthConfig.AuthConfig): String =
+    match auth#mode { case AuthConfig.Mode.Dev => "X-Dev-User" case _ => auth#tokenHeader }
+
+///
+/// ログインのトークンの検証（発行元の JWKS、dev、閉じている）。身元の読み取りは Credentials.wrap（PAT → トークン → X-Api-Key → X-Preview-Token の順）。
+///
+def verifierOf(auth: AuthConfig.AuthConfig, jwks: TokenVerifier.JwksCache, token: String): Result[String, Principal] \ IO = match auth#mode {
+    case AuthConfig.Mode.Jwks(config) => Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> TokenVerifier.runWithJwks(config, jwks, () -> TokenVerifier.verify(token))))
+    case AuthConfig.Mode.Dev          => TokenVerifier.runDev(() -> TokenVerifier.verify(token))
+    case AuthConfig.Mode.Closed       => Err("管理 API は閉じています（CMS_AUTH=none）")
+}
 
 ///
 /// パスか Host のプロジェクト slug からプロジェクトを決める。無ければ既定プロジェクト（SQL を出さない）。

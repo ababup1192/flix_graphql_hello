@@ -25,7 +25,7 @@ mod TestServer {
     ///
     /// 管理画面のオリジンだけ許す設定。
     ///
-    def adminConfig(): ServerConfig = { cors = { allowedOrigins = "https://admin.example.com" :: Nil }, graphqlPath = "/graphql", version = "dev", jobsToken = None, cacheMaxAge = None }
+    def adminConfig(): ServerConfig = { cors = { allowedOrigins = "https://admin.example.com" :: Nil }, version = "dev", jobsToken = None, cacheMaxAge = None }
 
     ///
     /// runWithEcho が data に入れて返す形。variables が無いリクエストは空の Obj、operationName が無ければ Null。
@@ -213,7 +213,7 @@ mod TestServer {
         let response = GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(adminConfig(), Credential.Missing, fromAdmin("OPTIONS", "/graphql"))));
         Assert.assertEq(expected = (204, "", true, 1),
             (response#status, response#body,
-             List.memberOf(("Access-Control-Allow-Methods", "GET, POST, OPTIONS"), response#headers),
+             List.memberOf(("Access-Control-Allow-Methods", "POST, GET, OPTIONS"), response#headers),
              response#headers |> List.count(match (name, _) -> name == "Access-Control-Allow-Origin")))
 
     /// CORS 無しの設定では、Origin が付いていてもヘッダを足さない。
@@ -222,44 +222,59 @@ mod TestServer {
         Assert.assertEq(expected = Nil,
             GraphqlFake.runWithEcho(() -> handle(fromAdmin("POST", "/graphql")))#headers)
 
-    /// エンジンが要るのは POST でそのパス宛の時だけ。preflight / GET / 他のパスは要らない。
-    @Test
-    def testServerNeedsGraphqlEngineForPostAndGet(): Unit \ Assert =
-        Assert.assertEq(expected = (true, true, false, true, false),
-            (Server.needsGraphqlEngine(adminConfig(), fromAdmin("POST", "/graphql")),
-             Server.needsGraphqlEngine(adminConfig(), fromAdmin("POST", "/graphql?x=1")),
-             Server.needsGraphqlEngine(adminConfig(), fromAdmin("OPTIONS", "/graphql")),
-             Server.needsGraphqlEngine(adminConfig(), fromAdmin("GET", "/graphql")),
-             Server.needsGraphqlEngine(adminConfig(), fromAdmin("POST", "/health"))))
-
-    /// OPTIONS は GraphQL のパスと /health だけ 204 で、無いパスは 404。
+    /// OPTIONS は表にあるパス（/p/ 付きも）だけ 204 で、無いパスは 404。404 にも CORS ヘッダが付く。
     @Test
     def testServerPreflightOnlyOnKnownPaths(): Unit \ Assert =
-        let statuses = List#{"/graphql", "/health", "/nope"} |> List.map(path ->
-            GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(adminConfig(), Credential.Missing, fromAdmin("OPTIONS", path))))#status);
-        Assert.assertEq(expected = List#{204, 204, 404}, statuses)
+        let responses = List#{"/graphql", "/health", "/p/shop/admin/graphql", "/nope"} |> List.map(path ->
+            GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(adminConfig(), Credential.Missing, fromAdmin("OPTIONS", path)))));
+        Assert.assertEq(expected = (List#{204, 204, 204, 404}, List#{true, true, true, true}),
+            (responses |> List.map(response -> response#status),
+             responses |> List.map(response -> List.memberOf(("Access-Control-Allow-Origin", "https://admin.example.com"), response#headers))))
 
-    /// パスの先頭の /p/{プロジェクト slug} を切り出す。無ければそのまま。プロジェクト slug が空なら切り出さない。
+    // ---- ルート表 ----
+
+    /// 表の全行（/p/{projectSlug} 付きの複製込み）。行を足したらここにも足す。
     @Test
-    def testServerSplitProject(): Unit \ Assert =
-        Assert.assertEq(expected = ((Some("shop"), "/graphql"), (Some("shop"), "/admin/graphql?x=1"), (None, "/graphql"), (None, "/p/"), (None, "/health")),
-            (Server.splitProject("/p/shop/graphql"), Server.splitProject("/p/shop/admin/graphql?x=1"), Server.splitProject("/graphql"), Server.splitProject("/p/"), Server.splitProject("/health")))
+    def testServerRoutesDescribe(): Unit \ Assert =
+        Assert.assertEq(
+            expected = List#{
+                "POST /graphql", "GET /graphql", "POST /admin/graphql", "GET /admin/graphql", "POST /account/graphql", "GET /health", "POST /jobs/tick",
+                "POST /p/{projectSlug}/graphql", "GET /p/{projectSlug}/graphql", "POST /p/{projectSlug}/admin/graphql", "GET /p/{projectSlug}/admin/graphql",
+                "GET /p/{projectSlug}/health", "POST /p/{projectSlug}/jobs/tick" },
+            Server.routes(Server.defaultConfig()) |> Router.withProjectPrefix |> Router.describeAll)
 
-    /// Host の先頭ラベルをプロジェクト slug にする。ポートは無視、base が違えば None、/p/ があればそちらが勝つ、base 未設定なら Host は見ない。
+    /// /p/{プロジェクト slug} 付きのパスも同じ handler に届く。空のプロジェクト slug（/p//graphql）や /p/ だけは 404。
+    @Test
+    def testServerProjectPrefixedPaths(): Unit \ Assert =
+        let statusOf = path -> GraphqlFake.runWithEcho(() -> handle({ version = "HTTP/1.1", method = "GET", path = path, headers = Nil, body = "" }))#status;
+        Assert.assertEq(expected = (200, 200, 404, 404, 404),
+            (statusOf("/p/shop/health"), statusOf("/p/shop/graphql?query=%7B%20x%20%7D"), statusOf("/p//graphql"), statusOf("/p/"), statusOf("/p/shop/account/graphql")))
+
+    /// Host の先頭ラベルをプロジェクト slug にする。ポートは無視、base が違えば None、base 未設定なら Host は見ない。
     @Test
     def testServerSlugFromHost(): Unit \ Assert =
         let base = Some("example.com");
         let hostOf = host -> ("Host", host) :: Nil;
         Assert.assertEq(
-            expected = (Some("consumer"), Some("consumer"), None, None, None, (Some("shop"), "/graphql"), (Some("business"), "/admin/graphql"), (None, "/graphql")),
+            expected = (Some("consumer"), Some("consumer"), None, None, None),
             (Server.projectSlugFromHost(base, hostOf("consumer.example.com")),
              Server.projectSlugFromHost(base, hostOf("Consumer.Example.com:8080")),
              Server.projectSlugFromHost(base, hostOf("example.com")),
              Server.projectSlugFromHost(base, hostOf("consumer.other.com")),
-             Server.projectSlugFromHost(None, hostOf("consumer.example.com")),
-             Server.splitProjectSlug(base, { version = "HTTP/1.1", method = "GET", path = "/p/shop/graphql", headers = hostOf("consumer.example.com"), body = "" }),
-             Server.splitProjectSlug(base, { version = "HTTP/1.1", method = "GET", path = "/admin/graphql", headers = hostOf("business.example.com"), body = "" }),
-             Server.splitProjectSlug(None, { version = "HTTP/1.1", method = "GET", path = "/graphql", headers = hostOf("business.example.com"), body = "" })))
+             Server.projectSlugFromHost(None, hostOf("consumer.example.com"))))
+
+    /// projectSlug の params: /p/ があればそちらが勝ち、無ければ Host から、base 未設定なら空。
+    @Test
+    def testServerProjectSlugParam(): Unit \ Assert =
+        let table = Server.routes(Server.defaultConfig()) |> Router.withProjectPrefix;
+        let slugOf = (baseDomain, path, host) ->
+            Server.wrapProjectFromHost(baseDomain, Server.dispatch(table, (_, routeRequest) ->
+                { status = 200, headers = Nil, body = Map.get(Router.projectSlugParam(), routeRequest#params) |> Option.getWithDefault("") }))
+                ({ request = { version = "HTTP/1.1", method = "GET", path = path, headers = ("Host", host) :: Nil, body = "" }, params = Map.empty(), credential = Credential.Missing })#body;
+        Assert.assertEq(expected = ("shop", "business", ""),
+            (slugOf(Some("example.com"), "/p/shop/graphql", "consumer.example.com"),
+             slugOf(Some("example.com"), "/admin/graphql", "business.example.com"),
+             slugOf(None, "/graphql", "business.example.com")))
 
 
     /// POST /jobs/tick は、トークンが設定されていなければ 404、違えば 403、合えば 200 で失敗の一覧（空）を返す。

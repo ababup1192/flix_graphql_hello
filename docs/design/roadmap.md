@@ -11,6 +11,8 @@ Docker（起動時 migration、JSON ログ、/health の版）、deploy/ の com
 
 HTTP サーバの同時接続の上限（`CMS_MAX_CONNECTIONS`。超えたら 503 + `Retry-After`。`/health` の `connections`）と keep-alive（HTTP/1.1、1 接続 100 回、idle 15 秒、エラー応答の後は閉じる）は 2026-09-08 に実装済み。`spawn` は virtual thread なので接続ごとのスレッドは platform thread を食わない。
 
+ルーティングの表化（2026-09-08 に実装済み）: `Router`（純粋。`find` / `describe` / `withProjectPrefix`）と `Server.routes` の表、middleware（`Cors.wrap` / `Credentials.wrap` / `Server.wrapProjectFromHost`）。404 / 405 / 503 にも CORS が付き、preflight の `Allow-Methods` は表から、`Allow-Headers` に `X-Api-Key` / `X-Preview-Token`。`/mcp` と `/api/…` は表に 1 行足すだけ。
+
 エラーの分類（2026-09-08 に実装済み）: `errors[].extensions.code`（`INVALID` / `NOT_FOUND` / `FORBIDDEN` / `CONFLICT` / `REQUIRES_LOGIN` / `UNAUTHENTICATED` / `INTERNAL`）と `violations` / `entity` / `id` / `expectedVersion` / `actualVersion`。message は日本語のままで、クライアント・CLI・MCP は code で分岐する（[error-codes.md](error-codes.md)）。
 
 ## 優先度順（上から着手）

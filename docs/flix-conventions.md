@@ -185,6 +185,20 @@ pub def resolvers(): GeneratedAdmin.WebhookResolvers[AdminEff] =
 
 雛形は `make scaffold TYPE=Xxx` が既定を使う形で吐く（`DEFAULTS=no` で全フィールド）。
 
+## HTTP のルートは表に 1 行
+
+ルーティングは `src/app/Server.flix` の `routes` の表（`Router.route(メソッド, "/パス", engine, handler)`）で持つ。
+文字列の分岐や `Main` のエンジン選択に書き足さない。
+
+- **表に 1 行**足す。`engine` は要る GraphQL エンジン（`Engine.Content` / `Admin` / `Account`）か、要らなければ `None`。
+  Main が表の `engine` を見てエンジンを入れるので、Main は触らない
+- **`test/app/TestServer.flix` の `testServerRoutesDescribe` の期待値に 1 行**足す（`/p/{projectSlug}/` 付きの複製も出る。Account だけ複製されない）
+- `/p/{projectSlug}/...` は表に書かない（`Router.withProjectPrefix` が複製する）。パスの `{name}` は `routeRequest#params` に生の文字列で入るので、
+  型付きの id は handler の入口で `ProjectSlug.parse` などの既存の parse を呼ぶ
+- OPTIONS の 204 と 405 の `Allow` は表から出る。手で列挙しない
+- 行の handler は自分の effect（`Graphql` だけ、`Health` だけ）を宣言し、表に載せる時に `widen` で表全体の effect に広げる
+- `handler` は Flix の予約語。レコードのフィールドも変数も `handle` / `pipeline` にする
+
 ## その他の落とし穴
 
 - レコードは `Eq` / `Order` を持てない。比較したい値は名前付き 1 フィールドの enum で包む

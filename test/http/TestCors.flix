@@ -67,17 +67,33 @@ mod TestCors {
 
     // ---- preflight ----
 
-    /// 許したオリジンの preflight は 204 で、メソッド・ヘッダ・Max-Age だけを返す（Allow-Origin は withHeaders が足す）。
+    /// 許したオリジンの preflight は 204 で、表のメソッド + OPTIONS・鍵とプレビューのヘッダ・Max-Age だけを返す（Allow-Origin は withHeaders が足す）。
     @Test
     def testCorsPreflightAllowed(): Unit \ Assert =
-        let response = Cors.preflight(adminOnly(), requestFrom("https://admin.example.com"));
-        Assert.assertEq(expected = (204, "", ("Access-Control-Allow-Methods", "GET, POST, OPTIONS") :: ("Access-Control-Allow-Headers", "Content-Type, Authorization") :: ("Access-Control-Max-Age", "86400") :: Nil),
+        let response = Cors.preflight(adminOnly(), Method.Post :: Method.Get :: Nil, requestFrom("https://admin.example.com"));
+        Assert.assertEq(expected = (204, "", ("Access-Control-Allow-Methods", "POST, GET, OPTIONS") :: ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Api-Key, X-Preview-Token") :: ("Access-Control-Max-Age", "86400") :: Nil),
             (response#status, response#body, response#headers))
 
     /// 許していないオリジンの preflight は 204 だがヘッダを一切付けない。
     @Test
     def testCorsPreflightDenied(): Unit \ Assert =
-        let response = Cors.preflight(adminOnly(), requestFrom("https://evil.example"));
+        let response = Cors.preflight(adminOnly(), Method.Get :: Nil, requestFrom("https://evil.example"));
         Assert.assertEq(expected = (204, Nil, ""), (response#status, response#headers, response#body))
+
+    // ---- wrap ----
+
+    /// 受けるメソッドのあるパスへの OPTIONS は next を呼ばず preflight（Allow-Origin 付き）。無いパスは next の応答（404）にも CORS ヘッダが付く。
+    @Test
+    def testCorsWrapPreflightAndPassThrough(): Unit \ Assert =
+        let allowedMethods = path -> if (path == "/graphql") Method.Post :: Nil else Nil;
+        let pipeline = Cors.wrap(adminOnly(), allowedMethods, _ -> { status = 404, headers = Nil, body = "" });
+        let call = path -> pipeline({ request = { version = "HTTP/1.1", method = "OPTIONS", path = path, headers = ("origin", "https://admin.example.com") :: Nil, body = "" }, params = Map.empty(), credential = Credential.Missing });
+        Assert.assertEq(
+            expected = ((204, Some("https://admin.example.com"), Some("POST, OPTIONS")), (404, Some("https://admin.example.com"), None)),
+            (call("/graphql") |> summarize, call("/nope") |> summarize))
+
+    /// (status, Allow-Origin, Allow-Methods)。
+    def summarize(response: HttpResponse): (Int32, Option[String], Option[String]) =
+        (response#status, Http.findHeader("Access-Control-Allow-Origin", response#headers), Http.findHeader("Access-Control-Allow-Methods", response#headers))
 
 }
