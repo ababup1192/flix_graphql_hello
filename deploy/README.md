@@ -14,6 +14,12 @@ curl -s localhost:8080/health # {"status":"ok","version":"..."}
 - **Cloudflare Tunnel（おすすめ。ポートを開けない）**: cloudflared をこの VPS に入れ、`cms.example.com → http://localhost:8080`、`assets.example.com → http://localhost:9000` の 2 本を向ける。`ASSET_PUBLIC_URL=https://assets.example.com/cms`
 - **Caddy**: `docker compose --profile caddy up -d`。`CMS_DOMAIN` と `ASSET_DOMAIN` の DNS をこの VPS に向ければ TLS は自動
 
+## テナント分離（RLS）
+
+プロジェクトの中身の表（content_types / content_fields / entries / entry_versions / entry_links / assets）には PostgreSQL の RLS が掛かっている。
+リクエストの Tx の先頭で `app.project_id` の印を置き、policy はその印と一致する行しか見せない（印が無ければ 0 行）。
+`CMS_DB_APP_PASSWORD` を入れると所有者でないロール `cms_app` で繋ぎ、SQL インジェクションや生 SQL があっても他のプロジェクトの行は出ない。
+
 ## 更新
 
 ```bash
@@ -63,7 +69,8 @@ ASSET_PUBLIC_URL=https://assets.example.com
 
 | 名前 | 意味 | 既定 |
 |---|---|---|
-| `CMS_DSN` / `CMS_DB_USER` / `CMS_DB_PASSWORD` | PostgreSQL | 必須 / cms / cms |
+| `CMS_DSN` / `CMS_DB_USER` / `CMS_DB_PASSWORD` | PostgreSQL。表の所有者（migration に使う） | 必須 / cms / cms |
+| `CMS_DB_APP_USER` / `CMS_DB_APP_PASSWORD` | リクエストに使うロール。起動時に所有者が作り、表の読み書きだけ許す（RLS が効く）。PASSWORD が無ければ所有者で繋ぐ | cms_app / 無し |
 | `CMS_MIGRATE` | `apply`（起動時に当てる）か `check`（未適用なら起動しない） | イメージは apply、手元は check |
 | `CMS_CORS_ORIGINS` | 許すオリジン（カンマ区切り） | 無し |
 | `CMS_VERSION` | `/health` に出す版 | イメージのビルド時に git の sha |

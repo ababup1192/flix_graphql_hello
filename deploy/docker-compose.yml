@@ -17,6 +17,8 @@ services:
       CMS_DSN: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-cms}
       CMS_DB_USER: ${POSTGRES_USER:-cms}
       CMS_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD を .env に入れてください}
+      CMS_DB_APP_USER: ${CMS_DB_APP_USER:-cms_app}
+      CMS_DB_APP_PASSWORD: ${CMS_DB_APP_PASSWORD:-}
       CMS_MIGRATE: apply
       CMS_CORS_ORIGINS: ${CMS_CORS_ORIGINS:-}
       CMS_AUTH: ${CMS_AUTH:-none}

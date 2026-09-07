@@ -28,7 +28,7 @@ mod AdminRunner {
                         IdGen.runWithRandom(() ->
                             Tenant.runWith(projectId, () ->
                                 Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () ->
-                                    Pool.withLazyTx(pool, () -> {
+                                    TenantTx.withLazyTx(pool, projectId, () -> {
                                         let actor = Deps.actorOf(deps, projectId, credential);
                                         Session.runWith(actor, f)
                                     }))))))));

@@ -107,7 +107,7 @@ mod TestAccountPg {
             let alice = Accounts.resolveUser({ ownerEmail = None }, { issuer = "test", subject = "alice", email = "alice@example.com", name = "alice" });
             let org = Session.runWith(Accounts.actorWithoutProject(alice), () -> Organizations.create(Signup.Open, "Acme"));
             let blog = Session.runWith(Accounts.actorWithoutProject(alice), () -> Organizations.createProject(org#id, ProjectSlug.ProjectSlug("blog"), "Blog"));
-            Tenant.runWith(blog#id, () -> Session.runWith(Accounts.actorFor(alice, blog#id), () ->
+            PgTestSupport.asProject(blog#id, () -> Session.runWith(Accounts.actorFor(alice, blog#id), () ->
                 (ContentTypes.create(CmsTestKit.typeDraft("posts", "記事"))#apiId, Session.current() == Actor.User(alice#id, "alice@example.com", Role.Owner :: Nil))))
         });
         Assert.assertEq(expected = Ok(Ok((ApiId.ApiId("posts"), true))), result)

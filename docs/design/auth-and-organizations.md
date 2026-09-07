@@ -1,7 +1,8 @@
 # 設計: 認証・組織・権限と subdomain ルーティング
 
 状態: 2026-09-07 に実装（users / organizations / memberships / invitations / api_keys、Authz の Datalog、JWT の検証、`Session` effect、
-管理 API の `me` / メンバー / 招待 / 鍵、公開 API の visibility、Host ヘッダでプロジェクト slug、Account API）。まだ無い物: RLS（[roadmap #3b](roadmap.md)）。
+管理 API の `me` / メンバー / 招待 / 鍵、公開 API の visibility、Host ヘッダでプロジェクト slug、Account API、RLS と生成器の検査（三重化）、外向きの id は乱数の public_id）。
+まだ無い物: auth の表（memberships / invitations / api_keys）の RLS（`app.user_id` を足した policy が要る。[roadmap #3c](roadmap.md)）。
 
 言葉: **プロジェクト slug** は URL の `/p/{プロジェクト slug}/` と subdomain でプロジェクトを選ぶ人が読める名前（`ProjectSlug` 型。parse 済みしか作れない）。
 **プロジェクト id** は DB の主キー。**既定プロジェクト** はプロジェクト slug 無しの時に落ちる先（`CMS_DEFAULT_PROJECT`）。
@@ -135,11 +136,12 @@ api_keys       (id, project_id, name, key_hash, scope: read | readDraft, created
 ### テナント分離の三重化
 
 1. 型: `Tenant` effect の未使用はコンパイルで落ちる（済み）
-2. 生成器: sqlfx の生成器が、`project_id` 列を持つ表を触る query に `project_id = :projectId` が無ければ生成を失敗させ、
-   `projectId` を生成コードの中で `Tenant.currentId()` から供給する（呼ぶ側は渡さない）
-3. DB: RLS。`ALTER TABLE ... ENABLE / FORCE ROW LEVEL SECURITY` と `USING (project_id = current_setting('app.project_id')::bigint)` を
-   プロジェクトに属する全表に。`Tenant.runWith` の handler が Tx の最初に `SET LOCAL app.project_id` を流す（sqlfx の withLazyTx に
-   「開いた直後に流す SQL」の口を足す）。接続は所有者でない `cms_app` ロール、migration だけ所有者。設定が無い Tx は全行が見えない
+2. 生成器（済み、sqlfx 0.1.3）: `gen --scope project_id` で、`project_id` 列を持つ表を触る query に列の名前が無ければ生成を失敗させる。
+   意図して跨ぐ query は `// unscoped: 理由`。`projectId` は呼ぶ側が渡す（sqlfx が CMS の effect を知らないため。RLS が受け止める）
+3. DB（済み、migration 012）: 中身の 6 表に ENABLE / FORCE と policy `project_id = nullif(current_setting('app.project_id', true), '')::bigint`（USING と WITH CHECK）。
+   印は Runner が `TenantTx.withLazyTx`（sqlfx の `Pool.withLazyTxAfterBegin`）で BEGIN の直後に `set_config('app.project_id', $1, true)` を流す。
+   Account API は印を置かないので中身の表は 0 行。接続は `CMS_DB_APP_PASSWORD` があれば所有者でない `cms_app`（起動時に `AppRole.ensure` が作る）。
+   注意: docker の POSTGRES_USER は superuser で RLS を素通りするので、テスト（TestRlsPg）は cms_app で繋ぎ直して確かめる
 
 ### 後から足す属性ベースの権限に備える
 

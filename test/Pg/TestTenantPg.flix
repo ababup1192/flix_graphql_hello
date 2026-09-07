@@ -16,7 +16,7 @@ mod TestTenantPg {
             let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
             discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hello"))}));
-            Tenant.runWith(shop, () -> {
+            PgTestSupport.asProject(shop, () -> {
                 let own = ContentTypes.create(CmsTestKit.typeDraft("blogs", "商品記事"));
                 (List.length(ContentTypes.list()),
                  ContentTypes.findByApiId(CmsTestKit.apiId("blogs")) |> Option.map(found -> found#id == own#id),

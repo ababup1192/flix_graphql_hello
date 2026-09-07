@@ -117,7 +117,7 @@ mod TestAssetsPg {
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"asset003"}, () -> {
             let upload = Assets.createUpload({ fileName = "a.png", mime = "image/png", size = 5i64 });
             let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
-            Tenant.runWith(shop, () ->
+            PgTestSupport.asProject(shop, () ->
                 (Assets.find(upload#asset#id) |> Option.isEmpty,
                  CmsTestKit.failureMessage(() -> Assets.delete(upload#asset#id))))
         }));

@@ -183,5 +183,5 @@ mod TestPublishPg {
     /// プール越しに 1 つの Tx で publish し、(DB の失敗, (業務エラーの文言, stage)) の形で返す。
     ///
     def publishOutcome(pool: Pool, id: String): Result[DbFailure, Result[String, Stage]] \ IO =
-        DbError.runWithFailure(() -> CmsTestKit.messageOr(entry -> entry#stage, () -> Pool.withLazyTx(pool, () -> Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> ContentEntries.publish(CmsTestKit.entryId(id), "tester", false))))))
+        DbError.runWithFailure(() -> CmsTestKit.messageOr(entry -> entry#stage, () -> TenantTx.withLazyTx(pool, ProjectId.default(), () -> Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> ContentEntries.publish(CmsTestKit.entryId(id), "tester", false))))))
 }

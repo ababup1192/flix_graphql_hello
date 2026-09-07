@@ -45,12 +45,12 @@ mod ContentEngine {
     /// 定義を読んで組み直す。
     ///
     def rebuild(pool: Pool, deps: Deps, projectId: ProjectId): Result[String, Graphql.Engine] \ IO =
-        read(pool, "content type の定義を読めません", () -> Tenant.runWith(projectId, () -> Session.runWith(Actor.System, () -> CmsErr.runWithResult(ContentTypes.list))))
+        read(pool, projectId, "content type の定義を読めません", () -> Tenant.runWith(projectId, () -> Session.runWith(Actor.System, () -> CmsErr.runWithResult(ContentTypes.list))))
             |> Result.flatMap(loaded -> loaded |> Result.mapErr(failure -> "content type の定義を読めません: ${CmsErr.toMessage(failure)}"))
             |> Result.flatMap(types -> Graphql.buildEngine(ContentSchemaBuilder.build(types, ContentRunner.make(pool, deps, projectId))))
 
     def readFingerprint(pool: Pool, projectId: ProjectId): Result[String, String] \ IO =
-        read(pool, "content type の目印を読めません", () -> ContentTypesQueries.schemaFingerprint(ProjectId.toInt64(projectId)))
+        read(pool, projectId, "content type の目印を読めません", () -> ContentTypesQueries.schemaFingerprint(ProjectId.toInt64(projectId)))
             |> Result.map(row -> match row {
                 case Some(found) => "${found#types |> Option.getWithDefault(0i64)}/${found#latest |> Option.map(Timestamp.toIso8601) |> Option.getWithDefault("-")}"
                 case None        => "0/-"
@@ -59,7 +59,7 @@ mod ContentEngine {
     ///
     /// プールから接続を借りて thunk を 1 つの遅延 Tx で走らせ、DbFailure を label 付きの文字列にする。一時的な失敗は Runner と同じく再試行する。
     ///
-    def read(pool: Pool, label: String, thunk: Unit -> a \ ef): Result[String, a] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr}) + IO =
-        DbRunner.retrying(() -> Pool.withLazyTx(pool, thunk)) |> Result.mapErr(failure -> "${label}: ${failure}")
+    def read(pool: Pool, projectId: ProjectId, label: String, thunk: Unit -> a \ ef): Result[String, a] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr}) + IO =
+        DbRunner.retrying(() -> TenantTx.withLazyTx(pool, projectId, thunk)) |> Result.mapErr(failure -> "${label}: ${failure}")
 
 }

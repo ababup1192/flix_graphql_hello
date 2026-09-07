@@ -4,7 +4,7 @@
 /// パスの先頭に /p/{プロジェクト slug} を付けるとそのプロジェクト、無ければ既定プロジェクト（CMS_DEFAULT_PROJECT。空なら 404）。
 /// 起動に失敗したらメッセージを出して終了コード 1 で終わる。
 ///
-/// 環境変数: CMS_DSN / CMS_DB_USER / CMS_DB_PASSWORD（DbConfig）、ASSET_*（StorageConfig。省略時は asset 無し）、
+/// 環境変数: CMS_DSN / CMS_DB_USER / CMS_DB_PASSWORD（DbConfig。表の所有者）、CMS_DB_APP_USER / CMS_DB_APP_PASSWORD（リクエスト用のロール。無ければ所有者で繋ぐ）、ASSET_*（StorageConfig。省略時は asset 無し）、
 /// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_BASE_DOMAIN（`{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。省略時は /p/ だけ）、
 /// CMS_DEFAULT_PROJECT（プロジェクト slug 無しの時のプロジェクト slug。省略時は default、空ならプロジェクト slug 無しは 404）、CMS_SIGNUP（open / closed）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
 /// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health に出す版。省略時は dev）
@@ -14,8 +14,10 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
         _           <- checkGenerated(GeneratedCheck.admin());
         _           <- checkGenerated(GeneratedCheck.account());
         connection  <- DbConfig.fromEnv();
-        pool        <- openPool(connection);
         _           <- prepareMigrations(connection, Sys.Env.getVar("CMS_MIGRATE"));
+        appConnection <- Ok(DbConfig.appFromEnv(connection));
+        _           <- ensureAppRole(connection, appConnection);
+        pool        <- openPool(appConnection |> Option.getWithDefault(connection));
         storage     <- StorageConfig.fromEnv();
         auth        <- AuthConfig.fromEnv();
         deps        <- Ok({ storage = storage, auth = auth });
@@ -116,6 +118,17 @@ def resolveDefaultProject(pool: Pool, configured: Option[String]): Result[String
                     case None     => Err("CMS_DEFAULT_PROJECT '${text}' のプロジェクトがありません")
                 })
     }
+}
+
+///
+/// アプリ用のロールを所有者の接続で用意する。設定が無ければ何もしない（所有者で繋ぐ）。
+///
+/// WhyNot: 所有者で繋ぐ事を Err にしないのは、セルフホストで 1 プロジェクトならロール分離の価値が薄く、
+/// policy は FORCE で所有者にも効くため。ログには出して分かるようにする。
+///
+def ensureAppRole(owner: Jdbc.ConnectionConfig, app: Option[Jdbc.ConnectionConfig]): Result[String, Unit] \ IO = match app {
+    case None        => { println("db: CMS_DB_APP_PASSWORD が無いので所有者（${owner#user}）で繋ぎます。RLS は効きますがロール分離はありません"); Ok(()) }
+    case Some(found) => AppRole.ensure(owner, found#user, found#password)
 }
 
 ///

@@ -20,7 +20,7 @@ mod ContentRunner {
             CmsErr.runWithResult(() ->
                 Tenant.runWith(projectId, () ->
                     Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () -> IdGen.runWithRandom(() ->
-                        Pool.withLazyTx(pool, () -> {
+                        TenantTx.withLazyTx(pool, projectId, () -> {
                             let actor = Deps.actorOf(deps, projectId, context#credential);
                             guardVisibility(projectId, actor);
                             Session.runWith(actor, f)

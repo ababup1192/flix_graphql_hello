@@ -38,8 +38,18 @@ mod PgTestSupport {
     pub def withDb(body: Unit -> a \ ef): Result[DbFailure, Result[CmsErr.CmsFailure, a]] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr, IdGen, Tenant, Session, ObjectStore}) + IO =
         DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(config(), _ -> {
             resetSchema();
+            TenantTx.stampSession(ProjectId.default());
             CmsErr.runWithResult(() -> Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() -> withStorage(body)))))
         })))
+
+    ///
+    /// withDb の中で別のプロジェクトとして走らせる。Tenant と RLS の印（接続に効く物）を両方切り替え、終わったら既定に戻す。
+    ///
+    pub def asProject(projectId: ProjectId, thunk: Unit -> a \ ef): a \ (ef - Tenant) + DbRead =
+        TenantTx.stampSession(projectId);
+        let result = Tenant.runWith(projectId, thunk);
+        TenantTx.stampSession(ProjectId.default());
+        result
 
     ///
     /// asset の保存先（MinIO）。ASSET_ENDPOINT が無ければ未設定の handler。
@@ -66,7 +76,7 @@ mod PgTestSupport {
     /// プール越しに 1 つの Tx で書く（withDb の外から、コンテンツ API のエンジンと同じ接続先を触る）。
     ///
     pub def mutate(pool: Pool, thunk: Unit -> a \ ef): Result[DbFailure, Result[CmsErr.CmsFailure, a]] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, CmsErr, IdGen, Tenant, Session, ObjectStore}) + IO =
-        DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() -> withStorage(() -> Pool.withLazyTx(pool, thunk)))))))
+        DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() -> withStorage(() -> TenantTx.withLazyTx(pool, ProjectId.default(), thunk)))))))
 
     ///
     /// プールを開いて body に渡し、必ず閉じる。
@@ -135,7 +145,7 @@ mod PgTestSupport {
         case Err(message) => bug!("engine: ${message}")
     }
 
-    def seededOrBug(result: Result[DbFailure, Result[CmsErr.CmsFailure, b]]): b = match result {
+    pub def seededOrBug(result: Result[DbFailure, Result[CmsErr.CmsFailure, b]]): b = match result {
         case Ok(Ok(seeded))  => seeded
         case Ok(Err(failure)) => bug!("seed: ${CmsErr.toMessage(failure)}")
         case Err(failure)    => bug!("seed: ${failure}")
