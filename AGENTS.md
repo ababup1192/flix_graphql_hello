@@ -54,13 +54,14 @@ migrations/            DDL。sqlfx の机上スキーマの元で、make migrate
 queries/*.q            SQL
 src/generated/graphql/ schemagen の生成物（触らない）。GeneratedSchema / GeneratedAdminSchema
 src/generated/sql/     sqlfx の生成物（触らない）。*Queries / Tables
-src/cms/model/         ドメインの型。Ids（TypeId / FieldId / ApiId / TypeName）、ContentType（enum・レコード・Draft / Changes・FieldConfig）、Entry（EntryId / Stage / EntryData / IdGen）、Asset（AssetId / AssetStatus / Upload）
-src/cms/rules/         純粋な規則。Naming（予約名・衝突・kind と config）、EntryValidation（下書きは緩く、公開は required まで）、EntryLinks（中身から参照を取り出す）、AssetRules（置いてよい mime と大きさ）、RichText（doc の検査・平文・HTML）、AssetRefs（中身から asset を取り出す）
+src/cms/model/         ドメインの型。Auth（UserId / OrgId / Role / Permission / Actor / ApiKeyScope / Visibility）、Ids（TypeId / FieldId / ApiId / TypeName）、ContentType（enum・レコード・Draft / Changes・FieldConfig）、Entry（EntryId / Stage / EntryData / IdGen）、Asset（AssetId / AssetStatus / Upload）
+src/cms/rules/         純粋な規則。Authz（役割 → 権限の Datalog。`can` は resource も受ける）、Naming（予約名・衝突・kind と config）、EntryValidation（下書きは緩く、公開は required まで）、EntryLinks（中身から参照を取り出す）、AssetRules（置いてよい mime と大きさ）、RichText（doc の検査・平文・HTML）、AssetRefs（中身から asset を取り出す）
 src/cms/db/            行とドメインの値の変換と、絞り込みの SQL 化（EntryFilterSql）。列名と JSONB の式を知るのはここだけ
-src/cms/               ユースケース（ContentTypes / ContentEntries / Projects / Assets）と業務エラー（CmsErr）、今のプロジェクト（Tenant effect）
+src/cms/               ユースケース（ContentTypes / ContentEntries / Projects / Assets / Accounts / Members / ApiKeys）と業務エラー（CmsErr）、今のプロジェクト（Tenant effect）、今の主体（Session effect。`Session.require(permission)` が既定拒否の入口）
 src/admin/             管理 API。AdminMapping（GraphQL の型 ↔ ドメイン）、リゾルバ、AdminRunner（最初の SQL で借りる Tx）、AdminEngine（プロジェクトごとのエンジン）
 src/content/           コンテンツ API。ContentSchemaBuilder（定義 → Schema）、ContentEngine（目印で組み直す置き場）、ContentRunner（読むだけ）
-src/app/               Server（ルーティング・CORS・/health）、DbConfig、StorageConfig（ASSET_*。無ければ asset 無し）、Health
+src/app/               Server（ルーティング・CORS・/health・Host の slug）、DbConfig、StorageConfig（ASSET_*。無ければ asset 無し）、AuthConfig（CMS_AUTH=jwks|dev|none）、Deps、Health
+src/auth/              JWT の検証（RS256 固定。kid / iss / aud / exp / nbf）と TokenVerifier effect（JWKS の取得とキャッシュ）
 src/storage/           asset の置き先。SigV4（純粋な署名）、ObjectStore effect（署名付き URL / HEAD / DELETE。MinIO と R2 は同じ handler）
 src/http/              手書き HTTP/1.1 と Cors
 src/graphql/           graphql-java の境界と Schema の DSL
@@ -73,6 +74,14 @@ test/sample/           graphql-java の境界のテストで使う見本のス�
 1 つの DB に複数のプロジェクト（型と entry の集まり）を持つ。パスの先頭 `/p/{slug}/` で選び、無ければ既定（id 1 / `default`）。
 ユースケースは `Tenant.current()`（algebraic effect）で今のプロジェクトを読み、読み書きを全部そこに閉じる。
 Runner がリクエストごとに handler を入れ、テストは `PgTestSupport` が既定のプロジェクトで入れる。他のプロジェクトの id を渡しても notFound。
+
+## 認証と権限
+
+身元は `Credential`（Bearer / ApiKey / Missing / Invalid）として graphql 層の Context に入り、Runner が Tx の中で `Actor` に解決して `Session` に入れる。
+ユースケースは `Session.require(Permission)` で守り、判定は `Authz.can`（Datalog）。役割は owner ⊃ editor ⊃ writer ⊃ viewer、組織 owner はプロジェクト owner。
+公開 API は public なら鍵無しで公開中を読め、`stage: DRAFT` は readDraft、private は API キー（`X-Api-Key`）か役割が要る。
+最初の owner は `CMS_BOOTSTRAP_OWNER` の初回ログイン。dev 認証（`X-Dev-User`）は `CMS_VERSION=dev` の時だけで、その時は 127.0.0.1 にしか bind しない。
+設計と決めた事は [docs/design/auth-and-organizations.md](docs/design/auth-and-organizations.md)。環境変数の一覧は `deploy/README.md`。
 
 ## 型の決まり
 
