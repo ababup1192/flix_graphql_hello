@@ -33,6 +33,49 @@ mod Http {
     import java.nio.charset.StandardCharsets
 
     ///
+    /// パスのクエリ文字列（"?a=1&b=x%20y"）を名前 → 値に。パーセントと + を戻す。同じ名前があれば後の物。値が無ければ空。
+    ///
+    pub def parseQueryString(path: String): Map[String, String] =
+        match String.splitOn(substr = "?", path) {
+            case _ :: rest if not List.isEmpty(rest) =>
+                List.join("?", rest)
+                    |> String.splitOn(substr = "&")
+                    |> List.filter(pair -> not String.isEmpty(pair))
+                    |> List.map(pair -> match String.splitOn(substr = "=", pair) {
+                        case name :: value => (percentDecode(name), percentDecode(List.join("=", value)))
+                        case Nil           => ("", "")
+                    })
+                    |> List.toMap
+            case _ => Map.empty()
+        }
+
+    ///
+    /// %XX と + を元の文字に。壊れた %（後ろが 2 桁の 16 進でない）はそのまま残す。UTF-8 のバイト列として組み立て直す。
+    ///
+    pub def percentDecode(text: String): String =
+        decodeChars(String.toList(text), Nil) |> List.reverse |> List.toVector |> String.fromBytes
+
+    def decodeChars(chars: List[Char], acc: List[Int8]): List[Int8] = match chars {
+        case Nil => acc
+        case '+' :: rest => decodeChars(rest, 32i8 :: acc)
+        case '%' :: high :: low :: rest =>
+            match (hexValue(high), hexValue(low)) {
+                case (Some(h), Some(l)) => decodeChars(rest, Int32.clampToInt8(min = -128i8, max = 127i8, wrapByte(h * 16 + l)) :: acc)
+                case _ => decodeChars(high :: low :: rest, bytesOf('%') ::: acc)
+            }
+        case ch :: rest => decodeChars(rest, bytesOf(ch) ::: acc)
+    }
+
+    /// 0..255 を Int8 の範囲に折り返す。
+    def wrapByte(n: Int32): Int32 = if (n > 127) n - 256 else n
+
+    /// 1 文字を UTF-8 のバイト列（逆順。acc に積むため）に。
+    def bytesOf(ch: Char): List[Int8] =
+        String.toBytes(Char.toString(ch)) |> Vector.toList |> List.reverse
+
+    def hexValue(ch: Char): Option[Int32] = Char.digit(radix = 16, ch)
+
+    ///
     /// ヘッダの値（名前は大文字小文字を問わない。前後の空白は落とす）。無ければ None。同じ名前が複数あれば最初の物。
     ///
     pub def findHeader(name: String, headers: List[(String, String)]): Option[String] =

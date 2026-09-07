@@ -25,7 +25,7 @@ mod TestServer {
     ///
     /// 管理画面のオリジンだけ許す設定。
     ///
-    def adminConfig(): ServerConfig = { cors = { allowedOrigins = "https://admin.example.com" :: Nil }, graphqlPath = "/graphql", version = "dev", jobsToken = None }
+    def adminConfig(): ServerConfig = { cors = { allowedOrigins = "https://admin.example.com" :: Nil }, graphqlPath = "/graphql", version = "dev", jobsToken = None, cacheMaxAge = None }
 
     ///
     /// runWithEcho が data に入れて返す形。variables が無いリクエストは空の Obj、operationName が無ければ Null。
@@ -100,19 +100,61 @@ mod TestServer {
 
     // ---- ルーティング ----
 
-    /// /graphql への GET は 405、それ以外のパスは 404。
+    /// /graphql への PUT は 405、それ以外のパスは 404。
     @Test
     def testServerRouting(): Unit \ Assert =
         Assert.assertEq(expected = (405, 404),
             GraphqlFake.runWithEcho(() -> (
-                handle({ method = "GET", path = "/graphql", headers = Nil, body = "" })#status,
+                handle({ method = "PUT", path = "/graphql", headers = Nil, body = "" })#status,
                 handle({ method = "POST", path = "/", headers = Nil, body = "" })#status)))
 
-    /// 405 のレスポンスは Allow: POST ヘッダを持つ。
+    /// 405 のレスポンスは Allow ヘッダを持つ。
     @Test
     def testServerMethodNotAllowedHasAllowHeader(): Unit \ Assert =
-        Assert.assertEq(expected = ("Allow", "POST") :: Nil,
-            GraphqlFake.runWithEcho(() -> handle({ method = "GET", path = "/graphql", headers = Nil, body = "" }))#headers)
+        Assert.assertEq(expected = ("Allow", "POST, GET") :: Nil,
+            GraphqlFake.runWithEcho(() -> handle({ method = "PUT", path = "/graphql", headers = Nil, body = "" }))#headers)
+
+    // ---- GET /graphql ----
+
+    /// GET は query パラメータ（パーセント符号化）を実行し、variables と operationName も受ける。query が無ければ 400、mutation なら 405。
+    @Test
+    def testServerGetQuery(): Unit \ Assert =
+        let get = path -> GraphqlFake.runWithEcho(() -> handle({ method = "GET", path = path, headers = Nil, body = "" }));
+        let echoed = get("/graphql?query=%7B%20blogs%20%7B%20id%20%7D%20%7D&variables=%7B%22first%22%3A2%7D&operationName=Q");
+        Assert.assertEq(
+            expected = (200, Ok(Value.Obj(Map#{ "query" => Value.Str("{ blogs { id } }"), "variables" => Value.Obj(Map#{ "first" => Value.Int(2) }), "operationName" => Value.Str("Q") })), 400, 405),
+            (echoed#status, echoed#body |> JsonValue.parse |> Result.map(Value.field("data")),
+             get("/graphql")#status,
+             get("/graphql?query=mutation%20%7B%20x%20%7D")#status))
+
+    /// 身元無しで cacheMaxAge があれば public のキャッシュ、鍵付きや cacheMaxAge 無しなら no-store。Vary は常に付く。
+    @Test
+    def testServerGetCacheControl(): Unit \ Assert =
+        let cached = { cacheMaxAge = Some(60) | Server.defaultConfig() };
+        let headerOf = (config, credential) -> GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() ->
+            Server.handle(config, credential, { method = "GET", path = "/graphql?query=%7B%20x%20%7D", headers = Nil, body = "" })))#headers
+            |> Http.findHeader("Cache-Control");
+        Assert.assertEq(
+            expected = (Some("public, max-age=60, s-maxage=60, stale-while-revalidate=60"), Some("private, no-store"), Some("private, no-store")),
+            (headerOf(cached, Credential.Missing), headerOf(cached, Credential.ApiKey("cms_x")), headerOf(Server.defaultConfig(), Credential.Missing)))
+
+    /// 読むだけかの判定: 無名・query・fragment 付きは読む、mutation / subscription は書く。文字列とコメントの中の語は見ない。
+    @Test
+    def testServerIsReadOnly(): Unit \ Assert =
+        Assert.assertEq(expected = (true, true, true, false, false, true),
+            (Server.isReadOnly("{ blogs { id } }"),
+             Server.isReadOnly("query Q($f: Int) { blogs(first: $f) { id } }"),
+             Server.isReadOnly("fragment F on Blog { id } query { blogs { ...F } }"),
+             Server.isReadOnly("mutation { publishEntry(id: \"e1\") { id } }"),
+             Server.isReadOnly("query { a } mutation { b }"),
+             Server.isReadOnly("# mutation\n{ blogs(where: { title_eq: \"mutation\" }) { id } }")))
+
+    /// クエリ文字列の解読: + と %XX（UTF-8 の多バイトも）、値の無い名前、壊れた % はそのまま。
+    @Test
+    def testHttpParseQueryString(): Unit \ Assert =
+        Assert.assertEq(
+            expected = Map#{ "q" => "a b", "name" => "日本", "flag" => "", "bad" => "%zz", "eq" => "a=b" },
+            Http.parseQueryString("/graphql?q=a+b&name=%E6%97%A5%E6%9C%AC&flag&bad=%zz&eq=a%3Db"))
 
     /// ルーティングのエラーも errors[].message の形の JSON ボディで返す。
     @Test

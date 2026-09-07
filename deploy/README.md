@@ -26,6 +26,12 @@ curl -s localhost:8080/health # {"status":"ok","version":"..."}
 サイトはその token を `X-Preview-Token` ヘッダに付けてコンテンツ API に `stage: DRAFT` で問い合わせる。読めるのはその entry と参照先の下書きだけで、一覧の下書きや他の entry は読めない。
 既定 1 時間、最長 1 日で切れる。無状態（表を持たない）なので、鍵（`CMS_API_KEY_PEPPER`）を回せば全部無効になる。
 
+## CDN に乗せる（GET）
+
+コンテンツ API は `GET /graphql?query=...&variables=...` でも読める（mutation は 405）。鍵もプレビュートークンも無い問い合わせで errors が無ければ
+`Cache-Control: public, max-age=60, s-maxage=60, stale-while-revalidate=60`（秒数は `CMS_CACHE_MAX_AGE`）が付くので、Cloudflare などの CDN がそのまま溜める。
+鍵やトークン付きの応答は `private, no-store` で、共有キャッシュには入らない。公開サイトのビルドや SWR の fetch は GET を使い、書く操作と下書きは POST を使う。
+
 ## 予約公開とバックグラウンドワーカー
 
 予約公開（`schedulePublish` / `scheduleUnpublish`）と Webhook の配信は、業務の Tx と同じ DB に仕事の行を積み（outbox）、
@@ -131,6 +137,7 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_JOBS` | `on` ならプロセス内のバックグラウンドワーカー（予約公開と Webhook の配信）を回す。`off` は外部トリガーか別の worker で回す時 | on |
 | `CMS_JOBS_TOKEN` | `POST /jobs/tick`（外部トリガー）を許す `X-Jobs-Token` の値。無ければその口は閉じる | 無し |
 | `CMS_JOBS_DRAIN_SECONDS` | 停止時に実行中の仕事を待つ秒数 | 15 |
+| `CMS_CACHE_MAX_AGE` | コンテンツ API の GET で、鍵もトークンも無い応答に付ける `Cache-Control` の秒数（CDN 用）。0 で no-store | 60 |
 | `CMS_BASE_DOMAIN` | `{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。無ければ `/p/{プロジェクト slug}/` だけ | 無し |
 | `CMS_API_KEY_PEPPER` / `CMS_API_KEY_PEPPER_ID` | 公開 API の鍵のハッシュに混ぜる秘密と版。無ければ鍵を発行できない | 無し / v1 |
 | `JAVA_OPTS` | JVM の引数 | `-Xss32m -XX:MaxRAMPercentage=70` |

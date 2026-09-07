@@ -23,7 +23,7 @@ Docker（起動時 migration、JSON ログ、/health の版）、deploy/ の com
 | 4 | Webhook（2026-09-07 に実装済み）| サイト運営者 | 済み | outbox（公開などと同じ Tx に配信行を積み、dispatcher が別スレッドで POST）。`entry.published` / `entry.unpublished` / `entry.deleted` / `schema.changed`、`X-Cms-Signature`（HMAC-SHA256）、再試行 1 分 → 5 分 → 30 分 → 2 時間、管理 API で再送。配信 id は ULID |
 | 5 | プレビュートークン（2026-09-07 に実装済み）| 編集者 | 済み | `createPreviewToken(entryId)` → `pv_...`（無状態、HMAC 署名、既定 1 時間・最長 1 日）。`X-Preview-Token` でコンテンツ API のその entry（と参照先）の下書きだけ読める。一覧の下書きと他の entry は不可。`previewUrl` から url を組む |
 | 6 | 予約公開・公開停止予約（2026-09-07 に実装済み）| 編集者 | 済み | `schedulePublish` / `scheduleUnpublish` / `cancelSchedule` / `schedules`。outbox（scheduled_actions）をプロセス内のバックグラウンドワーカー（BackgroundJobs。Webhook と同じ tick）が拾い、通常の publish と同じ検査で実行。失敗は FAILED に理由。実行中に落ちた行は 10 分で回復、記録は 30 日で掃除。外部トリガー `POST /jobs/tick`（`CMS_JOBS_TOKEN`）、`CMS_JOBS=off`、`/health` の `jobs.lastTickAt` |
-| 7 | GraphQL の GET 対応 | サイト運営者 | 1 時間 | `GET /graphql?query=` と `Cache-Control`。CDN に乗せる |
+| 7 | GraphQL の GET 対応（2026-09-07 に実装済み）| サイト運営者 | 済み | `GET /graphql?query=&variables=&operationName=`。mutation は 405。身元無しで errors が無ければ `Cache-Control: public, max-age / s-maxage / stale-while-revalidate`（`CMS_CACHE_MAX_AGE`。既定 60 秒）、鍵やトークン付きは `private, no-store`。`Vary: X-Api-Key, X-Preview-Token, Authorization` |
 | 8 | microCMS 移行ツール | 自社 | 1 時間 + 実データの検証 | 型と entry と画像を読み、HTML → doc に変換して流し込む。実データで想定外を潰す時間が支配 |
 | 9 | 管理画面（Elm、別リポジトリ） | 編集者 | 1〜2 日 + 目で見る往復 | ログイン、プロジェクト切り替え、型の編集、entry の一覧・編集、TipTap、画像、公開、プレビュー、dry-run と impact の表示 |
 | 10 | 公開サイトの載せ替え | 自社 | 半日 | elm-pages を GraphQL に。`headings` で目次、`html` で本文。Cloudflare Pages の再ビルドは Webhook |

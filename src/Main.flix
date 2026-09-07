@@ -7,7 +7,7 @@
 /// 環境変数: CMS_DSN / CMS_DB_USER / CMS_DB_PASSWORD（DbConfig。表の所有者）、CMS_DB_APP_USER / CMS_DB_APP_PASSWORD（リクエスト用のロール。無ければ所有者で繋ぐ）、ASSET_*（StorageConfig。省略時は asset 無し）、
 /// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_BASE_DOMAIN（`{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。省略時は /p/ だけ）、
 /// CMS_DEFAULT_PROJECT（プロジェクト slug 無しの時のプロジェクト slug。省略時は default、空ならプロジェクト slug 無しは 404）、CMS_SIGNUP（open / closed）、
-/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（停止時に実行中の仕事を待つ秒数。既定 15）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
+/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（停止時に実行中の仕事を待つ秒数。既定 15）、CMS_CACHE_MAX_AGE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 60、0 で no-store）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
 /// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health に出す版。省略時は dev）
 ///
 def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
@@ -38,9 +38,10 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
             let jobsOn = Sys.Env.getVar("CMS_JOBS") |> Option.getWithDefault("on") != "off";
             let drainSeconds = Sys.Env.getVar("CMS_JOBS_DRAIN_SECONDS") |> Option.flatMap(Int64.fromString) |> Option.getWithDefault(15i64);
             let jobs = BackgroundJobs.createState(drainSeconds);
-            let contentConfig = { cors = cors, graphqlPath = "/graphql", version = version, jobsToken = jobsToken };
-            let adminConfig = { cors = cors, graphqlPath = "/admin/graphql", version = version, jobsToken = jobsToken };
-            let accountConfig = { cors = cors, graphqlPath = "/account/graphql", version = version, jobsToken = jobsToken };
+            let cacheMaxAge = Sys.Env.getVar("CMS_CACHE_MAX_AGE") |> Option.flatMap(Int32.fromString) |> Option.getWithDefault(60);
+            let contentConfig = { cors = cors, graphqlPath = "/graphql", version = version, jobsToken = jobsToken, cacheMaxAge = if (cacheMaxAge > 0) Some(cacheMaxAge) else None };
+            let adminConfig = { cors = cors, graphqlPath = "/admin/graphql", version = version, jobsToken = jobsToken, cacheMaxAge = (None: Option[Int32]) };
+            let accountConfig = { cors = cors, graphqlPath = "/account/graphql", version = version, jobsToken = jobsToken, cacheMaxAge = (None: Option[Int32]) };
             let engineCache = ContentEngine.create(deps);
             // WhyNot: 開発モード（X-Dev-User を信じる）で 127.0.0.1 にしか bind しないのは、ヘッダで人になれる経路を LAN に開けないため
             let bind = match deps#auth#mode { case AuthConfig.Mode.Dev => Some("127.0.0.1") case _ => None };

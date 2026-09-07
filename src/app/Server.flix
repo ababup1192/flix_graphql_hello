@@ -5,8 +5,9 @@
 /// - graphqlPath: GraphQL を受けるパス（"/graphql" / "/admin/graphql" / "/account/graphql"）
 /// - version: /health に出す版（イメージの git の sha など）
 /// - jobsToken: POST /jobs/tick（外部トリガー）を許す X-Jobs-Token の値。None なら閉じる
+/// - cacheMaxAge: GET で身元無しの応答に付ける Cache-Control の秒数（CDN 用）。None なら no-store
 ///
-pub type alias ServerConfig = { cors = CorsConfig, graphqlPath = String, version = String, jobsToken = Option[String] }
+pub type alias ServerConfig = { cors = CorsConfig, graphqlPath = String, version = String, jobsToken = Option[String], cacheMaxAge = Option[Int32] }
 
 ///
 /// HTTP リクエストを GraphQL の実行と死活監視に橋渡しするルーティング。
@@ -17,11 +18,12 @@ mod Server {
     ///
     /// CORS 無しの設定。テストと、同一オリジンだけで使うとき。
     ///
-    pub def defaultConfig(): ServerConfig = { cors = Cors.none(), graphqlPath = "/graphql", version = "dev", jobsToken = None }
+    pub def defaultConfig(): ServerConfig = { cors = Cors.none(), graphqlPath = "/graphql", version = "dev", jobsToken = None, cacheMaxAge = None }
 
     ///
     /// リクエストを 1 つ処理する。
     /// - POST <graphqlPath>: ボディ {"query": "...", "variables": {...}, "operationName": "..."} を実行して {"data": ..., "errors": [...]} を返す
+    /// - GET <graphqlPath>?query=...&variables=...&operationName=...: query だけ（mutation は 405）。身元無しなら Cache-Control で CDN に乗せられる
     /// - GET /health: DB に届けば 200、届かなければ 503。jobs にワーカーの最終実行時刻と待ち・失敗の件数（数えられなければ -1）
     /// - POST /jobs/tick: 外部トリガー。X-Jobs-Token が設定と一致すればワーカーを 1 周回す（無ければ 404）
     /// - OPTIONS: CORS の preflight
@@ -39,7 +41,8 @@ mod Server {
             case ("OPTIONS", path) if path == config#graphqlPath or path == "/health" => Cors.preflight(config#cors, request)
             case ("POST", path) if path == config#graphqlPath =>
                 if (isJson(request)) executeBody(credential, request#body) else errorResponse(415, Nil, "Content-Type: application/json で送ってください")
-            case (_, path) if path == config#graphqlPath      => errorResponse(405, ("Allow", "POST") :: Nil, "POST only")
+            case ("GET", path) if path == config#graphqlPath  => executeQueryString(config, credential, request)
+            case (_, path) if path == config#graphqlPath      => errorResponse(405, ("Allow", "POST, GET") :: Nil, "POST or GET only")
             case ("GET", "/health")   => health(config#version)
             case ("POST", "/jobs/tick") => jobsTick(config, request)
             case (_, "/health")       => errorResponse(405, ("Allow", "GET") :: Nil, "GET only")
@@ -155,6 +158,64 @@ mod Server {
             case Ok(request)  => { status = 200, headers = Nil, body = JsonValue.toJsonString(toValue(Graphql.execute(request, Context.withCredential(credential)))) }
             case Err(message) => errorResponse(400, Nil, message)
         }
+
+    ///
+    /// GET のクエリ文字列を実行する。query が無ければ 400、mutation / subscription なら 405（GET は読むだけ）。
+    /// 身元無し（鍵もトークンも無い）で errors が無ければ Cache-Control を public にして CDN に乗せ、それ以外は no-store。
+    ///
+    /// WhyNot: 身元付きの応答をキャッシュしないのは、鍵ごとに違う中身（下書き、非公開プロジェクト）が共有キャッシュから他人に出るため。
+    /// Vary で鍵のヘッダを指しても、鍵の値ごとに溜まる事自体を避ける。
+    ///
+    def executeQueryString(config: ServerConfig, credential: Credential, request: HttpRequest): HttpResponse \ Graphql =
+        let params = Http.parseQueryString(request#path);
+        let parsed = forM (
+            queryText <- Map.get("query", params) |> Option.filter(text -> not String.isEmpty(text)) |> Option.toOk("query パラメータが要ります（?query=...）");
+            variables <- Map.get("variables", params) |> Option.filter(text -> not String.isEmpty(text))
+                |> Option.map(text -> JsonValue.parse(text) |> Result.mapErr(message -> "variables が JSON ではありません: ${message}") |> Result.flatMap(toVariables))
+                |> Option.getWithDefault(Ok(Map.empty()))
+        ) yield { queryText = queryText, variables = variables, operationName = Map.get("operationName", params) |> Option.filter(text -> not String.isEmpty(text)) };
+        match parsed {
+            case Err(message) => errorResponse(400, Nil, message)
+            case Ok(graphqlRequest) =>
+                if (not isReadOnly(graphqlRequest#queryText)) errorResponse(405, ("Allow", "POST") :: Nil, "GET は query だけです。mutation は POST で送ってください")
+                else {
+                    let response = Graphql.execute(graphqlRequest, Context.withCredential(credential));
+                    let cacheable = config#cacheMaxAge |> Option.filter(_ -> credential == Credential.Missing and List.isEmpty(response#errors));
+                    let cacheControl = match cacheable {
+                        case Some(seconds) => "public, max-age=${seconds}, s-maxage=${seconds}, stale-while-revalidate=${seconds}"
+                        case None          => "private, no-store"
+                    };
+                    { status = 200, headers = ("Cache-Control", cacheControl) :: ("Vary", "X-Api-Key, X-Preview-Token, Authorization") :: Nil, body = JsonValue.toJsonString(toValue(response)) }
+                }
+        }
+
+    ///
+    /// GraphQL の文書が読むだけか。括弧の深さ 0 に mutation / subscription の語が無ければ読むだけ（無名の { ... } と query は読む）。
+    /// # のコメントと文字列の中は見ない。
+    ///
+    pub def isReadOnly(queryText: String): Bool =
+        topLevelWords(String.toList(queryText), 0, false, false, Nil)
+            |> List.forAll(word -> word != "mutation" and word != "subscription")
+
+    /// 深さ 0 の語を集める。inString は文字列の中、inComment は # から行末。
+    def topLevelWords(chars: List[Char], depth: Int32, inString: Bool, inComment: Bool, acc: List[String]): List[String] = match chars {
+        case Nil => List.reverse(acc)
+        case '\n' :: rest if inComment => topLevelWords(rest, depth, false, false, acc)
+        case _ :: rest if inComment    => topLevelWords(rest, depth, false, true, acc)
+        case '\\' :: _ :: rest if inString => topLevelWords(rest, depth, true, false, acc)
+        case '"' :: rest if inString   => topLevelWords(rest, depth, false, false, acc)
+        case _ :: rest if inString     => topLevelWords(rest, depth, true, false, acc)
+        case '"' :: rest               => topLevelWords(rest, depth, true, false, acc)
+        case '#' :: rest               => topLevelWords(rest, depth, false, true, acc)
+        case '{' :: rest               => topLevelWords(rest, depth + 1, false, false, acc)
+        case '(' :: rest               => topLevelWords(rest, depth + 1, false, false, acc)
+        case '}' :: rest               => topLevelWords(rest, depth - 1, false, false, acc)
+        case ')' :: rest               => topLevelWords(rest, depth - 1, false, false, acc)
+        case ch :: _ if depth == 0 and Char.isLetter(ch) =>
+            let word = List.takeWhile(c -> Char.isLetterOrDigit(c) or c == '_', chars);
+            topLevelWords(List.drop(List.length(word), chars), depth, false, false, (word |> List.map(Char.toString) |> List.join("")) :: acc)
+        case _ :: rest                 => topLevelWords(rest, depth, false, false, acc)
+    }
 
     ///
     /// ボディの Value を GraphqlRequest に組み立てる。
