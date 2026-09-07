@@ -83,6 +83,62 @@ mod TestPublishPg {
         }));
         Assert.assertEq(expected = Ok(Ok((VersionReason.Save, Some(Json.JString("New")), Some(Json.JString("Old")), 3, Err(CmsFailure.NotFound(Entity.Version, "1"))))), result)
 
+    /// 復元した下書きは公開し直せる。公開側は復元した中身になり、CHANGED は消える。
+    ///
+    ///   create(Old/old) → publish → update(New/new) → publish → restore(最初の公開の版) → publish ✓ → 公開側 = Old
+    @Test
+    def testPgRestoreThenRepublish(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"r1"}, () -> {
+            let blogs = blogsForPublish();
+            let created = ContentEntries.create(blogs, None, titled("Old", "old"));
+            let first = ContentEntries.publish(created#id, "tester", false);
+            let edited = ContentEntries.update(created#id, titled("New", "new"), first#version);
+            discard ContentEntries.publish(created#id, "tester", false);
+            let oldest = ContentEntries.versions(created#id) |> List.last |> Option.map(version -> version#id) |> Option.getWithDefault(VersionId.VersionId(0i64));
+            let restored = ContentEntries.restoreVersion(created#id, oldest, edited#version);
+            let republished = CmsTestKit.messageOr(entry -> (entry#stage, entry#changedSincePublish), () -> ContentEntries.publish(created#id, "tester", false));
+            let publicSide = ContentEntries.findByStage(ContentTypes.get(blogs), created#id, Stage.Published) |> Option.map(entry -> Map.get(CmsTestKit.apiId("title"), entry#data));
+            ((restored#changedSincePublish, Map.get(CmsTestKit.apiId("slug"), restored#data)), republished, publicSide)
+        }));
+        Assert.assertEq(expected = Ok(Ok(((true, Some(Json.JString("old"))), Ok((Stage.Published, false)), Some(Some(Json.JString("Old")))))), result)
+
+    /// 復元した中身の unique が他の公開中の entry と重なる時、復元は下書きなので通るが、公開は拒まれ、公開側は動かない。
+    ///
+    ///   A(same) → saveVersion → update(A: free) → publish A → B(same) → publish B → restore A(版 same) ✓ → publish A ✗
+    @Test
+    def testPgRestoreUniqueCollisionRejectedOnPublish(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"a", "b"}, () -> {
+            let blogs = blogsForPublish();
+            let a = ContentEntries.create(blogs, None, titled("A", "same"));
+            let saved = ContentEntries.saveVersion(a#id, "tester");
+            let freed = ContentEntries.update(a#id, titled("A", "free"), a#version);
+            discard ContentEntries.publish(a#id, "tester", false);
+            let b = ContentEntries.create(blogs, None, titled("B", "same"));
+            discard ContentEntries.publish(b#id, "tester", false);
+            let restored = ContentEntries.restoreVersion(a#id, saved#id, freed#version);
+            let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(a#id, "tester", false));
+            let publicSide = ContentEntries.findByStage(ContentTypes.get(blogs), a#id, Stage.Published) |> Option.map(entry -> Map.get(CmsTestKit.apiId("slug"), entry#data));
+            (Map.get(CmsTestKit.apiId("slug"), restored#data), blocked, publicSide)
+        }));
+        Assert.assertEq(expected = Ok(Ok((Some(Json.JString("same")), Err("fields.slug: 'same' は公開中の entry 'b' が使っています"), Some(Some(Json.JString("free")))))), result)
+
+    /// 復元しただけでは配信は積まれず、復元した物を公開すると entry.published が 1 件積まれる。
+    @Test
+    def testPgRestoreThenPublishEmitsWebhook(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"w1"}, () -> {
+            let issued = Webhooks.create({ name = "site", url = "https://example.com/hook", events = List#{WebhookEvent.EntryPublished}, active = true });
+            let blogs = blogsForPublish();
+            let created = ContentEntries.create(blogs, Some(CmsTestKit.entryId("r1")), titled("Old", "old"));
+            let saved = ContentEntries.saveVersion(created#id, "tester");
+            let edited = ContentEntries.update(created#id, titled("New", "new"), created#version);
+            discard ContentEntries.restoreVersion(created#id, saved#id, edited#version);
+            let events = () -> Webhooks.deliveries(issued#webhook#publicId, 10) |> List.map(delivery -> delivery#event);
+            let afterRestore = events();
+            discard ContentEntries.publish(created#id, "tester", false);
+            (afterRestore, events())
+        }));
+        Assert.assertEq(expected = Ok(Ok((Nil, List#{WebhookEvent.EntryPublished}))), result)
+
     /// 公開するとコンテンツ API の既定（PUBLISHED）で引け、下書きの編集は公開側に出ない。消すと公開側からも消える。
     @Test
     def testPgPublishedVisibleInContentApi(): Unit \ {IO, Assert} =

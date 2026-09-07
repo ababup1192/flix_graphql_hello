@@ -48,7 +48,7 @@ mod TestContentEntriesPg {
     /// 一覧は更新が新しい順、search で絞れ、totalCount は絞った後の件数。渡した id はそのまま使われる。
     @Test
     def testPgEntryList(): Unit \ {IO, Assert} =
-        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(Nil, () -> {
+        let result = PgTestSupport.withDb(() -> {
             let blogs = blogsWithFields();
             discard ContentEntries.create(blogs, Some(CmsTestKit.entryId("first")), CmsTestKit.entryData(List#{("title", Json.JString("apple"))}));
             discard ContentEntries.create(blogs, Some(CmsTestKit.entryId("second")), CmsTestKit.entryData(List#{("title", Json.JString("banana"))}));
@@ -57,7 +57,7 @@ mod TestContentEntriesPg {
             let searched = ContentEntries.list(blogs, { search = "ap", first = 10, skip = 0 });
             let paged = ContentEntries.list(blogs, { search = "", first = 1, skip = 1 });
             (all#totalCount, searched#entries |> List.map(entry -> EntryId.text(entry#id)) |> List.sort, searched#totalCount, paged#entries |> List.length)
-        }));
+        });
         Assert.assertEq(expected = Ok(Ok((3i64, List#{"first", "third"}, 2i64, 1))), result)
 
     /// search は値だけに当たり（キー名 "title" では当たらない）、% と _ はそのままの文字として当たる。

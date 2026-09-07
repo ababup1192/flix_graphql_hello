@@ -66,8 +66,7 @@ mod TestSchedulesPg {
             let cancelAgainRejected = PgTestSupport.mutate(pool, () -> CmsTestKit.failureMessage(() -> Schedules.cancel(id))) |> PgTestSupport.seededOrBug |> Result.isErr;
             // 落ちた事にする: 新しい予約を running のまま 1 時間前に拾った形にする
             let stuckId = PgTestSupport.mutate(pool, () -> Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Publish, past(), false)#id) |> PgTestSupport.seededOrBug;
-            discard DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(PgTestSupport.config(), _ ->
-                Sql.execute("UPDATE scheduled_actions SET status = 'running', claimed_at = now() - interval '1 hour' WHERE id = $1", SqlValue.Str(stuckId) :: Nil))));
+            discard PgTestSupport.executeSql("UPDATE scheduled_actions SET status = 'running', claimed_at = now() - interval '1 hour' WHERE id = $1", SqlValue.Str(stuckId) :: Nil);
             let untouched = Scheduler.tick(pool);
             let beforeRecovery = statusOf(pool, stuckId);
             let jobs = BackgroundJobs.createState(15i64);
@@ -76,6 +75,88 @@ mod TestSchedulesPg {
         });
         Assert.assertEq(
             expected = (ScheduleStatus.Cancelled, true, Ok(0), (ScheduleStatus.Running, ""), Nil, (ScheduleStatus.Done, ""), Stage.Published, true),
+            outcome)
+
+    def hook(): WebhookDraft = { name = "site", url = "https://example.com/hook", events = List#{WebhookEvent.EntryPublished}, active = true }
+
+    ///
+    /// 別のプロジェクト（shop）の予約を tick が実行すると、entry.published の配信行は shop の project_id で積まれ、default の Webhook には積まれない。
+    ///
+    ///   default: Webhook だけ     shop: Webhook + blogs(s1) + s1 の publish の予約（過去）
+    ///
+    @Test
+    def testPgScheduleTickQueuesWebhookInOwnProject(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withPool(pool -> {
+            let shop = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1", "w2"}, () -> {
+                let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
+                discard Webhooks.create(hook());
+                PgTestSupport.asProject(shop, () -> {
+                    discard Webhooks.create(hook());
+                    let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
+                    discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+                    discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("s1")), CmsTestKit.entryData(List#{("title", Json.JString("shop"))}));
+                    discard Schedules.schedule(CmsTestKit.entryId("s1"), ScheduleAction.Publish, past(), false)
+                });
+                shop
+            }));
+            let ticked = Scheduler.tick(pool);
+            let publishedCount = projectId -> PgTestSupport.countSql("SELECT count(*)::bigint AS total FROM webhook_deliveries WHERE project_id = $1 AND event = 'entry.published'", SqlValue.Int64(ProjectId.toInt64(projectId)) :: Nil);
+            (ticked, publishedCount(shop), publishedCount(ProjectId.default()))
+        });
+        Assert.assertEq(expected = (Ok(1), 1i64, 0i64), outcome)
+
+    ///
+    /// tick で公開された entry は、コンテンツ API の既定（PUBLISHED）で引ける。tick の前は無い。
+    ///
+    @Test
+    def testPgScheduledPublishVisibleInContentApi(): Unit \ {IO, Assert} =
+        let seed = () -> CmsTestKit.withIds(List#{"e1", "e2"}, () -> {
+            seedEntries();
+            discard Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Publish, past(), false)
+        });
+        let outcome = PgTestSupport.withContentApiAndPool(seed, (pool, ask) -> {
+            let before = ask("{ blog(id: \"e1\") { title } blogs { totalCount } }") |> fst;
+            let ticked = Scheduler.tick(pool);
+            (before, ticked, ask("{ blog(id: \"e1\") { title } blogs { totalCount } }") |> fst)
+        });
+        Assert.assertEq(
+            expected = (
+                Value.Obj(Map#{ "blog" => Value.Null, "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }) }),
+                Ok(1),
+                Value.Obj(Map#{ "blog" => Value.Obj(Map#{ "title" => Value.Str("ok") }), "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(1) }) })),
+            outcome)
+
+    ///
+    /// 参照先（p1）が未公開の b1 は、withDependencies 無しの予約では failed に理由が残り、withDependencies 有りなら参照先ごと公開される。
+    ///
+    ///   b1 { profile: p1 }   p1 は未公開
+    ///
+    @Test
+    def testPgScheduleWithDependencies(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withPool(pool -> {
+            let aloneId = PgTestSupport.seed(() -> {
+                let profiles = ContentTypes.create(CmsTestKit.typeDraft("profiles", "書き手"));
+                discard ContentTypes.addField(profiles#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
+                let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
+                discard ContentTypes.addField(blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
+                discard ContentEntries.create(profiles#id, Some(CmsTestKit.entryId("p1")), CmsTestKit.entryData(List#{("name", Json.JString("山田"))}));
+                discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("profile", Json.JString("p1"))}));
+                Schedules.schedule(CmsTestKit.entryId("b1"), ScheduleAction.Publish, past(), false)#id
+            });
+            let aloneTick = Scheduler.tick(pool);
+            let alone = (statusOf(pool, aloneId), stageOf(pool, "b1"), stageOf(pool, "p1"));
+            let togetherId = PgTestSupport.mutate(pool, () -> Schedules.schedule(CmsTestKit.entryId("b1"), ScheduleAction.Publish, past(), true)#id) |> PgTestSupport.seededOrBug;
+            let togetherTick = Scheduler.tick(pool);
+            (aloneTick, alone, togetherTick, statusOf(pool, togetherId), stageOf(pool, "b1"), stageOf(pool, "p1"))
+        });
+        Assert.assertEq(
+            expected = (
+                Ok(1),
+                ((ScheduleStatus.Failed, "references: 参照先 'p1' が未公開です（withDependencies: true で一緒に公開できます）"), Stage.Draft, Stage.Draft),
+                Ok(1),
+                (ScheduleStatus.Done, ""),
+                Stage.Published,
+                Stage.Published),
             outcome)
 
 }

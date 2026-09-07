@@ -21,7 +21,7 @@ mod TestPreviewPg {
             PreviewTokens.issue(pepper(), first#id, { ttlSeconds = 3600i64, nowMillis = farFuture() })
         });
         let (own, other, listing, published, tampered, url) = PgTestSupport.withContentApiAndPool(seed, (pool, _) -> {
-            let issued = PgTestSupport.mutate(pool, () -> CmsTestKit.withIds(Nil, () -> PreviewTokens.issue(pepper(), CmsTestKit.entryId("e1"), { ttlSeconds = 3600i64, nowMillis = farFuture() }))) |> PgTestSupport.seededOrBug;
+            let issued = PgTestSupport.mutate(pool, () -> PreviewTokens.issue(pepper(), CmsTestKit.entryId("e1"), { ttlSeconds = 3600i64, nowMillis = farFuture() })) |> PgTestSupport.seededOrBug;
             let cache = ContentEngine.create(PgTestSupport.deps());
             let engine = match ContentEngine.current(cache, pool, ProjectId.default()) { case Ok(found) => found case Err(message) => bug!(message) };
             let asPreview = queryText -> GraphqlTestKit.askEngineWith(engine, Context.withCredential(Credential.Preview(issued#token)), queryText);

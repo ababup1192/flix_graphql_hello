@@ -25,7 +25,7 @@ mod TestNestedPg {
     /// 子は親の children に入り、blocks の子は object しか置けない。
     @Test
     def testPgNestedDefinition(): Unit \ {IO, Assert} =
-        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(Nil, () -> {
+        let result = PgTestSupport.withDb(() -> {
             let pages = pagesWithNested();
             let loaded = ContentTypes.get(pages);
             let sections = loaded#fields |> List.find(field -> ApiId.text(field#apiId) == "sections");
@@ -33,7 +33,7 @@ mod TestNestedPg {
             (loaded#fields |> List.map(field -> ApiId.text(field#apiId)),
              sections |> Option.map(field -> Children.toList(field#children) |> List.map(variant -> (ApiId.text(variant#apiId), Children.toList(variant#children) |> List.map(child -> ApiId.text(child#apiId))))),
              badChild)
-        }));
+        });
         Assert.assertEq(expected = Ok(Ok((
             List#{"title", "related", "sections"},
             Some(List#{("hero", List#{"headline"}), ("cta", List#{"caption", "url"})}),
@@ -42,7 +42,7 @@ mod TestNestedPg {
     /// 並べ替えは最上位のフィールドだけ。子の id を混ぜると invalid。
     @Test
     def testPgNestedReorderTopLevelOnly(): Unit \ {IO, Assert} =
-        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(Nil, () -> {
+        let result = PgTestSupport.withDb(() -> {
             let pages = pagesWithNested();
             let top = ContentTypes.get(pages) |> (owner -> owner#fields);
             let ids = top |> List.map(field -> field#id);
@@ -50,7 +50,7 @@ mod TestNestedPg {
             let reordered = ContentTypes.reorderFields(pages, List.reverse(ids)) |> (owner -> owner#fields |> List.map(field -> ApiId.text(field#apiId)));
             let mixed = CmsTestKit.failurePaths(CmsErr.runWithResult(() -> ContentTypes.reorderFields(pages, List.reverse(ids) |> List.drop(1) |> (rest -> Option.toList(childId) ::: rest))));
             (reordered, mixed)
-        }));
+        });
         Assert.assertEq(expected = Ok(Ok((List#{"sections", "related", "title"}, List#{"ids"}))), result)
 
     /// コンテンツ API では object が入れ子の型、blocks が union になり、中の参照も展開される。

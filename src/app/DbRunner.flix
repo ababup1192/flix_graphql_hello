@@ -11,11 +11,26 @@
 ///
 mod DbRunner {
 
+    import java.lang.Throwable
+
     use DbError.DbFailure
     use CmsErr.CmsFailure
 
     /// 業務エラーで ROLLBACK させる時の印。外で元の CmsFailure に戻す。
     def rollbackMarker(): String = "cms-failure"
+
+    ///
+    /// JVM の例外（リゾルバの VerifyError、Java interop の例外）を DbErr に変えて、withLazyTx に ROLLBACK と接続の返却をさせる。
+    ///
+    /// WhyNot: 例外をそのまま上へ通さないのは、withLazyTx に finally が無く、例外が通り抜けると Tx が開いたまま接続が漏れるため
+    /// （test/Pg/TestTxLeakPg が見張る）。
+    ///
+    def guarded(thunk: Unit -> a \ ef): a \ ef + IO + DbErr =
+        try {
+            thunk()
+        } catch {
+            case e: Throwable => DbErr.other("exception: ${e.toString()}")
+        }
 
     ///
     /// 印付き（projectId があれば RLS の印）の遅延 Tx で thunk を走らせる。一時的な失敗は 3 回まで再試行し、
@@ -24,7 +39,7 @@ mod DbRunner {
     pub def transact(pool: Pool, projectId: Option[ProjectId], thunk: Unit -> a \ ef): Result[DbFailure, Result[CmsFailure, a]] \ (ef - {Db, CmsErr}) + IO =
         let stash = Ref.fresh(Static, None);
         let outcome = DbError.runWithFailure(() -> Retry.withRetry(3, () -> {
-            let inTx = () -> match CmsErr.runWithResult(thunk) {
+            let inTx = () -> match CmsErr.runWithResult(() -> guarded(thunk)) {
                 case Ok(value)    => value
                 case Err(failure) => { Ref.put(Some(failure), stash); DbErr.other(rollbackMarker()) }
             };

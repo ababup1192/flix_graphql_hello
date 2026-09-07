@@ -18,11 +18,9 @@ mod TestDateAndSelectPg {
         discard ContentTypes.addField(events#id, CmsTestKit.fieldDraft("heldOn", FieldKind.Date, FieldConfig.empty()));
         discard ContentTypes.addField(events#id, { many = true | CmsTestKit.fieldDraft("topics", FieldKind.Select, { options = List#{"NEWS", "TECH"} | FieldConfig.empty() }) });
         let topics = names -> Json.JArray(names |> List.map(Json.JString) |> List.toVector);
-        CmsTestKit.withIds(Nil, () -> {
-            discard ContentEntries.create(events#id, Some(CmsTestKit.entryId("e1")), CmsTestKit.entryData(List#{("title", Json.JString("e1")), ("heldOn", Json.JString("2026-09-01")), ("topics", topics(List#{"NEWS"}))}));
-            discard ContentEntries.create(events#id, Some(CmsTestKit.entryId("e2")), CmsTestKit.entryData(List#{("title", Json.JString("e2")), ("heldOn", Json.JString("2026-09-10T09:00:00Z")), ("topics", topics(List#{"NEWS", "TECH"}))}));
-            discard ContentEntries.create(events#id, Some(CmsTestKit.entryId("e3")), CmsTestKit.entryData(List#{("title", Json.JString("e3")), ("heldOn", Json.JString("2026-09-20T18:00:00+09:00")), ("topics", topics(List#{"TECH"}))}))
-        });
+        discard ContentEntries.create(events#id, Some(CmsTestKit.entryId("e1")), CmsTestKit.entryData(List#{("title", Json.JString("e1")), ("heldOn", Json.JString("2026-09-01")), ("topics", topics(List#{"NEWS"}))}));
+        discard ContentEntries.create(events#id, Some(CmsTestKit.entryId("e2")), CmsTestKit.entryData(List#{("title", Json.JString("e2")), ("heldOn", Json.JString("2026-09-10T09:00:00Z")), ("topics", topics(List#{"NEWS", "TECH"}))}));
+        discard ContentEntries.create(events#id, Some(CmsTestKit.entryId("e3")), CmsTestKit.entryData(List#{("title", Json.JString("e3")), ("heldOn", Json.JString("2026-09-20T18:00:00+09:00")), ("topics", topics(List#{"TECH"}))}));
         List.forEach(id -> discard ContentEntries.publish(CmsTestKit.entryId(id), "tester", false), List#{"e1", "e2", "e3"})
 
     /// DATE は ISO 8601 で返り（日付だけの物は 0 時 UTC に揃う）、_gte / _lt は timestamptz で比べ（offset 付きの値も日付だけの引数も効く）、_DESC で並ぶ。

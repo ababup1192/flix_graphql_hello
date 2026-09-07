@@ -38,7 +38,7 @@ mod TestImpactPg {
     /// impact(PUBLISH) は再帰的に一緒に公開される物（b2 と、b2 の本文がリンクする b3、p1）を返す。
     @Test
     def testPgPublishReportAndPublishImpact(): Unit \ {IO, Assert} =
-        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(Nil, () -> {
+        let result = PgTestSupport.withDb(() -> {
             let (_, b1, _, _) = seedGraph();
             let report = ContentEntries.publishReport(b1);
             let cascades = ContentEntries.impact(b1, ImpactAction.Publish);
@@ -46,7 +46,7 @@ mod TestImpactPg {
              report#unpublishedDependencies |> List.map(entry -> EntryId.text(entry#id)) |> List.sort,
              cascades#cascades |> List.map(entry -> EntryId.text(entry#id)) |> List.sort,
              ContentEntries.find(b1) |> Option.map(entry -> entry#stage))
-        }));
+        });
         Assert.assertEq(
             expected = Ok(Ok((
                 Violation.Violation("fields.title", "公開には値が要ります") :: Nil,
@@ -59,7 +59,7 @@ mod TestImpactPg {
     /// 本文のリンクが未公開の物を指したままでは公開できない（withDependencies で一緒に公開できる）。
     @Test
     def testPgUnpublishAndDeleteImpact(): Unit \ {IO, Assert} =
-        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(Nil, () -> {
+        let result = PgTestSupport.withDb(() -> {
             let (p1, b1, b2, _) = seedGraph();
             discard ContentEntries.update(b1, CmsTestKit.entryData(List#{("title", Json.JString("one"))}), 1);
             let blockedByLink = CmsTestKit.failureMessage(() -> ContentEntries.publish(b2, "tester", false));
@@ -70,7 +70,7 @@ mod TestImpactPg {
             (blockedByLink,
              unpublishB2#breaks |> List.map(describe),
              deleteP1#breaks |> List.map(describe) |> List.sort)
-        }));
+        });
         Assert.assertEq(
             expected = Ok(Ok((
                 Err("references: 参照先 'b3' が未公開です（withDependencies: true で一緒に公開できます）"),
@@ -83,7 +83,7 @@ mod TestImpactPg {
     /// dry-run は unique（ロック無し）と、消された参照先（ゴミ箱の p1）を required と一緒に全部返す。無い id は notFound。
     @Test
     def testPgImpactCyclesAndReportCollectsAll(): Unit \ {IO, Assert} =
-        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(Nil, () -> {
+        let result = PgTestSupport.withDb(() -> {
             let (p1, b1, b2, b3) = seedGraph();
             let blogs = ContentEntries.get(b1)#typeId;
             discard ContentTypes.addField(blogs, { unique = true | CmsTestKit.fieldDraft("slug", FieldKind.Text, FieldConfig.empty()) });
@@ -96,7 +96,7 @@ mod TestImpactPg {
             (cycle#cascades |> List.map(entry -> EntryId.text(entry#id)),
              report#violations |> List.map(violation -> { let Violation.Violation(path, _) = violation; path }),
              CmsTestKit.failureMessage(() -> ContentEntries.impact(CmsTestKit.entryId("nope"), ImpactAction.Delete)))
-        }));
+        });
         Assert.assertEq(
             expected = Ok(Ok((
                 Nil,
@@ -104,10 +104,23 @@ mod TestImpactPg {
                 Err("entry 'nope' が見つかりません")))),
             result)
 
+    /// impact(PUBLISH) の cascades は、withDependencies で実際に一緒に公開される物と一致する。
+    @Test
+    def testPgPublishCascadesMatchImpact(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> {
+            let (p1, b1, b2, b3) = seedGraph();
+            discard ContentEntries.update(b1, CmsTestKit.entryData(List#{("title", Json.JString("one"))}), 1);
+            let cascades = ContentEntries.impact(b1, ImpactAction.Publish)#cascades |> List.map(entry -> EntryId.text(entry#id)) |> List.sort;
+            discard ContentEntries.publish(b1, "tester", true);
+            let publishedOthers = List#{p1, b2, b3} |> List.filter(id -> ContentEntries.get(id)#stage == Stage.Published) |> List.map(EntryId.text) |> List.sort;
+            (cascades, publishedOthers)
+        });
+        Assert.assertEq(expected = Ok(Ok((List#{ "b2", "b3", "p1" }, List#{ "b2", "b3", "p1" }))), result)
+
     /// 管理 API を通した形。publishCheck / impact が SDL の型で返る。依存は直接の物が id 順、cascades は依存の順（b2 → その先の b3 → p1）。
     @Test
     def testPgImpactViaAdminApi(): Unit \ {IO, Assert} =
-        let (check, impact) = PgTestSupport.withAdminApi(() -> CmsTestKit.withIds(Nil, () -> discard seedGraph()), (schema, _) -> {
+        let (check, impact) = PgTestSupport.withAdminApi(() -> discard seedGraph(), (schema, _) -> {
             let ask = PgTestSupport.askOwner(schema);
             (ask("{ publishCheck(id: \"b1\") { ok violations { path message } unpublishedDependencies { id } } }"),
              ask("{ impact(id: \"b1\", action: PUBLISH) { breaks { via } cascades { id } } }"))

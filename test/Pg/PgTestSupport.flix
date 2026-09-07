@@ -160,6 +160,24 @@ mod PgTestSupport {
         case Err(message) => bug!("engine: ${message}")
     }
 
+    ///
+    /// 所有者の接続で生 SQL を 1 本流し、影響した行数を返す。行の時刻や状態を直接ずらすテスト用。失敗はテストの前提が壊れている。
+    ///
+    pub def executeSql(sql: String, params: List[SqlValue]): Int32 \ IO =
+        DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(config(), _ -> Sql.execute(sql, params)))) |> sqlOrBug
+
+    ///
+    /// 所有者の接続で `count(*)::bigint AS total` を返す生 SQL を 1 本流す。RLS を通さずに表の行数を見るテスト用。
+    ///
+    pub def countSql(sql: String, params: List[SqlValue]): Int64 \ IO =
+        DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(config(), _ ->
+            Sql.fetchOneAs(Decoder.int64("total"), sql, params) |> Option.getWithDefault(-1i64)))) |> sqlOrBug
+
+    def sqlOrBug(result: Result[DbFailure, a]): a = match result {
+        case Ok(found)    => found
+        case Err(failure) => bug!("sql: ${failure}")
+    }
+
     pub def seededOrBug(result: Result[DbFailure, Result[CmsErr.CmsFailure, b]]): b = match result {
         case Ok(Ok(seeded))  => seeded
         case Ok(Err(failure)) => bug!("seed: ${CmsErr.toMessage(failure)}")

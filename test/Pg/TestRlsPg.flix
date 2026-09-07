@@ -1,7 +1,7 @@
 ///
 /// RLS を実 PostgreSQL で見る。所有者（superuser）で種を置き、アプリ用のロール cms_app で繋ぎ直して、
 /// 条件を書かない生 SQL でも他のプロジェクトの行が読めず・書けず・消せず、印の無い Tx は 0 行で、
-/// 他のプロジェクトの project_id では INSERT できない事を、中身の 6 表すべてで確かめる。
+/// 他のプロジェクトの project_id では INSERT できない事を、中身の 7 表すべてで確かめる。
 ///
 mod TestRlsPg {
 
@@ -9,7 +9,7 @@ mod TestRlsPg {
 
     /// RLS を掛けた表。
     def guardedTables(): List[String] =
-        List#{"content_types", "content_fields", "entries", "entry_versions", "entry_links", "assets"}
+        List#{"content_types", "content_fields", "entries", "entry_versions", "entry_links", "assets", "webhooks"}
 
     def countRows(table: String): Int64 \ DbRead + RawSql + DbErr =
         Sql.fetchOneAs(Decoder.int64("total"), "SELECT count(*)::bigint AS total FROM ${table}", Nil) |> Option.getWithDefault(-1i64)
@@ -22,7 +22,7 @@ mod TestRlsPg {
         discard Sql.fetch("SELECT set_config('app.project_id', $1, false)", SqlValue.Str(text) :: Nil)
 
     ///
-    /// default に 6 表とも 1 行以上置く（型・フィールド・entry・版・参照・asset）。shop のプロジェクト id を返す。
+    /// default に 7 表とも 1 行以上置く（型・フィールド・entry・版・参照・asset・Webhook）。shop のプロジェクト id を返す。
     ///
     def seedAllTables(): ProjectId \ Db + CmsErr + IdGen + Tenant + Session + ObjectStore =
         let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
@@ -35,10 +35,11 @@ mod TestRlsPg {
         let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hello")), ("tag", Json.JString(EntryId.text(tag#id)))}));
         discard ContentEntries.saveVersion(entry#id, "tester");
         discard Assets.createUpload({ fileName = "photo.png", mime = "image/png", size = 5i64 });
+        discard Webhooks.create({ name = "site", url = "https://example.com/hook", events = List#{WebhookEvent.EntryPublished}, active = true });
         shop
 
     ///
-    /// 6 表それぞれで:
+    /// 7 表それぞれで:
     ///   印 = default : count ≥ 1
     ///   印 = shop    : count 0、UPDATE 0 行、DELETE 0 行（条件を書いていないのに）
     ///   印 無し      : count 0
@@ -46,7 +47,7 @@ mod TestRlsPg {
     ///
     @Test
     def testPgRlsGuardsEveryTable(): Unit \ {IO, Assert} =
-        let shop = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"t1", "e1", "a1"}, seedAllTables)) |> PgTestSupport.seededOrBug;
+        let shop = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"t1", "e1", "a1", "w1"}, seedAllTables)) |> PgTestSupport.seededOrBug;
         let outcome = DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(PgTestSupport.appConfig(), _ ->
             guardedTables() |> List.map(table -> {
                 stampSession("${ProjectId.default()}");
@@ -132,7 +133,7 @@ mod TestRlsPg {
     ///
     @Test
     def testPgRlsBlocksCrossProjectWrites(): Unit \ {IO, Assert} =
-        let shop = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"t1", "e1", "a1"}, seedAllTables)) |> PgTestSupport.seededOrBug;
+        let shop = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"t1", "e1", "a1", "w1"}, seedAllTables)) |> PgTestSupport.seededOrBug;
         let crossInsert = DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(PgTestSupport.appConfig(), _ -> {
             stampSession("${ProjectId.default()}");
             Sql.execute("INSERT INTO content_types (project_id, api_id, kind, name, singular, plural) VALUES ($1, 'x', 'collection', 'x', 'X', 'Xs')", SqlValue.Int64(ProjectId.toInt64(shop)) :: Nil)

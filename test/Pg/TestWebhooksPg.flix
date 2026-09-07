@@ -33,7 +33,7 @@ mod TestWebhooksPg {
     @Test
     def testPgWebhookOutboxAndDispatch(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withPool(pool -> {
-            let issued = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
+            let issued = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1", "e1"}, () -> {
                 let issued = Webhooks.create(draft(List#{WebhookEvent.EntryPublished, WebhookEvent.EntryUnpublished, WebhookEvent.SchemaChanged}));
                 let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
                 discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
@@ -109,7 +109,7 @@ mod TestWebhooksPg {
     ///
     @Test
     def testPgWebhookDeletedEventAndInactive(): Unit \ {IO, Assert} =
-        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"w1", "w2", "e1"}, () -> {
             let active = Webhooks.create(draft(List#{WebhookEvent.EntryDeleted}));
             let inactive = Webhooks.create({ active = false | draft(List#{WebhookEvent.EntryDeleted, WebhookEvent.SchemaChanged}) });
             let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
@@ -128,7 +128,7 @@ mod TestWebhooksPg {
     @Test
     def testPgWebhookFailsAfterFiveAttempts(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withPool(pool -> {
-            let issued = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
+            let issued = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1"}, () -> {
                 let issued = Webhooks.create(draft(List#{WebhookEvent.SchemaChanged}));
                 discard ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
                 issued
@@ -154,7 +154,7 @@ mod TestWebhooksPg {
     @Test
     def testPgWebhookClaimIsExclusive(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withPool(pool -> {
-            discard PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
+            discard PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1"}, () -> {
                 discard Webhooks.create(draft(List#{WebhookEvent.SchemaChanged}));
                 ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"))
             }));
@@ -179,7 +179,7 @@ mod TestWebhooksPg {
     @Test
     def testPgWebhookKeepsOrderPerWebhook(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withPool(pool -> {
-            let issued = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
+            let issued = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1"}, () -> {
                 let issued = Webhooks.create(draft(List#{WebhookEvent.SchemaChanged}));
                 let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
                 discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
