@@ -22,7 +22,7 @@ mod Server {
     ///
     /// リクエストを 1 つ処理する。
     /// - POST <graphqlPath>: ボディ {"query": "...", "variables": {...}, "operationName": "..."} を実行して {"data": ..., "errors": [...]} を返す
-    /// - GET /health: DB に届けば 200、届かなければ 503。jobs.lastTickAt にワーカーが最後に回った時刻
+    /// - GET /health: DB に届けば 200、届かなければ 503。jobs にワーカーの最終実行時刻と待ち・失敗の件数（数えられなければ -1）
     /// - POST /jobs/tick: 外部トリガー。X-Jobs-Token が設定と一致すればワーカーを 1 周回す（無ければ 404）
     /// - OPTIONS: CORS の preflight
     /// パスのクエリ文字列は無視する。許したオリジンからのリクエストには CORS ヘッダを足す。
@@ -121,7 +121,13 @@ mod Server {
     /// GET /health。DB に届けば {"status": "ok", "version": "...", "jobs": {"lastTickAt": ...}}、届かなければ 503 で理由を付ける。
     ///
     def health(version: String): HttpResponse \ Health =
-        let jobs = Value.Obj(Map#{ "lastTickAt" => Health.jobsLastTick() |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null) });
+        let summary = Health.jobsSummary();
+        let jobs = Value.Obj(Map#{
+            "lastTickAt" => summary#lastTickAt |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null),
+            "pendingSchedules" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#pendingSchedules)),
+            "failedSchedules" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedSchedules)),
+            "pendingDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#pendingDeliveries)),
+            "failedDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedDeliveries)) });
         match Health.checkDb() {
             case Ok(())       => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str(version), "jobs" => jobs })) }
             case Err(message) => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str(version), "db" => Value.Str(message), "jobs" => jobs })) }

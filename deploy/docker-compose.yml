@@ -39,6 +39,8 @@ services:
       ASSET_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD を .env に入れてください}
       ASSET_REGION: us-east-1
       ASSET_PUBLIC_URL: ${ASSET_PUBLIC_URL:?ASSET_PUBLIC_URL（画像の配信 URL）を .env に入れてください}
+    # SIGTERM で実行中の仕事（予約公開・Webhook）を最長 15 秒待つ
+    stop_grace_period: 20s
     ports:
       - "127.0.0.1:8080:8080"
     logging:

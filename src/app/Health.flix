@@ -8,9 +8,9 @@ pub eff Health {
     ///
     def checkDb(): Result[String, Unit]
     ///
-    /// バックグラウンドワーカーが最後に 1 周した時刻（ISO 8601）。まだなら None。
+    /// バックグラウンドワーカーのまとめ（最終実行時刻と待ち・失敗の件数）。
     ///
-    def jobsLastTick(): Option[String]
+    def jobsSummary(): BackgroundJobs.Summary
     ///
     /// 外部トリガーから 1 周回す。失敗した所の説明（空なら全部通った）。
     ///
@@ -25,7 +25,7 @@ mod Health {
     pub def runWithPool(pool: Pool, jobs: BackgroundJobs.State, f: Unit -> a \ ef): a \ (ef - Health) + IO =
         run f() with handler Health {
             def checkDb(resume)      = resume(ping(pool))
-            def jobsLastTick(resume) = resume(BackgroundJobs.lastTickAt(jobs))
+            def jobsSummary(resume)  = resume(BackgroundJobs.summary(pool, jobs))
             def runJobs(resume)      = resume(BackgroundJobs.tick(pool, jobs))
         }
 

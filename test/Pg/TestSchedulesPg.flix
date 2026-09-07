@@ -72,7 +72,7 @@ mod TestSchedulesPg {
             let beforeRecovery = statusOf(pool, stuckId);
             let jobs = BackgroundJobs.createState();
             let failures = BackgroundJobs.tick(pool, jobs);
-            (cancelled, cancelAgainRejected, untouched, beforeRecovery, failures, statusOf(pool, stuckId), stageOf(pool, "e1"), Option.nonEmpty(BackgroundJobs.lastTickAt(jobs)))
+            (cancelled, cancelAgainRejected, untouched, beforeRecovery, failures, statusOf(pool, stuckId), stageOf(pool, "e1"), Option.nonEmpty(Ref.get(jobs#lastTick)))
         });
         Assert.assertEq(
             expected = (ScheduleStatus.Cancelled, true, Ok(0), (ScheduleStatus.Running, ""), Nil, (ScheduleStatus.Done, ""), Stage.Published, true),

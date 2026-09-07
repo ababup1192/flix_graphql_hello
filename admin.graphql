@@ -180,6 +180,8 @@ type Schedule {
   status: ScheduleStatus!
   requestedBy: String!
   lastError: String!
+  """runAt が既に過ぎている（次の周ですぐ実行される）。管理画面が「過去の時刻です」と出すため"""
+  overdue: Boolean!
   createdAt: String!
   doneAt: String
 }

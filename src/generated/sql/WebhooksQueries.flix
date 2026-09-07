@@ -7,7 +7,7 @@ mod WebhooksQueries {
     ///
     /// 生成元 webhooks.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -1077507866
+    pub def sourceHash(): Int32 = 746548391
 
     ///
     /// insertWebhook の 1 行。
@@ -201,7 +201,7 @@ mod WebhooksQueries {
     ///
     /// claimDueDeliveries の 1 行。
     ///
-    pub type alias ClaimDueDeliveriesRow = { id = String, projectId = Int64, webhookId = Int64, event = String, payload = Util.Json.Json, attempts = Int32 }
+    pub type alias ClaimDueDeliveriesRow = { id = String, projectId = Int64, webhookId = Int64, event = String, payload = Util.Json.Json, attempts = Int32, createdAt = Timestamp.Timestamp }
 
     def claimDueDeliveriesDecoder(): Decoder[ClaimDueDeliveriesRow] =
         forA (
@@ -210,14 +210,15 @@ mod WebhooksQueries {
             webhookId <- Decoder.int64("webhook_id");
             event <- Decoder.str("event");
             payload <- Decoder.json("payload");
-            attempts <- Decoder.int32("attempts")
-        ) yield { id = id, projectId = projectId, webhookId = webhookId, event = event, payload = payload, attempts = attempts }
+            attempts <- Decoder.int32("attempts");
+            createdAt <- Decoder.timestamp("created_at")
+        ) yield { id = id, projectId = projectId, webhookId = webhookId, event = event, payload = payload, attempts = attempts, createdAt = createdAt }
 
     ///
-    /// claimDueDeliveries: UPDATE webhook_deliveries SET status = 'sending', attempts = attempts + 1, claimed_at = now() WHERE id IN ( SELECT id FROM webhook_deliveries WHERE status = 'pending' AND next_attempt_at <= now() ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED ) RETURNING id, project_id, webhook_id, event, payload, attempts
+    /// claimDueDeliveries: UPDATE webhook_deliveries SET status = 'sending', attempts = attempts + 1, claimed_at = now() WHERE id IN ( SELECT id FROM webhook_deliveries WHERE status = 'pending' AND next_attempt_at <= now() ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED ) RETURNING id, project_id, webhook_id, event, payload, attempts, created_at
     ///
     pub def claimDueDeliveries(limit: Int64): List[ClaimDueDeliveriesRow] \ DbWrite =
-        let sql = "UPDATE webhook_deliveries SET status = 'sending', attempts = attempts + 1, claimed_at = now()\n    WHERE id IN (\n        SELECT id FROM webhook_deliveries WHERE status = 'pending' AND next_attempt_at <= now()\n        ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED\n    )\n    RETURNING id, project_id, webhook_id, event, payload, attempts";
+        let sql = "UPDATE webhook_deliveries SET status = 'sending', attempts = attempts + 1, claimed_at = now()\n    WHERE id IN (\n        SELECT id FROM webhook_deliveries WHERE status = 'pending' AND next_attempt_at <= now()\n        ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED\n    )\n    RETURNING id, project_id, webhook_id, event, payload, attempts, created_at";
         let params = List#{SqlValue.Int64(limit)};
         RawSql.runWithAllow(() -> Sql.executeReturningAs(claimDueDeliveriesDecoder(), sql, params))
 
@@ -236,6 +237,25 @@ mod WebhooksQueries {
         let sql = "DELETE FROM webhook_deliveries WHERE status IN ('delivered', 'failed') AND created_at < now() - make_interval(days => $1::int)";
         let params = List#{SqlValue.Int64(keepDays)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// countDeliveries の 1 行。
+    ///
+    pub type alias CountDeliveriesRow = { pending = Option[Int64], failed = Option[Int64] }
+
+    def countDeliveriesDecoder(): Decoder[CountDeliveriesRow] =
+        forA (
+            pending <- Decoder.opt(Decoder.int64("pending"));
+            failed <- Decoder.opt(Decoder.int64("failed"))
+        ) yield { pending = pending, failed = failed }
+
+    ///
+    /// countDeliveries: SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending, count(*) FILTER (WHERE status = 'failed')::bigint AS failed FROM webhook_deliveries
+    ///
+    pub def countDeliveries(): Option[CountDeliveriesRow] \ DbRead =
+        let sql = "SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending, count(*) FILTER (WHERE status = 'failed')::bigint AS failed FROM webhook_deliveries";
+        let params = Nil;
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(countDeliveriesDecoder(), sql, params))
 
     ///
     /// markDelivered: UPDATE webhook_deliveries SET status = 'delivered', delivered_at = now(), last_status = $1, last_error = '' WHERE id = $2 AND project_id = $3

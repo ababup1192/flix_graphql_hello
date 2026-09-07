@@ -42,14 +42,15 @@ mod WebhookDispatcher {
     ///
     /// 1 件送って結果を書く。
     ///
-    def deliverOne(pool: Pool, claimed: { id = String, projectId = Int64, webhookId = Int64, event = String, payload = Util.Json.Json, attempts = Int32 }): Result[String, Unit] \ {IO, Http} =
+    def deliverOne(pool: Pool, claimed: { id = String, projectId = Int64, webhookId = Int64, event = String, payload = Util.Json.Json, attempts = Int32, createdAt = Timestamp.Timestamp }): Result[String, Unit] \ {IO, Http} =
         let projectId = ProjectId.ProjectId(claimed#projectId);
         let target = DbRunner.retrying(() -> TenantTx.withLazyTx(pool, projectId, () -> WebhooksQueries.findWebhookForDelivery({ id = claimed#webhookId, projectId = claimed#projectId })))
             |> Result.mapErr(failure -> "Webhook を引けません: ${failure}");
         Result.flatMap(found -> match found {
             case None => record(pool, claimed, projectId, Err((0, "Webhook が消えています")))
             case Some(webhook) => {
-                let body = Util.Json.toCompactString(claimed#payload);
+                // 積んだ時刻を本文にも入れる（受け手が本文だけ保存しても時刻が残る）
+                let body = Util.Json.toCompactString(withAt(claimed#createdAt, claimed#payload));
                 let timestamp = Int64.toString(System.currentTimeMillis() / 1000i64);
                 let request = HttpRequest.post(webhook#url, body)
                     |> HttpRequest.withContentType("application/json")
@@ -66,6 +67,12 @@ mod WebhookDispatcher {
             }
         }, target)
 
+    /// payload に "at"（ISO 8601）を足す。オブジェクトでなければそのまま。
+    def withAt(at: Timestamp.Timestamp, payload: Util.Json.Json): Util.Json.Json = match payload {
+        case Util.Json.Json.JObject(fields) => Util.Json.Json.JObject(Map.insert("at", Util.Json.Json.JString(Timestamp.toIso8601(at)), fields))
+        case other => other
+    }
+
     ///
     /// 結果を書く。失敗は回数に応じて次の時刻を置き、使い切れば failed。
     ///
@@ -76,6 +83,10 @@ mod WebhookDispatcher {
                 case Some(delay) => discard WebhooksQueries.markRetry({ id = claimed#id, projectId = ProjectId.toInt64(projectId), delaySeconds = delay, lastStatus = status, lastError = reason })
                 case None        => discard WebhooksQueries.markFailed({ id = claimed#id, projectId = ProjectId.toInt64(projectId), lastStatus = status, lastError = reason })
             }
+        };
+        match outcome {
+            case Ok(status)            => BackgroundJobs.logJob("webhook", claimed#id, "delivered", "HTTP ${status}")
+            case Err((status, reason)) => BackgroundJobs.logJob("webhook", claimed#id, if (Option.isEmpty(retryDelaySeconds(claimed#attempts))) "failed" else "retry", "HTTP ${status} ${reason}")
         };
         DbRunner.retrying(() -> TenantTx.withLazyTx(pool, projectId, write)) |> Result.mapErr(failure -> "配信の結果を書けません: ${failure}")
 

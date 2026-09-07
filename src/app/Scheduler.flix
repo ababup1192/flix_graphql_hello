@@ -32,8 +32,8 @@ mod Scheduler {
         };
         match outcome {
             case Err(failure)     => Err("予約を実行できません: ${failure}")
-            case Ok(Ok(()))       => record(pool, projectId, () -> discard SchedulesQueries.markScheduleDone({ id = claimed#id, projectId = claimed#projectId }))
-            case Ok(Err(message)) => record(pool, projectId, () -> discard SchedulesQueries.markScheduleFailed({ id = claimed#id, projectId = claimed#projectId, lastError = message }))
+            case Ok(Ok(()))       => { BackgroundJobs.logJob("schedule", claimed#id, "done", "${claimed#action} ${claimed#entryId}"); record(pool, projectId, () -> discard SchedulesQueries.markScheduleDone({ id = claimed#id, projectId = claimed#projectId })) }
+            case Ok(Err(message)) => { BackgroundJobs.logJob("schedule", claimed#id, "failed", message); record(pool, projectId, () -> discard SchedulesQueries.markScheduleFailed({ id = claimed#id, projectId = claimed#projectId, lastError = message })) }
         }
 
     def record(pool: Pool, projectId: ProjectId, write: Unit -> Unit \ DbWrite): Result[String, Unit] \ IO =

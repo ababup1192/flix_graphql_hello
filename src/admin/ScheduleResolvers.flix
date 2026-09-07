@@ -14,6 +14,7 @@ mod ScheduleResolvers {
             status           = (_context, source) -> Ok(AdminMapping.scheduleStatusToGql(source#status)),
             requestedBy      = (_context, source) -> Ok(source#requestedBy),
             lastError        = (_context, source) -> Ok(source#lastError),
+            overdue          = (_context, source) -> Ok(source#status == ScheduleStatus.Pending and Timestamp.toEpochMillis(source#runAt) <= Time.Clock.now()),
             createdAt        = (_context, source) -> Ok(Timestamp.toIso8601(source#createdAt)),
             doneAt           = (_context, source) -> Ok(source#doneAt |> Option.map(Timestamp.toIso8601))
         }

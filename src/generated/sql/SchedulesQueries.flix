@@ -7,7 +7,7 @@ mod SchedulesQueries {
     ///
     /// 生成元 schedules.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 2015027940
+    pub def sourceHash(): Int32 = -869064238
 
     ///
     /// insertSchedule: INSERT INTO scheduled_actions (id, project_id, entry_id, action, run_at, with_dependencies, requested_by) VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -151,6 +151,25 @@ mod SchedulesQueries {
         let sql = "DELETE FROM scheduled_actions WHERE status IN ('done', 'failed', 'cancelled') AND created_at < now() - make_interval(days => $1::int)";
         let params = List#{SqlValue.Int64(keepDays)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
+
+    ///
+    /// countSchedules の 1 行。
+    ///
+    pub type alias CountSchedulesRow = { pending = Option[Int64], failed = Option[Int64] }
+
+    def countSchedulesDecoder(): Decoder[CountSchedulesRow] =
+        forA (
+            pending <- Decoder.opt(Decoder.int64("pending"));
+            failed <- Decoder.opt(Decoder.int64("failed"))
+        ) yield { pending = pending, failed = failed }
+
+    ///
+    /// countSchedules: SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending, count(*) FILTER (WHERE status = 'failed')::bigint AS failed FROM scheduled_actions
+    ///
+    pub def countSchedules(): Option[CountSchedulesRow] \ DbRead =
+        let sql = "SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending, count(*) FILTER (WHERE status = 'failed')::bigint AS failed FROM scheduled_actions";
+        let params = Nil;
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(countSchedulesDecoder(), sql, params))
 
     ///
     /// markScheduleDone: UPDATE scheduled_actions SET status = 'done', done_at = now() WHERE id = $1 AND project_id = $2

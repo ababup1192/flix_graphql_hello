@@ -252,13 +252,15 @@ mod IdGen {
     ///
     pub def runWithFixed(ids: List[EntryId], f: Unit -> a \ ef): a \ ef - IdGen = region rc {
         let remaining = Ref.fresh(rc, ids);
-        let issued = Ref.fresh(rc, 0);
+        let issued = Ref.fresh(rc, unsafe IO { Int64.clampToInt32(min = 0, max = 2147483647, Int64.remainder(System.nanoTime() / 1000i64, 1000000000i64)) });
         run f() with handler IdGen {
             def freshEntryId(resume) = resume(nextFixed(remaining))
             def freshAssetId(resume) = resume(AssetId.AssetId(EntryId.text(nextFixed(remaining))))
             def freshSecret(resume) = resume("secret-${EntryId.text(nextFixed(remaining))}")
             // 外向きの id は決めた列を使わず連番にする。UNIQUE なので「尽きたら最後を繰り返す」では衝突する
             def freshPublicId(resume) = { Ref.put(Ref.get(issued) + 1, issued); resume("pub-${Ref.get(issued)}") }
+            // WhyNot: 連番の起点をプロセス内で毎回 0 にしないのは、同じテストの中で runWithFixed を 2 度使うと public_id / ULID が
+            // 重なり UNIQUE で落ちるため。起点は時刻から取り、handler の中では発行順に増える（並びは変わらない）
             // ULID も連番。26 文字に揃えて、文字列の並びが時刻順（発行順）になるようにする
             def freshUlid(resume) = { Ref.put(Ref.get(issued) + 1, issued); resume(String.padLeft(26, '0', "${Ref.get(issued)}")) }
         }

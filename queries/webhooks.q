@@ -62,7 +62,7 @@ query claimDueDeliveries(limit: Int64) -> many {
         SELECT id FROM webhook_deliveries WHERE status = 'pending' AND next_attempt_at <= now()
         ORDER BY next_attempt_at LIMIT :limit FOR UPDATE SKIP LOCKED
     )
-    RETURNING id, project_id, webhook_id, event, payload, attempts
+    RETURNING id, project_id, webhook_id, event, payload, attempts, created_at
 }
 
 // unscoped: 送っている最中に落ちた行の回復。受け手には届いているかもしれないので、受け手は X-Cms-Delivery で重複を見分ける
@@ -74,6 +74,11 @@ query recoverStuckDeliveries(staleMinutes: Int64) -> exec {
 // unscoped: 古い記録の掃除
 query purgeOldDeliveries(keepDays: Int64) -> exec {
     DELETE FROM webhook_deliveries WHERE status IN ('delivered', 'failed') AND created_at < now() - make_interval(days => :keepDays::int)
+}
+
+// unscoped: /health の件数
+query countDeliveries() -> one {
+    SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending, count(*) FILTER (WHERE status = 'failed')::bigint AS failed FROM webhook_deliveries
 }
 
 query markDelivered(id: String, projectId: Int64, lastStatus: Int32) -> exec {

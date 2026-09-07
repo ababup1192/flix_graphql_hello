@@ -135,7 +135,7 @@ mod TestServer {
     /// DB に届けば 200 と {"status": "ok"}。クエリ文字列が付いていても同じ。
     @Test
     def testServerHealthOk(): Unit \ Assert =
-        Assert.assertEq(expected = ((200, Ok(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str("dev"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null }) }))), 200),
+        Assert.assertEq(expected = ((200, Ok(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str("dev"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }) }))), 200),
             GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> {
                 let response = Server.handle(Server.defaultConfig(), Credential.Missing, { method = "GET", path = "/health", headers = Nil, body = "" });
                 ((response#status, JsonValue.parse(response#body)),
@@ -147,7 +147,7 @@ mod TestServer {
     def testServerHealthFailure(): Unit \ Assert =
         let response = GraphqlFake.runWithEcho(() -> HealthFake.runWithFailure("connection refused", () ->
             Server.handle(Server.defaultConfig(), Credential.Missing, { method = "GET", path = "/health", headers = Nil, body = "" })));
-        Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null }) }))),
+        Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }) }))),
             (response#status, JsonValue.parse(response#body)))
 
     /// /health への POST は 405 で Allow: GET。

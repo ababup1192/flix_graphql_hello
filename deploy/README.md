@@ -32,7 +32,10 @@ curl -s localhost:8080/health # {"status":"ok","version":"..."}
 プロセス内のバックグラウンドワーカーが 2 秒ごとに拾って実行する。拾う SQL は `FOR UPDATE SKIP LOCKED` なので、複数台で動かしても同じ仕事は 1 台にしか渡らない。
 実行中にプロセスが落ちた仕事は 10 分後に拾い直す（公開は冪等。Webhook は受け手が `X-Cms-Delivery` で重複を捨てる）。終わった記録は 30 日で消す。
 
-`/health` の `jobs.lastTickAt` がワーカーの最終実行時刻。外形監視で古ければワーカーが止まっている。
+`/health` の `jobs` にワーカーの最終実行時刻（`lastTickAt`）と、待ち・失敗の件数（`pendingSchedules` / `failedSchedules` / `pendingDeliveries` / `failedDeliveries`。数えられなければ -1）が出る。
+外形監視で `lastTickAt` が古ければワーカーが止まっている。`failedDeliveries` が増えていれば受け手が落ちている。仕事 1 件ごとに `{"job":"webhook","id":...,"status":"delivered",...}` の 1 行 JSON もログに出る。
+
+SIGTERM / SIGINT を受けると、新しい仕事を拾うのをやめ、実行中の 1 周が終わるまで（最長 15 秒）待ってから終わる。`docker stop` の既定の猶予（10 秒）で足りない時は `stop_grace_period` を延ばす。
 
 保険として、外の cron から同じ処理を呼べる（`CMS_JOBS_TOKEN` を設定した時だけ）。同時に呼ばれても二重にはならない。
 
@@ -62,6 +65,7 @@ X-Cms-Signature: sha256=<hex>           # HMAC-SHA256(secret, "<timestamp>.<body
 
 受け手は同じ計算で署名を照合し、timestamp が古すぎれば捨てる。照合の見本は `scripts/webhook-receiver.py`（`python3 scripts/webhook-receiver.py secret.txt received.log` で 127.0.0.1:9999 に立つ）。中身は入っていないので、必要ならコンテンツ API で読む。
 2xx 以外なら 1 分 → 5 分 → 30 分 → 2 時間の後に送り直し、5 回目で失敗になる（管理 API の `webhookDeliveries` で見え、`redeliverWebhook` で送り直せる）。
+本文の `at` は積んだ時刻（ISO 8601）。同じ entry を続けて公開すると、配信は順不同で届きうる（再試行があるため）。順序が要る受け手は `at` か `X-Cms-Delivery`（ULID。時刻順）で並べ直す。
 
 ## 更新
 

@@ -50,6 +50,11 @@ query purgeOldSchedules(keepDays: Int64) -> exec {
     DELETE FROM scheduled_actions WHERE status IN ('done', 'failed', 'cancelled') AND created_at < now() - make_interval(days => :keepDays::int)
 }
 
+// unscoped: /health の件数
+query countSchedules() -> one {
+    SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending, count(*) FILTER (WHERE status = 'failed')::bigint AS failed FROM scheduled_actions
+}
+
 query markScheduleDone(id: String, projectId: Int64) -> exec {
     UPDATE scheduled_actions SET status = 'done', done_at = now() WHERE id = :id AND project_id = :projectId
 }
