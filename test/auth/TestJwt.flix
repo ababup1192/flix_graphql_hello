@@ -18,16 +18,16 @@ mod TestJwt {
     /// 公開鍵を JWK に。
     def jwkOf(kid: String, pair: KeyPair): Jwt.RsaJwk \ IO =
         let publicKey: RSAPublicKey = unchecked_cast(pair.getPublic() as RSAPublicKey);
-        { kid = kid, n = Jwt.encodeBase64Url(Array.toVector(publicKey.getModulus().toByteArray())), e = Jwt.encodeBase64Url(Array.toVector(publicKey.getPublicExponent().toByteArray())) }
+        { kid = kid, n = Base64Url.encode(Array.toVector(publicKey.getModulus().toByteArray())), e = Base64Url.encode(Array.toVector(publicKey.getPublicExponent().toByteArray())) }
 
     /// header と payload の JSON を署名して JWT にする。
     def sign(pair: KeyPair, header: String, payload: String): String \ IO =
-        let signed = "${Jwt.encodeBase64Url(String.toBytes(header))}.${Jwt.encodeBase64Url(String.toBytes(payload))}";
+        let signed = "${Base64Url.encode(String.toBytes(header))}.${Base64Url.encode(String.toBytes(payload))}";
         let signer = Signature.getInstance("SHA256withRSA");
         let privateKey: RSAPrivateKey = unchecked_cast(pair.getPrivate() as RSAPrivateKey);
         signer.initSign(privateKey);
         signer.update(Vector.toArray(Static, String.toBytes(signed)));
-        "${signed}.${Jwt.encodeBase64Url(Array.toVector(signer.sign()))}"
+        "${signed}.${Base64Url.encode(Array.toVector(signer.sign()))}"
 
     def expectation(): Jwt.Expectation = { issuer = "https://team.cloudflareaccess.com", audience = "cms-app", now = 1000000i64, skewSeconds = 60i64 }
 
@@ -58,7 +58,7 @@ mod TestJwt {
         let tampered = {
             let token = sign(pair, header("RS256", "k1"), good);
             let parts = String.splitOn(substr = ".", token);
-            let forged = Jwt.encodeBase64Url(String.toBytes(payload("https://team.cloudflareaccess.com", "cms-app", 9999999i64)));
+            let forged = Base64Url.encode(String.toBytes(payload("https://team.cloudflareaccess.com", "cms-app", 9999999i64)));
             List.join(".", List#{ List.head(parts) |> Option.getWithDefault(""), forged, List.last(parts) |> Option.getWithDefault("") })
         };
         Assert.assertEq(

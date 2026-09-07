@@ -12,24 +12,9 @@ mod WebhookDispatcher {
     use Net.HttpResponse
 
     import java.lang.System
-    import java.lang.Thread
 
     /// 1 回に拾う数。
     def batchSize(): Int64 = 20i64
-
-    /// 拾う間隔（ミリ秒）。
-    def intervalMs(): Int64 = 2000i64
-
-    ///
-    /// 止まらずに回す。失敗はログに出して次の周へ。
-    ///
-    pub def runForever(pool: Pool): Unit \ IO =
-        match Net.Http.runWithIO(() -> tick(pool)) {
-            case Ok(_)        => ()
-            case Err(message) => println("webhook: ${message}")
-        };
-        Thread.sleep(intervalMs());
-        runForever(pool)
 
     /// 1 回の tick で拾い直す回数の上限。同じ Webhook 宛は 1 度に 1 件しか拾えない（順序を守るため）ので、送れたら続けて拾う。
     def maxRounds(): Int32 = 25
@@ -116,6 +101,6 @@ mod WebhookDispatcher {
     /// X-Cms-Signature の値。secret を鍵に "timestamp.body" の HMAC-SHA256（16 進）。受け手は同じ計算で照合し、timestamp が古ければ捨てる。
     ///
     pub def signature(secret: String, timestamp: String, body: String): String =
-        "sha256=" + SigV4.hmacSha256Hex(secret, "${timestamp}.${body}")
+        "sha256=" + Sha256.hmacHex(secret, "${timestamp}.${body}")
 
 }

@@ -5,7 +5,7 @@ def pepper(): ApiKeys.Pepper = { pepperId = "test", secret = "test-pepper" }
 /// 同じ手順で作ったトークン（テスト用。issue は DB を引くのでここでは組み立てだけ真似る）。
 def tokenOf(secret: String, projectId: Int64, entryId: String, exp: Int64): String =
     let payload = "${projectId}.${entryId}.${exp}";
-    "pv_" + Jwt.encodeBase64Url(String.toBytes(payload)) + "." + SigV4.hmacSha256Hex(secret, payload)
+    "pv_" + Base64Url.encode(String.toBytes(payload)) + "." + Sha256.hmacHex(secret, payload)
 
 /// 正しい物は entry の id になり、期限切れ・別プロジェクト・別の鍵で署名した物・形が違う物は None。
 @Test

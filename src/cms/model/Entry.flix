@@ -241,7 +241,7 @@ mod IdGen {
     def randomSecret(): String \ IO =
         let bytes = Array.empty(Static, 32);
         new SecureRandom().nextBytes(bytes);
-        Jwt.encodeBase64Url(Array.toVector(bytes))
+        Base64Url.encode(Array.toVector(bytes))
 
     /// UUID から作った 12 文字。
     def randomText(): String \ IO =

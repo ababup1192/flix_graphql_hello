@@ -11,9 +11,6 @@
 /// 大きく JVM の起動も遅くなるため。署名の手順は AWS の文書に固定されていて、公式の例で検証できる。
 ///
 mod SigV4 {
-    import java.security.MessageDigest
-    import javax.crypto.Mac
-    import javax.crypto.spec.SecretKeySpec
 
     ///
     /// 署名に使う鍵と region。
@@ -88,7 +85,7 @@ mod SigV4 {
     /// authorization）。本文の無いリクエスト（HEAD / DELETE）向け。
     ///
     pub def authorize(cred: Credentials, at: Timestamp, req: Request): Map[String, String] =
-        let emptyHash = sha256Hex("");
+        let emptyHash = Sha256.hex("");
         let headers = req#headers
             |> Map.insert("host", req#host)
             |> Map.insert("x-amz-date", at#time)
@@ -122,9 +119,9 @@ mod SigV4 {
             "AWS4-HMAC-SHA256",
             at#time,
             scope(cred, at),
-            sha256Hex(canonicalRequest)
+            Sha256.hex(canonicalRequest)
         });
-        hexOf(hmacSha256(signingKey(cred, at), stringToSign))
+        Sha256.hexOf(Sha256.hmac(signingKey(cred, at), stringToSign))
 
     /// `date/region/s3/aws4_request`。
     def scope(cred: Credentials, at: Timestamp): String =
@@ -148,7 +145,7 @@ mod SigV4 {
     /// 秘密鍵から日付 → region → service → aws4_request の順に HMAC を重ねた署名鍵。
     def signingKey(cred: Credentials, at: Timestamp): Vector[Int8] =
         List#{ at#date, cred#regionName, service(), "aws4_request" }
-            |> List.foldLeft(hmacSha256, String.toBytes("AWS4${cred#secretKey}"))
+            |> List.foldLeft(Sha256.hmac, String.toBytes("AWS4${cred#secretKey}"))
 
     ///
     /// AWS 流の URI エンコード。`A-Z a-z 0-9 - _ . ~` 以外は UTF-8 のバイトごとに `%XX`（大文字）。
@@ -166,43 +163,10 @@ mod SigV4 {
         (n >= 65 and n <= 90) or (n >= 97 and n <= 122) or (n >= 48 and n <= 57)
             or n == 45 or n == 95 or n == 46 or n == 126
 
-    ///
-    /// SHA-256 の 16 進（小文字）。
-    ///
-    pub def sha256Hex(data: String): String =
-        let digest = unsafe IO {
-            let bytes = Vector.toArray(Static, String.toBytes(data));
-            Array.toVector(MessageDigest.getInstance("SHA-256").digest(bytes))
-        };
-        hexOf(digest)
-
-    ///
-    /// 文字列の鍵で HMAC-SHA256 を取り、16 進（小文字）に。Webhook の署名に使う。
-    ///
-    pub def hmacSha256Hex(key: String, data: String): String =
-        hexOf(hmacSha256(String.toBytes(key), data))
-
-    /// HMAC-SHA256。
-    def hmacSha256(key: Vector[Int8], data: String): Vector[Int8] =
-        unsafe IO {
-            let keyBytes = Vector.toArray(Static, key);
-            let dataBytes = Vector.toArray(Static, String.toBytes(data));
-            let mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(keyBytes, "HmacSHA256"));
-            Array.toVector(mac.doFinal(dataBytes))
-        }
-
-    /// バイト列を 16 進（小文字）に。
-    def hexOf(bytes: Vector[Int8]): String =
-        bytes |> Vector.map(byte -> String.toLowerCase(hexByte(unsignedOf(byte)))) |> Vector.join("")
-
-    /// 0..255 を 2 桁の 16 進（大文字）に。
+    /// 0..255 を 2 桁の 16 進（大文字。URI エンコードは大文字と決まっている）に。
     def hexByte(n: Int32): String =
-        "${hexDigit(n / 16)}${hexDigit(Int32.remainder(n, 16))}"
-
-    /// 0..15 を 1 桁の 16 進（大文字）に。
-    def hexDigit(n: Int32): String =
-        String.charAt(n, "0123456789ABCDEF") |> Char.toString
+        let digit = k -> String.charAt(k, "0123456789ABCDEF") |> Char.toString;
+        "${digit(n / 16)}${digit(Int32.remainder(n, 16))}"
 
     /// Int8 を 0..255 に。
     def unsignedOf(byte: Int8): Int32 =

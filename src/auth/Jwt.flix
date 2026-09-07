@@ -9,7 +9,6 @@ mod Jwt {
 
     use Util.Json.Json
 
-    import java.util.Base64
     import java.math.BigInteger
     import java.security.KeyFactory
     import java.security.Signature
@@ -74,9 +73,9 @@ mod Jwt {
     /// RSA の公開鍵を組んで SHA256withRSA で確かめる。鍵や署名が壊れていれば Err。
     def checkSignature(key: RsaJwk, signed: String, signatureText: String): Result[String, Unit] =
         forM (
-            n <- decodeBase64Url(key#n);
-            e <- decodeBase64Url(key#e);
-            signature <- decodeBase64Url(signatureText);
+            n <- Base64Url.decode(key#n);
+            e <- Base64Url.decode(key#e);
+            signature <- Base64Url.decode(signatureText);
             _ <- verifyRsa(n, e, String.toBytes(signed), signature)
         ) yield ()
 
@@ -135,27 +134,9 @@ mod Jwt {
     /// base64url（パディング無し）の文字列を JSON のオブジェクトに。
     ///
     pub def decodeJson(text: String): Result[String, Map[String, Json]] =
-        decodeBase64Url(text) |> Result.map(String.fromBytes) |> Result.flatMap(raw -> Util.Json.parse(raw) |> Result.mapErr(err -> "${err}")) |> Result.flatMap(json -> match json {
+        Base64Url.decode(text) |> Result.map(String.fromBytes) |> Result.flatMap(raw -> Util.Json.parse(raw) |> Result.mapErr(err -> "${err}")) |> Result.flatMap(json -> match json {
             case Json.JObject(fields) => Ok(fields)
             case _                    => Err("オブジェクトではありません")
         })
-
-    ///
-    /// base64url を bytes に。壊れていれば Err。
-    ///
-    pub def decodeBase64Url(text: String): Result[String, Vector[Int8]] =
-        unsafe IO {
-            try {
-                Ok(Array.toVector(Base64.getUrlDecoder().decode(text)))
-            } catch {
-                case _: Exception => Err("base64url が壊れています")
-            }
-        }
-
-    ///
-    /// bytes を base64url（パディング無し）に。テストと JWKS の鍵の組み立てで使う。
-    ///
-    pub def encodeBase64Url(bytes: Vector[Int8]): String =
-        unsafe IO { Base64.getUrlEncoder().withoutPadding().encodeToString(Vector.toArray(Static, bytes)) }
 
 }

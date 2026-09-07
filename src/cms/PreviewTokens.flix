@@ -29,8 +29,8 @@ mod PreviewTokens {
         let ttl = Int64.max(60i64, Int64.min(maxTtlSeconds(), ttlSeconds));
         let exp = nowMillis / 1000i64 + ttl;
         let payload = "${Tenant.currentId()}.${EntryId.text(entryId)}.${exp}";
-        let encoded = Jwt.encodeBase64Url(String.toBytes(payload));
-        let token = prefix() + encoded + "." + SigV4.hmacSha256Hex(pepper#secret, payload);
+        let encoded = Base64Url.encode(String.toBytes(payload));
+        let token = prefix() + encoded + "." + Sha256.hmacHex(pepper#secret, payload);
         { token = token, entryId = entryId, expiresAt = Timestamp.fromEpochMillis(exp * 1000i64), url = owner#previewUrl |> Option.map(template -> previewUrl(template, entryId, token)) }
 
     ///
@@ -46,7 +46,7 @@ mod PreviewTokens {
     pub def verify(pepper: ApiKeys.Pepper, raw: String, projectId: ProjectId, nowMillis: Int64): Option[EntryId] =
         if (not String.startsWith(prefix = prefix(), raw)) None
         else match String.splitOn(substr = ".", String.drop(String.length(prefix()), raw)) {
-            case encoded :: signature :: Nil => match Jwt.decodeBase64Url(encoded) {
+            case encoded :: signature :: Nil => match Base64Url.decode(encoded) {
                 case Err(_)    => None
                 case Ok(bytes) => verifyPayload(pepper, String.fromBytes(bytes), signature, projectId, nowMillis)
             }
@@ -55,7 +55,7 @@ mod PreviewTokens {
 
     /// 復号した payload（projectId.entryId.exp）を、署名・期限・プロジェクトで確かめる。
     def verifyPayload(pepper: ApiKeys.Pepper, payload: String, signature: String, projectId: ProjectId, nowMillis: Int64): Option[EntryId] =
-        if (SigV4.hmacSha256Hex(pepper#secret, payload) != signature) None
+        if (Sha256.hmacHex(pepper#secret, payload) != signature) None
         else match String.splitOn(substr = ".", payload) {
             case projectText :: entryText :: expText :: Nil =>
                 let fresh = Int64.fromString(expText) |> Option.exists(deadline -> deadline * 1000i64 > nowMillis);

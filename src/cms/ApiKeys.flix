@@ -54,6 +54,6 @@ mod ApiKeys {
     /// sha256(pepper + key) の 16 進。
     ///
     pub def hash(pepper: Pepper, key: String): String =
-        SigV4.sha256Hex("${pepper#secret}:${key}")
+        Sha256.hex("${pepper#secret}:${key}")
 
 }
