@@ -549,7 +549,7 @@ mod Schema {
     /// WhyNot: 同名で中身が同じ物を Err にしないのは、`postType()` のように型を関数で作ると
     /// 参照のたびに新しい値ができ、同じ定義の再参照と別定義の重複を見分けられないため。
     /// 中身（SDL）が同じなら最初の物を使う。source の Flix 型だけが違う重複は検出できない
-    /// （docs/design/typed-schema.md の既知の制限）。
+    /// （既知の制限）。
     ///
     pub def collectTypes(schema: Schema): Result[String, List[TypeDecl]] =
         let Schema.Schema(inner) = schema;
