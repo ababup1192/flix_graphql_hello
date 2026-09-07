@@ -102,4 +102,70 @@ mod TestWebhooksPg {
                 (Value.Obj(Map#{ "webhooks" => Value.List(Nil) }), None)),
             (created, listed, updated, badUrl, deleted, afterDelete))
 
+
+    ///
+    /// entry.deleted も積まれ、無効（active: false）な Webhook には積まれない。
+    ///
+    @Test
+    def testPgWebhookDeletedEventAndInactive(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
+            let active = Webhooks.create(draft(List#{WebhookEvent.EntryDeleted}));
+            let inactive = Webhooks.create({ active = false | draft(List#{WebhookEvent.EntryDeleted, WebhookEvent.SchemaChanged}) });
+            let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
+            let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(Nil));
+            ContentEntries.delete(entry#id);
+            (Webhooks.deliveries(active#webhook#publicId, 20) |> List.map(delivery -> delivery#event),
+             Webhooks.deliveries(inactive#webhook#publicId, 20) |> List.length)
+        }));
+        Assert.assertEq(expected = Ok(Ok((List#{WebhookEvent.EntryDeleted}, 0))), result)
+
+    ///
+    /// 5 回失敗すると failed になり、理由が残る。redeliver で送る番に戻せる（attempts は積み上がる）。
+    ///
+    ///   tick(500) ×5（間に redeliver で待ち時間を飛ばす）→ failed / attempts 5 / "HTTP 500"
+    ///
+    @Test
+    def testPgWebhookFailsAfterFiveAttempts(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withPool(pool -> {
+            let issued = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
+                let issued = Webhooks.create(draft(List#{WebhookEvent.SchemaChanged}));
+                discard ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
+                issued
+            }));
+            let received = Ref.fresh(Static, Nil);
+            let deliveryId = PgTestSupport.mutate(pool, () -> Webhooks.deliveries(issued#webhook#publicId, 1)) |> PgTestSupport.seededOrBug |> List.head |> Option.map(delivery -> delivery#id) |> Option.getWithDefault("?");
+            let attempt = () -> {
+                discard tickWith(500, received, pool);
+                discard PgTestSupport.mutate(pool, () -> Webhooks.redeliver(deliveryId))
+            };
+            List.forEach(_ -> attempt(), List.range(0, 4));
+            discard tickWith(500, received, pool);
+            let delivery = PgTestSupport.mutate(pool, () -> Webhooks.deliveries(issued#webhook#publicId, 1)) |> PgTestSupport.seededOrBug |> List.head;
+            (delivery |> Option.map(found -> (found#status, found#attempts, found#lastStatus, found#lastError)), List.length(Ref.get(received)))
+        });
+        Assert.assertEq(expected = (Some((DeliveryStatus.Failed, 5, 500, "HTTP 500")), 5), outcome)
+
+    ///
+    /// 2 台の dispatcher が同時に拾っても同じ配信は 1 台にしか渡らない（FOR UPDATE SKIP LOCKED）。
+    ///
+    ///   Tx A: 拾う（COMMIT しない）→ Tx B: 拾う → 0 件 → A を COMMIT
+    ///
+    @Test
+    def testPgWebhookClaimIsExclusive(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withPool(pool -> {
+            discard PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
+                discard Webhooks.create(draft(List#{WebhookEvent.SchemaChanged}));
+                ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"))
+            }));
+            DbError.runWithFailure(() -> Jdbc.withConnection(PgTestSupport.appConfig(), conn -> {
+                Tx.begin(conn);
+                let first = Jdbc.runWithConnection(conn, () -> WebhooksQueries.claimDueDeliveries(10i64)) |> List.length;
+                let second = DbError.runWithFailure(() -> Pool.withLazyTx(pool, () -> WebhooksQueries.claimDueDeliveries(10i64) |> List.length));
+                Tx.commit(conn);
+                let afterCommit = DbError.runWithFailure(() -> Pool.withLazyTx(pool, () -> WebhooksQueries.claimDueDeliveries(10i64) |> List.length));
+                (first, second, afterCommit)
+            }))
+        });
+        Assert.assertEq(expected = Ok((1, Ok(0), Ok(0))), outcome)
+
 }

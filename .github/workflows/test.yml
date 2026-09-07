@@ -1,0 +1,25 @@
+# push ごとにテストを全部回す。実 PostgreSQL と MinIO は docker compose（runner に docker がある）。
+# Flix のコンパイラは release の jar を取り、bin/flix に FLIX_JAR で渡す。
+name: test
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Flix のコンパイラ
+        run: curl -sSL -o /tmp/flix.jar https://github.com/flix/flix/releases/download/v0.75.3/flix.jar
+      - name: 依存の取得と型検査
+        run: make check
+        env:
+          FLIX_JAR: /tmp/flix.jar
+      - name: 実 PostgreSQL と MinIO 込みのテスト
+        run: make test-pg
+        env:
+          FLIX_JAR: /tmp/flix.jar

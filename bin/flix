@@ -4,14 +4,18 @@
 # 同梱していて手元の jdk と別マイナー版になるため。jar だけ借り、JRE は手元に固定する。
 ENGINE_ROOT="$HOME/Desktop/flix_game_engine"
 
-FLIX_JAR=""
+# CI などで jar を直接指す時は FLIX_JAR を環境変数で渡す（release の flix.jar）
+FLIX_JAR="${FLIX_JAR:-}"
+if [ -n "$FLIX_JAR" ] && [ ! -f "$FLIX_JAR" ]; then FLIX_JAR=""; fi
 real="$(readlink -f "$ENGINE_ROOT/.devbox/nix/profile/default/bin/flix" 2>/dev/null)"
-case "$real" in
-    /nix/store/*)
-        jar="$(dirname "$(dirname "$real")")/share/java/flix/flix.jar"
-        if [ -f "$jar" ]; then FLIX_JAR="$jar"; fi
-        ;;
-esac
+if [ -z "$FLIX_JAR" ]; then
+    case "$real" in
+        /nix/store/*)
+            jar="$(dirname "$(dirname "$real")")/share/java/flix/flix.jar"
+            if [ -f "$jar" ]; then FLIX_JAR="$jar"; fi
+            ;;
+    esac
+fi
 
 if [ -z "$FLIX_JAR" ]; then
     echo "flix.jar が見つかりません。$ENGINE_ROOT で devbox の profile を作ってください。" >&2

@@ -44,6 +44,8 @@ make image     # Docker イメージ（手元用。CI は ghcr.io に amd64 / ar
 ログは 1 行 1 JSON、`/health` に `version`（git の sha）が出る。
 
 実 PG が要るテストは `test/Pg/` に置く。`make test` はそれを除いた写しを `build/unit/` に作って回す。
+CI（`.github/workflows/test.yml`）は push ごとに `make check` と `make test-pg` を回す。Flix のコンパイラは release の jar を `FLIX_JAR` で `bin/flix` に渡す。
+Webhook の受け手の見本は `scripts/webhook-receiver.py`（署名の照合）。
 
 ## ディレクトリ
 

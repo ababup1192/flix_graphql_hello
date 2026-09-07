@@ -35,7 +35,7 @@ X-Cms-Signature: sha256=<hex>           # HMAC-SHA256(secret, "<timestamp>.<body
 {"event":"entry.published","project":"default","entry":{"id":"e1","type":"blogs"}}
 ```
 
-受け手は同じ計算で署名を照合し、timestamp が古すぎれば捨てる。中身は入っていないので、必要ならコンテンツ API で読む。
+受け手は同じ計算で署名を照合し、timestamp が古すぎれば捨てる。照合の見本は `scripts/webhook-receiver.py`（`python3 scripts/webhook-receiver.py secret.txt received.log` で 127.0.0.1:9999 に立つ）。中身は入っていないので、必要ならコンテンツ API で読む。
 2xx 以外なら 1 分 → 5 分 → 30 分 → 2 時間の後に送り直し、5 回目で失敗になる（管理 API の `webhookDeliveries` で見え、`redeliverWebhook` で送り直せる）。
 
 ## 更新
