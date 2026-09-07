@@ -64,11 +64,11 @@ mod AdminQueryResolvers {
 
     /// Query.webhookDeliveries
     pub def webhookDeliveries(): GeneratedAdmin.QueryWebhookDeliveriesResolver[AdminEff] =
-        (_context, webhookId, first) -> Ok(Webhooks.deliveries(AdminMapping.publicIdOf(webhookId), first |> Option.getWithDefault(20)))
+        (_context, webhookId, first) -> Ok(Webhooks.deliveries(AdminMapping.publicIdOf(webhookId), EntryPage.clamp(20, first, None) |> fst))
 
     /// Query.schedules
     pub def schedules(): GeneratedAdmin.QuerySchedulesResolver[AdminEff] =
-        (_context, entryId, first) -> Ok(Schedules.list(entryId |> Option.map(AdminMapping.entryId("entryId")), first |> Option.getWithDefault(50)))
+        (_context, entryId, first) -> Ok(Schedules.list(entryId |> Option.map(AdminMapping.entryId("entryId")), EntryPage.clamp(50, first, None) |> fst))
 
     /// Query.apiKeys
     pub def apiKeys(): GeneratedAdmin.QueryApiKeysResolver[AdminEff] =

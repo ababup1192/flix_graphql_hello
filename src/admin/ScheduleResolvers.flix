@@ -6,8 +6,8 @@ mod ScheduleResolvers {
     /// type Schedule のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.ScheduleResolvers[AdminEff] =
         {
-            id               = (_context, source) -> Ok(Id.Id(source#id)),
-            entryId          = (_context, source) -> Ok(Id.Id(EntryId.text(source#entryId))),
+            id               = (_context, source) -> Ok(AdminMapping.idOfUlid(source#id)),
+            entryId          = (_context, source) -> Ok(AdminMapping.idOfEntry(source#entryId)),
             action           = (_context, source) -> Ok(AdminMapping.scheduleActionToGql(source#action)),
             runAt            = (_context, source) -> Ok(Timestamp.toIso8601(source#runAt)),
             withDependencies = (_context, source) -> Ok(source#withDependencies),

@@ -82,9 +82,8 @@ mod Server {
     /// POST されると preflight 無しで届き、被害者の Cookie 付きで mutation が通る（CSRF）ため。JSON を要求すれば必ず preflight が走る。
     ///
     pub def isJson(request: HttpRequest): Bool =
-        request#headers
-            |> List.find(match (name, _) -> String.toLowerCase(name) == "content-type")
-            |> Option.map(match (_, value) -> String.startsWith(prefix = "application/json", String.toLowerCase(String.trim(value))))
+        Http.findHeader("Content-Type", request#headers)
+            |> Option.map(value -> String.startsWith(prefix = "application/json", String.toLowerCase(value)))
             |> Option.getWithDefault(false)
 
     ///
@@ -92,20 +91,19 @@ mod Server {
     /// baseDomain が無い（CMS_BASE_DOMAIN 未設定）なら常に None で、/p/{プロジェクト slug}/ だけが効く。
     ///
     pub def projectSlugFromHost(baseDomain: Option[String], headers: List[(String, String)]): Option[String] =
-        let host = headers
-            |> List.find(match (name, _) -> String.toLowerCase(name) == "host")
-            |> Option.map(match (_, value) -> value |> String.trim |> String.toLowerCase |> String.splitOn(substr = ":") |> List.head |> Option.getWithDefault(""));
+        let host = Http.findHeader("Host", headers)
+            |> Option.map(value -> value |> String.toLowerCase |> String.splitOn(substr = ":") |> List.head |> Option.getWithDefault(""));
         match (baseDomain |> Option.map(String.toLowerCase), host) {
             case (Some(base), Some(found)) if String.endsWith(suffix = ".${base}", found) =>
                 let label = String.dropRight(String.length(base) + 1, found);
-                if (String.isMatch(regex = "^[a-z0-9][a-z0-9-]{0,63}$", label)) Some(label) else None
+                ProjectSlug.parse(label) |> Option.map(ProjectSlug.text)
             case _ => None
         }
 
     ///
     /// リクエストのプロジェクト slug と、プロジェクトを除いたパス。/p/{プロジェクト slug}/ があればそれを優先し、無ければ Host から。
     ///
-    pub def projectOf(baseDomain: Option[String], request: HttpRequest): (Option[String], String) =
+    pub def splitProjectSlug(baseDomain: Option[String], request: HttpRequest): (Option[String], String) =
         match splitProject(request#path) {
             case (Some(projectSlug), rest) => (Some(projectSlug), rest)
             case (None, rest)              => (projectSlugFromHost(baseDomain, request#headers), rest)
@@ -137,7 +135,7 @@ mod Server {
     /// POST /jobs/tick。トークンが設定されていなければ 404（存在を見せない）、違えば 403、合えば 1 周回して失敗の説明を返す。
     ///
     def jobsTick(config: ServerConfig, request: HttpRequest): HttpResponse \ Health =
-        let given = request#headers |> List.find(match (name, _) -> String.toLowerCase(name) == "x-jobs-token") |> Option.map(snd) |> Option.map(String.trim);
+        let given = Http.findHeader("X-Jobs-Token", request#headers);
         match config#jobsToken {
             case None => errorResponse(404, Nil, "not found")
             case Some(expected) =>

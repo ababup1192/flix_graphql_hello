@@ -32,7 +32,7 @@ mod WebhookDeliveryResolvers {
     /// type WebhookDelivery のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.WebhookDeliveryResolvers[AdminEff] =
         {
-            id            = (_context, source) -> Ok(Id.Id(source#id)),
+            id            = (_context, source) -> Ok(AdminMapping.idOfUlid(source#id)),
             event         = (_context, source) -> Ok(AdminMapping.webhookEventToGql(source#event)),
             status        = (_context, source) -> Ok(AdminMapping.deliveryStatusToGql(source#status)),
             attempts      = (_context, source) -> Ok(source#attempts),

@@ -8,16 +8,14 @@ mod Members {
     ///
     pub def list(): List[Member] \ DbRead + DbErr + CmsErr + Tenant + Session =
         Session.require(Permission.ManageMembers);
-        AuthQueries.listMembers(Tenant.currentId()) |> List.map(row ->
-            { userId = UserId.UserId(row#id), publicId = row#publicId, email = row#email, name = row#name, role = Role.parse(row#role) |> Rows.orRaise("memberships.role", row#role) })
+        AuthQueries.listMembers(Tenant.currentId()) |> List.map(AuthRows.toMember)
 
     ///
     /// 今のプロジェクトの招待。
     ///
     pub def invitations(): List[Invitation] \ DbRead + DbErr + CmsErr + Tenant + Session =
         Session.require(Permission.ManageMembers);
-        AuthQueries.listInvitations(Tenant.currentId()) |> List.map(row ->
-            { id = row#id, publicId = row#publicId, email = row#email, role = Role.parse(row#role) |> Rows.orRaise("invitations.role", row#role), createdAt = row#createdAt })
+        AuthQueries.listInvitations(Tenant.currentId()) |> List.map(AuthRows.toInvitation)
 
     ///
     /// email で招待する。既にユーザーがいれば membership を直接付け、いなければ招待として置く（初回ログインで写る）。
@@ -66,7 +64,12 @@ mod Members {
 
     /// プロジェクトの owner が 1 人しかいなければ invalid。組織の owner は数えない（組織側で守る）。
     def guardLastOwner(): Unit \ DbRead + CmsErr + Tenant =
-        let owners = AuthQueries.countProjectOwners(Tenant.currentId()) |> Rows.total;
+        AuthQueries.countProjectOwners(Tenant.currentId()) |> Rows.total |> requireAnotherOwner
+
+    ///
+    /// owner が 1 人しかいなければ invalid。プロジェクトと組織で同じ規則。
+    ///
+    pub def requireAnotherOwner(owners: Int64): Unit \ CmsErr =
         CmsErr.raiseIfAny(if (owners <= 1i64) Violation.Violation("role", "最後の owner は外せません。先に別の owner を付けてください") :: Nil else Nil)
 
 }
@@ -83,7 +86,7 @@ mod Organizations {
     pub def create(signup: Signup, name: String): Organization \ Db + CmsErr + IdGen + Session =
         let user = Session.currentUser();
         if (signup == Signup.Closed and not isOwner(user, OrgId.default())) CmsErr.forbidden(Permission.ManageProject) else ();
-        CmsErr.raiseIfAny(if (String.isEmpty(String.trim(name))) Violation.Violation("name", "名前を付けてください") :: Nil else Nil);
+        CmsErr.raiseIfAny(Naming.validateName("name", name));
         let publicId = IdGen.freshPublicId();
         let id = AuthQueries.insertOrganization({ publicId = publicId, name = name }) |> Rows.expectId;
         discard AuthQueries.upsertOrgMember({ userId = UserId.toInt64(user), orgId = id, role = OrgRole.text(OrgRole.Owner) });
@@ -95,7 +98,7 @@ mod Organizations {
     pub def find(orgId: OrgId): Option[Organization] \ DbRead + CmsErr + Session =
         let user = Session.currentUser();
         if (Option.isEmpty(roleOf(user, orgId))) None
-        else AuthQueries.findOrganization(OrgId.toInt64(orgId)) |> Option.map(row -> { id = OrgId.OrgId(row#id), publicId = row#publicId, name = row#name })
+        else AuthQueries.findOrganization(OrgId.toInt64(orgId)) |> Option.map(AuthRows.toOrganization)
 
     ///
     /// 外向きの id から内部の id。無ければ notFound（member かどうかは呼ぶ先が見る）。
@@ -130,8 +133,7 @@ mod Organizations {
     ///
     pub def members(orgId: OrgId): List[OrganizationMember] \ DbRead + DbErr + CmsErr + Session =
         if (isOwner(Session.currentUser(), orgId))
-            AuthQueries.listOrgMembers(OrgId.toInt64(orgId)) |> List.map(row ->
-                { userId = UserId.UserId(row#id), publicId = row#publicId, email = row#email, name = row#name, role = OrgRole.parse(row#role) |> Rows.orRaise("org_members.role", row#role) })
+            AuthQueries.listOrgMembers(OrgId.toInt64(orgId)) |> List.map(AuthRows.toOrganizationMember)
         else Nil
 
     ///
@@ -165,8 +167,7 @@ mod Organizations {
 
     /// 組織の owner が 1 人しかいなければ invalid。
     def guardLastOwner(orgId: OrgId): Unit \ DbRead + CmsErr =
-        let owners = AuthQueries.countOrgOwners(OrgId.toInt64(orgId)) |> Rows.total;
-        CmsErr.raiseIfAny(if (owners <= 1i64) Violation.Violation("role", "最後の owner は外せません。先に別の owner を付けてください") :: Nil else Nil)
+        AuthQueries.countOrgOwners(OrgId.toInt64(orgId)) |> Rows.total |> Members.requireAnotherOwner
 
     ///
     /// 組織の下にプロジェクトを作る。owner だけ。

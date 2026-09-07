@@ -16,7 +16,7 @@ mod ApiKeys {
     ///
     pub def create(pepper: Pepper, name: String, scope: ApiKeyScope): IssuedApiKey \ DbWrite + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageApiKeys);
-        CmsErr.raiseIfAny(if (String.isEmpty(String.trim(name))) Violation.Violation("name", "名前を付けてください") :: Nil else Nil);
+        CmsErr.raiseIfAny(Naming.validateName("name", name));
         let key = prefix() ++ IdGen.freshSecret();
         let publicId = IdGen.freshPublicId();
         let id = AuthQueries.insertApiKey({ publicId = publicId, projectId = Tenant.currentId(), name = name, keyHash = hash(pepper, key), pepperId = pepper#pepperId, scope = ApiKeyScope.text(scope) }) |> Rows.expectId;
@@ -35,11 +35,7 @@ mod ApiKeys {
     ///
     pub def list(): List[ApiKey] \ DbRead + DbErr + CmsErr + Tenant + Session =
         Session.require(Permission.ManageApiKeys);
-        AuthQueries.listApiKeys(Tenant.currentId()) |> List.map(row -> {
-            id = row#id, publicId = row#publicId, name = row#name,
-            scope = ApiKeyScope.parse(row#scope) |> Rows.orRaise("api_keys.scope", row#scope),
-            createdAt = row#createdAt, revokedAt = row#revokedAt
-        })
+        AuthQueries.listApiKeys(Tenant.currentId()) |> List.map(AuthRows.toApiKey)
 
     ///
     /// 生の鍵からこのプロジェクトの範囲を引く。hash で引いた後にプロジェクトが一致するかを確かめる（鍵がプロジェクトを決めない）。

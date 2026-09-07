@@ -141,6 +141,12 @@ mod Naming {
         else Nil
 
     ///
+    /// 表示名。空（空白だけ）は invalid。組織・プロジェクト・鍵・Webhook の名前に共通。
+    ///
+    pub def validateName(path: String, text: String): List[Violation] =
+        if (String.isEmpty(String.trim(text))) Violation.Violation(path, "名前を付けてください") :: Nil else Nil
+
+    ///
     /// フィールドの性質の組み合わせ。unique は配列・OBJECT・BLOCKS・ASSET・RICH_TEXT に付けられない（値ごとの一意を DB で守れない）。
     /// BLOCKS は常に配列、RICH_TEXT は配列にできない。
     ///

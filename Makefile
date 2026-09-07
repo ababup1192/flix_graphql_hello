@@ -24,7 +24,7 @@ UNIT_DIR = build/unit
 test-unit:
 	mkdir -p $(UNIT_DIR)
 	cp flix.toml $(UNIT_DIR)/flix.toml
-	cp schema.graphql admin.graphql $(UNIT_DIR)/
+	cp schema.graphql admin.graphql account.graphql $(UNIT_DIR)/
 	ln -sfn $(CURDIR)/migrations $(UNIT_DIR)/migrations
 	rsync -a --delete src/ $(UNIT_DIR)/src/
 	rsync -a --delete --exclude Pg test/ $(UNIT_DIR)/test/

@@ -170,8 +170,12 @@ mod EntryPage {
     ///
     /// Int32 に載る件数（32 bit の Int しか持てない API へ渡す用）。超える分は上限に丸める。
     ///
-    pub def totalCountInt32(page: EntryPage): Int32 =
-        Int64.clampToInt32(min = 0, max = Int32.maxValue(), page#totalCount)
+    pub def totalCountInt32(page: EntryPage): Int32 = countToInt32(page#totalCount)
+
+    ///
+    /// 件数や大きさ（Int64）を GraphQL の Int に。負は 0、超えれば上限。
+    ///
+    pub def countToInt32(value: Int64): Int32 = Int64.clampToInt32(min = 0, max = Int32.maxValue(), value)
 
 }
 

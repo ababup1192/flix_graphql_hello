@@ -9,7 +9,7 @@ mod AccountMapping {
     /// ID（public_id）から内部の UserId。無ければ notFound。
     pub def userId(argument: String, id: Id): UserId \ DbRead + CmsErr =
         let Id.Id(publicId) = id;
-        Accounts.findByPublicId(publicId) |> Option.map(user -> user#id) |> CmsErr.orNotFound(Entity.Member, "${argument}=${publicId}")
+        Accounts.requireByPublicId(argument, publicId)
 
     /// ID（public_id）から内部の OrgId。無ければ notFound。
     pub def orgId(_argument: String, id: Id): OrgId \ DbRead + CmsErr =

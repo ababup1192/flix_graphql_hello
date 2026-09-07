@@ -29,21 +29,13 @@ mod Schedules {
     ///
     pub def list(entryId: Option[EntryId], first: Int32): List[Schedule] \ DbRead + DbErr + CmsErr + Tenant + Session =
         Session.require(Permission.ReadDraft);
-        let limit = Int32.toInt64(Int32.max(1, Int32.min(200, first)));
+        let limit = Int32.toInt64(first);
         match entryId {
-            case Some(id) => SchedulesQueries.listSchedulesOfEntry({ projectId = Tenant.currentId(), entryId = EntryId.text(id), limit = limit }) |> List.map(fromRow)
-            case None     => SchedulesQueries.listSchedules({ projectId = Tenant.currentId(), limit = limit }) |> List.map(fromRow)
+            case Some(id) => SchedulesQueries.listSchedulesOfEntry({ projectId = Tenant.currentId(), entryId = EntryId.text(id), limit = limit }) |> List.map(ScheduleRows.toSchedule)
+            case None     => SchedulesQueries.listSchedules({ projectId = Tenant.currentId(), limit = limit }) |> List.map(ScheduleRows.toSchedule)
         }
 
     def find(id: String): Schedule \ DbRead + DbErr + CmsErr + Tenant =
-        SchedulesQueries.findSchedule({ id = id, projectId = Tenant.currentId() }) |> Option.map(fromRow) |> CmsErr.orNotFound(Entity.Schedule, id)
-
-    pub def fromRow(row: { id = String, entryId = String, action = String, runAt = Timestamp.Timestamp, withDependencies = Bool, status = String, requestedBy = String, lastError = String, createdAt = Timestamp.Timestamp, doneAt = Option[Timestamp.Timestamp] | r }): Schedule \ DbErr =
-        { id = row#id,
-          entryId = EntryId.parse(row#entryId) |> Rows.orRaise("scheduled_actions.entry_id", row#entryId),
-          action = ScheduleAction.parse(row#action) |> Rows.orRaise("scheduled_actions.action", row#action),
-          runAt = row#runAt, withDependencies = row#withDependencies,
-          status = ScheduleStatus.parse(row#status) |> Rows.orRaise("scheduled_actions.status", row#status),
-          requestedBy = row#requestedBy, lastError = row#lastError, createdAt = row#createdAt, doneAt = row#doneAt }
+        SchedulesQueries.findSchedule({ id = id, projectId = Tenant.currentId() }) |> Option.map(ScheduleRows.toSchedule) |> CmsErr.orNotFound(Entity.Schedule, id)
 
 }

@@ -77,9 +77,7 @@ mod AuthConfig {
     /// リクエストからトークンを取り出す。`Authorization` なら `Bearer ` を剥がす。無ければ None。
     ///
     pub def tokenOf(headerName: String, headers: List[(String, String)]): Option[String] =
-        headers
-            |> List.find(match (name, _) -> String.toLowerCase(name) == String.toLowerCase(headerName))
-            |> Option.map(match (_, value) -> String.trim(value))
+        Http.findHeader(headerName, headers)
             |> Option.map(value -> if (String.startsWith(prefix = "Bearer ", value)) String.drop(7, value) else value)
             |> Option.filter(value -> not String.isEmpty(value))
 
@@ -88,15 +86,9 @@ mod AuthConfig {
     ///
     /// X-Preview-Token の値。
     pub def previewTokenOf(headers: List[(String, String)]): Option[String] =
-        headers
-            |> List.find(match (name, _) -> String.toLowerCase(name) == "x-preview-token")
-            |> Option.map(match (_, value) -> String.trim(value))
-            |> Option.filter(value -> not String.isEmpty(value))
+        Http.findHeader("X-Preview-Token", headers) |> Option.filter(value -> not String.isEmpty(value))
 
     pub def apiKeyOf(headers: List[(String, String)]): Option[String] =
-        headers
-            |> List.find(match (name, _) -> String.toLowerCase(name) == "x-api-key")
-            |> Option.map(match (_, value) -> String.trim(value))
-            |> Option.filter(value -> not String.isEmpty(value))
+        Http.findHeader("X-Api-Key", headers) |> Option.filter(value -> not String.isEmpty(value))
 
 }

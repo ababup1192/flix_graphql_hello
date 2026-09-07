@@ -61,10 +61,13 @@ mod AdminMapping {
     /// 外向きの id（public_id）をそのまま ID に。内部の連番は出さない。
     pub def idOfPublic(publicId: String): Id = Id.Id(publicId)
 
+    /// 時刻順の記録（配信・予約）の id（ULID）をそのまま ID に。
+    pub def idOfUlid(ulid: String): Id = Id.Id(ulid)
+
     /// ID（public_id）から内部の UserId。無ければ notFound。
     pub def userId(argument: String, id: Id): UserId \ DbRead + CmsErr =
         let Id.Id(publicId) = id;
-        Accounts.findByPublicId(publicId) |> Option.map(user -> user#id) |> CmsErr.orNotFound(Entity.Member, "${argument}=${publicId}")
+        Accounts.requireByPublicId(argument, publicId)
 
     /// ID（public_id）の中の文字列。
     pub def publicIdOf(id: Id): String =
@@ -190,7 +193,7 @@ mod AdminMapping {
     ///
     /// バイト数や件数を GraphQL の Int に収める。上限（20 MB、一覧の件数）は Int32 に十分入る。
     ///
-    pub def sizeToGql(value: Int64): Int32 = Int64.clampToInt32(min = 0, max = Int32.maxValue(), value)
+    pub def sizeToGql(value: Int64): Int32 = EntryPage.countToInt32(value)
 
     ///
     /// UploadInput をドメインの申し込みに。
@@ -275,10 +278,6 @@ mod AdminMapping {
 
     pub def idOfVersion(id: VersionId): Id = Id.Id(Int64.toString(VersionId.toInt64(id)))
 
-    ///
-    /// 版に残す作者名。認証が入るまでは Context の userId か "anonymous"。
-    ///
-    pub def authorOf(context: Context): String = context#userId |> Option.getWithDefault("anonymous")
 
     // ---- JSON ----
 

@@ -14,7 +14,7 @@ mod Webhooks {
     ///
     pub def list(): List[Webhook] \ DbRead + DbErr + CmsErr + Tenant + Session =
         Session.require(Permission.ManageProject);
-        WebhooksQueries.listWebhooks(Tenant.currentId()) |> List.map(fromRow)
+        WebhooksQueries.listWebhooks(Tenant.currentId()) |> List.map(WebhookRows.toWebhook)
 
     ///
     /// 作る。secret はこの戻りでしか見えない。
@@ -54,8 +54,8 @@ mod Webhooks {
     pub def deliveries(publicId: String, first: Int32): List[WebhookDelivery] \ DbRead + DbErr + CmsErr + Tenant + Session =
         Session.require(Permission.ManageProject);
         let webhook = find(publicId);
-        WebhooksQueries.listDeliveries({ webhookId = webhook#id, projectId = Tenant.currentId(), limit = Int32.toInt64(Int32.max(1, Int32.min(200, first))) })
-            |> List.map(deliveryOf)
+        WebhooksQueries.listDeliveries({ webhookId = webhook#id, projectId = Tenant.currentId(), limit = Int32.toInt64(first) })
+            |> List.map(WebhookRows.toDelivery)
 
     ///
     /// 配信をもう 1 度送る番にする。送っている最中の物は触れない。
@@ -64,7 +64,7 @@ mod Webhooks {
         Session.require(Permission.ManageProject);
         let changed = WebhooksQueries.resetDelivery({ id = deliveryId, projectId = Tenant.currentId() });
         if (changed == 0) CmsErr.notFound(Entity.WebhookDelivery, deliveryId) else ();
-        WebhooksQueries.findDelivery({ id = deliveryId, projectId = Tenant.currentId() }) |> Option.map(deliveryOf) |> CmsErr.orNotFound(Entity.WebhookDelivery, deliveryId)
+        WebhooksQueries.findDelivery({ id = deliveryId, projectId = Tenant.currentId() }) |> Option.map(WebhookRows.toDelivery) |> CmsErr.orNotFound(Entity.WebhookDelivery, deliveryId)
 
     ///
     /// 出来事を受ける有効な Webhook すべてに配信を積む。ユースケースが同じ Tx で呼ぶ。Webhook が無ければ何もしない。
@@ -94,27 +94,18 @@ mod Webhooks {
             "type"    => Json.JString(ApiId.text(typeApiId))
         })
 
+    /// payload に入れる今のプロジェクトのプロジェクト slug。
     def projectSlug(): String \ DbRead + DbErr + Tenant =
         Projects.find(Tenant.current()) |> Option.map(found -> ProjectSlug.text(found#slug)) |> Option.getWithDefault("")
 
+    /// 外向きの id で 1 つ。無ければ notFound。
     def find(publicId: String): Webhook \ DbRead + DbErr + CmsErr + Tenant =
-        WebhooksQueries.findWebhookByPublicId({ publicId = publicId, projectId = Tenant.currentId() }) |> Option.map(fromRow) |> CmsErr.orNotFound(Entity.Webhook, publicId)
+        WebhooksQueries.findWebhookByPublicId({ publicId = publicId, projectId = Tenant.currentId() }) |> Option.map(WebhookRows.toWebhook) |> CmsErr.orNotFound(Entity.Webhook, publicId)
 
+    /// 名前・url の形・出来事の有無。
     def validate(draft: WebhookDraft): List[Violation] =
-        (if (String.isEmpty(String.trim(draft#name))) Violation.Violation("name", "名前を付けてください") :: Nil else Nil)
+        Naming.validateName("name", draft#name)
             ::: (if (String.startsWith(prefix = "https://", draft#url) or String.startsWith(prefix = "http://", draft#url)) Nil else Violation.Violation("url", "url は http:// か https:// で始めてください") :: Nil)
             ::: (if (List.isEmpty(draft#events)) Violation.Violation("events", "出来事を 1 つ以上選んでください") :: Nil else Nil)
-
-    def fromRow(row: { id = Int64, publicId = String, name = String, url = String, events = List[String], active = Bool, createdAt = Timestamp.Timestamp | r }): Webhook \ DbErr =
-        { id = row#id, publicId = row#publicId, name = row#name, url = row#url,
-          events = row#events |> List.map(text -> WebhookEvent.parse(text) |> Rows.orRaise("webhooks.events", text)),
-          active = row#active, createdAt = row#createdAt }
-
-    def deliveryOf(row: { id = String, event = String, status = String, attempts = Int32, nextAttemptAt = Timestamp.Timestamp, lastStatus = Int32, lastError = String, createdAt = Timestamp.Timestamp, deliveredAt = Option[Timestamp.Timestamp] | r }): WebhookDelivery \ DbErr =
-        { id = row#id,
-          event = WebhookEvent.parse(row#event) |> Rows.orRaise("webhook_deliveries.event", row#event),
-          status = DeliveryStatus.parse(row#status) |> Rows.orRaise("webhook_deliveries.status", row#status),
-          attempts = row#attempts, nextAttemptAt = row#nextAttemptAt, lastStatus = row#lastStatus, lastError = row#lastError,
-          createdAt = row#createdAt, deliveredAt = row#deliveredAt }
 
 }

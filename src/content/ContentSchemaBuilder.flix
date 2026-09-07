@@ -160,7 +160,7 @@ mod ContentSchemaBuilder {
             Schema.field0("url", Out.string(), (_context, asset) -> Ok(ObjectStore.publicUrl(asset#key))) ::
             Schema.field0("fileName", Out.string(), (_context, asset) -> Ok(asset#fileName)) ::
             Schema.field0("mime", Out.string(), (_context, asset) -> Ok(asset#mime)) ::
-            Schema.field0("size", Out.int32(), (_context, asset) -> Ok(Int64.clampToInt32(min = 0, max = Int32.maxValue(), asset#size))) ::
+            Schema.field0("size", Out.int32(), (_context, asset) -> Ok(EntryPage.countToInt32(asset#size))) ::
             Schema.field0("width", Out.option(Out.int32()), (_context, asset) -> Ok(asset#width)) ::
             Schema.field0("height", Out.option(Out.int32()), (_context, asset) -> Ok(asset#height)) ::
             Schema.field0("alt", Out.string(), (_context, asset) -> Ok(asset#alt)) :: Nil)

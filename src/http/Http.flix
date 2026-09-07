@@ -29,7 +29,17 @@ pub type alias HttpResponse = { status = Int32, headers = List[(String, String)]
 /// - ヘッダ 1 行は maxHeaderLineBytes()（8 KiB）まで。超える行は 431 にする
 ///
 mod Http {
+
     import java.nio.charset.StandardCharsets
+
+    ///
+    /// ヘッダの値（名前は大文字小文字を問わない。前後の空白は落とす）。無ければ None。同じ名前が複数あれば最初の物。
+    ///
+    pub def findHeader(name: String, headers: List[(String, String)]): Option[String] =
+        let wanted = String.toLowerCase(name);
+        headers
+            |> List.find(match (found, _) -> String.toLowerCase(found) == wanted)
+            |> Option.map(match (_, value) -> String.trim(value))
 
     ///
     /// Content-Length の読み取りに失敗した理由。
