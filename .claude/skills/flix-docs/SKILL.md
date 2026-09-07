@@ -107,6 +107,15 @@ pub type alias Clip = { playback = Playback, name = String, volume = Float64 }
 
 ### Algebraic Effect の扱い方
 
+- **effect にする基準は 3 つだけ。どれにも当たらない物は関数か値にする**
+  1. **非再開**: 途中で抜ける・分岐する。戻り値では表せない（`CmsErr`）
+  2. **差し替え**: 本番とテストで実装が違う、外の世界に触る（`Clock` / `IdGen` / `ObjectStore` / `TokenVerifier` / sqlfx の `Db` 系）
+  3. **文脈の暗黙の引数**: 呼び出し列の深い所で読む「今の〜」で、全関数の引数に通すと汚れる（`Tenant` / `Session`）
+  - 「型に意図が出る」「強制力が付く」だけでは理由にしない。effect の和が伸びるほど取り回しが悪くなる。
+    値を読むだけの物（設定、状態のまとめ）はレコードで渡す
+  - effect の和が 5 つを超える署名は alias にし、alias は「共通 + 差分」で組む（`AdminEff` = 共通 + `ObjectStore` のように）
+  - 非再開の effect（基準 1）を `withLazyTx` のような「後始末が要る物」の外で受けると後始末が飛ぶ（接続が漏れた実例あり）。
+    必ず内側で受ける（`DbRunner.transact`）
 - **エフェクトはすぐに `run` せず、呼び出し元へ伝播させること**
   - その場で `run` すると IO に変換され、関数シグネチャが `IO` だらけになる
   - IO が伝播すると「何の副作用が起きているか」が型から読み取れなくなる
