@@ -76,13 +76,28 @@ mod PgTestSupport {
     /// プール越しに 1 つの Tx で書く（withDb の外から、コンテンツ API のエンジンと同じ接続先を触る）。
     ///
     pub def mutate(pool: Pool, thunk: Unit -> a \ ef): Result[DbFailure, Result[CmsErr.CmsFailure, a]] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, CmsErr, IdGen, Tenant, Session, ObjectStore}) + IO =
-        DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() -> withStorage(() -> TenantTx.withLazyTx(pool, ProjectId.default(), thunk)))))))
+        Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() -> withStorage(() -> DbRunner.transact(pool, Some(ProjectId.default()), thunk)))))
 
     ///
-    /// プールを開いて body に渡し、必ず閉じる。
+    /// アプリ用のロール（cms_app）の接続設定。API のテストはこれで繋ぎ、RLS 越しに動く事を確かめる。
+    ///
+    /// WhyNot: 所有者（docker の POSTGRES_USER）で繋がないのは、superuser は FORCE でも RLS を素通りし、
+    /// Runner の印が抜けていてもテストが通ってしまうため。表の作り直しと migration だけ所有者で行う。
+    ///
+    pub def appConfig(): Jdbc.ConnectionConfig \ IO =
+        let owner = config();
+        { url = owner#url, user = "cms_app", password = "cms_app" }
+
+    ///
+    /// cms_app のプールを開いて body に渡し、必ず閉じる。ロールが無ければ所有者で作る（以後に作る表にも権限が付く）。
     ///
     pub def withPool(body: Pool -> a \ ef): a \ ef + IO =
-        let pool = Pool.open(Pool.defaultConfig(config()));
+        let app = appConfig();
+        match AppRole.ensure(config(), app#user, app#password) {
+            case Ok(())       => ()
+            case Err(message) => bug!(message)
+        };
+        let pool = Pool.open(Pool.defaultConfig(app));
         let result = body(pool);
         Pool.close(pool);
         result

@@ -141,7 +141,8 @@ api_keys       (id, project_id, name, key_hash, scope: read | readDraft, created
 3. DB（済み、migration 012）: 中身の 6 表に ENABLE / FORCE と policy `project_id = nullif(current_setting('app.project_id', true), '')::bigint`（USING と WITH CHECK）。
    印は Runner が `TenantTx.withLazyTx`（sqlfx の `Pool.withLazyTxAfterBegin`）で BEGIN の直後に `set_config('app.project_id', $1, true)` を流す。
    Account API は印を置かないので中身の表は 0 行。接続は `CMS_DB_APP_PASSWORD` があれば所有者でない `cms_app`（起動時に `AppRole.ensure` が作る）。
-   注意: docker の POSTGRES_USER は superuser で RLS を素通りするので、テスト（TestRlsPg）は cms_app で繋ぎ直して確かめる
+   注意: docker の POSTGRES_USER は superuser で RLS を素通りするので、API のテストは `PgTestSupport.withPool` が cms_app で繋ぎ、
+   TestRlsPg は 6 表それぞれで SELECT / UPDATE / DELETE / INSERT と印の無い Tx を見る。Runner の印を外すと 4 件が落ちる事を確かめた
 
 ### 後から足す属性ベースの権限に備える
 

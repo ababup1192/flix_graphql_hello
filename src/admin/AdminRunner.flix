@@ -23,15 +23,14 @@ mod AdminRunner {
         match context#credential {
             case Credential.Invalid(reason) => Err("認証に失敗しました: ${reason}")
             case credential =>
-                let outcome = DbRunner.retrying(() ->
-                    CmsErr.runWithResult(() ->
-                        IdGen.runWithRandom(() ->
-                            Tenant.runWith(projectId, () ->
-                                Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () ->
-                                    TenantTx.withLazyTx(pool, projectId, () -> {
-                                        let actor = Deps.actorOf(deps, projectId, credential);
-                                        Session.runWith(actor, f)
-                                    }))))))));
+                let outcome =
+                    IdGen.runWithRandom(() ->
+                        Tenant.runWith(projectId, () ->
+                            Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () ->
+                                DbRunner.transact(pool, Some(projectId), () -> {
+                                    let actor = Deps.actorOf(deps, projectId, credential);
+                                    Session.runWith(actor, f)
+                                }))))));
                 match outcome {
                     case Err(failure)      => Err(DbRunner.failureMessage(failure))
                     case Ok(Err(failure))  => Err(CmsErr.toMessage(failure))

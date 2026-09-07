@@ -16,15 +16,14 @@ mod ContentRunner {
         (context, f) -> runOne(pool, deps, projectId, context, f)
 
     def runOne(pool: Pool, deps: Deps, projectId: ProjectId, context: Context, f: Unit -> Result[FieldError, JavaValue.Boxed] \ ContentEff + IO): Result[FieldError, JavaValue.Boxed] \ IO =
-        let outcome = DbRunner.retrying(() ->
-            CmsErr.runWithResult(() ->
-                Tenant.runWith(projectId, () ->
-                    Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () -> IdGen.runWithRandom(() ->
-                        TenantTx.withLazyTx(pool, projectId, () -> {
-                            let actor = Deps.actorOf(deps, projectId, context#credential);
-                            guardVisibility(projectId, actor);
-                            Session.runWith(actor, f)
-                        }))))))));
+        let outcome =
+            Tenant.runWith(projectId, () ->
+                Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () -> IdGen.runWithRandom(() ->
+                    DbRunner.transact(pool, Some(projectId), () -> {
+                        let actor = Deps.actorOf(deps, projectId, context#credential);
+                        guardVisibility(projectId, actor);
+                        Session.runWith(actor, f)
+                    }))))));
         match outcome {
             case Err(failure)     => Err(DbRunner.failureMessage(failure))
             case Ok(Err(failure)) => Err(CmsErr.toMessage(failure))

@@ -26,13 +26,12 @@ mod AccountRunner {
             case Credential.Invalid(reason) => Err("認証に失敗しました: ${reason}")
             case Credential.ApiKey(_)       => Err("Account API は API キーでは使えません。ログインしてください")
             case credential =>
-                let outcome = DbRunner.retrying(() ->
-                    CmsErr.runWithResult(() ->
-                        IdGen.runWithRandom(() ->
-                            Pool.withLazyTx(pool, () -> {
-                                let actor = actorOf(deps, credential);
-                                Session.runWith(actor, f)
-                            }))));
+                let outcome =
+                    IdGen.runWithRandom(() ->
+                        DbRunner.transact(pool, None, () -> {
+                            let actor = actorOf(deps, credential);
+                            Session.runWith(actor, f)
+                        }));
                 match outcome {
                     case Err(failure)      => Err(DbRunner.failureMessage(failure))
                     case Ok(Err(failure))  => Err(CmsErr.toMessage(failure))
