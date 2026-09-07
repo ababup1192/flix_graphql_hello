@@ -124,6 +124,22 @@ api_keys       (id, project_id, name, key_hash, scope: read | readDraft, created
 
 **確認済みで問題なし**: richText の HTML（エスケープ、href / embed の許可リスト、noopener）、asset（署名に Content-Type / Length、乱数 id、一覧不可、使用中は消せない）、GraphQL（深さ 15、first 200、1 操作）、HTTP（上限とタイムアウト、制御文字除去）、テナントの型強制、compose の必須値。
 
+### テナント分離の三重化
+
+1. 型: `Tenant` effect の未使用はコンパイルで落ちる（済み）
+2. 生成器: sqlfx の生成器が、`project_id` 列を持つ表を触る query に `project_id = :projectId` が無ければ生成を失敗させ、
+   `projectId` を生成コードの中で `Tenant.currentId()` から供給する（呼ぶ側は渡さない）
+3. DB: RLS。`ALTER TABLE ... ENABLE / FORCE ROW LEVEL SECURITY` と `USING (project_id = current_setting('app.project_id')::bigint)` を
+   プロジェクトに属する全表に。`Tenant.runWith` の handler が Tx の最初に `SET LOCAL app.project_id` を流す（sqlfx の withLazyTx に
+   「開いた直後に流す SQL」の口を足す）。接続は所有者でない `cms_app` ロール、migration だけ所有者。設定が無い Tx は全行が見えない
+
+### 後から足す属性ベースの権限に備える
+
+- `Authz.can(actor, permission, resource)` は最初から resource（型 id、entry の属性）を受ける。今は使わない
+- `Authz.readFilter(actor): List[Condition]` を用意し、管理 API の `entries` とコンテンツ API の一覧に AND で付ける。今は空
+- 後で `access_rules(project_id, subject_kind, subject_id, field_api_id, allowed_values)` を足し、Datalog の事実（`Scope`）と readFilter で
+  「このタグの記事だけ」を人にも API キーにも付けられる。RLS はテナント境界に限り、属性の絞り込みは SQL の条件で行う
+
 ### 作業の順
 
 表と migration → `Authz`（Datalog）→ `TokenVerifier` → `Actor` と Runner と PgTestSupport → 既存 mutation に `require`、`me` と組織・メンバー・鍵 → Host で slug、slug 無しの管理 API、公開 API のキー。
