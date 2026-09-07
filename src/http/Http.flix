@@ -3,10 +3,11 @@
 ///
 /// - method: "POST" などのメソッド
 /// - path: "/graphql" などのパス（クエリ文字列も含めたまま）
+/// - version: リクエスト行の "HTTP/1.1" / "HTTP/1.0"。keep-alive を続けるかの判定に使う
 /// - headers: (小文字にしたヘッダ名, trim した値) の並び。届いた順
 /// - body: Content-Length ぶん読んだボディ
 ///
-pub type alias HttpRequest = { method = String, path = String, headers = List[(String, String)], body = String }
+pub type alias HttpRequest = { method = String, path = String, version = String, headers = List[(String, String)], body = String }
 
 ///
 /// HTTP レスポンス。
@@ -24,7 +25,8 @@ pub type alias HttpResponse = { status = Int32, headers = List[(String, String)]
 /// - Transfer-Encoding: chunked には対応しない。ボディの長さは Content-Length だけで決める
 /// - Content-Length が無いリクエストはボディ無し（空文字列）として扱う
 /// - Content-Length が複数あって値が食い違うリクエストは 400 にする（RFC 9110 8.6）
-/// - keep-alive には対応しない。1 接続につき 1 リクエストで、レスポンスは常に Connection: close
+/// - keep-alive: 続けるかは shouldKeepAlive が決め、レスポンスの Connection ヘッダは render の引数で決める
+/// - pipelining（応答を待たずに次を送る）は保証しない。順に読んで順に書くだけ
 /// - ボディは maxBodyBytes()（1 MiB）まで。超える Content-Length は 413 にする
 /// - ヘッダ 1 行は maxHeaderLineBytes()（8 KiB）まで。超える行は 431 にする
 ///
@@ -106,14 +108,41 @@ mod Http {
     pub def maxHeaderLineBytes(): Int32 = 8192
 
     ///
-    /// リクエスト行（"POST /graphql HTTP/1.1"）からメソッドとパスを取り出す。
+    /// リクエスト行（"POST /graphql HTTP/1.1"）からメソッド・パス・バージョンを取り出す。
     /// メソッド・パス・"HTTP/" で始まるバージョンの 3 つがそろっていなければ None。
     ///
-    pub def parseRequestLine(line: String): Option[(String, String)] =
+    pub def parseRequestLine(line: String): Option[(String, String, String)] =
         match String.splitOn(substr = " ", line) {
-            case method :: path :: version :: Nil if String.startsWith(prefix = "HTTP/", version) => Some((method, path))
+            case method :: path :: version :: Nil if String.startsWith(prefix = "HTTP/", version) => Some((method, path, version))
             case _                                                                                 => None
         }
+
+    ///
+    /// 1 接続で受けるリクエストの上限。超えたら応答の後に閉じる。
+    ///
+    pub def maxRequestsPerConnection(): Int32 = 100
+
+    ///
+    /// 応答の後に接続を続ける（keep-alive）か閉じるか。
+    ///
+    pub enum Connection with Eq, ToString {
+        case KeepAlive
+        case Close
+    }
+
+    ///
+    /// 応答を書いた後に同じ接続で次のリクエストを待つか。served は今の応答を含めた、この接続で処理した数。
+    /// HTTP/1.1 で、Connection: close が無く、上限（maxRequestsPerConnection）に届かず、応答が 4xx / 5xx でない時だけ続ける。
+    ///
+    /// WhyNot: エラー応答の後に続けないのは、400 / 413 / 431 はボディを読み切らずに返す事があり、ストリームの位置が次のリクエストの先頭とは限らないため。
+    /// WhyNot: HTTP/1.0 で続けないのは、既定が close で、続けるには Keep-Alive ヘッダの取り決めが別に要るため。
+    ///
+    pub def shouldKeepAlive(request: HttpRequest, status: Int32, served: Int32): Connection =
+        let wantsClose = findHeader("Connection", request#headers) |> Option.map(String.toLowerCase) |> Option.exists(value -> value == "close");
+        if (request#version == "HTTP/1.1" and not wantsClose and served < maxRequestsPerConnection() and status < 400)
+            Connection.KeepAlive
+        else
+            Connection.Close
 
     ///
     /// ヘッダ行（"Content-Length: 42"）を (小文字のヘッダ名, trim した値) にする。
@@ -163,11 +192,12 @@ mod Http {
         value |> String.replace(src = "\r", dst = "") |> String.replace(src = "\n", dst = "")
 
     ///
-    /// レスポンスを HTTP/1.1 の文字列にする。1 リクエストで接続を閉じる。
+    /// レスポンスを HTTP/1.1 の文字列にする。Connection ヘッダは connection（keep-alive / close）で決める。
     /// ボディが空なら Content-Type は付けない。204 には Content-Length も付けない（RFC 9110）。
     /// response#headers は Content-Type / Content-Length / Connection の後ろに並べる。
     ///
-    pub def render(response: HttpResponse): String =
+    pub def render(connection: Connection, response: HttpResponse): String =
+        let connectionValue = match connection { case Connection.KeepAlive => "keep-alive" case Connection.Close => "close" };
         let contentType = if (response#body == "") "" else "Content-Type: application/json; charset=utf-8\r\n";
         let contentLength = if (response#status == 204) "" else "Content-Length: ${utf8Length(response#body)}\r\n";
         // WhyNot: 値の CR / LF を落とすのは、Origin をそのまま返す CORS のヘッダで、行中の裸の CR がレスポンス分割になるのを防ぐため
@@ -176,7 +206,7 @@ mod Http {
             "HTTP/1.1 ${response#status} ${reasonPhrase(response#status)}\r\n" +
             contentType +
             contentLength +
-            "Connection: close\r\n" +
+            "Connection: ${connectionValue}\r\n" +
             extraHeaders + "\r\n";
         headers + response#body
 

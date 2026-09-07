@@ -119,10 +119,12 @@ mod Server {
         String.splitOn(substr = "?", path) |> List.head |> Option.getWithDefault(path)
 
     ///
-    /// GET /health。DB に届けば {"status": "ok", "version": "...", "jobs": {"lastTickAt": ...}}、届かなければ 503 で理由を付ける。
+    /// GET /health。DB に届けば {"status": "ok", "version": "...", "jobs": {"lastTickAt": ...}, "connections": {"active": 1, "max": 256}}、届かなければ 503 で理由を付ける。
     ///
     def health(version: String): HttpResponse \ Health =
         let summary = Health.jobsSummary();
+        let connected = Health.connections();
+        let connections = Value.Obj(Map#{ "active" => Value.Int(connected#active), "max" => Value.Int(connected#max) });
         let jobs = Value.Obj(Map#{
             "lastTickAt" => summary#lastTickAt |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null),
             "pendingSchedules" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#pendingSchedules)),
@@ -130,8 +132,8 @@ mod Server {
             "pendingDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#pendingDeliveries)),
             "failedDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedDeliveries)) });
         match Health.checkDb() {
-            case Ok(())       => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str(version), "jobs" => jobs })) }
-            case Err(message) => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str(version), "db" => Value.Str(message), "jobs" => jobs })) }
+            case Ok(())       => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str(version), "jobs" => jobs, "connections" => connections })) }
+            case Err(message) => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str(version), "db" => Value.Str(message), "jobs" => jobs, "connections" => connections })) }
         }
 
     ///

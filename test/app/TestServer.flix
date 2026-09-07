@@ -14,13 +14,13 @@ mod TestServer {
     /// POST /graphql に JSON ボディを載せたリクエスト。
     ///
     def postGraphql(body: String): HttpRequest =
-        { method = "POST", path = "/graphql", headers = ("Content-Type", "application/json; charset=utf-8") :: Nil, body = body }
+        { version = "HTTP/1.1", method = "POST", path = "/graphql", headers = ("Content-Type", "application/json; charset=utf-8") :: Nil, body = body }
 
     ///
     /// 管理画面のオリジンから来たリクエスト。
     ///
     def fromAdmin(method: String, path: String): HttpRequest =
-        { method = method, path = path, headers = ("origin", "https://admin.example.com") :: Nil, body = "{\"query\": \"{ x }\"}" }
+        { version = "HTTP/1.1", method = method, path = path, headers = ("origin", "https://admin.example.com") :: Nil, body = "{\"query\": \"{ x }\"}" }
 
     ///
     /// 管理画面のオリジンだけ許す設定。
@@ -105,21 +105,21 @@ mod TestServer {
     def testServerRouting(): Unit \ Assert =
         Assert.assertEq(expected = (405, 404),
             GraphqlFake.runWithEcho(() -> (
-                handle({ method = "PUT", path = "/graphql", headers = Nil, body = "" })#status,
-                handle({ method = "POST", path = "/", headers = Nil, body = "" })#status)))
+                handle({ version = "HTTP/1.1", method = "PUT", path = "/graphql", headers = Nil, body = "" })#status,
+                handle({ version = "HTTP/1.1", method = "POST", path = "/", headers = Nil, body = "" })#status)))
 
     /// 405 のレスポンスは Allow ヘッダを持つ。
     @Test
     def testServerMethodNotAllowedHasAllowHeader(): Unit \ Assert =
         Assert.assertEq(expected = ("Allow", "POST, GET") :: Nil,
-            GraphqlFake.runWithEcho(() -> handle({ method = "PUT", path = "/graphql", headers = Nil, body = "" }))#headers)
+            GraphqlFake.runWithEcho(() -> handle({ version = "HTTP/1.1", method = "PUT", path = "/graphql", headers = Nil, body = "" }))#headers)
 
     // ---- GET /graphql ----
 
     /// GET は query パラメータ（パーセント符号化）を実行し、variables と operationName も受ける。query が無ければ 400、mutation なら 405。
     @Test
     def testServerGetQuery(): Unit \ Assert =
-        let get = path -> GraphqlFake.runWithEcho(() -> handle({ method = "GET", path = path, headers = Nil, body = "" }));
+        let get = path -> GraphqlFake.runWithEcho(() -> handle({ version = "HTTP/1.1", method = "GET", path = path, headers = Nil, body = "" }));
         let echoed = get("/graphql?query=%7B%20blogs%20%7B%20id%20%7D%20%7D&variables=%7B%22first%22%3A2%7D&operationName=Q");
         Assert.assertEq(
             expected = (200, Ok(Value.Obj(Map#{ "query" => Value.Str("{ blogs { id } }"), "variables" => Value.Obj(Map#{ "first" => Value.Int(2) }), "operationName" => Value.Str("Q") })), 400, 405),
@@ -132,7 +132,7 @@ mod TestServer {
     def testServerGetCacheControl(): Unit \ Assert =
         let cached = { cacheMaxAge = Some(60) | Server.defaultConfig() };
         let headerOf = (config, credential) -> GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() ->
-            Server.handle(config, credential, { method = "GET", path = "/graphql?query=%7B%20x%20%7D", headers = Nil, body = "" })))#headers
+            Server.handle(config, credential, { version = "HTTP/1.1", method = "GET", path = "/graphql?query=%7B%20x%20%7D", headers = Nil, body = "" })))#headers
             |> Http.findHeader("Cache-Control");
         Assert.assertEq(
             expected = (Some("public, max-age=60, s-maxage=60, stale-while-revalidate=60"), Some("private, no-store"), Some("private, no-store")),
@@ -161,7 +161,7 @@ mod TestServer {
     def testServerErrorBodyShape(): Unit \ Assert =
         Assert.assertEq(
             expected = Ok(Value.Obj(Map#{ "data" => Value.Null, "errors" => Value.List(Value.Obj(Map#{ "message" => Value.Str("not found") }) :: Nil) })),
-            GraphqlFake.runWithEcho(() -> handle({ method = "POST", path = "/", headers = Nil, body = "" }))#body |> JsonValue.parse)
+            GraphqlFake.runWithEcho(() -> handle({ version = "HTTP/1.1", method = "POST", path = "/", headers = Nil, body = "" }))#body |> JsonValue.parse)
 
     // ---- GET /health ----
 
@@ -170,32 +170,32 @@ mod TestServer {
     def testServerRejectsNonJsonContentType(): Unit \ Assert =
         let statusOf = request -> GraphqlFake.runWithEcho(() -> handle(request))#status;
         Assert.assertEq(expected = (415, 415, 200),
-            (statusOf({ method = "POST", path = "/graphql", headers = ("Content-Type", "text/plain") :: Nil, body = "{\"query\":\"{ x }\"}" }),
-             statusOf({ method = "POST", path = "/graphql", headers = Nil, body = "{\"query\":\"{ x }\"}" }),
-             statusOf({ method = "POST", path = "/graphql", headers = ("content-type", "APPLICATION/JSON") :: Nil, body = "{\"query\":\"{ x }\"}" })))
+            (statusOf({ version = "HTTP/1.1", method = "POST", path = "/graphql", headers = ("Content-Type", "text/plain") :: Nil, body = "{\"query\":\"{ x }\"}" }),
+             statusOf({ version = "HTTP/1.1", method = "POST", path = "/graphql", headers = Nil, body = "{\"query\":\"{ x }\"}" }),
+             statusOf({ version = "HTTP/1.1", method = "POST", path = "/graphql", headers = ("content-type", "APPLICATION/JSON") :: Nil, body = "{\"query\":\"{ x }\"}" })))
 
     /// DB に届けば 200 と {"status": "ok"}。クエリ文字列が付いていても同じ。
     @Test
     def testServerHealthOk(): Unit \ Assert =
-        Assert.assertEq(expected = ((200, Ok(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str("dev"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }) }))), 200),
+        Assert.assertEq(expected = ((200, Ok(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str("dev"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }) }))), 200),
             GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> {
-                let response = Server.handle(Server.defaultConfig(), Credential.Missing, { method = "GET", path = "/health", headers = Nil, body = "" });
+                let response = Server.handle(Server.defaultConfig(), Credential.Missing, { version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" });
                 ((response#status, JsonValue.parse(response#body)),
-                 Server.handle(Server.defaultConfig(), Credential.Missing, { method = "GET", path = "/health?probe=1", headers = Nil, body = "" })#status)
+                 Server.handle(Server.defaultConfig(), Credential.Missing, { version = "HTTP/1.1", method = "GET", path = "/health?probe=1", headers = Nil, body = "" })#status)
             })))
 
     /// DB に届かなければ 503 で、理由を db に入れる。
     @Test
     def testServerHealthFailure(): Unit \ Assert =
         let response = GraphqlFake.runWithEcho(() -> HealthFake.runWithFailure("connection refused", () ->
-            Server.handle(Server.defaultConfig(), Credential.Missing, { method = "GET", path = "/health", headers = Nil, body = "" })));
-        Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }) }))),
+            Server.handle(Server.defaultConfig(), Credential.Missing, { version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" })));
+        Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }) }))),
             (response#status, JsonValue.parse(response#body)))
 
     /// /health への POST は 405 で Allow: GET。
     @Test
     def testServerHealthPostNotAllowed(): Unit \ Assert =
-        let response = GraphqlFake.runWithEcho(() -> handle({ method = "POST", path = "/health", headers = Nil, body = "" }));
+        let response = GraphqlFake.runWithEcho(() -> handle({ version = "HTTP/1.1", method = "POST", path = "/health", headers = Nil, body = "" }));
         Assert.assertEq(expected = (405, ("Allow", "GET") :: Nil), (response#status, response#headers))
 
     // ---- CORS ----
@@ -257,15 +257,15 @@ mod TestServer {
              Server.projectSlugFromHost(base, hostOf("example.com")),
              Server.projectSlugFromHost(base, hostOf("consumer.other.com")),
              Server.projectSlugFromHost(None, hostOf("consumer.example.com")),
-             Server.splitProjectSlug(base, { method = "GET", path = "/p/shop/graphql", headers = hostOf("consumer.example.com"), body = "" }),
-             Server.splitProjectSlug(base, { method = "GET", path = "/admin/graphql", headers = hostOf("business.example.com"), body = "" }),
-             Server.splitProjectSlug(None, { method = "GET", path = "/graphql", headers = hostOf("business.example.com"), body = "" })))
+             Server.splitProjectSlug(base, { version = "HTTP/1.1", method = "GET", path = "/p/shop/graphql", headers = hostOf("consumer.example.com"), body = "" }),
+             Server.splitProjectSlug(base, { version = "HTTP/1.1", method = "GET", path = "/admin/graphql", headers = hostOf("business.example.com"), body = "" }),
+             Server.splitProjectSlug(None, { version = "HTTP/1.1", method = "GET", path = "/graphql", headers = hostOf("business.example.com"), body = "" })))
 
 
     /// POST /jobs/tick は、トークンが設定されていなければ 404、違えば 403、合えば 200 で失敗の一覧（空）を返す。
     @Test
     def testServerJobsTick(): Unit \ Assert =
-        let request = token -> { method = "POST", path = "/jobs/tick", headers = ("X-Jobs-Token", token) :: Nil, body = "" };
+        let request = token -> { version = "HTTP/1.1", method = "POST", path = "/jobs/tick", headers = ("X-Jobs-Token", token) :: Nil, body = "" };
         let closed = Server.defaultConfig();
         let opened = { jobsToken = Some("secret") | Server.defaultConfig() };
         let call = (config, token) -> GraphqlFake.runWithEcho(() -> HealthFake.runWithOk(() -> Server.handle(config, Credential.Missing, request(token))));

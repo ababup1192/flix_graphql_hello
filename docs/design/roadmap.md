@@ -9,6 +9,8 @@
 テナント、asset（S3 互換、署名付き URL）、richText（doc / html / text / 目次 / 抜粋 / 埋め込み / 表 / callout）、
 Docker（起動時 migration、JSON ログ、/health の版）、deploy/ の compose。
 
+HTTP サーバの同時接続の上限（`CMS_MAX_CONNECTIONS`。超えたら 503 + `Retry-After`。`/health` の `connections`）と keep-alive（HTTP/1.1、1 接続 100 回、idle 15 秒、エラー応答の後は閉じる）は 2026-09-08 に実装済み。`spawn` は virtual thread なので接続ごとのスレッドは platform thread を食わない。
+
 エラーの分類（2026-09-08 に実装済み）: `errors[].extensions.code`（`INVALID` / `NOT_FOUND` / `FORBIDDEN` / `CONFLICT` / `REQUIRES_LOGIN` / `UNAUTHENTICATED` / `INTERNAL`）と `violations` / `entity` / `id` / `expectedVersion` / `actualVersion`。message は日本語のままで、クライアント・CLI・MCP は code で分岐する（[error-codes.md](error-codes.md)）。
 
 ## 優先度順（上から着手）

@@ -15,18 +15,23 @@ pub eff Health {
     /// 外部トリガーから 1 周回す。失敗した所の説明（空なら全部通った）。
     ///
     def runJobs(): List[String]
+    ///
+    /// HTTP の同時接続の今の数と上限。
+    ///
+    def connections(): HttpServer.Connections
 }
 
 mod Health {
 
     ///
-    /// プールと ワーカーの状態で答えるハンドラ。
+    /// プールと ワーカーと Listener の状態で答えるハンドラ。
     ///
-    pub def runWithPool(pool: Pool, jobs: BackgroundJobs.State, f: Unit -> a \ ef): a \ (ef - Health) + IO =
+    pub def runWithPool(pool: Pool, jobs: BackgroundJobs.State, listener: HttpServer.Listener, f: Unit -> a \ ef): a \ (ef - Health) + IO =
         run f() with handler Health {
             def checkDb(resume)      = resume(ping(pool))
             def jobsSummary(resume)  = resume(BackgroundJobs.summary(pool, jobs))
             def runJobs(resume)      = resume(BackgroundJobs.tick(pool, jobs))
+            def connections(resume)  = resume(HttpServer.connections(listener))
         }
 
     ///

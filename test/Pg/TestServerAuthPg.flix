@@ -13,7 +13,7 @@ mod TestServerAuthPg {
 
     /// POST /admin/graphql。
     def post(headers: List[(String, String)], queryText: String): HttpRequest =
-        { method = "POST", path = "/admin/graphql", headers = ("Content-Type", "application/json") :: headers,
+        { version = "HTTP/1.1", method = "POST", path = "/admin/graphql", headers = ("Content-Type", "application/json") :: headers,
           body = JsonValue.toJsonString(Value.Obj(Map#{ "query" => Value.Str(queryText) })) }
 
     /// 管理 API のエンジンでリクエストを処理し、(status, body の JSON) を返す。

@@ -7,7 +7,7 @@
 mod TestCors {
 
     def requestFrom(origin: String): HttpRequest =
-        { method = "GET", path = "/graphql", headers = ("origin", origin) :: ("host", "api") :: Nil, body = "" }
+        { version = "HTTP/1.1", method = "GET", path = "/graphql", headers = ("origin", origin) :: ("host", "api") :: Nil, body = "" }
 
     ///
     /// 管理画面のオリジンだけ許す設定。
@@ -50,7 +50,7 @@ mod TestCors {
     def testCorsResponseHeadersDenied(): Unit \ Assert =
         Assert.assertEq(expected = (("Vary", "Origin") :: Nil, Nil),
             (Cors.responseHeaders(adminOnly(), requestFrom("https://evil.example")),
-             Cors.responseHeaders(adminOnly(), { method = "GET", path = "/graphql", headers = Nil, body = "" })))
+             Cors.responseHeaders(adminOnly(), { version = "HTTP/1.1", method = "GET", path = "/graphql", headers = Nil, body = "" })))
 
     /// "*" で許しても "*" ではなく届いたオリジンを返す。
     @Test

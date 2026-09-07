@@ -9,7 +9,7 @@
 /// CMS_DEFAULT_PROJECT（プロジェクト slug 無しの時のプロジェクト slug。省略時は default、空ならプロジェクト slug 無しは 404）、CMS_SIGNUP（open / closed）、
 /// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（停止時に実行中の仕事を待つ秒数。既定 15）、CMS_CACHE_MAX_AGE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 60、0 で no-store）、
 /// CMS_MODE=import-microcms（サーバを立てず、CMS_IMPORT_DIR の microCMS のスキーマを写してダミーの entry を CMS_IMPORT_COUNT 件ずつ積んで終わる）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
-/// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health に出す版。省略時は dev）
+/// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health に出す版。省略時は dev）、CMS_MAX_CONNECTIONS（HTTP の同時接続の上限。超えた接続は 503。既定 256）
 ///
 def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
     let started = forM (
@@ -62,7 +62,9 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
                 pool = pool, deps = deps, jwks = jwks, baseDomain = baseDomain, defaultProject = defaultProject,
                 accountEngine = accountEngine, adminEngines = adminEngines, engineCache = engineCache,
                 contentConfig = contentConfig, adminConfig = adminConfig, accountConfig = accountConfig };
-            HttpServer.listen(bind, 8080, request -> Health.runWithPool(pool, jobs, () -> dispatch(runtime, request)))
+            let maxConnections = Sys.Env.getVar("CMS_MAX_CONNECTIONS") |> Option.flatMap(Int32.fromString) |> Option.filter(n -> n > 0) |> Option.getWithDefault(256);
+            let listener = HttpServer.open({ bind = bind, maxConnections = maxConnections | HttpServer.defaultConfig() });
+            HttpServer.listen(listener, request -> Health.runWithPool(pool, jobs, listener, () -> dispatch(runtime, request)))
             }
     }
 

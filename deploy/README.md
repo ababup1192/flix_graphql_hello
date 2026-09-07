@@ -143,6 +143,13 @@ cms のログは 1 行 1 JSON。`docker compose logs -f cms` で見られる。
 
 Grafana Cloud（無料枠）へ送るなら `.env` に `GRAFANA_*` を入れて `docker compose --profile alloy up -d`。外形監視は Better Stack や UptimeRobot で `/health` を叩く。
 
+`/health` の `connections` は `{"active": 今つないでいる数, "max": CMS_MAX_CONNECTIONS}`。active が max に張り付いていれば 503 が出ている。
+
+## keep-alive と同時接続
+
+cms は HTTP/1.1 の keep-alive を受ける（1 接続で 100 リクエストまで、次のリクエストを 15 秒待つ）。Caddy は cms との接続を使い回すので、Caddy と cms の間は張り直しの往復が消える。
+同時接続の上限（`CMS_MAX_CONNECTIONS`）は Caddy から見た接続数で、keep-alive の接続は idle の間も枠を占める。Caddy の `reverse_proxy` に `transport http { keepalive_idle_conns N }` を書くなら N は上限より小さくする。
+
 ## クラウド版（R2）にする時
 
 compose の `minio` / `minio-init` を消し、`ASSET_*` を R2 の値にする。
@@ -176,6 +183,7 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_JOBS_TOKEN` | `POST /jobs/tick`（外部トリガー）を許す `X-Jobs-Token` の値。無ければその口は閉じる | 無し |
 | `CMS_JOBS_DRAIN_SECONDS` | 停止時に実行中の仕事を待つ秒数 | 15 |
 | `CMS_CACHE_MAX_AGE` | コンテンツ API の GET で、鍵もトークンも無い応答に付ける `Cache-Control` の秒数（CDN 用）。0 で no-store | 60 |
+| `CMS_MAX_CONNECTIONS` | HTTP の同時接続の上限。超えた接続は `503` と `Retry-After: 1` で断る（待ち行列は無い）。今の数は `/health` の `connections` | 256 |
 | `CMS_BASE_DOMAIN` | `{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。無ければ `/p/{プロジェクト slug}/` だけ | 無し |
 | `CMS_API_KEY_PEPPER` / `CMS_API_KEY_PEPPER_ID` | API キーと PAT のハッシュ、プレビュートークンの署名に混ぜる秘密と版。無ければ鍵と PAT を発行できない | 無し / v1 |
 | `JAVA_OPTS` | JVM の引数 | `-Xss32m -XX:MaxRAMPercentage=70` |

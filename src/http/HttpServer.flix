@@ -1,14 +1,17 @@
 ///
-/// ソケットを開いて HTTP/1.1 のリクエストを 1 本ずつハンドラに渡す最小サーバ。
+/// ソケットを開いて HTTP/1.1 のリクエストをハンドラに渡す最小サーバ。
 /// GraphQL のことは知らず、HttpRequest -> HttpResponse の関数だけを受け取る。
 ///
 /// 対応範囲と上限:
-/// - 接続ごとにスレッドを 1 本起こす。スレッド数に上限は無い（接続が増えた分だけ増える）
-/// - keep-alive には対応せず、1 接続で 1 リクエストを処理して閉じる
+/// - 接続ごとにスレッド（Flix の spawn。virtual thread）を 1 本起こす
+/// - 同時接続は maxConnections まで。超えた接続は handle を呼ばずに 503（Retry-After: 1）を返して閉じる。待ち行列は無い
+/// - keep-alive: HTTP/1.1 で Connection: close が無ければ、1 接続で Http.maxRequestsPerConnection() 回まで順に受ける。
+///   4xx / 5xx の後と HTTP/1.0 は閉じる。2 回目以降の待ちは idleTimeoutMs で切る
+/// - pipelining（応答を待たずに次を送る）は保証しない
 /// - Transfer-Encoding: chunked には対応せず、ボディは Content-Length ぶんだけ読む
 /// - ヘッダは maxHeaderLines() 行まで、1 行は Http.maxHeaderLineBytes() バイトまで、
 ///   ボディは Http.maxBodyBytes() バイトまで
-/// - 読み取りは 10 秒でタイムアウトする
+/// - 最初のリクエストの読み取りは readTimeoutMs、2 回目以降の待ちは idleTimeoutMs でタイムアウトする
 ///
 mod HttpServer {
     import java.io.BufferedInputStream
@@ -20,8 +23,10 @@ mod HttpServer {
     import java.lang.System
     import java.net.InetAddress
     import java.net.ServerSocket
-    import java.time.Instant
     import java.net.Socket
+    import java.net.SocketTimeoutException
+    import java.time.Instant
+    import java.util.concurrent.Semaphore
 
     ///
     /// 受け付けるヘッダ行数の上限。超えたリクエストは 431 にする。
@@ -29,67 +34,152 @@ mod HttpServer {
     pub def maxHeaderLines(): Int32 = 100
 
     ///
-    /// 指定ポートで待ち受け、接続ごとにスレッドを起こして handle に渡す。戻らない。
-    /// ログは 1 本のチャネルに集めて logger スレッドが順に表示する。bind が Some なら、そのアドレスにだけ bind する（開発モードで外に開けないため）。
+    /// 待ち受けの設定。
+    ///
+    /// - bind: Some なら、そのアドレスにだけ bind する（開発モードで外に開けないため）
+    /// - port: 待ち受けるポート。0 なら空いているポートを OS が選ぶ（Listener の port で読める）
+    /// - maxConnections: 同時に受ける接続の上限（CMS_MAX_CONNECTIONS）
+    /// - readTimeoutMs: 最初のリクエストを読み切るまでの待ち（ミリ秒）
+    /// - idleTimeoutMs: keep-alive で次のリクエストが来るまでの待ち（ミリ秒）
+    ///
+    pub type alias ListenConfig = { bind = Option[String], port = Int32, maxConnections = Int32, readTimeoutMs = Int32, idleTimeoutMs = Int32 }
+
+    ///
+    /// 本番の既定値。全部のアドレスで 8080、同時接続 256、最初の読み取り 10 秒、idle 15 秒。
+    ///
+    pub def defaultConfig(): ListenConfig =
+        { bind = None, port = 8080, maxConnections = 256, readTimeoutMs = 10000, idleTimeoutMs = 15000 }
+
+    ///
+    /// bind 済みのサーバソケットと、接続数を数えるセマフォ。
+    ///
+    /// - server: bind 済みのソケット。close で accept ループが終わる
+    /// - port: 実際に待ち受けているポート（config の port が 0 なら OS が選んだ物）
+    /// - limiter: 空き枠。accept ごとに 1 つ借り、接続を閉じたら返す
+    /// - config: 待ち受けの設定
+    ///
+    pub type alias Listener = { server = ServerSocket, port = Int32, limiter = Semaphore, config = ListenConfig }
+
+    ///
+    /// /health に出す混み具合。
+    ///
+    /// - active: 今つないでいる接続の数
+    /// - max: 同時接続の上限
+    ///
+    pub type alias Connections = { active = Int32, max = Int32 }
+
+    ///
+    /// ソケットを bind して Listener を作る。まだ accept はしない。
+    ///
+    pub def open(config: ListenConfig): Listener \ IO =
+        let server = match config#bind {
+            case Some(address) => new ServerSocket(config#port, 50, InetAddress.getByName(address))
+            case None          => new ServerSocket(config#port)
+        };
+        { server = server, port = server.getLocalPort(), limiter = new Semaphore(config#maxConnections), config = config }
+
+    ///
+    /// サーバソケットを閉じる。accept ループが抜け、新しい接続を受けなくなる（つないでいる接続はそのまま）。
+    ///
+    pub def close(listener: Listener): Unit \ IO =
+        listener#server.close()
+
+    ///
+    /// 今つないでいる接続の数と上限。
+    ///
+    pub def connections(listener: Listener): Connections \ IO =
+        { active = listener#config#maxConnections - listener#limiter.availablePermits(), max = listener#config#maxConnections }
+
+    ///
+    /// Listener で待ち受け、接続ごとにスレッドを起こして handle に渡す。戻らない。
+    /// ログは 1 本のチャネルに集めて logger スレッドが順に表示する。
     ///
     /// WhyNot: handle のエフェクトを多相にしないのは、spawn に渡す式は IO 以外の
     /// algebraic effect を残せないため。Graphql などは呼び出し側が剥がしてから渡す。
     ///
-    pub def listen(bind: Option[String], port: Int32, handle: HttpRequest -> HttpResponse \ IO): Unit \ {IO, Chan, NonDet} =
+    pub def listen(listener: Listener, handle: HttpRequest -> HttpResponse \ IO): Unit \ {IO, Chan, NonDet} =
         region rc {
             let (sender, receiver) = Channel.buffered(1024);
             spawn logger(receiver) @ rc;
-            let server = match bind {
-                case Some(address) => new ServerSocket(port, 50, InetAddress.getByName(address))
-                case None          => new ServerSocket(port)
-            };
-            println("listening on http://${bind |> Option.getWithDefault("0.0.0.0")}:${port}/");
-            def accept() = {
-                let socket = server.accept();
-                spawn serve(socket, sender, handle) @ rc;
-                accept()
-            };
-            accept()
+            println("listening on http://${listener#config#bind |> Option.getWithDefault("0.0.0.0")}:${listener#port}/");
+            acceptLoop(listener, sender, handle)
         }
 
     ///
-    /// 接続 1 本ぶんの処理。HTTP リクエストを 1 つ読み、handle に渡し、返して閉じる。
+    /// accept を繰り返し、空き枠があれば serve のスレッドを起こし、無ければ 503 を書いて閉じる。
+    /// サーバソケットが閉じられたら戻る。
+    ///
+    /// WhyNot: 空きが無い時に accept しないで backlog に溜めないのは、クライアントが理由の読めないまま待たされ、
+    /// 前段（Caddy）のタイムアウトで 502 になるため。503 と Retry-After なら「混んでいる」と伝わる。
+    ///
+    pub def acceptLoop(listener: Listener, log: Sender[String], handle: HttpRequest -> HttpResponse \ IO): Unit \ {IO, Chan} =
+        region rc {
+            def loop() = match accept(listener#server) {
+                case None         => ()
+                case Some(socket) =>
+                    if (listener#limiter.tryAcquire()) {
+                        spawn serveThenRelease(socket, listener#limiter, log, listener#config, handle) @ rc
+                    } else {
+                        reject(socket, log)
+                    };
+                    loop()
+            };
+            loop()
+        }
+
+    ///
+    /// 接続を 1 つ受ける。サーバソケットが閉じられていれば None。
+    ///
+    def accept(server: ServerSocket): Option[Socket] \ IO =
+        try {
+            Some(server.accept())
+        } catch {
+            case _: Exception => None
+        }
+
+    ///
+    /// 空き枠が無い接続に 503 と Retry-After: 1 を書いて閉じる。handle は呼ばない。
+    ///
+    def reject(socket: Socket, log: Sender[String]): Unit \ {IO, Chan} =
+        try {
+            let writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
+            Channel.send(logLine("-", "-", 503, 0i64), log);
+            write(writer, Http.Connection.Close, { status = 503, headers = ("Retry-After", "1") :: Nil, body = "" }, log);
+            socket.close()
+        } catch {
+            case e: Exception =>
+                Channel.send("error: ${e.getMessage()}", log);
+                socket.close()
+        }
+
+    ///
+    /// serve の後に必ず枠を返す。serve が例外で抜けても返す。
+    ///
+    def serveThenRelease(socket: Socket, limiter: Semaphore, log: Sender[String], config: ListenConfig, handle: HttpRequest -> HttpResponse \ IO): Unit \ {IO, Chan} =
+        try {
+            serve(socket, log, config, handle)
+        } catch {
+            case e: Exception => Channel.send("error: ${e.getMessage()}", log)
+        };
+        limiter.release()
+
+    ///
+    /// 接続 1 本ぶんの処理。リクエストを読み、handle に渡し、応答を書く。続けられる間は同じ接続で繰り返し、最後に閉じる。
     /// リクエストが読めなければ 400、ヘッダが多すぎる・長すぎれば 431、
     /// Content-Length が上限を超えていれば 413、handle が例外を投げれば 500 を返す。
     ///
     /// WhyNot: 例外を握りつぶさず catch してログへ流すのは、spawn したスレッドで例外が
     /// 起きても親には何も伝わらず、ソケットも閉じられないまま黙って消えるため。
-    /// IOException に絞らず Exception で受けるのは、handle の中で起きる RuntimeException も
-    /// 同じ理由で消えるため。
-    ///
-    /// WhyNot: writer を try の外で先に作るのは、handle が例外を投げたときに catch の中から
-    /// 500 を書き戻すため。writer を作れないときはソケットを閉じるしかない。
     ///
     /// WhyNot: 書き出しを既定の文字コードに任せないのは、Content-Length を UTF-8 の
     /// バイト数で数えているので、エンコードも UTF-8 に固定しないと食い違うため。
     ///
-    /// WhyNot: 読み取りにタイムアウトを付けるのは、ヘッダやボディを送り切らない遅い
-    /// クライアントが 1 本のスレッドを永久に塞いでしまうため。
-    ///
-    def serve(socket: Socket, log: Sender[String], handle: HttpRequest -> HttpResponse \ IO): Unit \ {IO, Chan} =
+    def serve(socket: Socket, log: Sender[String], config: ListenConfig, handle: HttpRequest -> HttpResponse \ IO): Unit \ {IO, Chan} =
         try {
-            socket.setSoTimeout(10000);
             let writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
-            try {
-                let input: InputStream = checked_cast(new BufferedInputStream(socket.getInputStream()));
-                let started = System.currentTimeMillis();
-                let (method, path, response) = match readRequest(input) {
-                    case Ok(request) => (request#method, request#path, handle(request))
-                    case Err(status) => ("-", "-", { status = status, headers = Nil, body = "" })
-                };
-                Channel.send(logLine(method, path, response#status, System.currentTimeMillis() - started), log);
-                write(writer, response, log)
-            } catch {
-                case e: Exception =>
-                    Channel.send("error: ${e.getMessage()}", log);
-                    write(writer, { status = 500, headers = Nil, body = "" }, log)
-            };
-            // WhyNot: close を try の中に置かないのは、応答を書き終えた後の close の失敗で catch に入り、閉じかけの
+            let input: InputStream = checked_cast(new BufferedInputStream(socket.getInputStream()));
+            serveLoop(socket, input, writer, log, config, handle, 1);
+            // WhyNot: close を serveLoop の try の中に置かないのは、応答を書き終えた後の close の失敗で catch に入り、閉じかけの
             // ソケットへ 500 をもう一度書いてしまうため
             socket.close()
         } catch {
@@ -99,14 +189,71 @@ mod HttpServer {
         }
 
     ///
+    /// 1 リクエストを処理し、続けられるなら次を待つ。served はこの接続で何回目か（1 から）。
+    /// 次のリクエストが来る前に EOF かタイムアウトになれば黙って終わる。
+    ///
+    /// WhyNot: 読み取りにタイムアウトを付けるのは、ヘッダやボディを送り切らない遅い
+    /// クライアントが 1 本のスレッドを永久に塞いでしまうため。keep-alive の待ちを別の値にするのは、
+    /// 1 回目の「来ない」は短く切り、2 回目以降は少し待ちたいため。
+    ///
+    /// WhyNot: handle の例外を IOException に絞らず Exception で受けるのは、handle の中で起きる RuntimeException も
+    /// 同じ理由で消えるため。writer を try の外で先に作るのは、catch の中から 500 を書き戻すため。
+    ///
+    def serveLoop(socket: Socket, input: InputStream, writer: PrintWriter, log: Sender[String], config: ListenConfig, handle: HttpRequest -> HttpResponse \ IO, served: Int32): Unit \ {IO, Chan} =
+        socket.setSoTimeout(if (served == 1) config#readTimeoutMs else config#idleTimeoutMs);
+        if (awaitRequest(input)) {
+            let connection = try {
+                let started = System.currentTimeMillis();
+                let (method, path, response, next) = match readRequest(input) {
+                    case Ok(request) =>
+                        let response = handle(request);
+                        (request#method, request#path, response, Http.shouldKeepAlive(request, response#status, served))
+                    case Err(status) => ("-", "-", { status = status, headers = Nil, body = "" }, Http.Connection.Close)
+                };
+                Channel.send(logLine(method, path, response#status, System.currentTimeMillis() - started), log);
+                write(writer, next, response, log);
+                next
+            } catch {
+                case e: Exception =>
+                    Channel.send("error: ${e.getMessage()}", log);
+                    write(writer, Http.Connection.Close, { status = 500, headers = Nil, body = "" }, log);
+                    Http.Connection.Close
+            };
+            match connection {
+                case Http.Connection.KeepAlive => serveLoop(socket, input, writer, log, config, handle, served + 1)
+                case Http.Connection.Close     => ()
+            }
+        } else
+            ()
+
+    ///
+    /// 次のリクエストの先頭 1 バイトが来るまで待つ。来れば true（バイトは戻す）。EOF かタイムアウトなら false。
+    ///
+    /// WhyNot: readRequest に任せず先に 1 バイト覗くのは、クライアントが何も送らずに閉じた時に 400 を書いてログに残すのを避けるため。
+    /// keep-alive では応答の後にクライアントが閉じるのが普通で、それはエラーではない。
+    ///
+    def awaitRequest(input: InputStream): Bool \ IO =
+        try {
+            input.mark(1);
+            if (input.read() == -1)
+                false
+            else {
+                input.reset();
+                true
+            }
+        } catch {
+            case _: SocketTimeoutException => false
+        }
+
+    ///
     /// レスポンスを書き出して flush する。
     ///
     /// WhyNot: 書き出しの失敗を例外で受けないのは、PrintWriter が IOException を
     /// 内部で握りつぶして checkError() に残す作りのため。書いたあとに checkError() を見て
     /// ログへ流す。
     ///
-    def write(writer: PrintWriter, response: HttpResponse, log: Sender[String]): Unit \ {IO, Chan} =
-        writer.print(Http.render(response));
+    def write(writer: PrintWriter, connection: Http.Connection, response: HttpResponse, log: Sender[String]): Unit \ {IO, Chan} =
+        writer.print(Http.render(connection, response));
         writer.flush();
         if (writer.checkError())
             Channel.send("error: write failed", log)
@@ -142,13 +289,13 @@ mod HttpServer {
     pub def readRequest(input: InputStream): Result[Int32, HttpRequest] \ IO =
         readLine(input)
             |> Result.flatMap(requestLine -> Http.parseRequestLine(requestLine) |> Option.toOk(400))
-            |> Result.flatMap(match (method, path) ->
+            |> Result.flatMap(match (method, path, version) ->
                 readHeaderLines(input)
-                    |> Result.map(lines -> (method, path, Http.parseHeaders(lines))))
-            |> Result.flatMap(match (method, path, headers) ->
+                    |> Result.map(lines -> (method, path, version, Http.parseHeaders(lines))))
+            |> Result.flatMap(match (method, path, version, headers) ->
                 Http.contentLength(headers)
                     |> Result.mapErr(statusOf)
-                    |> Result.map(length -> { method = method, path = path, headers = headers, body = readBody(input, length) }))
+                    |> Result.map(length -> { method = method, path = path, version = version, headers = headers, body = readBody(input, length) }))
 
     ///
     /// Content-Length の失敗をステータスコードにする。
