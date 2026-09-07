@@ -17,6 +17,12 @@ Flix から graphql-java（Java の GraphQL ライブラリ）を Java interop �
 - 予約語・コメントの流儀・型の設計・二乗を書かない、の本文: [docs/flix-conventions.md](docs/flix-conventions.md)
 - **GraphQL のリゾルバのラムダに effect を使う式を直に書かない**（JVM の VerifyError。関数に切り出す）。型検査もスキーマの組み立ても素通りし、そのフィールドを選ぶ query でだけ出る。見張るのは `test/admin/TestApiSurface.flix`（型とフィールドの一覧）と、全フィールドを選ぶ Pg テスト。本文は [docs/flix-conventions.md](docs/flix-conventions.md)
 
+## テストの進め方
+
+- **純粋な物はテストファースト。** `src/cms/rules`、`src/cms/db` の SQL 化、`src/crypto`、`src/http/Router` のような入出力が決まる物は、実装の前にテスト計画（入力 → 期待の表、往復、境界）を書き、表駆動の `List#{(入力, 期待)}` で通していく。`make test` は DB 無しで回る
+- **実 PG と GraphQL は後付けで良い。** schema と Runner を組んでからでないとテストの形が決まらない。代わりに機能ごとに 1 回「繋ぎ目を伸ばす」（操作の列を最後の状態まで追う、outbox の行を見る、接続が返るか）観点を入れる
+- テストの書き方の決まり（1 assert、分岐しない、表駆動、コメントは What）は `.claude/skills/flix-docs/SKILL.md`
+
 ## コーディングポリシー
 
 コードには **How** / テストコードには **What** / コミットログには **Why** / コードコメントには **WhyNot**
