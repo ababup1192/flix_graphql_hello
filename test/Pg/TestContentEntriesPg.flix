@@ -9,7 +9,7 @@ mod TestContentEntriesPg {
     ///
     /// blogs 型（title / views）を作って id を返す。
     ///
-    def blogsWithFields(): TypeId \ Db + CmsErr + Tenant + Session =
+    def blogsWithFields(): TypeId \ Db + CmsErr + IdGen + Tenant + Session =
         let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
         discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, { maxLength = Some(10) | FieldConfig.empty() }));
         discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("views", FieldKind.Number, FieldConfig.empty()));

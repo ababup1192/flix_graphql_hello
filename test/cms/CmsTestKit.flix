@@ -93,6 +93,12 @@ mod CmsTestKit {
         IdGen.runWithFixed(entryIds(texts), body)
 
     ///
+    /// System として、決めた id 無し（連番の public_id / ULID だけ）で走らせる。DB 無しのユースケースのテスト用。
+    ///
+    pub def asSystem(body: Unit -> a \ ef): a \ ef - {Session, IdGen} =
+        Session.runWith(Actor.System, () -> IdGen.runWithFixed(Nil, body))
+
+    ///
     /// 誤りのパスだけ取り出す（メッセージの文言はテストしない）。
     ///
     pub def violationPaths(violations: List[Violation]): List[String] =

@@ -108,6 +108,31 @@ mod AdminMapping {
         case GeneratedAdmin.Visibility.Private => Visibility.Private
     }
 
+    pub def webhookEventOf(event: GeneratedAdmin.WebhookEvent): WebhookEvent = match event {
+        case GeneratedAdmin.WebhookEvent.EntryPublished   => WebhookEvent.EntryPublished
+        case GeneratedAdmin.WebhookEvent.EntryUnpublished => WebhookEvent.EntryUnpublished
+        case GeneratedAdmin.WebhookEvent.EntryDeleted     => WebhookEvent.EntryDeleted
+        case GeneratedAdmin.WebhookEvent.SchemaChanged    => WebhookEvent.SchemaChanged
+    }
+
+    pub def webhookEventToGql(event: WebhookEvent): GeneratedAdmin.WebhookEvent = match event {
+        case WebhookEvent.EntryPublished   => GeneratedAdmin.WebhookEvent.EntryPublished
+        case WebhookEvent.EntryUnpublished => GeneratedAdmin.WebhookEvent.EntryUnpublished
+        case WebhookEvent.EntryDeleted     => GeneratedAdmin.WebhookEvent.EntryDeleted
+        case WebhookEvent.SchemaChanged    => GeneratedAdmin.WebhookEvent.SchemaChanged
+    }
+
+    pub def deliveryStatusToGql(status: DeliveryStatus): GeneratedAdmin.DeliveryStatus = match status {
+        case DeliveryStatus.Pending   => GeneratedAdmin.DeliveryStatus.Pending
+        case DeliveryStatus.Sending   => GeneratedAdmin.DeliveryStatus.Sending
+        case DeliveryStatus.Delivered => GeneratedAdmin.DeliveryStatus.Delivered
+        case DeliveryStatus.Failed    => GeneratedAdmin.DeliveryStatus.Failed
+    }
+
+    /// WebhookInput → ドメインの入力。active を省けば true。
+    pub def webhookDraftOf(input: GeneratedAdmin.WebhookInput): WebhookDraft =
+        { name = input#name, url = input#url, events = input#events |> List.map(webhookEventOf), active = input#active |> Option.getWithDefault(true) }
+
     pub def visibilityToGql(visibility: Visibility): GeneratedAdmin.Visibility = match visibility {
         case Visibility.Public  => GeneratedAdmin.Visibility.Public
         case Visibility.Private => GeneratedAdmin.Visibility.Private

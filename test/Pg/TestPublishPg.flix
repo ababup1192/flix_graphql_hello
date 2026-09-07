@@ -12,7 +12,7 @@ mod TestPublishPg {
     ///
     /// blogs（title: required / slug: unique / views）を作って id を返す。
     ///
-    def blogsForPublish(): TypeId \ Db + CmsErr + Tenant + Session =
+    def blogsForPublish(): TypeId \ Db + CmsErr + IdGen + Tenant + Session =
         let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
         discard ContentTypes.addField(blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
         discard ContentTypes.addField(blogs#id, { unique = true | CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = CmsTestKit.apiId("title") |> Some | FieldConfig.empty() }) });
@@ -183,7 +183,7 @@ mod TestPublishPg {
     /// プール越しに 1 つの Tx で publish し、(DB の失敗, (業務エラーの文言, stage)) の形で返す。
     ///
     def publishOutcome(pool: Pool, id: String): Result[DbFailure, Result[String, Stage]] \ IO =
-        Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () ->
-            DbRunner.transact(pool, Some(ProjectId.default()), () -> ContentEntries.publish(CmsTestKit.entryId(id), "tester", false))))
+        Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() ->
+            DbRunner.transact(pool, Some(ProjectId.default()), () -> ContentEntries.publish(CmsTestKit.entryId(id), "tester", false)))))
             |> Result.map(Result.map(entry -> entry#stage) >> Result.mapErr(CmsErr.toMessage))
 }

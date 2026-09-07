@@ -59,7 +59,7 @@ mod ContentTypes {
     ///
     /// content type を作る。singular / plural を省けば apiId から導く。名前の規則に合わなければ invalid。
     ///
-    pub def create(draft: ContentTypeDraft): ContentType \ Db + CmsErr + Tenant + Session =
+    pub def create(draft: ContentTypeDraft): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
         let names = {
             apiId    = draft#apiId,
@@ -70,7 +70,12 @@ mod ContentTypes {
         let others = listAll();
         CmsErr.raiseIfAny(typeNameViolations(others, names, Nil) |> List.map(violation -> if (derived) blameApiId(violation) else violation));
         let inserted = ContentTypesQueries.insertContentType({ +projectId = Tenant.currentId() | ContentTypeRows.typeInsert(names, draft) }) |> Rows.expectId;
+        notifySchema(names#apiId);
         get(TypeId.TypeId(inserted))
+
+    /// 型の変更を Webhook に積む（同じ Tx）。
+    def notifySchema(apiId: ApiId): Unit \ Db + IdGen + Tenant =
+        Webhooks.emit(WebhookEvent.SchemaChanged, Webhooks.schemaPayload(apiId))
 
     ///
     /// singular / plural を導いた時の違反は apiId のせいなので、そこへ付け替える（渡していない項目を怒られても直せない）。
@@ -83,7 +88,7 @@ mod ContentTypes {
     ///
     /// content type を直す。触った項目だけ UPDATE に出る。名前を変えるなら規則を検査する。
     ///
-    pub def update(id: TypeId, changes: ContentTypeChanges): ContentType \ Db + CmsErr + Tenant + Session =
+    pub def update(id: TypeId, changes: ContentTypeChanges): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
         let existing = get(id);
         let names = {
@@ -94,29 +99,31 @@ mod ContentTypes {
         let others = listAll() |> List.filter(other -> other#id != id);
         CmsErr.raiseIfAny(typeNameViolations(others, names, existing#fields));
         discard ContentTypesQueries.updateContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() }, ContentTypeRows.typeChanges(changes));
+        notifySchema(existing#apiId);
         get(id)
 
     ///
     /// content type をフィールドごと消す。無ければ notFound。entry が残っていれば、他の型から参照されていれば invalid。
     /// ゴミ箱の entry は型と一緒に消す（残すと型が消せない）。
     ///
-    pub def delete(id: TypeId): Unit \ Db + CmsErr + Tenant + Session =
+    pub def delete(id: TypeId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
-        discard get(id);
+        let existing = get(id);
         let remaining = EntriesQueries.countEntriesOfType({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() }) |> Rows.total;
         let referrers = ContentFieldsQueries.countFieldsTargeting({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() }) |> Rows.total;
         CmsErr.raiseIfAny(
             (if (remaining == 0i64) Nil else Violation.Violation("id", "entry が ${remaining} 件あります。先に消してください") :: Nil)
             ::: (if (referrers == 0i64) Nil else Violation.Violation("id", "他の型の REFERENCE のフィールド ${referrers} 本が参照先にしています。先にそのフィールドを消してください") :: Nil));
         discard EntriesQueries.purgeDeletedEntries({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() });
-        discard ContentTypesQueries.deleteContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() })
+        discard ContentTypesQueries.deleteContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() });
+        notifySchema(existing#apiId)
 
     // ---- フィールド ----
 
     ///
     /// フィールドを末尾に足す。apiId の規則と config の組み合わせを検査する。parent があればその子（object の子か blocks の variant）になる。
     ///
-    pub def addField(typeId: TypeId, draft: FieldDraft): FieldDef \ Db + CmsErr + Tenant + Session =
+    pub def addField(typeId: TypeId, draft: FieldDraft): FieldDef \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
         let owner = get(typeId);
         let parent = draft#parent |> Option.map(parentId -> FieldTree.find(parentId, owner#fields) |> CmsErr.orNotFound(Entity.Field, "${parentId}"));
@@ -134,7 +141,7 @@ mod ContentTypes {
     ///
     /// フィールドを直す。触った項目だけ UPDATE に出る。config は丸ごと置き換える。
     ///
-    pub def updateField(id: FieldId, changes: FieldChanges): FieldDef \ Db + CmsErr + Tenant + Session =
+    pub def updateField(id: FieldId, changes: FieldChanges): FieldDef \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
         let existing = getField(id);
         let taken = takenApiIds(fieldsOf(existing#typeId), Some(id));
@@ -149,7 +156,7 @@ mod ContentTypes {
     ///
     /// フィールドを消す。無ければ notFound。
     ///
-    pub def removeField(id: FieldId): Unit \ Db + CmsErr + Tenant + Session =
+    pub def removeField(id: FieldId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
         let existing = getField(id);
         discard ContentFieldsQueries.deleteField({ id = FieldId.toInt64(id), projectId = Tenant.currentId() });
@@ -158,7 +165,7 @@ mod ContentTypes {
     ///
     /// ids の順に並べ直す。最上位のフィールドを過不足なく渡さなければ invalid。object / blocks の子は対象外。
     ///
-    pub def reorderFields(typeId: TypeId, ids: List[FieldId]): ContentType \ Db + CmsErr + Tenant + Session =
+    pub def reorderFields(typeId: TypeId, ids: List[FieldId]): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
         let owner = get(typeId);
         let current = owner#fields |> List.map(field -> field#id) |> List.toSet;
@@ -228,7 +235,8 @@ mod ContentTypes {
     ///
     /// 型の updated_at を今にする。フィールドを触った時も型が変わった事にする。
     ///
-    def touch(typeId: TypeId): Unit \ DbWrite + Tenant =
-        discard ContentTypesQueries.touchContentType({ id = TypeId.toInt64(typeId), projectId = Tenant.currentId() })
+    def touch(typeId: TypeId): Unit \ Db + CmsErr + IdGen + Tenant =
+        discard ContentTypesQueries.touchContentType({ id = TypeId.toInt64(typeId), projectId = Tenant.currentId() });
+        notifySchema(get(typeId)#apiId)
 
 }

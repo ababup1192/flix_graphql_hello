@@ -58,6 +58,14 @@ mod AdminQueryResolvers {
     pub def invitations(): GeneratedAdmin.QueryInvitationsResolver[AdminEff] =
         _context -> Ok(Members.invitations())
 
+    /// Query.webhooks
+    pub def webhooks(): GeneratedAdmin.QueryWebhooksResolver[AdminEff] =
+        _context -> Ok(Webhooks.list())
+
+    /// Query.webhookDeliveries
+    pub def webhookDeliveries(): GeneratedAdmin.QueryWebhookDeliveriesResolver[AdminEff] =
+        (_context, webhookId, first) -> Ok(Webhooks.deliveries(AdminMapping.publicIdOf(webhookId), first |> Option.getWithDefault(20)))
+
     /// Query.apiKeys
     pub def apiKeys(): GeneratedAdmin.QueryApiKeysResolver[AdminEff] =
         _context -> Ok(ApiKeys.list())
@@ -65,6 +73,6 @@ mod AdminQueryResolvers {
     /// type Query のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.QueryResolvers[AdminEff] =
         { contentTypes = contentTypes(), contentType = contentType(), entries = entries(), entry = entry(), assets = assets(), asset = asset(),
-          publishCheck = publishCheck(), impact = impact(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys() }
+          publishCheck = publishCheck(), impact = impact(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries() }
 
 }

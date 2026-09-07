@@ -107,12 +107,18 @@ mod ContentEntries {
     ///
     /// ゴミ箱へ。無ければ notFound。公開中なら公開も取り下げる（公開側から消え、一意の値も空く）。
     ///
-    pub def delete(id: EntryId): Unit \ Db + CmsErr + Tenant + Session =
+    pub def delete(id: EntryId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.WriteEntries);
         let existing = get(id);
         if (existing#stage == Stage.Published) discard unpublish(id) else ();
         discard EntriesQueries.deleteLinks({ fromEntryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft), projectId = Tenant.currentId() });
-        discard EntriesQueries.softDeleteEntry({ id = EntryId.text(id), projectId = Tenant.currentId() })
+        discard EntriesQueries.softDeleteEntry({ id = EntryId.text(id), projectId = Tenant.currentId() });
+        notify(WebhookEvent.EntryDeleted, id, existing#typeId)
+
+    /// entry の出来事を Webhook に積む（同じ Tx）。
+    def notify(event: WebhookEvent, id: EntryId, typeId: TypeId): Unit \ Db + CmsErr + IdGen + Tenant =
+        let owner = ContentTypes.get(typeId);
+        Webhooks.emit(event, Webhooks.entryPayload(event, id, owner#apiId))
 
     // ---- 公開 ----
 
@@ -121,11 +127,11 @@ mod ContentEntries {
     /// 既に公開中なら公開側を下書きで上書きする（再公開）。
     /// 参照先が未公開なら invalid。withDependencies なら参照先を先に（再帰的に）公開する。循環は 1 度だけ辿る。
     ///
-    pub def publish(id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + Tenant + Session =
+    pub def publish(id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.PublishEntries);
         publishWithin(Nil, id, author, withDependencies)
 
-    def publishWithin(visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + Tenant =
+    def publishWithin(visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant =
         let existing = get(id);
         let owner = ContentTypes.get(existing#typeId);
         let data = EntryValidation.prune(owner#fields, existing#data);
@@ -139,6 +145,7 @@ mod ContentEntries {
         writeContent(id, Stage.Published, owner, data);
         discard EntriesQueries.insertVersion(EntryRows.versionInsert(existing, author, VersionReason.Publish));
         discard EntriesQueries.markPublished({ id = EntryId.text(id), projectId = Tenant.currentId() });
+        notify(WebhookEvent.EntryPublished, id, existing#typeId);
         get(id)
 
     ///
@@ -202,16 +209,17 @@ mod ContentEntries {
     ///
     /// 公開を取り下げる。published の行と一意の値を消す。下書きは残る。未公開なら何もしない。
     ///
-    pub def unpublish(id: EntryId): Entry \ Db + CmsErr + Tenant + Session =
+    pub def unpublish(id: EntryId): Entry \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.PublishEntries);
         let key = EntryId.text(id);
         let published = EntryRows.stageToDb(Stage.Published);
-        discard get(id);
+        let existing = get(id);
         let referrers = EntriesQueries.publishedReferrers({ toEntryId = key, projectId = Tenant.currentId() }) |> List.map(EntryRows.referrerText) |> List.filter(referrer -> referrer != key);
         CmsErr.raiseIfAny(referrers |> List.map(referrer -> Violation.Violation("references", "公開中の entry '${referrer}' が参照しています。先にそちらを取り下げるか、参照を外してください")));
         discard EntriesQueries.deleteLinks({ fromEntryId = key, stage = published, projectId = Tenant.currentId() });
         discard EntriesQueries.deleteContent({ entryId = key, stage = published });
         discard EntriesQueries.markUnpublished({ id = key, projectId = Tenant.currentId() });
+        if (existing#stage == Stage.Published) notify(WebhookEvent.EntryUnpublished, id, existing#typeId) else ();
         get(id)
 
     // ---- 版 ----

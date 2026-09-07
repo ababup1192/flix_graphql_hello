@@ -176,6 +176,12 @@ mod SigV4 {
         };
         hexOf(digest)
 
+    ///
+    /// 文字列の鍵で HMAC-SHA256 を取り、16 進（小文字）に。Webhook の署名に使う。
+    ///
+    pub def hmacSha256Hex(key: String, data: String): String =
+        hexOf(hmacSha256(String.toBytes(key), data))
+
     /// HMAC-SHA256。
     def hmacSha256(key: Vector[Int8], data: String): Vector[Int8] =
         unsafe IO {

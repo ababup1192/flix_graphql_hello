@@ -28,6 +28,10 @@ type Query {
   invitations: [Invitation!]!
   """今のプロジェクトの API キー（owner だけ）。生の鍵は出ない"""
   apiKeys: [ApiKey!]!
+  """今のプロジェクトの Webhook（owner だけ）。secret は出ない"""
+  webhooks: [Webhook!]!
+  """Webhook の配信の記録。新しい順（owner だけ）"""
+  webhookDeliveries(webhookId: ID!, first: Int = 20): [WebhookDelivery!]!
 }
 
 """入力の 1 つの誤り。path は GraphQL の入力に対応（"fields.title" など）"""
@@ -125,6 +129,78 @@ type Mutation {
   createApiKey(name: String!, scope: ApiKeyScope!): IssuedApiKey!
   """失効する（owner だけ）"""
   revokeApiKey(id: ID!): ID!
+
+  """Webhook を作る（owner だけ）。secret はこの応答でしか見えない"""
+  createWebhook(input: WebhookInput!): IssuedWebhook!
+  """Webhook を直す（owner だけ）。secret は変わらない"""
+  updateWebhook(id: ID!, input: WebhookInput!): Webhook!
+  """Webhook を消す。配信の記録も消える（owner だけ）"""
+  deleteWebhook(id: ID!): ID!
+  """配信をもう 1 度送る（owner だけ）。failed や delivered の物にも使える"""
+  redeliverWebhook(deliveryId: ID!): WebhookDelivery!
+}
+
+"""Webhook が知らせる出来事"""
+enum WebhookEvent {
+  """entry を公開した（再公開も）"""
+  ENTRY_PUBLISHED
+  """公開を取り下げた"""
+  ENTRY_UNPUBLISHED
+  """entry をゴミ箱へ入れた"""
+  ENTRY_DELETED
+  """content type かフィールドが変わった"""
+  SCHEMA_CHANGED
+}
+
+"""配信 1 回の状態"""
+enum DeliveryStatus {
+  """送る番を待っている（再試行待ちも）"""
+  PENDING
+  """送っている最中"""
+  SENDING
+  """2xx が返った"""
+  DELIVERED
+  """回数を使い切った。redeliverWebhook で送り直せる"""
+  FAILED
+}
+
+input WebhookInput {
+  name: String!
+  """POST 先。http:// か https://"""
+  url: String!
+  events: [WebhookEvent!]!
+  active: Boolean = true
+}
+
+"""登録した Webhook。受け手は X-Cms-Signature（sha256=HMAC(secret, "timestamp.body")）で照合する"""
+type Webhook {
+  id: ID!
+  name: String!
+  url: String!
+  events: [WebhookEvent!]!
+  active: Boolean!
+  createdAt: String!
+}
+
+type IssuedWebhook {
+  webhook: Webhook!
+  """HMAC の鍵。この応答でしか見えない"""
+  secret: String!
+}
+
+"""配信の記録 1 つ。id は時刻順（ULID）"""
+type WebhookDelivery {
+  id: ID!
+  event: WebhookEvent!
+  status: DeliveryStatus!
+  """送った回数"""
+  attempts: Int!
+  nextAttemptAt: String!
+  """最後の HTTP のステータス。応答が無ければ 0"""
+  lastStatus: Int!
+  lastError: String!
+  createdAt: String!
+  deliveredAt: String
 }
 
 """プロジェクトでの役割。上が下を含む"""

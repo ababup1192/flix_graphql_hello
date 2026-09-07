@@ -109,6 +109,22 @@ mod AdminMutationResolvers {
     pub def revokeApiKey(): GeneratedAdmin.MutationRevokeApiKeyResolver[AdminEff] =
         (_context, id) -> { ApiKeys.revoke(AdminMapping.publicIdOf(id)); Ok(id) }
 
+    /// Mutation.createWebhook
+    pub def createWebhook(): GeneratedAdmin.MutationCreateWebhookResolver[AdminEff] =
+        (_context, input) -> Ok(Webhooks.create(AdminMapping.webhookDraftOf(input)))
+
+    /// Mutation.updateWebhook
+    pub def updateWebhook(): GeneratedAdmin.MutationUpdateWebhookResolver[AdminEff] =
+        (_context, id, input) -> Ok(Webhooks.update(AdminMapping.publicIdOf(id), AdminMapping.webhookDraftOf(input)))
+
+    /// Mutation.deleteWebhook。消した id を返す
+    pub def deleteWebhook(): GeneratedAdmin.MutationDeleteWebhookResolver[AdminEff] =
+        (_context, id) -> { Webhooks.delete(AdminMapping.publicIdOf(id)); Ok(id) }
+
+    /// Mutation.redeliverWebhook
+    pub def redeliverWebhook(): GeneratedAdmin.MutationRedeliverWebhookResolver[AdminEff] =
+        (_context, deliveryId) -> Ok(Webhooks.redeliver(AdminMapping.publicIdOf(deliveryId)))
+
     /// type Mutation のリゾルバ一式
     pub def resolvers(deps: Deps): GeneratedAdmin.MutationResolvers[AdminEff] =
         {
@@ -136,7 +152,11 @@ mod AdminMutationResolvers {
             changeMemberRole        = changeMemberRole(),
             removeMember            = removeMember(),
             createApiKey            = createApiKey(deps),
-            revokeApiKey            = revokeApiKey()
+            revokeApiKey            = revokeApiKey(),
+            createWebhook           = createWebhook(),
+            updateWebhook           = updateWebhook(),
+            deleteWebhook           = deleteWebhook(),
+            redeliverWebhook        = redeliverWebhook()
         }
 
 }

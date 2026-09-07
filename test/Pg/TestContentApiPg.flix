@@ -8,7 +8,7 @@ mod TestContentApiPg {
     ///
     /// blogs（title / views / tags）に 3 件。まだ公開は無いので DRAFT で引く。
     ///
-    def seed(): Unit \ Db + CmsErr + Tenant + Session =
+    def seed(): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
         discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
         discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("views", FieldKind.Number, FieldConfig.empty()));

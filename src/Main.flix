@@ -41,6 +41,9 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
             // 死活監視や preflight まで 503 になり、404 ごとに目印の SELECT が走るため。GraphQL を実行しない道なので管理 API のエンジンで受ける
             // WhyNot: 開発モード（X-Dev-User を信じる）で 127.0.0.1 にしか bind しないのは、ヘッダで人になれる経路を LAN に開けないため
             let bind = match deps#auth#mode { case AuthConfig.Mode.Dev => Some("127.0.0.1") case _ => None };
+            // Webhook の配信は別スレッドで回す。積むのはリクエストの Tx（outbox）、送るのはここ
+            region rc {
+            spawn WebhookDispatcher.runForever(pool) @ rc;
             HttpServer.listen(bind, 8080, request ->
                 Health.runWithPool(pool, () -> {
                     let (projectSlug, path) = Server.projectOf(baseDomain, request);
@@ -67,6 +70,7 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
                                 }
                     }
                 }))
+            }
     }
 
 ///

@@ -204,12 +204,17 @@ pub eff IdGen {
     /// 新しい外向きの id（users / organizations / projects / invitations / api_keys の public_id）。entry と同じ 12 文字。
     ///
     def freshPublicId(): String
+    ///
+    /// 新しい ULID（配信記録のように時刻順に読む物の id）。
+    ///
+    def freshUlid(): String
 }
 
 mod IdGen {
 
     import java.util.UUID
     import java.security.SecureRandom
+    import java.lang.System
 
     ///
     /// UUID から作った 12 文字の id を振るハンドラ。
@@ -223,7 +228,14 @@ mod IdGen {
             def freshAssetId(resume) = resume(AssetId.AssetId(randomText()))
             def freshSecret(resume) = resume(randomSecret())
             def freshPublicId(resume) = resume(randomText())
+            def freshUlid(resume) = resume(randomUlid())
         }
+
+    /// 今の時刻と SecureRandom の 10 バイトから ULID。
+    def randomUlid(): String \ IO =
+        let bytes = Array.empty(Static, 10);
+        new SecureRandom().nextBytes(bytes);
+        Ulid.encode(System.currentTimeMillis(), Array.toVector(bytes))
 
     /// SecureRandom の 32 バイトを base64url に。
     def randomSecret(): String \ IO =
@@ -247,6 +259,8 @@ mod IdGen {
             def freshSecret(resume) = resume("secret-${EntryId.text(nextFixed(remaining))}")
             // 外向きの id は決めた列を使わず連番にする。UNIQUE なので「尽きたら最後を繰り返す」では衝突する
             def freshPublicId(resume) = { Ref.put(Ref.get(issued) + 1, issued); resume("pub-${Ref.get(issued)}") }
+            // ULID も連番。26 文字に揃えて、文字列の並びが時刻順（発行順）になるようにする
+            def freshUlid(resume) = { Ref.put(Ref.get(issued) + 1, issued); resume(String.padLeft(26, '0', "${Ref.get(issued)}")) }
         }
     }
 

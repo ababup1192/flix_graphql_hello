@@ -20,6 +20,24 @@ curl -s localhost:8080/health # {"status":"ok","version":"..."}
 リクエストの Tx の先頭で `app.project_id` の印を置き、policy はその印と一致する行しか見せない（印が無ければ 0 行）。
 `CMS_DB_APP_PASSWORD` を入れると所有者でないロール `cms_app` で繋ぎ、SQL インジェクションや生 SQL があっても他のプロジェクトの行は出ない。
 
+## Webhook の受け方
+
+公開・取り下げ・削除・型の変更で、登録した URL に JSON を POST する（管理 API の `createWebhook`。secret はその応答でしか見えない）。
+
+```
+POST <url>
+Content-Type: application/json
+X-Cms-Event: entry.published            # entry.unpublished / entry.deleted / schema.changed
+X-Cms-Delivery: 01J...                  # 配信の id（再送でも同じ）。重複の見分けに使う
+X-Cms-Timestamp: 1725700000             # UNIX 秒
+X-Cms-Signature: sha256=<hex>           # HMAC-SHA256(secret, "<timestamp>.<body>")
+
+{"event":"entry.published","project":"default","entry":{"id":"e1","type":"blogs"}}
+```
+
+受け手は同じ計算で署名を照合し、timestamp が古すぎれば捨てる。中身は入っていないので、必要ならコンテンツ API で読む。
+2xx 以外なら 1 分 → 5 分 → 30 分 → 2 時間の後に送り直し、5 回目で失敗になる（管理 API の `webhookDeliveries` で見え、`redeliverWebhook` で送り直せる）。
+
 ## 更新
 
 ```bash

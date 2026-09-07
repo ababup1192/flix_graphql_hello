@@ -4,7 +4,7 @@
 mod GeneratedAdmin {
 
     /// 生成元の SDL 本文（改行は LF）。GeneratedCheck が SDL ファイルと照合する
-    pub def sdlText(): String = "\"\"\"任意の JSON 値。entry の中身（フィールドの apiId → 値）に使う\"\"\"\nscalar JSON\n\n\"\"\"管理 API。content type とフィールドの定義と、entry を読み書きする。形は固定で、コンテンツ API は定義から実行時に組む\"\"\"\ntype Query {\n  \"\"\"全 content type。apiId 順\"\"\"\n  contentTypes: [ContentType!]!\n  \"\"\"id か apiId で 1 つ。無ければ null\"\"\"\n  contentType(id: ID, apiId: String): ContentType\n  \"\"\"型の entry の一覧。更新が新しい順。search は下書きの中身に含む文字列\"\"\"\n  entries(typeId: ID!, search: String, first: Int = 50, skip: Int = 0): EntryPage!\n  \"\"\"entry 1 つ。無ければ null\"\"\"\n  entry(id: ID!): Entry\n  \"\"\"asset の一覧。新しい順。アップロード途中（PENDING）の物も出る\"\"\"\n  assets(first: Int = 50, skip: Int = 0): AssetPage!\n  \"\"\"asset 1 つ。無ければ null\"\"\"\n  asset(id: ID!): Asset\n  \"\"\"公開できるか。書き込まない。violations が空なら publishEntry は通る（unique は押した瞬間の競合を除く）\"\"\"\n  publishCheck(id: ID!): PublishReport!\n  \"\"\"操作の影響。取り下げ・削除で壊れる参照元と、公開で一緒に動く参照先\"\"\"\n  impact(id: ID!, action: ImpactAction!): Impact!\n\n  \"\"\"自分。ログインしていなければ null。organizations と projects は自分が触れる物だけ\"\"\"\n  me: Me\n  \"\"\"今のプロジェクトのメンバー（owner だけ）\"\"\"\n  members: [Member!]!\n  \"\"\"今のプロジェクトの招待（owner だけ）\"\"\"\n  invitations: [Invitation!]!\n  \"\"\"今のプロジェクトの API キー（owner だけ）。生の鍵は出ない\"\"\"\n  apiKeys: [ApiKey!]!\n}\n\n\"\"\"入力の 1 つの誤り。path は GraphQL の入力に対応（\"fields.title\" など）\"\"\"\ntype Violation {\n  path: String!\n  message: String!\n}\n\n\"\"\"公開の検査結果（dry-run）\"\"\"\ntype PublishReport {\n  ok: Boolean!\n  \"\"\"required / unique / 参照の消失 / asset の未完了。全部一度に\"\"\"\n  violations: [Violation!]!\n  \"\"\"未公開の参照先。withDependencies: true で一緒に公開できる\"\"\"\n  unpublishedDependencies: [Entry!]!\n}\n\nenum ImpactAction {\n  PUBLISH\n  UNPUBLISH\n  DELETE\n}\n\n\"\"\"この entry を参照している 1 つ\"\"\"\ntype Referrer {\n  entry: Entry!\n  \"\"\"参照しているフィールドの apiId。本文内のリンクなら RICH_TEXT のフィールド\"\"\"\n  via: String!\n  \"\"\"参照している側のどの中身か\"\"\"\n  stage: ContentStage!\n}\n\n\"\"\"中身の段階\"\"\"\nenum ContentStage {\n  DRAFT\n  PUBLISHED\n}\n\n\"\"\"操作の影響\"\"\"\ntype Impact {\n  \"\"\"壊れる（参照先を失う）entry。取り下げ・削除の前に見せる\"\"\"\n  breaks: [Referrer!]!\n  \"\"\"一緒に動く entry。公開なら先に公開される未公開の参照先\"\"\"\n  cascades: [Entry!]!\n}\n\ntype Mutation {\n  createContentType(input: ContentTypeInput!): ContentType!\n  updateContentType(id: ID!, input: ContentTypePatch!): ContentType!\n  \"\"\"フィールドごと消す\"\"\"\n  deleteContentType(id: ID!): ID!\n  \"\"\"末尾に足す\"\"\"\n  addField(typeId: ID!, input: FieldInput!): FieldDef!\n  updateField(id: ID!, input: FieldPatch!): FieldDef!\n  removeField(id: ID!): ID!\n  \"\"\"ids の順に並べ直す。型の全フィールドを過不足なく渡す\"\"\"\n  reorderFields(typeId: ID!, ids: [ID!]!): ContentType!\n\n  \"\"\"下書きを作る。id を渡せば（移行用）それを使い、無ければ振る。fields は apiId → 値\"\"\"\n  createEntry(typeId: ID!, fields: JSON!, id: ID): Entry!\n  \"\"\"下書きを直す。fields のキーだけ上書きし、null で消す。expectedVersion が今の version と違えば CONFLICT\"\"\"\n  updateEntry(id: ID!, fields: JSON!, expectedVersion: Int!): Entry!\n  \"\"\"ゴミ箱へ（soft delete）。公開中なら公開も取り下げる\"\"\"\n  deleteEntry(id: ID!): ID!\n  \"\"\"下書きを公開する。required と unique と参照先の公開はここで検査する。公開中なら公開側を下書きで上書きする。\n  withDependencies なら未公開の参照先を先に公開する\"\"\"\n  publishEntry(id: ID!, withDependencies: Boolean = false): Entry!\n  \"\"\"公開を取り下げる。下書きは残る\"\"\"\n  unpublishEntry(id: ID!): Entry!\n  \"\"\"今の下書きを版として残す\"\"\"\n  saveVersion(id: ID!): EntryVersion!\n  \"\"\"版の中身を下書きに戻す。expectedVersion は updateEntry と同じ\"\"\"\n  restoreVersion(id: ID!, versionId: ID!, expectedVersion: Int!): Entry!\n\n  \"\"\"asset の置き先（署名付き PUT URL）を発行する。ブラウザが Content-Type / Content-Length を宣言どおりにして PUT し、\n  終わったら confirmAsset を呼ぶ。URL は expiresInSeconds で切れる\"\"\"\n  createUploadUrl(input: UploadInput!): Upload!\n  \"\"\"置いた事をストレージで確かめて READY にする。画像なら寸法を渡す。置かれていなければエラー\"\"\"\n  confirmAsset(id: ID!, input: AssetConfirmInput): Asset!\n  \"\"\"alt を変える。ファイルの差し替えは新しい asset を作る\"\"\"\n  updateAsset(id: ID!, input: AssetPatch!): Asset!\n  \"\"\"消す。entry（下書き・公開・richText の画像を含む）が使っていればエラー\"\"\"\n  deleteAsset(id: ID!): ID!\n\n  \"\"\"今のプロジェクトの公開範囲（owner だけ）\"\"\"\n  updateProjectVisibility(visibility: Visibility!): Project!\n  \"\"\"email で招待する（owner だけ）。初回ログインで役割が付く\"\"\"\n  inviteMember(email: String!, role: Role!): Invitation!\n  cancelInvitation(id: ID!): ID!\n  \"\"\"役割を変える（owner だけ）。最後の owner は降格できない\"\"\"\n  changeMemberRole(userId: ID!, role: Role!): Member!\n  \"\"\"外す（owner だけ）。最後の owner は外せない\"\"\"\n  removeMember(userId: ID!): ID!\n  \"\"\"API キーを発行する（owner だけ）。key はこの応答でしか見えない\"\"\"\n  createApiKey(name: String!, scope: ApiKeyScope!): IssuedApiKey!\n  \"\"\"失効する（owner だけ）\"\"\"\n  revokeApiKey(id: ID!): ID!\n}\n\n\"\"\"プロジェクトでの役割。上が下を含む\"\"\"\nenum Role {\n  VIEWER\n  WRITER\n  EDITOR\n  OWNER\n}\n\n\"\"\"組織での役割。OWNER は組織の全プロジェクトの owner でもある\"\"\"\nenum OrgRole {\n  MEMBER\n  OWNER\n}\n\n\"\"\"公開 API の鍵の範囲\"\"\"\nenum ApiKeyScope {\n  \"\"\"公開中の中身\"\"\"\n  READ\n  \"\"\"下書きも\"\"\"\n  READ_DRAFT\n}\n\n\"\"\"プロジェクトの見え方\"\"\"\nenum Visibility {\n  \"\"\"公開中の中身はキー無しで読める\"\"\"\n  PUBLIC\n  \"\"\"read のキーが要る\"\"\"\n  PRIVATE\n}\n\n\"\"\"自分\"\"\"\ntype Me {\n  id: ID!\n  email: String!\n  name: String!\n  \"\"\"今のプロジェクトでの役割（無ければ空）と、できる事\"\"\"\n  roles: [Role!]!\n  permissions: [String!]!\n  organizations: [OrganizationMembership!]!\n  projects: [ProjectMembership!]!\n}\n\ntype Organization {\n  id: ID!\n  name: String!\n}\n\ntype OrganizationMembership {\n  organization: Organization!\n  role: OrgRole!\n}\n\ntype Project {\n  id: ID!\n  slug: String!\n  name: String!\n  visibility: Visibility!\n}\n\ntype ProjectMembership {\n  project: Project!\n  role: Role!\n}\n\ntype Member {\n  userId: ID!\n  email: String!\n  name: String!\n  role: Role!\n}\n\ntype Invitation {\n  id: ID!\n  email: String!\n  role: Role!\n  createdAt: String!\n}\n\ntype ApiKey {\n  id: ID!\n  name: String!\n  scope: ApiKeyScope!\n  createdAt: String!\n  revokedAt: String\n}\n\n\"\"\"発行した鍵。key はこの時だけ\"\"\"\ntype IssuedApiKey {\n  id: ID!\n  name: String!\n  scope: ApiKeyScope!\n  key: String!\n}\n\n\"\"\"asset の状態\"\"\"\nenum AssetStatus {\n  \"\"\"URL を出したが、まだ置かれた事を確かめていない\"\"\"\n  PENDING\n  \"\"\"置かれ、confirmAsset が確かめた\"\"\"\n  READY\n}\n\n\"\"\"画像やファイル。中身はストレージにあり、url で配信する\"\"\"\ntype Asset {\n  id: ID!\n  \"\"\"配信 URL\"\"\"\n  url: String!\n  fileName: String!\n  mime: String!\n  \"\"\"バイト数\"\"\"\n  size: Int!\n  \"\"\"画像の幅。画像でなければ null\"\"\"\n  width: Int\n  height: Int\n  alt: String!\n  status: AssetStatus!\n  createdAt: String!\n  \"\"\"この asset を使っている entry（下書き・公開・本文の image）\"\"\"\n  usedBy: [Entry!]!\n}\n\n\"\"\"asset の一覧の 1 ページ\"\"\"\ntype AssetPage {\n  nodes: [Asset!]!\n  totalCount: Int!\n}\n\n\"\"\"署名付き URL の発行結果\"\"\"\ntype Upload {\n  asset: Asset!\n  \"\"\"ここへ PUT する\"\"\"\n  uploadUrl: String!\n  \"\"\"URL の有効期限（秒）\"\"\"\n  expiresInSeconds: Int!\n}\n\ninput UploadInput {\n  fileName: String!\n  \"\"\"image/png などの許可リストにある物\"\"\"\n  mime: String!\n  \"\"\"バイト数。20 MB まで\"\"\"\n  size: Int!\n}\n\ninput AssetConfirmInput {\n  width: Int\n  height: Int\n  alt: String\n}\n\ninput AssetPatch {\n  alt: String!\n}\n\n\"\"\"entry の状態\"\"\"\nenum EntryStage {\n  \"\"\"まだ公開していない\"\"\"\n  DRAFT\n  \"\"\"公開中で、下書きは公開した物と同じ\"\"\"\n  PUBLISHED\n  \"\"\"公開中で、公開後に下書きが進んでいる（再公開で反映）\"\"\"\n  CHANGED\n}\n\n\"\"\"entry。fields は下書きの中身\"\"\"\ntype Entry {\n  id: ID!\n  typeId: ID!\n  \"\"\"楽観ロックの版。updateEntry に expectedVersion として渡す\"\"\"\n  version: Int!\n  stage: EntryStage!\n  fields: JSON!\n  publishedAt: String\n  createdAt: String!\n  updatedAt: String!\n  \"\"\"版。新しい順。公開時と saveVersion で積む\"\"\"\n  versions: [EntryVersion!]!\n}\n\n\"\"\"版を積んだ理由\"\"\"\nenum VersionReason {\n  PUBLISH\n  SAVE\n}\n\n\"\"\"entry の版\"\"\"\ntype EntryVersion {\n  id: ID!\n  \"\"\"積んだ時点の entry の version\"\"\"\n  version: Int!\n  reason: VersionReason!\n  author: String!\n  fields: JSON!\n  createdAt: String!\n}\n\n\"\"\"entry の一覧の 1 ページ\"\"\"\ntype EntryPage {\n  nodes: [Entry!]!\n  totalCount: Int!\n}\n\n\"\"\"content type の種別\"\"\"\nenum TypeKind {\n  \"\"\"entry を何件でも持つ\"\"\"\n  COLLECTION\n  \"\"\"entry を 1 件だけ持つ（サイト設定など）\"\"\"\n  SINGLETON\n}\n\n\"\"\"フィールドの種類\"\"\"\nenum FieldKind {\n  TEXT\n  TEXT_AREA\n  \"\"\"URL に使う識別子。sourceField から自動生成し、型の中で一意\"\"\"\n  SLUG\n  NUMBER\n  BOOLEAN\n  \"\"\"決まった選択肢から 1 つ。config.options\"\"\"\n  SELECT\n  \"\"\"他の entry への参照。targetTypeId が参照先の型\"\"\"\n  REFERENCE\n  \"\"\"子フィールドを持つ入れ子。値は子の apiId → 値のオブジェクト\"\"\"\n  OBJECT\n  \"\"\"複数の OBJECT（variant）から選んで並べる。常に配列。値は { blockType: <variant の apiId>, ... } の並び\"\"\"\n  BLOCKS\n  \"\"\"画像やファイル。値は asset の id（createUploadUrl で作った物）。コンテンツ API では Asset に展開する\"\"\"\n  ASSET\n  \"\"\"構造化した本文。値は ProseMirror の doc（{ type: \"doc\", content: [...] }）。配列にできない。コンテンツ API では json / html / text\"\"\"\n  RICH_TEXT\n}\n\n\"\"\"content type。apiId がコンテンツ API のクエリ名の元になる\"\"\"\ntype ContentType {\n  id: ID!\n  \"\"\"lowerCamel の識別子（\"blogs\"）\"\"\"\n  apiId: String!\n  kind: TypeKind!\n  \"\"\"管理画面に出す名前\"\"\"\n  name: String!\n  \"\"\"コンテンツ API の型名（\"Blog\"）\"\"\"\n  singular: String!\n  \"\"\"コンテンツ API の一覧クエリ名（\"blogs\"）\"\"\"\n  plural: String!\n  \"\"\"管理画面のプレビューが開く URL。{id} を entry の id に置き換える\"\"\"\n  previewUrl: String\n  \"\"\"最上位のフィールド。position 順。子は children\"\"\"\n  fields: [FieldDef!]!\n  createdAt: String!\n  updatedAt: String!\n}\n\n\"\"\"フィールドの定義\"\"\"\ntype FieldDef {\n  id: ID!\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  \"\"\"配列か\"\"\"\n  many: Boolean!\n  \"\"\"公開時に値が要るか\"\"\"\n  required: Boolean!\n  \"\"\"型の中で値が一意か\"\"\"\n  unique: Boolean!\n  \"\"\"言語ごとに値を持つか\"\"\"\n  localized: Boolean!\n  \"\"\"REFERENCE の参照先の型\"\"\"\n  targetTypeId: ID\n  \"\"\"OBJECT / BLOCKS の子なら親のフィールド\"\"\"\n  parentFieldId: ID\n  \"\"\"OBJECT の子フィールド、BLOCKS の variant。position 順\"\"\"\n  children: [FieldDef!]!\n  config: FieldConfig!\n  \"\"\"兄弟の中の並び順\"\"\"\n  position: Int!\n}\n\n\"\"\"kind ごとの設定。使わない項目は null\"\"\"\ntype FieldConfig {\n  \"\"\"TEXT / TEXT_AREA / SLUG の最大文字数\"\"\"\n  maxLength: Int\n  \"\"\"SLUG の元にするフィールドの apiId\"\"\"\n  sourceField: String\n  \"\"\"NUMBER の下限\"\"\"\n  min: Float\n  \"\"\"NUMBER の上限\"\"\"\n  max: Float\n  \"\"\"NUMBER を整数に限るか\"\"\"\n  integer: Boolean\n  \"\"\"SELECT の選択肢。UPPER_SNAKE\"\"\"\n  options: [String!]\n}\n\ninput ContentTypeInput {\n  apiId: String!\n  kind: TypeKind = COLLECTION\n  name: String!\n  \"\"\"省くと apiId から導く\"\"\"\n  singular: String\n  \"\"\"省くと apiId から導く\"\"\"\n  plural: String\n  previewUrl: String\n}\n\n\"\"\"触らない項目は省く\"\"\"\ninput ContentTypePatch {\n  name: String\n  singular: String\n  plural: String\n  previewUrl: String\n}\n\ninput FieldInput {\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  many: Boolean = false\n  required: Boolean = false\n  unique: Boolean = false\n  localized: Boolean = false\n  \"\"\"REFERENCE の参照先の型\"\"\"\n  targetTypeId: ID\n  \"\"\"OBJECT / BLOCKS の子として足すなら親のフィールド\"\"\"\n  parentFieldId: ID\n  config: FieldConfigInput\n}\n\n\"\"\"触らない項目は省く。config は丸ごと置き換える\"\"\"\ninput FieldPatch {\n  name: String\n  required: Boolean\n  unique: Boolean\n  localized: Boolean\n  config: FieldConfigInput\n}\n\ninput FieldConfigInput {\n  maxLength: Int\n  sourceField: String\n  min: Float\n  max: Float\n  integer: Boolean\n  options: [String!]\n}\n"
+    pub def sdlText(): String = "\"\"\"任意の JSON 値。entry の中身（フィールドの apiId → 値）に使う\"\"\"\nscalar JSON\n\n\"\"\"管理 API。content type とフィールドの定義と、entry を読み書きする。形は固定で、コンテンツ API は定義から実行時に組む\"\"\"\ntype Query {\n  \"\"\"全 content type。apiId 順\"\"\"\n  contentTypes: [ContentType!]!\n  \"\"\"id か apiId で 1 つ。無ければ null\"\"\"\n  contentType(id: ID, apiId: String): ContentType\n  \"\"\"型の entry の一覧。更新が新しい順。search は下書きの中身に含む文字列\"\"\"\n  entries(typeId: ID!, search: String, first: Int = 50, skip: Int = 0): EntryPage!\n  \"\"\"entry 1 つ。無ければ null\"\"\"\n  entry(id: ID!): Entry\n  \"\"\"asset の一覧。新しい順。アップロード途中（PENDING）の物も出る\"\"\"\n  assets(first: Int = 50, skip: Int = 0): AssetPage!\n  \"\"\"asset 1 つ。無ければ null\"\"\"\n  asset(id: ID!): Asset\n  \"\"\"公開できるか。書き込まない。violations が空なら publishEntry は通る（unique は押した瞬間の競合を除く）\"\"\"\n  publishCheck(id: ID!): PublishReport!\n  \"\"\"操作の影響。取り下げ・削除で壊れる参照元と、公開で一緒に動く参照先\"\"\"\n  impact(id: ID!, action: ImpactAction!): Impact!\n\n  \"\"\"自分。ログインしていなければ null。organizations と projects は自分が触れる物だけ\"\"\"\n  me: Me\n  \"\"\"今のプロジェクトのメンバー（owner だけ）\"\"\"\n  members: [Member!]!\n  \"\"\"今のプロジェクトの招待（owner だけ）\"\"\"\n  invitations: [Invitation!]!\n  \"\"\"今のプロジェクトの API キー（owner だけ）。生の鍵は出ない\"\"\"\n  apiKeys: [ApiKey!]!\n  \"\"\"今のプロジェクトの Webhook（owner だけ）。secret は出ない\"\"\"\n  webhooks: [Webhook!]!\n  \"\"\"Webhook の配信の記録。新しい順（owner だけ）\"\"\"\n  webhookDeliveries(webhookId: ID!, first: Int = 20): [WebhookDelivery!]!\n}\n\n\"\"\"入力の 1 つの誤り。path は GraphQL の入力に対応（\"fields.title\" など）\"\"\"\ntype Violation {\n  path: String!\n  message: String!\n}\n\n\"\"\"公開の検査結果（dry-run）\"\"\"\ntype PublishReport {\n  ok: Boolean!\n  \"\"\"required / unique / 参照の消失 / asset の未完了。全部一度に\"\"\"\n  violations: [Violation!]!\n  \"\"\"未公開の参照先。withDependencies: true で一緒に公開できる\"\"\"\n  unpublishedDependencies: [Entry!]!\n}\n\nenum ImpactAction {\n  PUBLISH\n  UNPUBLISH\n  DELETE\n}\n\n\"\"\"この entry を参照している 1 つ\"\"\"\ntype Referrer {\n  entry: Entry!\n  \"\"\"参照しているフィールドの apiId。本文内のリンクなら RICH_TEXT のフィールド\"\"\"\n  via: String!\n  \"\"\"参照している側のどの中身か\"\"\"\n  stage: ContentStage!\n}\n\n\"\"\"中身の段階\"\"\"\nenum ContentStage {\n  DRAFT\n  PUBLISHED\n}\n\n\"\"\"操作の影響\"\"\"\ntype Impact {\n  \"\"\"壊れる（参照先を失う）entry。取り下げ・削除の前に見せる\"\"\"\n  breaks: [Referrer!]!\n  \"\"\"一緒に動く entry。公開なら先に公開される未公開の参照先\"\"\"\n  cascades: [Entry!]!\n}\n\ntype Mutation {\n  createContentType(input: ContentTypeInput!): ContentType!\n  updateContentType(id: ID!, input: ContentTypePatch!): ContentType!\n  \"\"\"フィールドごと消す\"\"\"\n  deleteContentType(id: ID!): ID!\n  \"\"\"末尾に足す\"\"\"\n  addField(typeId: ID!, input: FieldInput!): FieldDef!\n  updateField(id: ID!, input: FieldPatch!): FieldDef!\n  removeField(id: ID!): ID!\n  \"\"\"ids の順に並べ直す。型の全フィールドを過不足なく渡す\"\"\"\n  reorderFields(typeId: ID!, ids: [ID!]!): ContentType!\n\n  \"\"\"下書きを作る。id を渡せば（移行用）それを使い、無ければ振る。fields は apiId → 値\"\"\"\n  createEntry(typeId: ID!, fields: JSON!, id: ID): Entry!\n  \"\"\"下書きを直す。fields のキーだけ上書きし、null で消す。expectedVersion が今の version と違えば CONFLICT\"\"\"\n  updateEntry(id: ID!, fields: JSON!, expectedVersion: Int!): Entry!\n  \"\"\"ゴミ箱へ（soft delete）。公開中なら公開も取り下げる\"\"\"\n  deleteEntry(id: ID!): ID!\n  \"\"\"下書きを公開する。required と unique と参照先の公開はここで検査する。公開中なら公開側を下書きで上書きする。\n  withDependencies なら未公開の参照先を先に公開する\"\"\"\n  publishEntry(id: ID!, withDependencies: Boolean = false): Entry!\n  \"\"\"公開を取り下げる。下書きは残る\"\"\"\n  unpublishEntry(id: ID!): Entry!\n  \"\"\"今の下書きを版として残す\"\"\"\n  saveVersion(id: ID!): EntryVersion!\n  \"\"\"版の中身を下書きに戻す。expectedVersion は updateEntry と同じ\"\"\"\n  restoreVersion(id: ID!, versionId: ID!, expectedVersion: Int!): Entry!\n\n  \"\"\"asset の置き先（署名付き PUT URL）を発行する。ブラウザが Content-Type / Content-Length を宣言どおりにして PUT し、\n  終わったら confirmAsset を呼ぶ。URL は expiresInSeconds で切れる\"\"\"\n  createUploadUrl(input: UploadInput!): Upload!\n  \"\"\"置いた事をストレージで確かめて READY にする。画像なら寸法を渡す。置かれていなければエラー\"\"\"\n  confirmAsset(id: ID!, input: AssetConfirmInput): Asset!\n  \"\"\"alt を変える。ファイルの差し替えは新しい asset を作る\"\"\"\n  updateAsset(id: ID!, input: AssetPatch!): Asset!\n  \"\"\"消す。entry（下書き・公開・richText の画像を含む）が使っていればエラー\"\"\"\n  deleteAsset(id: ID!): ID!\n\n  \"\"\"今のプロジェクトの公開範囲（owner だけ）\"\"\"\n  updateProjectVisibility(visibility: Visibility!): Project!\n  \"\"\"email で招待する（owner だけ）。初回ログインで役割が付く\"\"\"\n  inviteMember(email: String!, role: Role!): Invitation!\n  cancelInvitation(id: ID!): ID!\n  \"\"\"役割を変える（owner だけ）。最後の owner は降格できない\"\"\"\n  changeMemberRole(userId: ID!, role: Role!): Member!\n  \"\"\"外す（owner だけ）。最後の owner は外せない\"\"\"\n  removeMember(userId: ID!): ID!\n  \"\"\"API キーを発行する（owner だけ）。key はこの応答でしか見えない\"\"\"\n  createApiKey(name: String!, scope: ApiKeyScope!): IssuedApiKey!\n  \"\"\"失効する（owner だけ）\"\"\"\n  revokeApiKey(id: ID!): ID!\n\n  \"\"\"Webhook を作る（owner だけ）。secret はこの応答でしか見えない\"\"\"\n  createWebhook(input: WebhookInput!): IssuedWebhook!\n  \"\"\"Webhook を直す（owner だけ）。secret は変わらない\"\"\"\n  updateWebhook(id: ID!, input: WebhookInput!): Webhook!\n  \"\"\"Webhook を消す。配信の記録も消える（owner だけ）\"\"\"\n  deleteWebhook(id: ID!): ID!\n  \"\"\"配信をもう 1 度送る（owner だけ）。failed や delivered の物にも使える\"\"\"\n  redeliverWebhook(deliveryId: ID!): WebhookDelivery!\n}\n\n\"\"\"Webhook が知らせる出来事\"\"\"\nenum WebhookEvent {\n  \"\"\"entry を公開した（再公開も）\"\"\"\n  ENTRY_PUBLISHED\n  \"\"\"公開を取り下げた\"\"\"\n  ENTRY_UNPUBLISHED\n  \"\"\"entry をゴミ箱へ入れた\"\"\"\n  ENTRY_DELETED\n  \"\"\"content type かフィールドが変わった\"\"\"\n  SCHEMA_CHANGED\n}\n\n\"\"\"配信 1 回の状態\"\"\"\nenum DeliveryStatus {\n  \"\"\"送る番を待っている（再試行待ちも）\"\"\"\n  PENDING\n  \"\"\"送っている最中\"\"\"\n  SENDING\n  \"\"\"2xx が返った\"\"\"\n  DELIVERED\n  \"\"\"回数を使い切った。redeliverWebhook で送り直せる\"\"\"\n  FAILED\n}\n\ninput WebhookInput {\n  name: String!\n  \"\"\"POST 先。http:// か https://\"\"\"\n  url: String!\n  events: [WebhookEvent!]!\n  active: Boolean = true\n}\n\n\"\"\"登録した Webhook。受け手は X-Cms-Signature（sha256=HMAC(secret, \"timestamp.body\")）で照合する\"\"\"\ntype Webhook {\n  id: ID!\n  name: String!\n  url: String!\n  events: [WebhookEvent!]!\n  active: Boolean!\n  createdAt: String!\n}\n\ntype IssuedWebhook {\n  webhook: Webhook!\n  \"\"\"HMAC の鍵。この応答でしか見えない\"\"\"\n  secret: String!\n}\n\n\"\"\"配信の記録 1 つ。id は時刻順（ULID）\"\"\"\ntype WebhookDelivery {\n  id: ID!\n  event: WebhookEvent!\n  status: DeliveryStatus!\n  \"\"\"送った回数\"\"\"\n  attempts: Int!\n  nextAttemptAt: String!\n  \"\"\"最後の HTTP のステータス。応答が無ければ 0\"\"\"\n  lastStatus: Int!\n  lastError: String!\n  createdAt: String!\n  deliveredAt: String\n}\n\n\"\"\"プロジェクトでの役割。上が下を含む\"\"\"\nenum Role {\n  VIEWER\n  WRITER\n  EDITOR\n  OWNER\n}\n\n\"\"\"組織での役割。OWNER は組織の全プロジェクトの owner でもある\"\"\"\nenum OrgRole {\n  MEMBER\n  OWNER\n}\n\n\"\"\"公開 API の鍵の範囲\"\"\"\nenum ApiKeyScope {\n  \"\"\"公開中の中身\"\"\"\n  READ\n  \"\"\"下書きも\"\"\"\n  READ_DRAFT\n}\n\n\"\"\"プロジェクトの見え方\"\"\"\nenum Visibility {\n  \"\"\"公開中の中身はキー無しで読める\"\"\"\n  PUBLIC\n  \"\"\"read のキーが要る\"\"\"\n  PRIVATE\n}\n\n\"\"\"自分\"\"\"\ntype Me {\n  id: ID!\n  email: String!\n  name: String!\n  \"\"\"今のプロジェクトでの役割（無ければ空）と、できる事\"\"\"\n  roles: [Role!]!\n  permissions: [String!]!\n  organizations: [OrganizationMembership!]!\n  projects: [ProjectMembership!]!\n}\n\ntype Organization {\n  id: ID!\n  name: String!\n}\n\ntype OrganizationMembership {\n  organization: Organization!\n  role: OrgRole!\n}\n\ntype Project {\n  id: ID!\n  slug: String!\n  name: String!\n  visibility: Visibility!\n}\n\ntype ProjectMembership {\n  project: Project!\n  role: Role!\n}\n\ntype Member {\n  userId: ID!\n  email: String!\n  name: String!\n  role: Role!\n}\n\ntype Invitation {\n  id: ID!\n  email: String!\n  role: Role!\n  createdAt: String!\n}\n\ntype ApiKey {\n  id: ID!\n  name: String!\n  scope: ApiKeyScope!\n  createdAt: String!\n  revokedAt: String\n}\n\n\"\"\"発行した鍵。key はこの時だけ\"\"\"\ntype IssuedApiKey {\n  id: ID!\n  name: String!\n  scope: ApiKeyScope!\n  key: String!\n}\n\n\"\"\"asset の状態\"\"\"\nenum AssetStatus {\n  \"\"\"URL を出したが、まだ置かれた事を確かめていない\"\"\"\n  PENDING\n  \"\"\"置かれ、confirmAsset が確かめた\"\"\"\n  READY\n}\n\n\"\"\"画像やファイル。中身はストレージにあり、url で配信する\"\"\"\ntype Asset {\n  id: ID!\n  \"\"\"配信 URL\"\"\"\n  url: String!\n  fileName: String!\n  mime: String!\n  \"\"\"バイト数\"\"\"\n  size: Int!\n  \"\"\"画像の幅。画像でなければ null\"\"\"\n  width: Int\n  height: Int\n  alt: String!\n  status: AssetStatus!\n  createdAt: String!\n  \"\"\"この asset を使っている entry（下書き・公開・本文の image）\"\"\"\n  usedBy: [Entry!]!\n}\n\n\"\"\"asset の一覧の 1 ページ\"\"\"\ntype AssetPage {\n  nodes: [Asset!]!\n  totalCount: Int!\n}\n\n\"\"\"署名付き URL の発行結果\"\"\"\ntype Upload {\n  asset: Asset!\n  \"\"\"ここへ PUT する\"\"\"\n  uploadUrl: String!\n  \"\"\"URL の有効期限（秒）\"\"\"\n  expiresInSeconds: Int!\n}\n\ninput UploadInput {\n  fileName: String!\n  \"\"\"image/png などの許可リストにある物\"\"\"\n  mime: String!\n  \"\"\"バイト数。20 MB まで\"\"\"\n  size: Int!\n}\n\ninput AssetConfirmInput {\n  width: Int\n  height: Int\n  alt: String\n}\n\ninput AssetPatch {\n  alt: String!\n}\n\n\"\"\"entry の状態\"\"\"\nenum EntryStage {\n  \"\"\"まだ公開していない\"\"\"\n  DRAFT\n  \"\"\"公開中で、下書きは公開した物と同じ\"\"\"\n  PUBLISHED\n  \"\"\"公開中で、公開後に下書きが進んでいる（再公開で反映）\"\"\"\n  CHANGED\n}\n\n\"\"\"entry。fields は下書きの中身\"\"\"\ntype Entry {\n  id: ID!\n  typeId: ID!\n  \"\"\"楽観ロックの版。updateEntry に expectedVersion として渡す\"\"\"\n  version: Int!\n  stage: EntryStage!\n  fields: JSON!\n  publishedAt: String\n  createdAt: String!\n  updatedAt: String!\n  \"\"\"版。新しい順。公開時と saveVersion で積む\"\"\"\n  versions: [EntryVersion!]!\n}\n\n\"\"\"版を積んだ理由\"\"\"\nenum VersionReason {\n  PUBLISH\n  SAVE\n}\n\n\"\"\"entry の版\"\"\"\ntype EntryVersion {\n  id: ID!\n  \"\"\"積んだ時点の entry の version\"\"\"\n  version: Int!\n  reason: VersionReason!\n  author: String!\n  fields: JSON!\n  createdAt: String!\n}\n\n\"\"\"entry の一覧の 1 ページ\"\"\"\ntype EntryPage {\n  nodes: [Entry!]!\n  totalCount: Int!\n}\n\n\"\"\"content type の種別\"\"\"\nenum TypeKind {\n  \"\"\"entry を何件でも持つ\"\"\"\n  COLLECTION\n  \"\"\"entry を 1 件だけ持つ（サイト設定など）\"\"\"\n  SINGLETON\n}\n\n\"\"\"フィールドの種類\"\"\"\nenum FieldKind {\n  TEXT\n  TEXT_AREA\n  \"\"\"URL に使う識別子。sourceField から自動生成し、型の中で一意\"\"\"\n  SLUG\n  NUMBER\n  BOOLEAN\n  \"\"\"決まった選択肢から 1 つ。config.options\"\"\"\n  SELECT\n  \"\"\"他の entry への参照。targetTypeId が参照先の型\"\"\"\n  REFERENCE\n  \"\"\"子フィールドを持つ入れ子。値は子の apiId → 値のオブジェクト\"\"\"\n  OBJECT\n  \"\"\"複数の OBJECT（variant）から選んで並べる。常に配列。値は { blockType: <variant の apiId>, ... } の並び\"\"\"\n  BLOCKS\n  \"\"\"画像やファイル。値は asset の id（createUploadUrl で作った物）。コンテンツ API では Asset に展開する\"\"\"\n  ASSET\n  \"\"\"構造化した本文。値は ProseMirror の doc（{ type: \"doc\", content: [...] }）。配列にできない。コンテンツ API では json / html / text\"\"\"\n  RICH_TEXT\n}\n\n\"\"\"content type。apiId がコンテンツ API のクエリ名の元になる\"\"\"\ntype ContentType {\n  id: ID!\n  \"\"\"lowerCamel の識別子（\"blogs\"）\"\"\"\n  apiId: String!\n  kind: TypeKind!\n  \"\"\"管理画面に出す名前\"\"\"\n  name: String!\n  \"\"\"コンテンツ API の型名（\"Blog\"）\"\"\"\n  singular: String!\n  \"\"\"コンテンツ API の一覧クエリ名（\"blogs\"）\"\"\"\n  plural: String!\n  \"\"\"管理画面のプレビューが開く URL。{id} を entry の id に置き換える\"\"\"\n  previewUrl: String\n  \"\"\"最上位のフィールド。position 順。子は children\"\"\"\n  fields: [FieldDef!]!\n  createdAt: String!\n  updatedAt: String!\n}\n\n\"\"\"フィールドの定義\"\"\"\ntype FieldDef {\n  id: ID!\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  \"\"\"配列か\"\"\"\n  many: Boolean!\n  \"\"\"公開時に値が要るか\"\"\"\n  required: Boolean!\n  \"\"\"型の中で値が一意か\"\"\"\n  unique: Boolean!\n  \"\"\"言語ごとに値を持つか\"\"\"\n  localized: Boolean!\n  \"\"\"REFERENCE の参照先の型\"\"\"\n  targetTypeId: ID\n  \"\"\"OBJECT / BLOCKS の子なら親のフィールド\"\"\"\n  parentFieldId: ID\n  \"\"\"OBJECT の子フィールド、BLOCKS の variant。position 順\"\"\"\n  children: [FieldDef!]!\n  config: FieldConfig!\n  \"\"\"兄弟の中の並び順\"\"\"\n  position: Int!\n}\n\n\"\"\"kind ごとの設定。使わない項目は null\"\"\"\ntype FieldConfig {\n  \"\"\"TEXT / TEXT_AREA / SLUG の最大文字数\"\"\"\n  maxLength: Int\n  \"\"\"SLUG の元にするフィールドの apiId\"\"\"\n  sourceField: String\n  \"\"\"NUMBER の下限\"\"\"\n  min: Float\n  \"\"\"NUMBER の上限\"\"\"\n  max: Float\n  \"\"\"NUMBER を整数に限るか\"\"\"\n  integer: Boolean\n  \"\"\"SELECT の選択肢。UPPER_SNAKE\"\"\"\n  options: [String!]\n}\n\ninput ContentTypeInput {\n  apiId: String!\n  kind: TypeKind = COLLECTION\n  name: String!\n  \"\"\"省くと apiId から導く\"\"\"\n  singular: String\n  \"\"\"省くと apiId から導く\"\"\"\n  plural: String\n  previewUrl: String\n}\n\n\"\"\"触らない項目は省く\"\"\"\ninput ContentTypePatch {\n  name: String\n  singular: String\n  plural: String\n  previewUrl: String\n}\n\ninput FieldInput {\n  apiId: String!\n  name: String!\n  kind: FieldKind!\n  many: Boolean = false\n  required: Boolean = false\n  unique: Boolean = false\n  localized: Boolean = false\n  \"\"\"REFERENCE の参照先の型\"\"\"\n  targetTypeId: ID\n  \"\"\"OBJECT / BLOCKS の子として足すなら親のフィールド\"\"\"\n  parentFieldId: ID\n  config: FieldConfigInput\n}\n\n\"\"\"触らない項目は省く。config は丸ごと置き換える\"\"\"\ninput FieldPatch {\n  name: String\n  required: Boolean\n  unique: Boolean\n  localized: Boolean\n  config: FieldConfigInput\n}\n\ninput FieldConfigInput {\n  maxLength: Int\n  sourceField: String\n  min: Float\n  max: Float\n  integer: Boolean\n  options: [String!]\n}\n"
 
     /// 生成した schemagen のバージョン
     pub def generatorVersion(): String = "6"
@@ -34,6 +34,38 @@ mod GeneratedAdmin {
     /// ContentStage の Codec
     pub def contentStageCodec(): GqlCodec[ContentStage] =
         GqlCodec.enumOf("ContentStage", value -> match value { case ContentStage.Draft => "DRAFT" case ContentStage.Published => "PUBLISHED" }, ContentStage.Draft :: ContentStage.Published :: Nil) |> GqlCodec.describe("中身の段階")
+
+    /// enum WebhookEvent。Webhook が知らせる出来事
+    pub enum WebhookEvent with Eq, Order, ToString {
+        /// entry を公開した（再公開も）
+        case EntryPublished
+        /// 公開を取り下げた
+        case EntryUnpublished
+        /// entry をゴミ箱へ入れた
+        case EntryDeleted
+        /// content type かフィールドが変わった
+        case SchemaChanged
+    }
+
+    /// WebhookEvent の Codec
+    pub def webhookEventCodec(): GqlCodec[WebhookEvent] =
+        GqlCodec.enumOf("WebhookEvent", value -> match value { case WebhookEvent.EntryPublished => "ENTRY_PUBLISHED" case WebhookEvent.EntryUnpublished => "ENTRY_UNPUBLISHED" case WebhookEvent.EntryDeleted => "ENTRY_DELETED" case WebhookEvent.SchemaChanged => "SCHEMA_CHANGED" }, WebhookEvent.EntryPublished :: WebhookEvent.EntryUnpublished :: WebhookEvent.EntryDeleted :: WebhookEvent.SchemaChanged :: Nil) |> GqlCodec.describe("Webhook が知らせる出来事") |> GqlCodec.describeValue(WebhookEvent.EntryPublished, "entry を公開した（再公開も）") |> GqlCodec.describeValue(WebhookEvent.EntryUnpublished, "公開を取り下げた") |> GqlCodec.describeValue(WebhookEvent.EntryDeleted, "entry をゴミ箱へ入れた") |> GqlCodec.describeValue(WebhookEvent.SchemaChanged, "content type かフィールドが変わった")
+
+    /// enum DeliveryStatus。配信 1 回の状態
+    pub enum DeliveryStatus with Eq, Order, ToString {
+        /// 送る番を待っている（再試行待ちも）
+        case Pending
+        /// 送っている最中
+        case Sending
+        /// 2xx が返った
+        case Delivered
+        /// 回数を使い切った。redeliverWebhook で送り直せる
+        case Failed
+    }
+
+    /// DeliveryStatus の Codec
+    pub def deliveryStatusCodec(): GqlCodec[DeliveryStatus] =
+        GqlCodec.enumOf("DeliveryStatus", value -> match value { case DeliveryStatus.Pending => "PENDING" case DeliveryStatus.Sending => "SENDING" case DeliveryStatus.Delivered => "DELIVERED" case DeliveryStatus.Failed => "FAILED" }, DeliveryStatus.Pending :: DeliveryStatus.Sending :: DeliveryStatus.Delivered :: DeliveryStatus.Failed :: Nil) |> GqlCodec.describe("配信 1 回の状態") |> GqlCodec.describeValue(DeliveryStatus.Pending, "送る番を待っている（再試行待ちも）") |> GqlCodec.describeValue(DeliveryStatus.Sending, "送っている最中") |> GqlCodec.describeValue(DeliveryStatus.Delivered, "2xx が返った") |> GqlCodec.describeValue(DeliveryStatus.Failed, "回数を使い切った。redeliverWebhook で送り直せる")
 
     /// enum Role。プロジェクトでの役割。上が下を含む
     pub enum Role with Eq, Order, ToString {
@@ -167,6 +199,18 @@ mod GeneratedAdmin {
     pub def fieldKindCodec(): GqlCodec[FieldKind] =
         GqlCodec.enumOf("FieldKind", value -> match value { case FieldKind.Text => "TEXT" case FieldKind.TextArea => "TEXT_AREA" case FieldKind.Slug => "SLUG" case FieldKind.Number => "NUMBER" case FieldKind.Boolean => "BOOLEAN" case FieldKind.Select => "SELECT" case FieldKind.Reference => "REFERENCE" case FieldKind.Object => "OBJECT" case FieldKind.Blocks => "BLOCKS" case FieldKind.Asset => "ASSET" case FieldKind.RichText => "RICH_TEXT" }, FieldKind.Text :: FieldKind.TextArea :: FieldKind.Slug :: FieldKind.Number :: FieldKind.Boolean :: FieldKind.Select :: FieldKind.Reference :: FieldKind.Object :: FieldKind.Blocks :: FieldKind.Asset :: FieldKind.RichText :: Nil) |> GqlCodec.describe("フィールドの種類") |> GqlCodec.describeValue(FieldKind.Slug, "URL に使う識別子。sourceField から自動生成し、型の中で一意") |> GqlCodec.describeValue(FieldKind.Select, "決まった選択肢から 1 つ。config.options") |> GqlCodec.describeValue(FieldKind.Reference, "他の entry への参照。targetTypeId が参照先の型") |> GqlCodec.describeValue(FieldKind.Object, "子フィールドを持つ入れ子。値は子の apiId → 値のオブジェクト") |> GqlCodec.describeValue(FieldKind.Blocks, "複数の OBJECT（variant）から選んで並べる。常に配列。値は { blockType: <variant の apiId>, ... } の並び") |> GqlCodec.describeValue(FieldKind.Asset, "画像やファイル。値は asset の id（createUploadUrl で作った物）。コンテンツ API では Asset に展開する") |> GqlCodec.describeValue(FieldKind.RichText, "構造化した本文。値は ProseMirror の doc（{ type: \"doc\", content: [...] }）。配列にできない。コンテンツ API では json / html / text")
 
+    /// input WebhookInput
+    pub type alias WebhookInput = { name = String, url = String, events = List[WebhookEvent], active = Option[Bool] }
+
+    /// WebhookInput の Codec
+    pub def webhookInputCodec(): GqlCodec[WebhookInput] =
+        let f0 = Schema.arg("name", GqlCodec.string());
+        let f1 = Schema.arg("url", GqlCodec.string()) |> Arg.withDescription("POST 先。http:// か https://");
+        let f2 = Schema.arg("events", GqlCodec.list(webhookEventCodec()));
+        let f3 = Schema.arg("active", GqlCodec.option(GqlCodec.bool())) |> Arg.withDefaultValue(Value.Bool(true));
+        GqlCodec.inputObject("WebhookInput", Arg.info(f0) :: Arg.info(f1) :: Arg.info(f2) :: Arg.info(f3) :: Nil, fields ->
+            forM (v0 <- Arg.decodeField(f0, fields); v1 <- Arg.decodeField(f1, fields); v2 <- Arg.decodeField(f2, fields); v3 <- Arg.decodeField(f3, fields)) yield { name = v0, url = v1, events = v2, active = v3 })
+
     /// input UploadInput
     pub type alias UploadInput = { fileName = String, mime = String, size = Int32 }
 
@@ -293,6 +337,10 @@ mod GeneratedAdmin {
     pub type alias QueryInvitationsResolver[ef: Eff] = Context -> Result[FieldError, List[Invitation]] \ ef
     /// Query.apiKeys
     pub type alias QueryApiKeysResolver[ef: Eff] = Context -> Result[FieldError, List[ApiKey]] \ ef
+    /// Query.webhooks
+    pub type alias QueryWebhooksResolver[ef: Eff] = Context -> Result[FieldError, List[Webhook]] \ ef
+    /// Query.webhookDeliveries
+    pub type alias QueryWebhookDeliveriesResolver[ef: Eff] = Context -> Id -> Option[Int32] -> Result[FieldError, List[WebhookDelivery]] \ ef
     /// Violation.path
     pub type alias ViolationPathResolver[ef: Eff] = Context -> Violation -> Result[FieldError, String] \ ef
     /// Violation.message
@@ -363,6 +411,48 @@ mod GeneratedAdmin {
     pub type alias MutationCreateApiKeyResolver[ef: Eff] = Context -> String -> ApiKeyScope -> Result[FieldError, IssuedApiKey] \ ef
     /// Mutation.revokeApiKey
     pub type alias MutationRevokeApiKeyResolver[ef: Eff] = Context -> Id -> Result[FieldError, Id] \ ef
+    /// Mutation.createWebhook
+    pub type alias MutationCreateWebhookResolver[ef: Eff] = Context -> WebhookInput -> Result[FieldError, IssuedWebhook] \ ef
+    /// Mutation.updateWebhook
+    pub type alias MutationUpdateWebhookResolver[ef: Eff] = Context -> Id -> WebhookInput -> Result[FieldError, Webhook] \ ef
+    /// Mutation.deleteWebhook
+    pub type alias MutationDeleteWebhookResolver[ef: Eff] = Context -> Id -> Result[FieldError, Id] \ ef
+    /// Mutation.redeliverWebhook
+    pub type alias MutationRedeliverWebhookResolver[ef: Eff] = Context -> Id -> Result[FieldError, WebhookDelivery] \ ef
+    /// Webhook.id
+    pub type alias WebhookIdResolver[ef: Eff] = Context -> Webhook -> Result[FieldError, Id] \ ef
+    /// Webhook.name
+    pub type alias WebhookNameResolver[ef: Eff] = Context -> Webhook -> Result[FieldError, String] \ ef
+    /// Webhook.url
+    pub type alias WebhookUrlResolver[ef: Eff] = Context -> Webhook -> Result[FieldError, String] \ ef
+    /// Webhook.events
+    pub type alias WebhookEventsResolver[ef: Eff] = Context -> Webhook -> Result[FieldError, List[WebhookEvent]] \ ef
+    /// Webhook.active
+    pub type alias WebhookActiveResolver[ef: Eff] = Context -> Webhook -> Result[FieldError, Bool] \ ef
+    /// Webhook.createdAt
+    pub type alias WebhookCreatedAtResolver[ef: Eff] = Context -> Webhook -> Result[FieldError, String] \ ef
+    /// IssuedWebhook.webhook
+    pub type alias IssuedWebhookWebhookResolver[ef: Eff] = Context -> IssuedWebhook -> Result[FieldError, Webhook] \ ef
+    /// IssuedWebhook.secret
+    pub type alias IssuedWebhookSecretResolver[ef: Eff] = Context -> IssuedWebhook -> Result[FieldError, String] \ ef
+    /// WebhookDelivery.id
+    pub type alias WebhookDeliveryIdResolver[ef: Eff] = Context -> WebhookDelivery -> Result[FieldError, Id] \ ef
+    /// WebhookDelivery.event
+    pub type alias WebhookDeliveryEventResolver[ef: Eff] = Context -> WebhookDelivery -> Result[FieldError, WebhookEvent] \ ef
+    /// WebhookDelivery.status
+    pub type alias WebhookDeliveryStatusResolver[ef: Eff] = Context -> WebhookDelivery -> Result[FieldError, DeliveryStatus] \ ef
+    /// WebhookDelivery.attempts
+    pub type alias WebhookDeliveryAttemptsResolver[ef: Eff] = Context -> WebhookDelivery -> Result[FieldError, Int32] \ ef
+    /// WebhookDelivery.nextAttemptAt
+    pub type alias WebhookDeliveryNextAttemptAtResolver[ef: Eff] = Context -> WebhookDelivery -> Result[FieldError, String] \ ef
+    /// WebhookDelivery.lastStatus
+    pub type alias WebhookDeliveryLastStatusResolver[ef: Eff] = Context -> WebhookDelivery -> Result[FieldError, Int32] \ ef
+    /// WebhookDelivery.lastError
+    pub type alias WebhookDeliveryLastErrorResolver[ef: Eff] = Context -> WebhookDelivery -> Result[FieldError, String] \ ef
+    /// WebhookDelivery.createdAt
+    pub type alias WebhookDeliveryCreatedAtResolver[ef: Eff] = Context -> WebhookDelivery -> Result[FieldError, String] \ ef
+    /// WebhookDelivery.deliveredAt
+    pub type alias WebhookDeliveryDeliveredAtResolver[ef: Eff] = Context -> WebhookDelivery -> Result[FieldError, Option[String]] \ ef
     /// Me.id
     pub type alias MeIdResolver[ef: Eff] = Context -> Me -> Result[FieldError, Id] \ ef
     /// Me.email
@@ -569,7 +659,9 @@ mod GeneratedAdmin {
         me = QueryMeResolver[ef],
         members = QueryMembersResolver[ef],
         invitations = QueryInvitationsResolver[ef],
-        apiKeys = QueryApiKeysResolver[ef]
+        apiKeys = QueryApiKeysResolver[ef],
+        webhooks = QueryWebhooksResolver[ef],
+        webhookDeliveries = QueryWebhookDeliveriesResolver[ef]
     }
 
     /// type Violation のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
@@ -624,7 +716,40 @@ mod GeneratedAdmin {
         changeMemberRole = MutationChangeMemberRoleResolver[ef],
         removeMember = MutationRemoveMemberResolver[ef],
         createApiKey = MutationCreateApiKeyResolver[ef],
-        revokeApiKey = MutationRevokeApiKeyResolver[ef]
+        revokeApiKey = MutationRevokeApiKeyResolver[ef],
+        createWebhook = MutationCreateWebhookResolver[ef],
+        updateWebhook = MutationUpdateWebhookResolver[ef],
+        deleteWebhook = MutationDeleteWebhookResolver[ef],
+        redeliverWebhook = MutationRedeliverWebhookResolver[ef]
+    }
+
+    /// type Webhook のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
+    pub type alias WebhookResolvers[ef: Eff] = {
+        id = WebhookIdResolver[ef],
+        name = WebhookNameResolver[ef],
+        url = WebhookUrlResolver[ef],
+        events = WebhookEventsResolver[ef],
+        active = WebhookActiveResolver[ef],
+        createdAt = WebhookCreatedAtResolver[ef]
+    }
+
+    /// type IssuedWebhook のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
+    pub type alias IssuedWebhookResolvers[ef: Eff] = {
+        webhook = IssuedWebhookWebhookResolver[ef],
+        secret = IssuedWebhookSecretResolver[ef]
+    }
+
+    /// type WebhookDelivery のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
+    pub type alias WebhookDeliveryResolvers[ef: Eff] = {
+        id = WebhookDeliveryIdResolver[ef],
+        event = WebhookDeliveryEventResolver[ef],
+        status = WebhookDeliveryStatusResolver[ef],
+        attempts = WebhookDeliveryAttemptsResolver[ef],
+        nextAttemptAt = WebhookDeliveryNextAttemptAtResolver[ef],
+        lastStatus = WebhookDeliveryLastStatusResolver[ef],
+        lastError = WebhookDeliveryLastErrorResolver[ef],
+        createdAt = WebhookDeliveryCreatedAtResolver[ef],
+        deliveredAt = WebhookDeliveryDeliveredAtResolver[ef]
     }
 
     /// type Me のリゾルバ一式。第 2 引数が source。ef はリゾルバの効果
@@ -818,6 +943,53 @@ mod GeneratedAdmin {
     } = {
         via = (_context, src) -> Ok(src#via),
         stage = (_context, src) -> Ok(src#stage)
+    }
+
+    /// type Webhook の既定リゾルバ。source の同名ラベルをそのまま返す
+    pub def webhookDefaults(): {
+        id = Context -> { id = Id | r0 } -> Result[FieldError, Id] \ ef,
+        name = Context -> { name = String | r1 } -> Result[FieldError, String] \ ef,
+        url = Context -> { url = String | r2 } -> Result[FieldError, String] \ ef,
+        events = Context -> { events = List[WebhookEvent] | r3 } -> Result[FieldError, List[WebhookEvent]] \ ef,
+        active = Context -> { active = Bool | r4 } -> Result[FieldError, Bool] \ ef,
+        createdAt = Context -> { createdAt = String | r5 } -> Result[FieldError, String] \ ef
+    } = {
+        id = (_context, src) -> Ok(src#id),
+        name = (_context, src) -> Ok(src#name),
+        url = (_context, src) -> Ok(src#url),
+        events = (_context, src) -> Ok(src#events),
+        active = (_context, src) -> Ok(src#active),
+        createdAt = (_context, src) -> Ok(src#createdAt)
+    }
+
+    /// type IssuedWebhook の既定リゾルバ。source の同名ラベルをそのまま返す。webhook は含まない（オブジェクト型を返すか、引数を持つ）
+    pub def issuedWebhookDefaults(): {
+        secret = Context -> { secret = String | r0 } -> Result[FieldError, String] \ ef
+    } = {
+        secret = (_context, src) -> Ok(src#secret)
+    }
+
+    /// type WebhookDelivery の既定リゾルバ。source の同名ラベルをそのまま返す
+    pub def webhookDeliveryDefaults(): {
+        id = Context -> { id = Id | r0 } -> Result[FieldError, Id] \ ef,
+        event = Context -> { event = WebhookEvent | r1 } -> Result[FieldError, WebhookEvent] \ ef,
+        status = Context -> { status = DeliveryStatus | r2 } -> Result[FieldError, DeliveryStatus] \ ef,
+        attempts = Context -> { attempts = Int32 | r3 } -> Result[FieldError, Int32] \ ef,
+        nextAttemptAt = Context -> { nextAttemptAt = String | r4 } -> Result[FieldError, String] \ ef,
+        lastStatus = Context -> { lastStatus = Int32 | r5 } -> Result[FieldError, Int32] \ ef,
+        lastError = Context -> { lastError = String | r6 } -> Result[FieldError, String] \ ef,
+        createdAt = Context -> { createdAt = String | r7 } -> Result[FieldError, String] \ ef,
+        deliveredAt = Context -> { deliveredAt = Option[String] | r8 } -> Result[FieldError, Option[String]] \ ef
+    } = {
+        id = (_context, src) -> Ok(src#id),
+        event = (_context, src) -> Ok(src#event),
+        status = (_context, src) -> Ok(src#status),
+        attempts = (_context, src) -> Ok(src#attempts),
+        nextAttemptAt = (_context, src) -> Ok(src#nextAttemptAt),
+        lastStatus = (_context, src) -> Ok(src#lastStatus),
+        lastError = (_context, src) -> Ok(src#lastError),
+        createdAt = (_context, src) -> Ok(src#createdAt),
+        deliveredAt = (_context, src) -> Ok(src#deliveredAt)
     }
 
     /// type Me の既定リゾルバ。source の同名ラベルをそのまま返す。organizations, projects は含まない（オブジェクト型を返すか、引数を持つ）
@@ -1086,6 +1258,9 @@ mod GeneratedAdmin {
         referrer = ReferrerResolvers[ef],
         impact = ImpactResolvers[ef],
         mutationRoot = MutationResolvers[ef],
+        webhook = WebhookResolvers[ef],
+        issuedWebhook = IssuedWebhookResolvers[ef],
+        webhookDelivery = WebhookDeliveryResolvers[ef],
         me = MeResolvers[ef],
         organization = OrganizationResolvers[ef],
         organizationMembership = OrganizationMembershipResolvers[ef],
@@ -1173,6 +1348,16 @@ mod GeneratedAdmin {
             {
                 Schema.fieldRaw("apiKeys", Nil, Out.list(Out.obj(apiKeyType(resolvers))), (context, _src, _args) ->
                     (resolvers#queryRoot#apiKeys)(context)) |> Field.withDescription("今のプロジェクトの API キー（owner だけ）。生の鍵は出ない")
+            } ::
+            {
+                Schema.fieldRaw("webhooks", Nil, Out.list(Out.obj(webhookType(resolvers))), (context, _src, _args) ->
+                    (resolvers#queryRoot#webhooks)(context)) |> Field.withDescription("今のプロジェクトの Webhook（owner だけ）。secret は出ない")
+            } ::
+            {
+                let arg0 = Schema.arg("webhookId", GqlCodec.id());
+                let arg1 = Schema.arg("first", GqlCodec.option(GqlCodec.int32())) |> Arg.withDefaultValue(Value.Int(20));
+                Schema.fieldRaw("webhookDeliveries", Arg.info(arg0) :: Arg.info(arg1) :: Nil, Out.list(Out.obj(webhookDeliveryType(resolvers))), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); v1 <- Arg.decode(arg1, args); result <- (resolvers#queryRoot#webhookDeliveries)(context, v0, v1)) yield result) |> Field.withDescription("Webhook の配信の記録。新しい順（owner だけ）")
             } ::
             Nil) |> ObjectType.withDescription("管理 API。content type とフィールドの定義と、entry を読み書きする。形は固定で、コンテンツ API は定義から実行時に組む")
 
@@ -1380,7 +1565,111 @@ mod GeneratedAdmin {
                 Schema.fieldRaw("revokeApiKey", Arg.info(arg0) :: Nil, Out.id(), (context, _src, args) ->
                     forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#revokeApiKey)(context, v0)) yield result) |> Field.withDescription("失効する（owner だけ）")
             } ::
+            {
+                let arg0 = Schema.arg("input", webhookInputCodec());
+                Schema.fieldRaw("createWebhook", Arg.info(arg0) :: Nil, Out.obj(issuedWebhookType(resolvers)), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#createWebhook)(context, v0)) yield result) |> Field.withDescription("Webhook を作る（owner だけ）。secret はこの応答でしか見えない")
+            } ::
+            {
+                let arg0 = Schema.arg("id", GqlCodec.id());
+                let arg1 = Schema.arg("input", webhookInputCodec());
+                Schema.fieldRaw("updateWebhook", Arg.info(arg0) :: Arg.info(arg1) :: Nil, Out.obj(webhookType(resolvers)), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); v1 <- Arg.decode(arg1, args); result <- (resolvers#mutationRoot#updateWebhook)(context, v0, v1)) yield result) |> Field.withDescription("Webhook を直す（owner だけ）。secret は変わらない")
+            } ::
+            {
+                let arg0 = Schema.arg("id", GqlCodec.id());
+                Schema.fieldRaw("deleteWebhook", Arg.info(arg0) :: Nil, Out.id(), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#deleteWebhook)(context, v0)) yield result) |> Field.withDescription("Webhook を消す。配信の記録も消える（owner だけ）")
+            } ::
+            {
+                let arg0 = Schema.arg("deliveryId", GqlCodec.id());
+                Schema.fieldRaw("redeliverWebhook", Arg.info(arg0) :: Nil, Out.obj(webhookDeliveryType(resolvers)), (context, _src, args) ->
+                    forM (v0 <- Arg.decode(arg0, args); result <- (resolvers#mutationRoot#redeliverWebhook)(context, v0)) yield result) |> Field.withDescription("配信をもう 1 度送る（owner だけ）。failed や delivered の物にも使える")
+            } ::
             Nil)
+
+    /// type Webhook
+    def webhookType(resolvers: Resolvers[ef]): ObjectType[Webhook, ef] =
+        Schema.objectType("Webhook", () ->
+            {
+                Schema.fieldRaw("id", Nil, Out.id(), (context, src, _args) ->
+                    (resolvers#webhook#id)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("name", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#webhook#name)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("url", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#webhook#url)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("events", Nil, Out.list(Out.scalar(webhookEventCodec())), (context, src, _args) ->
+                    (resolvers#webhook#events)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("active", Nil, Out.bool(), (context, src, _args) ->
+                    (resolvers#webhook#active)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("createdAt", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#webhook#createdAt)(context, src))
+            } ::
+            Nil) |> ObjectType.withDescription("登録した Webhook。受け手は X-Cms-Signature（sha256=HMAC(secret, \"timestamp.body\")）で照合する")
+
+    /// type IssuedWebhook
+    def issuedWebhookType(resolvers: Resolvers[ef]): ObjectType[IssuedWebhook, ef] =
+        Schema.objectType("IssuedWebhook", () ->
+            {
+                Schema.fieldRaw("webhook", Nil, Out.obj(webhookType(resolvers)), (context, src, _args) ->
+                    (resolvers#issuedWebhook#webhook)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("secret", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#issuedWebhook#secret)(context, src)) |> Field.withDescription("HMAC の鍵。この応答でしか見えない")
+            } ::
+            Nil)
+
+    /// type WebhookDelivery
+    def webhookDeliveryType(resolvers: Resolvers[ef]): ObjectType[WebhookDelivery, ef] =
+        Schema.objectType("WebhookDelivery", () ->
+            {
+                Schema.fieldRaw("id", Nil, Out.id(), (context, src, _args) ->
+                    (resolvers#webhookDelivery#id)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("event", Nil, Out.scalar(webhookEventCodec()), (context, src, _args) ->
+                    (resolvers#webhookDelivery#event)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("status", Nil, Out.scalar(deliveryStatusCodec()), (context, src, _args) ->
+                    (resolvers#webhookDelivery#status)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("attempts", Nil, Out.int32(), (context, src, _args) ->
+                    (resolvers#webhookDelivery#attempts)(context, src)) |> Field.withDescription("送った回数")
+            } ::
+            {
+                Schema.fieldRaw("nextAttemptAt", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#webhookDelivery#nextAttemptAt)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("lastStatus", Nil, Out.int32(), (context, src, _args) ->
+                    (resolvers#webhookDelivery#lastStatus)(context, src)) |> Field.withDescription("最後の HTTP のステータス。応答が無ければ 0")
+            } ::
+            {
+                Schema.fieldRaw("lastError", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#webhookDelivery#lastError)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("createdAt", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#webhookDelivery#createdAt)(context, src))
+            } ::
+            {
+                Schema.fieldRaw("deliveredAt", Nil, Out.option(Out.string()), (context, src, _args) ->
+                    (resolvers#webhookDelivery#deliveredAt)(context, src))
+            } ::
+            Nil) |> ObjectType.withDescription("配信の記録 1 つ。id は時刻順（ULID）")
 
     /// type Me
     def meType(resolvers: Resolvers[ef]): ObjectType[Me, ef] =
