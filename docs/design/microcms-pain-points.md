@@ -17,3 +17,4 @@ microCMS を日常で使ってきた人が挙げた不満。管理画面の計�
 | コードブロックにファイル名と行のハイライトが無い | 直前の段落に書くしかない | codeBlock の attrs.fileName / highlightLines。Markdown は ```` ```ts:src/a.ts {1,3-5} ```` |
 | 脚注が無い | 末尾に手書き | footnote mark。Markdown は `[^1]`（gallery などの後で） |
 | 文字色・寄せ・カスタムクラスがあり、本文にスタイルが混ざる | サイトの見た目と食い違う。移行で消える | 出さない（決め）。強調は mark、区別は callout。表のセル結合も入れない |
+| 折りたたみ（Notion のトグル、GitHub の details）が無い | 長いログや補足を畳めない。エンジニアの記事で定番 | richText の doc に details（attrs.summary、中は何でも）。HTML は `<details><summary>`、Markdown は GitHub でそのまま畳める `<details>` の形（Zenn の `:::details` は GitHub で出ないので採らない） |
