@@ -45,7 +45,8 @@ HTTP サーバの同時接続の上限（`CMS_MAX_CONNECTIONS`。超えたら 50
 | 12 | 公開の巻き戻し（`revertPublish`）と時点指定の読み出し（`at`） | 編集者・監査 | 1.5 日 | 版から 1 Tx で戻す。コンテンツ API に `at` を足す。**microCMS には無い** |
 | 13 | 型の export / apply | 開発者 | 半日 | SDL に寄せた書式で往復。差分の計画、削除の保護、`@renamedFrom` |
 | 14 | codegen の手順と CI の雛形 | 開発者 | 1 日 | elm-graphql / graphql-codegen に委ねる。Webhook で PR を開く |
-| 15 | 版の差分（`diff`） | 編集者 | 1 日 | JSON の差分と、richText は平文の差分 |
+| 15 | entry のバージョン間の差分（`Entry.diff(from, to)`） | 編集者・エージェント | 1 日 | 純粋な `EntryDiff`（kind ごとに等値、OBJECT は再帰、many と BLOCKS は位置、richText は Markdown の行差分）。MCP の `diff_entry` と管理画面の履歴が使う。Markdown 変換の直後にテストファーストで |
+| 15a | richText の gallery（画像の横並び） | 編集者 | 半日 | container node（attrs.columns 2〜4、中は image だけ）。HTML は `data-gallery`、Markdown は 1 行に画像を並べたら gallery。microCMS の負（本文の中で横に並べられない）を潰す。Markdown 変換の直後 |
 | 16 | 画像の `usedBy`（済み）、pending の掃除 cron、asset の先読み | 編集者・運用 | 半日 | 既存の query を出すだけ + 孤児の削除 |
 | 17 | 課金（Stripe）と組織の上限 | サービス | 1〜2 日 | [hosting-and-externalized-risk.md](hosting-and-externalized-risk.md) |
 | 18 | 監査ログ | 企業 | 半日 | `Actor` が入れば mutation の入口 1 か所 |

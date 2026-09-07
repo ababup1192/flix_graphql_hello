@@ -130,4 +130,37 @@ mod CmsTestKit {
     pub def messageOr(pick: a -> b, thunk: Unit -> a \ ef): Result[String, b] \ ef - CmsErr =
         CmsErr.runWithResult(thunk) |> Result.map(pick) |> Result.mapErr(CmsErr.toMessage)
 
+    // ---- richText の doc の組み立て ----
+
+    ///
+    /// 子を持つノード。attrs は空なら付けない。content は空でも付ける（doc と空の段落の形）。
+    ///
+    pub def richNode(kind: String, attrs: List[(String, Util.Json.Json)], content: List[Util.Json.Json]): Util.Json.Json =
+        Util.Json.Json.JObject(
+            Map#{ "type" => Util.Json.Json.JString(kind), "content" => Util.Json.Json.JArray(List.toVector(content)) }
+                |> withRichAttrs(attrs))
+
+    ///
+    /// 子を持たないノード（image / embed / horizontalRule / hardBreak）。attrs は空なら付けない。
+    ///
+    pub def richLeaf(kind: String, attrs: List[(String, Util.Json.Json)]): Util.Json.Json =
+        Util.Json.Json.JObject(Map#{ "type" => Util.Json.Json.JString(kind) } |> withRichAttrs(attrs))
+
+    ///
+    /// text ノード。marks は空なら付けない。
+    ///
+    pub def richText(marks: List[Util.Json.Json], text: String): Util.Json.Json =
+        Util.Json.Json.JObject(
+            Map#{ "type" => Util.Json.Json.JString("text"), "text" => Util.Json.Json.JString(text) }
+                |> fields -> if (List.isEmpty(marks)) fields else Map.insert("marks", Util.Json.Json.JArray(List.toVector(marks)), fields))
+
+    ///
+    /// マーク。attrs は空なら付けない（link は href か entryId を持つ）。
+    ///
+    pub def richMark(kind: String, attrs: List[(String, Util.Json.Json)]): Util.Json.Json =
+        Util.Json.Json.JObject(Map#{ "type" => Util.Json.Json.JString(kind) } |> withRichAttrs(attrs))
+
+    def withRichAttrs(attrs: List[(String, Util.Json.Json)], fields: Map[String, Util.Json.Json]): Map[String, Util.Json.Json] =
+        if (List.isEmpty(attrs)) fields else Map.insert("attrs", Util.Json.Json.JObject(List.toMap(attrs)), fields)
+
 }
