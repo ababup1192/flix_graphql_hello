@@ -86,6 +86,13 @@ mod AuthConfig {
     ///
     /// リクエストから API キー（X-Api-Key）。
     ///
+    /// X-Preview-Token の値。
+    pub def previewTokenOf(headers: List[(String, String)]): Option[String] =
+        headers
+            |> List.find(match (name, _) -> String.toLowerCase(name) == "x-preview-token")
+            |> Option.map(match (_, value) -> String.trim(value))
+            |> Option.filter(value -> not String.isEmpty(value))
+
     pub def apiKeyOf(headers: List[(String, String)]): Option[String] =
         headers
             |> List.find(match (name, _) -> String.toLowerCase(name) == "x-api-key")

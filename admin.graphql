@@ -116,6 +116,10 @@ type Mutation {
   """消す。entry（下書き・公開・richText の画像を含む）が使っていればエラー"""
   deleteAsset(id: ID!): ID!
 
+  """プレビュートークンを発行する（readDraft を持つ人）。X-Preview-Token で渡すと、その entry と参照先の下書きをコンテンツ API で読める。
+  既定 1 時間、最長 1 日。url は型の previewUrl の {id} を置き換えて ?preview=<token> を付けた物（previewUrl が無ければ null）"""
+  createPreviewToken(entryId: ID!, expiresInSeconds: Int = 3600): PreviewToken!
+
   """今のプロジェクトの公開範囲（owner だけ）"""
   updateProjectVisibility(visibility: Visibility!): Project!
   """email で招待する（owner だけ）。初回ログインで役割が付く"""
@@ -138,6 +142,15 @@ type Mutation {
   deleteWebhook(id: ID!): ID!
   """配信をもう 1 度送る（owner だけ）。failed や delivered の物にも使える"""
   redeliverWebhook(deliveryId: ID!): WebhookDelivery!
+}
+
+"""下書きを公開前のサイトで見るためのトークン"""
+type PreviewToken {
+  token: String!
+  entryId: ID!
+  expiresAt: String!
+  """管理画面が開くプレビューの URL。型に previewUrl が無ければ null"""
+  url: String
 }
 
 """Webhook が知らせる出来事"""

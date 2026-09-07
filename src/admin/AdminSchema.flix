@@ -19,6 +19,7 @@ mod AdminSchema {
             invitation             = InvitationResolvers.resolvers(),
             apiKey                 = ApiKeyResolvers.resolvers(),
             issuedApiKey           = IssuedApiKeyResolvers.resolvers(),
+            previewToken           = PreviewTokenResolvers.resolvers(),
             webhook                = WebhookResolvers.resolvers(),
             issuedWebhook          = IssuedWebhookResolvers.resolvers(),
             webhookDelivery        = WebhookDeliveryResolvers.resolvers(),

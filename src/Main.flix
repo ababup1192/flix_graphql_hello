@@ -74,7 +74,7 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
     }
 
 ///
-/// リクエストの身元。トークンのヘッダがあれば発行元で検証し、無ければ X-Api-Key、どちらも無ければ Missing。
+/// リクエストの身元。トークンのヘッダがあれば発行元で検証し、無ければ X-Api-Key、無ければ X-Preview-Token、どれも無ければ Missing。
 /// dev モードは X-Dev-User の email を信じる（AuthConfig が CMS_VERSION=dev の時にしか許さない）。
 ///
 def credentialOf(auth: AuthConfig.AuthConfig, jwks: TokenVerifier.JwksCache, request: HttpRequest): Credential \ IO =
@@ -84,13 +84,14 @@ def credentialOf(auth: AuthConfig.AuthConfig, jwks: TokenVerifier.JwksCache, req
         case AuthConfig.Mode.Closed       => Err("管理 API は閉じています（CMS_AUTH=none）")
     };
     let headerName = match auth#mode { case AuthConfig.Mode.Dev => "X-Dev-User" case _ => auth#tokenHeader };
-    match (AuthConfig.tokenOf(headerName, request#headers), AuthConfig.apiKeyOf(request#headers)) {
-        case (Some(token), _) => match verified(token) {
+    match (AuthConfig.tokenOf(headerName, request#headers), AuthConfig.apiKeyOf(request#headers), AuthConfig.previewTokenOf(request#headers)) {
+        case (Some(token), _, _) => match verified(token) {
             case Ok(principal) => Credential.Bearer(principal#issuer, principal#subject, principal#email, principal#name)
             case Err(reason)   => Credential.Invalid(reason)
         }
-        case (None, Some(key)) => Credential.ApiKey(key)
-        case (None, None)      => Credential.Missing
+        case (None, Some(key), _)     => Credential.ApiKey(key)
+        case (None, None, Some(raw))  => Credential.Preview(raw)
+        case (None, None, None)       => Credential.Missing
     }
 
 ///

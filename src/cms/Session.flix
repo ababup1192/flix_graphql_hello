@@ -43,6 +43,7 @@ mod Session {
         case Actor.User(_, email, _) => email
         case Actor.ApiKey(_)         => "api-key"
         case Actor.Anonymous         => "anonymous"
+        case Actor.Preview(_)        => "preview"
         case Actor.System            => "system"
     }
 

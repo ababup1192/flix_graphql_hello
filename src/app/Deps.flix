@@ -23,14 +23,17 @@ mod Deps {
     ///
     /// - Bearer: 検証済みの本人。初回なら users を作る
     /// - ApiKey: pepper があれば hash で引き、このプロジェクトの生きた鍵なら scope の主体。それ以外は Anonymous
+    /// - Preview: pepper があれば署名と期限とプロジェクトを確かめ、合えばその entry のプレビュー。それ以外は Anonymous
     /// - Missing / Invalid: Anonymous
     ///
-    pub def actorOf(deps: Deps, projectId: ProjectId, credential: Credential): Actor \ Db + IdGen = match credential {
+    pub def actorOf(deps: Deps, projectId: ProjectId, credential: Credential): Actor \ Db + IdGen + Time.Clock.Clock = match credential {
         case Credential.Bearer(issuer, subject, email, name) =>
             let user = Accounts.resolveUser(deps#auth#bootstrap, { issuer = issuer, subject = subject, email = email, name = name });
             Accounts.actorFor(user, projectId)
         case Credential.ApiKey(raw) =>
             deps#auth#pepper |> Option.flatMap(pepper -> ApiKeys.resolve(pepper, raw, projectId)) |> Option.map(Actor.ApiKey) |> Option.getWithDefault(Actor.Anonymous)
+        case Credential.Preview(raw) =>
+            deps#auth#pepper |> Option.flatMap(pepper -> PreviewTokens.verify(pepper, raw, projectId, Time.Clock.now())) |> Option.map(Actor.Preview) |> Option.getWithDefault(Actor.Anonymous)
         case Credential.Missing    => Actor.Anonymous
         case Credential.Invalid(_) => Actor.Anonymous
     }

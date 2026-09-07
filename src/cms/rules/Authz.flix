@@ -9,13 +9,16 @@
 mod Authz {
 
     ///
-    /// 判定に渡す対象。今は型 id だけで、判定には使っていない。
-    /// 後で「この型だけ編集可」のような事実を足す時に、呼び出し側を変えないために最初から受ける。
+    /// 判定に渡す対象。プレビュートークンは entryId で判定する。typeId はまだ使っていない
+    /// （後で「この型だけ編集可」のような事実を足す時に、呼び出し側を変えないために最初から受ける）。
     ///
-    pub type alias Resource = { typeId = Option[TypeId] }
+    pub type alias Resource = { typeId = Option[TypeId], entryId = Option[EntryId] }
 
     /// 対象を指定しない。
-    pub def anyResource(): Resource = { typeId = None }
+    pub def anyResource(): Resource = { typeId = None, entryId = None }
+
+    /// この entry を対象にする。
+    pub def entryResource(id: EntryId): Resource = { typeId = None, entryId = Some(id) }
 
     ///
     /// 役割の表。Grants(役割, 権限) と Implies(上の役割, 含む役割)。
@@ -39,8 +42,9 @@ mod Authz {
     ///
     /// 主体がこの操作をできるか。人は役割の表で引き、鍵は読み取りだけ、誰でもない人は何もできない。
     ///
-    pub def can(actor: Actor, permission: Permission, _resource: Resource): Bool = match actor {
+    pub def can(actor: Actor, permission: Permission, resource: Resource): Bool = match actor {
         case Actor.User(_, _, roles)             => canWithRoles(roles, permission)
+        case Actor.Preview(id)                   => permission == Permission.ReadDraft and resource#entryId == Some(id)
         case Actor.ApiKey(ApiKeyScope.ReadDraft) => permission == Permission.ReadDraft
         case Actor.ApiKey(ApiKeyScope.Read)      => false
         case Actor.Anonymous                     => false

@@ -15,6 +15,8 @@ pub type alias Context = { userId = Option[String], credential = Credential }
 pub enum Credential with Eq, Order, ToString {
     case Bearer(String, String, String, String)
     case ApiKey(String)
+    /// X-Preview-Token の生の値
+    case Preview(String)
     case Missing
     case Invalid(String)
 }

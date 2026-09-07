@@ -20,6 +20,12 @@ curl -s localhost:8080/health # {"status":"ok","version":"..."}
 リクエストの Tx の先頭で `app.project_id` の印を置き、policy はその印と一致する行しか見せない（印が無ければ 0 行）。
 `CMS_DB_APP_PASSWORD` を入れると所有者でないロール `cms_app` で繋ぎ、SQL インジェクションや生 SQL があっても他のプロジェクトの行は出ない。
 
+## プレビュー（下書きを公開前のサイトで見る）
+
+管理 API の `createPreviewToken(entryId)` が `pv_...` のトークンと、型の `previewUrl` から組んだ url（`?preview=<token>` 付き）を返す。
+サイトはその token を `X-Preview-Token` ヘッダに付けてコンテンツ API に `stage: DRAFT` で問い合わせる。読めるのはその entry と参照先の下書きだけで、一覧の下書きや他の entry は読めない。
+既定 1 時間、最長 1 日で切れる。無状態（表を持たない）なので、鍵（`CMS_API_KEY_PEPPER`）を回せば全部無効になる。
+
 ## Webhook の受け方
 
 公開・取り下げ・削除・型の変更で、登録した URL に JSON を POST する（管理 API の `createWebhook`。secret はその応答でしか見えない）。

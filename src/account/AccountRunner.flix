@@ -25,6 +25,7 @@ mod AccountRunner {
         match context#credential {
             case Credential.Invalid(reason) => Err("認証に失敗しました: ${reason}")
             case Credential.ApiKey(_)       => Err("Account API は API キーでは使えません。ログインしてください")
+            case Credential.Preview(_)      => Err("Account API はプレビュートークンでは使えません。ログインしてください")
             case credential =>
                 let outcome =
                     IdGen.runWithRandom(() ->

@@ -154,6 +154,8 @@ pub enum Actor with Eq, Order, ToString {
     case User(UserId, String, List[Role])
     case ApiKey(ApiKeyScope)
     case Anonymous
+    /// プレビュートークンの持ち主。その entry（と参照先）の下書きだけ読める
+    case Preview(EntryId)
     /// サーバ自身（エンジンの組み直しなど、リクエストの主体が無い内部の処理）。何でもできる
     case System
 }

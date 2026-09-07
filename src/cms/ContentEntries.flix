@@ -37,7 +37,7 @@ mod ContentEntries {
     /// stage の行を id で 1 つ。その stage の中身が無ければ（未公開など）None。参照先は 1 段先読みする。
     ///
     pub def findByStage(owner: ContentType, id: EntryId, stage: Stage): Option[Entry] \ DbRead + Tenant + CmsErr + Session =
-        requireStage(stage);
+        match stage { case Stage.Draft => Session.requireOn(Permission.ReadDraft, Authz.entryResource(id)) case Stage.Published => () };
         EntriesQueries.findEntryByStage({ id = EntryId.text(id), stage = EntryRows.stageToDb(stage), projectId = Tenant.currentId() })
             |> Option.map(EntryRows.toEntry(stage))
             |> Option.flatMap(entry -> attachLinked(owner, stage, entry :: Nil) |> List.head)
@@ -58,6 +58,7 @@ mod ContentEntries {
         rows(owner#id, owner#fields, stage, { filter = Nil, orderBy = Nil, first = 1, skip = 0 }) |> attachLinked(owner, stage) |> List.head
 
     /// 下書きを読むには readDraft が要る。公開中は誰でも読める（プロジェクトが private ならキーの検査は Runner が済ませている）。
+    /// 一覧の下書きは readDraft が要る（プレビュートークンでは読めない。1 件の下書きは findByStage が entry ごとに見る）。
     def requireStage(stage: Stage): Unit \ Session + CmsErr = match stage {
         case Stage.Draft     => Session.require(Permission.ReadDraft)
         case Stage.Published => ()

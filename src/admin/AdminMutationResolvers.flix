@@ -109,6 +109,13 @@ mod AdminMutationResolvers {
     pub def revokeApiKey(): GeneratedAdmin.MutationRevokeApiKeyResolver[AdminEff] =
         (_context, id) -> { ApiKeys.revoke(AdminMapping.publicIdOf(id)); Ok(id) }
 
+    /// Mutation.createPreviewToken。pepper が無ければ発行できない
+    pub def createPreviewToken(deps: Deps): GeneratedAdmin.MutationCreatePreviewTokenResolver[AdminEff] =
+        (_context, entryId, expiresInSeconds) -> match deps#auth#pepper {
+            case Some(pepper) => Ok(PreviewTokens.issue(pepper, AdminMapping.entryId("entryId", entryId), expiresInSeconds |> Option.map(Int32.toInt64) |> Option.getWithDefault(PreviewTokens.defaultTtlSeconds()), Time.Clock.now()))
+            case None         => Err("プレビュートークンを発行できません（CMS_API_KEY_PEPPER が設定されていません）")
+        }
+
     /// Mutation.createWebhook
     pub def createWebhook(): GeneratedAdmin.MutationCreateWebhookResolver[AdminEff] =
         (_context, input) -> Ok(Webhooks.create(AdminMapping.webhookDraftOf(input)))
@@ -153,6 +160,7 @@ mod AdminMutationResolvers {
             removeMember            = removeMember(),
             createApiKey            = createApiKey(deps),
             revokeApiKey            = revokeApiKey(),
+            createPreviewToken      = createPreviewToken(deps),
             createWebhook           = createWebhook(),
             updateWebhook           = updateWebhook(),
             deleteWebhook           = deleteWebhook(),
