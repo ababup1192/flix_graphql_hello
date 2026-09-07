@@ -1,0 +1,84 @@
+"""プロジェクトを選ぶ前の操作。/account/graphql で受け、Tenant を持たない。組織とプロジェクトを作り、組織のメンバーを管理する。
+ログイン（Bearer）が要り、API キーは使えない"""
+type Query {
+  """自分。ログインしていなければ null。organizations と projects は自分が触れる物だけ"""
+  me: Me
+  """組織 1 つ。member でなければ null（存在も教えない）"""
+  organization(id: ID!): Organization
+}
+
+type Mutation {
+  """組織を作る。作った人が owner。CMS_SIGNUP=closed なら既定の組織の owner だけ"""
+  createOrganization(name: String!): Organization!
+  """組織の下にプロジェクトを作る。組織の owner だけ。slug はプロジェクト slug（URL の /p/{slug}/ と subdomain に出る）"""
+  createProject(orgId: ID!, slug: String!, name: String!): Project!
+  """既にログインした事のある人を email で組織に足す（owner だけ）。まだ居なければエラー"""
+  addOrganizationMember(orgId: ID!, email: String!, role: OrgRole!): OrganizationMember!
+  """組織から外す（owner だけ）。最後の owner は外せない。外した userId を返す"""
+  removeOrganizationMember(orgId: ID!, userId: ID!): ID!
+}
+
+"""プロジェクトでの役割。上が下を含む"""
+enum Role {
+  VIEWER
+  WRITER
+  EDITOR
+  OWNER
+}
+
+"""組織での役割。OWNER は組織の全プロジェクトの owner でもある"""
+enum OrgRole {
+  MEMBER
+  OWNER
+}
+
+"""プロジェクトの見え方"""
+enum Visibility {
+  """公開中の中身はキー無しで読める"""
+  PUBLIC
+  """read のキーが要る"""
+  PRIVATE
+}
+
+"""自分"""
+type Me {
+  id: ID!
+  email: String!
+  name: String!
+  organizations: [OrganizationMembership!]!
+  projects: [ProjectMembership!]!
+}
+
+type Organization {
+  id: ID!
+  name: String!
+  """組織のメンバー。owner だけに出る（member には空）"""
+  members: [OrganizationMember!]!
+  """組織の下のプロジェクト"""
+  projects: [Project!]!
+}
+
+type OrganizationMember {
+  userId: ID!
+  email: String!
+  name: String!
+  role: OrgRole!
+}
+
+type OrganizationMembership {
+  organization: Organization!
+  role: OrgRole!
+}
+
+type Project {
+  id: ID!
+  """プロジェクト slug"""
+  slug: String!
+  name: String!
+  visibility: Visibility!
+}
+
+type ProjectMembership {
+  project: Project!
+  role: Role!
+}

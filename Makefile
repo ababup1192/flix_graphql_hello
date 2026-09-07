@@ -46,10 +46,11 @@ db-up:
 db-down:
 	docker compose down -v
 
-# SDL から生成物を作り直す。admin.graphql → src/generated/graphql/GeneratedAdminSchema.flix、
+# SDL から生成物を作り直す。admin.graphql → src/generated/graphql/GeneratedAdminSchema.flix、account.graphql → GeneratedAccountSchema.flix、
 # schema.graphql（graphql-java の境界のテスト用の見本）→ test/sample/GeneratedSchema.flix
 generate:
 	cd schemagen && ../bin/flix run
+	cd schemagen && SCHEMAGEN_SDL=../account.graphql SCHEMAGEN_MODULE=GeneratedAccount SCHEMAGEN_EFF=AccountEff ../bin/flix run
 	cd schemagen && SCHEMAGEN_SDL=../schema.graphql SCHEMAGEN_MODULE=Generated SCHEMAGEN_OUT=../test/sample/GeneratedSchema.flix ../bin/flix run
 
 # ---- sqlfx（生成器と migrate は flix_db 側の main で動かす。.fpkg には入っていない）----

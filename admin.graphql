@@ -112,10 +112,6 @@ type Mutation {
   """消す。entry（下書き・公開・richText の画像を含む）が使っていればエラー"""
   deleteAsset(id: ID!): ID!
 
-  """組織を作る。作った人が owner"""
-  createOrganization(name: String!): Organization!
-  """組織の下にプロジェクトを作る。組織の owner だけ。slug は subdomain と /p/ に出る"""
-  createProject(orgId: ID!, slug: String!, name: String!): Project!
   """今のプロジェクトの公開範囲（owner だけ）"""
   updateProjectVisibility(visibility: Visibility!): Project!
   """email で招待する（owner だけ）。初回ログインで役割が付く"""

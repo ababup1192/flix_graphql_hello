@@ -1,34 +1,39 @@
 ///
 /// 起動。SDL と生成物の一致、PostgreSQL の接続、migrations の適用済みを確かめ、管理 API（/admin/graphql）と
-/// コンテンツ API（/graphql。型の定義から実行時に組み、定義が変われば組み直す）を 8080 番で待つ。
-/// パスの先頭に /p/{slug} を付けるとそのプロジェクト、無ければ既定のプロジェクト（default）。
+/// コンテンツ API（/graphql。型の定義から実行時に組み、定義が変われば組み直す）、Account API（/account/graphql。プロジェクトを選ぶ前の操作）を 8080 番で待つ。
+/// パスの先頭に /p/{プロジェクト slug} を付けるとそのプロジェクト、無ければ既定プロジェクト（CMS_DEFAULT_PROJECT。空なら 404）。
 /// 起動に失敗したらメッセージを出して終了コード 1 で終わる。
 ///
 /// 環境変数: CMS_DSN / CMS_DB_USER / CMS_DB_PASSWORD（DbConfig）、ASSET_*（StorageConfig。省略時は asset 無し）、
-/// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_BASE_DOMAIN（`{slug}.{base}` の Host でプロジェクトを選ぶ。省略時は /p/ だけ）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
+/// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_BASE_DOMAIN（`{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。省略時は /p/ だけ）、
+/// CMS_DEFAULT_PROJECT（プロジェクト slug 無しの時のプロジェクト slug。省略時は default、空ならプロジェクト slug 無しは 404）、CMS_SIGNUP（open / closed）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
 /// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health に出す版。省略時は dev）
 ///
 def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
     let started = forM (
         _           <- checkGenerated(GeneratedCheck.admin());
+        _           <- checkGenerated(GeneratedCheck.account());
         connection  <- DbConfig.fromEnv();
         pool        <- openPool(connection);
         _           <- prepareMigrations(connection, Sys.Env.getVar("CMS_MIGRATE"));
         storage     <- StorageConfig.fromEnv();
         auth        <- AuthConfig.fromEnv();
         deps        <- Ok({ storage = storage, auth = auth });
+        defaultProject <- resolveDefaultProject(pool, Sys.Env.getVar("CMS_DEFAULT_PROJECT"));
+        accountEngine  <- AccountSchema.engine(pool, deps);
         adminEngines <- Ok(AdminEngine.create(deps));
-        _           <- AdminEngine.current(adminEngines, pool, ProjectId.default())
-    ) yield (pool, adminEngines, deps);
+        _           <- AdminEngine.current(adminEngines, pool, defaultProject |> Option.getWithDefault(ProjectId.default()))
+    ) yield (pool, adminEngines, deps, defaultProject, accountEngine);
     match started {
         case Err(message) => { println(message); Sys.Exit.exit(1) }
-        case Ok((pool, adminEngines, deps)) =>
+        case Ok((pool, adminEngines, deps, defaultProject, accountEngine)) =>
             let jwks = TokenVerifier.createCache();
             let cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins };
             let version = Sys.Env.getVar("CMS_VERSION") |> Option.getWithDefault("dev");
             let baseDomain = Sys.Env.getVar("CMS_BASE_DOMAIN") |> Option.filter(text -> not String.isEmpty(text));
             let contentConfig = { cors = cors, graphqlPath = "/graphql", version = version };
             let adminConfig = { cors = cors, graphqlPath = "/admin/graphql", version = version };
+            let accountConfig = { cors = cors, graphqlPath = "/account/graphql", version = version };
             let engineCache = ContentEngine.create(deps);
             // WhyNot: コンテンツ API を実行する時以外（/health、404、preflight、GET）でエンジンを組まないのは、型定義が壊れた時に
             // 死活監視や preflight まで 503 になり、404 ごとに目印の SELECT が走るため。GraphQL を実行しない道なので管理 API のエンジンで受ける
@@ -36,12 +41,17 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
             let bind = match deps#auth#mode { case AuthConfig.Mode.Dev => Some("127.0.0.1") case _ => None };
             HttpServer.listen(bind, 8080, request ->
                 Health.runWithPool(pool, () -> {
-                    let (slug, path) = Server.projectOf(baseDomain, request);
+                    let (projectSlug, path) = Server.projectOf(baseDomain, request);
                     let scoped = { path = path | request };
                     let credential = credentialOf(deps#auth, jwks, request);
-                    match resolveProject(pool, slug) {
+                    // WhyNot: プロジェクト slug 無しで既定プロジェクトも無い時に Account API のエンジンで受けるのは、/health と 404 を
+                    // プロジェクト無しで返すため（Account API は GraphQL のパス以外を実行しない）
+                    if (Option.isEmpty(projectSlug) and (Server.pathOf(path) == accountConfig#graphqlPath or Option.isEmpty(defaultProject)))
+                        Graphql.runWithEngine(accountEngine, () -> Server.handle(accountConfig, credential, scoped))
+                    else
+                    match resolveProject(pool, defaultProject, projectSlug) {
                         case Err(message)      => Server.unavailable(message)
-                        case Ok(None)          => Server.notFound("projectId '${slug |> Option.getWithDefault("")}' がありません")
+                        case Ok(None)          => Server.notFound("プロジェクト '${projectSlug |> Option.getWithDefault("")}' がありません")
                         case Ok(Some(projectId)) =>
                             if (Server.needsGraphqlEngine(contentConfig, scoped))
                                 match ContentEngine.current(engineCache, pool, projectId) {
@@ -78,11 +88,34 @@ def credentialOf(auth: AuthConfig.AuthConfig, jwks: TokenVerifier.JwksCache, req
     }
 
 ///
-/// パスの slug からプロジェクトを決める。slug が無ければ既定（SQL を出さない）。無い slug は None。
+/// パスか Host のプロジェクト slug からプロジェクトを決める。無ければ既定プロジェクト（SQL を出さない）。
+/// 形が違うか無いプロジェクト slug は None（404）。
 ///
-def resolveProject(pool: Pool, slug: Option[String]): Result[String, Option[ProjectId]] \ IO = match slug {
-    case None        => Ok(Some(ProjectId.default()))
-    case Some(found) => DbRunner.retrying(() -> Pool.withLazyTx(pool, () -> Projects.findBySlug(found))) |> Result.mapErr(DbRunner.failureMessage)
+def resolveProject(pool: Pool, defaultProject: Option[ProjectId], projectSlug: Option[String]): Result[String, Option[ProjectId]] \ IO = match projectSlug {
+    case None       => Ok(defaultProject)
+    case Some(text) => match ProjectSlug.parse(text) {
+        case None       => Ok(None)
+        case Some(slug) => DbRunner.retrying(() -> Pool.withLazyTx(pool, () -> Projects.findBySlug(slug))) |> Result.mapErr(DbRunner.failureMessage)
+    }
+}
+
+///
+/// CMS_DEFAULT_PROJECT から既定プロジェクト。省略なら default、空なら無し（プロジェクト slug 無しは 404）、
+/// プロジェクト slug が書いてあればそれを引き、無ければ起動しない。
+///
+def resolveDefaultProject(pool: Pool, configured: Option[String]): Result[String, Option[ProjectId]] \ IO = match configured {
+    case None     => Ok(Some(ProjectId.default()))
+    case Some("") => Ok(None)
+    case Some(text) => match ProjectSlug.parse(text) {
+        case None       => Err("CMS_DEFAULT_PROJECT '${text}' はプロジェクト slug の形ではありません（${ProjectSlug.rule()}）")
+        case Some(slug) =>
+            DbRunner.retrying(() -> Pool.withLazyTx(pool, () -> Projects.findBySlug(slug)))
+                |> Result.mapErr(DbRunner.failureMessage)
+                |> Result.flatMap(found -> match found {
+                    case Some(id) => Ok(Some(id))
+                    case None     => Err("CMS_DEFAULT_PROJECT '${text}' のプロジェクトがありません")
+                })
+    }
 }
 
 ///

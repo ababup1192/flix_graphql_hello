@@ -210,7 +210,7 @@ pub type alias OrganizationMembership = { organization = Organization, role = Or
 ///
 /// プロジェクト（認証の文脈で見る形）。
 ///
-pub type alias Project = { id = ProjectId, slug = String, name = String, visibility = Visibility }
+pub type alias Project = { id = ProjectId, slug = ProjectSlug, name = String, visibility = Visibility }
 
 ///
 /// 自分が触れるプロジェクトと役割。
@@ -221,6 +221,19 @@ pub type alias ProjectMembership = { target = Project, role = Role }
 /// 自分。roles は今のプロジェクトでの役割。
 ///
 pub type alias Me = { user = User, roles = List[Role], organizations = List[OrganizationMembership], projects = List[ProjectMembership] }
+
+///
+/// 組織のメンバー 1 人。
+///
+pub type alias OrganizationMember = { userId = UserId, email = String, name = String, role = OrgRole }
+
+///
+/// 組織を誰が作れるか。クラウド版は Open（ログインした人なら誰でも）、セルフホストは Closed（既定の組織の owner だけ）にできる。
+///
+pub enum Signup with Eq, ToString {
+    case Open
+    case Closed
+}
 
 ///
 /// プロジェクトのメンバー 1 人。

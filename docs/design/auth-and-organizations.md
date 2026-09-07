@@ -1,7 +1,10 @@
 # 設計: 認証・組織・権限と subdomain ルーティング
 
 状態: 2026-09-07 に実装（users / organizations / memberships / invitations / api_keys、Authz の Datalog、JWT の検証、`Session` effect、
-管理 API の `me` / メンバー / 招待 / 鍵、公開 API の visibility）。まだ無い物: Host ヘッダで slug、slug 無しの管理 API（今は既定プロジェクト）、RLS。
+管理 API の `me` / メンバー / 招待 / 鍵、公開 API の visibility、Host ヘッダでプロジェクト slug、Account API）。まだ無い物: RLS（[roadmap #3b](roadmap.md)）。
+
+言葉: **プロジェクト slug** は URL の `/p/{プロジェクト slug}/` と subdomain でプロジェクトを選ぶ人が読める名前（`ProjectSlug` 型。parse 済みしか作れない）。
+**プロジェクト id** は DB の主キー。**既定プロジェクト** はプロジェクト slug 無しの時に落ちる先（`CMS_DEFAULT_PROJECT`）。
 
 実装での名前: 主体の effect は `Actor` ではなく `Session`（`Session.current()` / `Session.require(permission)`。`Actor` は主体の enum）。
 ユーザーの解決は `Accounts`（`resolveUser` / `actorFor` / `me`）、身元は graphql 層の `Credential`（Bearer / ApiKey / Missing / Invalid）で
@@ -19,8 +22,9 @@ microCMS に対抗するサービスとして出すために、次の 3 つを�
 
 - 公開 API: `{slug}.example.com/graphql`（読むだけ。CDN でキャッシュしてよい）
 - 管理 API: `{slug}.example.com/admin/graphql`（素通し）
-- プロジェクトに属さない管理 API: `example.com/admin/graphql`（`me`、プロジェクト一覧、組織の操作）
-- 開発・内部: `/p/{slug}/...` も同じ意味で受け続ける（curl や Docker 内では subdomain が効かないため）
+- Account API（プロジェクトを選ぶ前の操作）: `example.com/account/graphql`（`me`、組織とプロジェクトの作成、組織のメンバー）。`account.graphql` で別のスキーマ、Runner は `Tenant` を入れない（プロジェクトのユースケースは型に `Tenant` が付くので呼べない）。API キーは断る
+- 開発・内部: `/p/{プロジェクト slug}/...` も同じ意味で受け続ける（curl や Docker 内では subdomain が効かないため）
+- プロジェクト slug 無しの `/graphql` / `/admin/graphql` は既定プロジェクト（`CMS_DEFAULT_PROJECT`。既定 `default`）。空にすると 404 で、クラウド版はこれで運用する
 - 認証はどの経路もヘッダで渡す。プロジェクトの選択は Host / slug だけで決め、鍵は「そのプロジェクトを触ってよいか」の判定にしか使わない（2 経路で決めると食い違うため）
 
 ## データ
@@ -89,12 +93,12 @@ api_keys       (id, project_id, name, key_hash, scope: read | readDraft, created
   プロジェクトの `visibility = private` ならキー必須
 - 最初の owner: `CMS_BOOTSTRAP_OWNER=you@example.com`。その email の初回ログインを既定の組織の owner にする
 - 招待: email で users に無ければ招待中の行を作り、初回ログインで (issuer, subject) を結ぶ
-- slug 無しの管理 API（`example.com/admin/graphql`）は `Tenant` を「無し」にし、`me` / 組織 / プロジェクト作成だけ受ける
+- Account API（`example.com/account/graphql`）は `Tenant` 無しの別エンジン（`src/account/`）。`me` / 組織 / プロジェクト作成 / 組織のメンバーだけ受ける。`CMS_SIGNUP=closed` なら組織を作れるのは既定の組織の owner だけ
 
 ### 環境変数
 
 `CMS_AUTH`（`jwks` | `dev`）、`CMS_AUTH_ISSUER`、`CMS_AUTH_JWKS_URL`、`CMS_AUTH_AUDIENCE`、`CMS_AUTH_HEADER`（既定 `Cf-Access-Jwt-Assertion`）、
-`CMS_BOOTSTRAP_OWNER`、`CMS_API_KEY_PEPPER`。インフラは増えない（Access は無料、セルフホストは compose の profile `auth` で Keycloak）。
+`CMS_BOOTSTRAP_OWNER`、`CMS_API_KEY_PEPPER`、`CMS_DEFAULT_PROJECT`、`CMS_SIGNUP`。インフラは増えない（Access は無料、セルフホストは compose の profile `auth` で Keycloak）。
 
 ### 懸念と対処
 
@@ -151,7 +155,7 @@ api_keys       (id, project_id, name, key_hash, scope: read | readDraft, created
 ## 管理 API に足す物
 
 - `me { id email projects { slug name role } }`: 切り替え候補。membership が無いプロジェクトは出ない
-- `createProject(orgId, slug, name)`: 組織の owner だけ
+- `createProject(orgId, slug, name)`: 組織の owner だけ（Account API）
 - `inviteMember(projectId, email, role)` / `removeMember` / `changeRole`: プロジェクトの owner だけ
 - `createApiKey(projectId, scope)` / `revokeApiKey`: owner だけ。生の鍵は作った時に 1 回だけ返す
 

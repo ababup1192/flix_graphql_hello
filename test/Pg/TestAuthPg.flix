@@ -27,7 +27,7 @@ mod TestAuthPg {
             (Accounts.actorFor(owner, ProjectId.default()),
              Accounts.actorFor(stranger, ProjectId.default()),
              again#id == owner#id,
-             Accounts.projectsOf(owner#id) |> List.map(membership -> (membership#target#slug, membership#role)))
+             Accounts.projectsOf(owner#id) |> List.map(membership -> (ProjectSlug.text(membership#target#slug), membership#role)))
         });
         Assert.assertEq(
             expected = Ok(Ok((
@@ -84,7 +84,7 @@ mod TestAuthPg {
         let pepper = { pepperId = "test", secret = "test-pepper" };
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1", "k2"}, () -> {
             let owner = Accounts.resolveUser(bootstrap(), principal("owner", "owner@test"));
-            let shop = Projects.create(OrgId.default(), "shop", "店");
+            let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
             let issued = runAs(owner, () -> ApiKeys.create(pepper, "site", ApiKeyScope.Read));
             let resolved = ApiKeys.resolve(pepper, issued#key, ProjectId.default());
             let otherProject = ApiKeys.resolve(pepper, issued#key, shop);

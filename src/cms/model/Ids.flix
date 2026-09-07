@@ -116,7 +116,46 @@ mod ProjectId {
         number
 
     ///
-    /// 既定のプロジェクト（migration が作る id 1、slug "default"）。/p/ の無いパスと、セルフホストで 1 つだけ使う時はこれ。
+    /// 既定プロジェクト（migration が作る id 1、プロジェクト slug "default"）。セルフホストで 1 つだけ使う時はこれ。
     ///
     pub def default(): ProjectId = ProjectId.ProjectId(1i64)
+}
+
+///
+/// プロジェクト slug。URL の /p/{プロジェクト slug}/ と subdomain でプロジェクトを選ぶ、人が読める名前。
+/// DNS のラベルとして使えるよう [a-z0-9][a-z0-9-]{0,63} に限り、`parse` を通した物だけを作る。予約した名前の検査は Projects が持つ。
+///
+pub enum ProjectSlug with Eq, Order {
+    case ProjectSlug(String)
+}
+
+instance ToString[ProjectSlug] {
+    pub def toString(slug: ProjectSlug): String = ProjectSlug.text(slug)
+}
+
+mod ProjectSlug {
+
+    ///
+    /// 規則に合えば Some。大文字は許さない（Host は小文字で来るので、入口で小文字に揃える）。
+    ///
+    pub def parse(text: String): Option[ProjectSlug] =
+        if (String.isMatch(regex = "^[a-z0-9][a-z0-9-]{0,63}$", text)) Some(ProjectSlug.ProjectSlug(text)) else None
+
+    ///
+    /// 中の文字列。
+    ///
+    pub def text(slug: ProjectSlug): String =
+        let ProjectSlug.ProjectSlug(raw) = slug;
+        raw
+
+    ///
+    /// 規則の説明。エラーメッセージ用。
+    ///
+    pub def rule(): String = "英小文字・数字・- を 1 〜 64 文字（先頭は英数字）"
+
+    ///
+    /// 既定プロジェクトのプロジェクト slug。
+    ///
+    pub def default(): ProjectSlug = ProjectSlug.ProjectSlug("default")
+
 }

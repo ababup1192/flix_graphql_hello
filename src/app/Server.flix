@@ -2,7 +2,7 @@
 /// サーバの設定。
 ///
 /// - cors: 許すオリジン
-/// - graphqlPath: GraphQL を受けるパス（"/graphql" か "/admin/graphql"）
+/// - graphqlPath: GraphQL を受けるパス（"/graphql" / "/admin/graphql" / "/account/graphql"）
 /// - version: /health に出す版（イメージの git の sha など）
 ///
 pub type alias ServerConfig = { cors = CorsConfig, graphqlPath = String, version = String }
@@ -63,13 +63,13 @@ mod Server {
         errorResponse(404, Nil, message)
 
     ///
-    /// パスの先頭の /p/{slug} を切り出す。"/p/shop/graphql" → (Some("shop"), "/graphql")。無ければ (None, そのまま)。
-    /// slug の無い "/p" や "/p/" は切り出さない（404 に落ちる）。
+    /// パスの先頭の /p/{プロジェクト slug} を切り出す。"/p/shop/graphql" → (Some("shop"), "/graphql")。無ければ (None, そのまま)。
+    /// プロジェクト slug の無い "/p" や "/p/" は切り出さない（404 に落ちる）。形の検査はしない（Main が ProjectSlug.parse で 404 にする）。
     ///
     pub def splitProject(path: String): (Option[String], String) =
         match String.splitOn(substr = "/", path) {
-            case "" :: "p" :: slug :: rest if slug != "" => (Some(slug), "/" + List.join("/", rest))
-            case _                                       => (None, path)
+            case "" :: "p" :: projectSlug :: rest if projectSlug != "" => (Some(projectSlug), "/" + List.join("/", rest))
+            case _                                                     => (None, path)
         }
 
     ///
@@ -85,10 +85,10 @@ mod Server {
             |> Option.getWithDefault(false)
 
     ///
-    /// Host ヘッダから slug を取る。`{slug}.{baseDomain}` の形の時だけ Some。ポートは無視する。
-    /// baseDomain が無い（CMS_BASE_DOMAIN 未設定）なら常に None で、/p/{slug}/ だけが効く。
+    /// Host ヘッダからプロジェクト slug を取る。`{プロジェクト slug}.{baseDomain}` の形の時だけ Some。ポートは無視する。
+    /// baseDomain が無い（CMS_BASE_DOMAIN 未設定）なら常に None で、/p/{プロジェクト slug}/ だけが効く。
     ///
-    pub def slugFromHost(baseDomain: Option[String], headers: List[(String, String)]): Option[String] =
+    pub def projectSlugFromHost(baseDomain: Option[String], headers: List[(String, String)]): Option[String] =
         let host = headers
             |> List.find(match (name, _) -> String.toLowerCase(name) == "host")
             |> Option.map(match (_, value) -> value |> String.trim |> String.toLowerCase |> String.splitOn(substr = ":") |> List.head |> Option.getWithDefault(""));
@@ -100,12 +100,12 @@ mod Server {
         }
 
     ///
-    /// リクエストのプロジェクトの slug と、プロジェクトを除いたパス。/p/{slug}/ があればそれを優先し、無ければ Host から。
+    /// リクエストのプロジェクト slug と、プロジェクトを除いたパス。/p/{プロジェクト slug}/ があればそれを優先し、無ければ Host から。
     ///
     pub def projectOf(baseDomain: Option[String], request: HttpRequest): (Option[String], String) =
         match splitProject(request#path) {
-            case (Some(slug), rest) => (Some(slug), rest)
-            case (None, rest)       => (slugFromHost(baseDomain, request#headers), rest)
+            case (Some(projectSlug), rest) => (Some(projectSlug), rest)
+            case (None, rest)              => (projectSlugFromHost(baseDomain, request#headers), rest)
         }
 
     ///

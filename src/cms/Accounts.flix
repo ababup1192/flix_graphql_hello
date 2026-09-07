@@ -59,10 +59,20 @@ mod Accounts {
         Actor.User(user#id, user#email, Authz.rolesOf(membership, orgRole))
 
     ///
-    /// プロジェクト無しの管理 API（me など）の主体。役割は空。
+    /// Account API（プロジェクトを選ぶ前の操作）の主体。プロジェクトの役割は空。
     ///
     pub def actorWithoutProject(user: User): Actor =
         Actor.User(user#id, user#email, Nil)
+
+    ///
+    /// email で 1 人。誰も居なければ None、同じ email が発行元をまたいで複数居れば invalid（どちらか決められない）。
+    ///
+    pub def findByEmail(email: String): Option[User] \ DbRead + CmsErr =
+        match AuthQueries.listUsersByEmail(String.toLowerCase(String.trim(email))) {
+            case Nil        => None
+            case row :: Nil => Some({ id = UserId.UserId(row#id), issuer = row#issuer, subject = row#subject, email = row#email, name = row#name })
+            case _          => CmsErr.invalid(Violation.Violation("email", "'${email}' のユーザーが複数います。発行元を 1 つにしてください") :: Nil)
+        }
 
     ///
     /// ユーザーが属する組織と役割。
@@ -75,13 +85,11 @@ mod Accounts {
     /// ユーザーが触れるプロジェクトと役割。直接の membership に加え、owner である組織の全プロジェクト（owner として）。
     /// 同じプロジェクトが両方にあれば高い方の役割。
     ///
-    pub def projectsOf(userId: UserId): List[ProjectMembership] \ DbRead =
-        let projectOf = (id, slug, name, visibility) -> { id = ProjectId.ProjectId(id), slug = slug, name = name, visibility = Visibility.parse(visibility) |> Option.getWithDefault(Visibility.Private) };
+    pub def projectsOf(userId: UserId): List[ProjectMembership] \ DbRead + DbErr =
         let direct = AuthQueries.listMembershipsOfUser(UserId.toInt64(userId))
-            |> List.filterMap(row -> Role.parse(row#role) |> Option.map(role -> { target = projectOf(row#id, row#slug, row#name, row#visibility), role = role }));
+            |> List.filterMap(row -> Role.parse(row#role) |> Option.map(role -> { target = Projects.fromRow(row#id, row#slug, row#name, row#visibility), role = role }));
         let owned = organizationsOf(userId) |> List.filter(org -> org#role == OrgRole.Owner)
-            |> List.flatMap(org -> AuthQueries.listProjectsOfOrg(OrgId.toInt64(org#organization#id))
-                |> List.map(row -> { target = projectOf(row#id, row#slug, row#name, row#visibility), role = Role.Owner }));
+            |> List.flatMap(org -> Projects.listOfOrg(org#organization#id) |> List.map(target -> { target = target, role = Role.Owner }));
         (direct ::: owned)
             |> List.foldLeft((acc, item) -> match List.find(found -> found#target#id == item#target#id, acc) {
                 case Some(found) if found#role >= item#role => acc
@@ -93,7 +101,7 @@ mod Accounts {
     ///
     /// 自分。人でなければ None。
     ///
-    pub def me(): Option[Me] \ DbRead + Session = match Session.current() {
+    pub def me(): Option[Me] \ DbRead + DbErr + Session = match Session.current() {
         case Actor.User(id, _, roles) =>
             AuthQueries.findUserById(UserId.toInt64(id)) |> Option.map(row ->
                 { user = { id = id, issuer = row#issuer, subject = row#subject, email = row#email, name = row#name },

@@ -72,5 +72,8 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_AUTH_ISSUER` / `CMS_AUTH_JWKS_URL` / `CMS_AUTH_AUDIENCE` | jwks の時に必須。Cloudflare Access なら `https://<team>.cloudflareaccess.com`、`.../cdn-cgi/access/certs`、アプリの AUD | 無し |
 | `CMS_AUTH_HEADER` | JWT のヘッダ名。Clerk 等は `Authorization` | Cf-Access-Jwt-Assertion |
 | `CMS_BOOTSTRAP_OWNER` | 最初の owner の email。その初回ログインを既定の組織の owner にする | 無し |
+| `CMS_DEFAULT_PROJECT` | プロジェクト slug 無しの `/graphql` / `/admin/graphql` が向くプロジェクト slug。空にするとプロジェクト slug 無しは 404（クラウド版） | default |
+| `CMS_SIGNUP` | `open`（ログインした人は誰でも組織を作れる）/ `closed`（既定の組織の owner だけ） | open |
+| `CMS_BASE_DOMAIN` | `{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。無ければ `/p/{プロジェクト slug}/` だけ | 無し |
 | `CMS_API_KEY_PEPPER` / `CMS_API_KEY_PEPPER_ID` | 公開 API の鍵のハッシュに混ぜる秘密と版。無ければ鍵を発行できない | 無し / v1 |
 | `JAVA_OPTS` | JVM の引数 | `-Xss32m -XX:MaxRAMPercentage=70` |

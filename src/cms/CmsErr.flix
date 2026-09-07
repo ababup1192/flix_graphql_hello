@@ -92,6 +92,14 @@ mod CmsErr {
     ///
     /// Option が None なら notFound。
     ///
+    ///
+    /// None なら invalid（入力の 1 つの誤り）。境界の parse に使う。
+    ///
+    pub def orInvalid(path: String, message: String, value: Option[a]): a \ CmsErr = match value {
+        case Some(found) => found
+        case None        => CmsErr.invalid(Violation.Violation(path, message) :: Nil)
+    }
+
     pub def orNotFound(entity: Entity, id: String, value: Option[a]): a \ CmsErr = match value {
         case Some(found) => found
         case None        => CmsErr.notFound(entity, id)

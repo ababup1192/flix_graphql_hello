@@ -28,6 +28,12 @@ mod GeneratedCheck {
         { label = "src/generated/graphql/GeneratedAdminSchema.flix", sdlPath = "admin.graphql", sdlText = GeneratedAdmin.sdlText(), generatorVersion = GeneratedAdmin.generatorVersion() }
 
     ///
+    /// account.graphql と src/generated/graphql/GeneratedAccountSchema.flix（mod GeneratedAccount）の組。
+    ///
+    pub def account(): Generated =
+        { label = "src/generated/graphql/GeneratedAccountSchema.flix", sdlPath = "account.graphql", sdlText = GeneratedAccount.sdlText(), generatorVersion = GeneratedAccount.generatorVersion() }
+
+    ///
     /// 生成物に埋まった SDL 本文と生成器バージョンを、SDL ファイルの本文と期待する版に照らす。
     ///
     /// WhyNot: ハッシュにしないのは、本体と生成器で同じ計算を 2 か所に持つ事になるため。本文をそのまま

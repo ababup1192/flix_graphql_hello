@@ -10,6 +10,11 @@ query findUserById(id: Int64) -> one {
     SELECT id, issuer, subject, email, name FROM users WHERE id = :id
 }
 
+// email で引く。email は発行元をまたいで一意ではないので複数ありうる
+query listUsersByEmail(email: String) -> many {
+    SELECT id, issuer, subject, email, name FROM users WHERE email = :email ORDER BY id
+}
+
 query insertUser(issuer: String, subject: String, email: String, name: String) -> one {
     INSERT INTO users (issuer, subject, email, name) VALUES (:issuer, :subject, :email, :name) RETURNING id
 }
@@ -41,6 +46,17 @@ query findOrgRole(userId: Int64, orgId: Int64) -> one {
 
 query countOrgOwners(orgId: Int64) -> one {
     SELECT count(*)::bigint AS total FROM org_members WHERE org_id = :orgId AND role = 'owner'
+}
+
+// 組織のメンバー
+query listOrgMembers(orgId: Int64) -> many {
+    SELECT u.id, u.email, u.name, m.role
+    FROM org_members AS m JOIN users AS u ON u.id = m.user_id
+    WHERE m.org_id = :orgId ORDER BY u.id
+}
+
+query deleteOrgMember(userId: Int64, orgId: Int64) -> exec {
+    DELETE FROM org_members WHERE user_id = :userId AND org_id = :orgId
 }
 
 query upsertOrgMember(userId: Int64, orgId: Int64, role: String) -> exec {

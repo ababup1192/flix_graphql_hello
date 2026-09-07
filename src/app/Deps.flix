@@ -15,6 +15,7 @@ mod Deps {
         { storage = storage,
           auth = { mode = AuthConfig.Mode.Closed, tokenHeader = "Authorization",
                    bootstrap = { ownerEmail = Some("owner@test") },
+                   signup = Signup.Open,
                    pepper = Some({ pepperId = "test", secret = "test-pepper" }) } }
 
     ///

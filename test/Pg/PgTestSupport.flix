@@ -87,6 +87,15 @@ mod PgTestSupport {
         })
 
     ///
+    /// テーブルを作り直して seed を当て、Account API（Tenant 無し）の Schema を body に渡す。
+    ///
+    pub def withAccountApi(seeding: Unit -> b \ ef2, body: (Schema, b) -> a \ ef): a \ (ef2 - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr, Tenant, Session, ObjectStore}) + ef + IO =
+        withPool(pool -> {
+            let seeded = seed(seeding);
+            body(AccountSchema.make(deps(), AccountRunner.make(pool, deps())), seeded)
+        })
+
+    ///
     /// テスト用の依存。認証は閉じ、bootstrap の owner は owner@test。
     ///
     pub def deps(): Deps \ IO = Deps.forTest(storage())

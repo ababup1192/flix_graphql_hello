@@ -45,7 +45,7 @@ mod ProjectResolvers {
     pub def resolvers(): GeneratedAdmin.ProjectResolvers[AdminEff] =
         {
             id         = (_context, source) -> Ok(AdminMapping.idOfProject(source#id)),
-            slug       = (_context, source) -> Ok(source#slug),
+            slug       = (_context, source) -> Ok(ProjectSlug.text(source#slug)),
             name       = (_context, source) -> Ok(source#name),
             visibility = (_context, source) -> Ok(AdminMapping.visibilityToGql(source#visibility))
         }

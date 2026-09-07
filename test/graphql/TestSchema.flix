@@ -134,6 +134,12 @@ mod TestSchema {
         Assert.assertEq(expected = Ok(()),
             Fs.FileRead.read("admin.graphql") |> Result.mapErr(ToString.toString) |> Result.flatMap(sdl -> GeneratedCheck.check(GeneratedCheck.admin(), sdl)))
 
+    /// src/generated/GeneratedAccountSchema.flix も同じく account.graphql と一致する。
+    @Test
+    def testAccountSchemaGeneratedIsUpToDate(): Unit \ {Assert, Fs.FileRead} =
+        Assert.assertEq(expected = Ok(()),
+            Fs.FileRead.read("account.graphql") |> Result.mapErr(ToString.toString) |> Result.flatMap(sdl -> GeneratedCheck.check(GeneratedCheck.account(), sdl)))
+
     /// enum の値の名前が重なると Err（SDL に同じ値が 2 行出て graphql-java が落ちるのを、分かる文言で先に止める）。
     @Test
     def testSchemaDuplicateEnumValue(): Unit \ Assert =

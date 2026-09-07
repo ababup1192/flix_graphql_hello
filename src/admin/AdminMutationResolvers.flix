@@ -78,20 +78,6 @@ mod AdminMutationResolvers {
     pub def deleteAsset(): GeneratedAdmin.MutationDeleteAssetResolver[AdminEff] =
         (_context, id) -> { Assets.delete(AdminMapping.assetId("id", id)); Ok(id) }
 
-    /// Mutation.createOrganization
-    pub def createOrganization(): GeneratedAdmin.MutationCreateOrganizationResolver[AdminEff] =
-        (_context, name) -> {
-            let id = Organizations.create(name);
-            Ok({ id = id, name = name })
-        }
-
-    /// Mutation.createProject
-    pub def createProject(): GeneratedAdmin.MutationCreateProjectResolver[AdminEff] =
-        (_context, orgId, slug, name) -> {
-            let id = Organizations.createProject(AdminMapping.orgId("orgId", orgId), slug, name);
-            Ok(Projects.find(id) |> CmsErr.orNotFound(Entity.Organization, "${id}"))
-        }
-
     /// Mutation.updateProjectVisibility
     pub def updateProjectVisibility(): GeneratedAdmin.MutationUpdateProjectVisibilityResolver[AdminEff] =
         (_context, visibility) -> Ok(Projects.updateVisibility(AdminMapping.visibilityOf(visibility)))
@@ -144,8 +130,6 @@ mod AdminMutationResolvers {
             confirmAsset      = confirmAsset(),
             updateAsset       = updateAsset(),
             deleteAsset       = deleteAsset(),
-            createOrganization      = createOrganization(),
-            createProject           = createProject(),
             updateProjectVisibility = updateProjectVisibility(),
             inviteMember            = inviteMember(),
             cancelInvitation        = cancelInvitation(),

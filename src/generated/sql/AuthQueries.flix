@@ -7,7 +7,7 @@ mod AuthQueries {
     ///
     /// 生成元 auth.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -33294362
+    pub def sourceHash(): Int32 = 1848985464
 
     ///
     /// findUserByIdentity の 1 行。
@@ -52,6 +52,28 @@ mod AuthQueries {
         let sql = "SELECT id, issuer, subject, email, name FROM users WHERE id = $1";
         let params = List#{SqlValue.Int64(id)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findUserByIdDecoder(), sql, params))
+
+    ///
+    /// listUsersByEmail の 1 行。
+    ///
+    pub type alias ListUsersByEmailRow = { id = Int64, issuer = String, subject = String, email = String, name = String }
+
+    def listUsersByEmailDecoder(): Decoder[ListUsersByEmailRow] =
+        forA (
+            id <- Decoder.int64("id");
+            issuer <- Decoder.str("issuer");
+            subject <- Decoder.str("subject");
+            email <- Decoder.str("email");
+            name <- Decoder.str("name")
+        ) yield { id = id, issuer = issuer, subject = subject, email = email, name = name }
+
+    ///
+    /// listUsersByEmail: SELECT id, issuer, subject, email, name FROM users WHERE email = $1 ORDER BY id
+    ///
+    pub def listUsersByEmail(email: String): List[ListUsersByEmailRow] \ DbRead =
+        let sql = "SELECT id, issuer, subject, email, name FROM users WHERE email = $1 ORDER BY id";
+        let params = List#{SqlValue.Str(email)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listUsersByEmailDecoder(), sql, params))
 
     ///
     /// insertUser の 1 行。
@@ -171,6 +193,35 @@ mod AuthQueries {
         let sql = "SELECT count(*)::bigint AS total FROM org_members WHERE org_id = $1 AND role = 'owner'";
         let params = List#{SqlValue.Int64(orgId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(countOrgOwnersDecoder(), sql, params))
+
+    ///
+    /// listOrgMembers の 1 行。
+    ///
+    pub type alias ListOrgMembersRow = { id = Int64, email = String, name = String, role = String }
+
+    def listOrgMembersDecoder(): Decoder[ListOrgMembersRow] =
+        forA (
+            id <- Decoder.int64("id");
+            email <- Decoder.str("email");
+            name <- Decoder.str("name");
+            role <- Decoder.str("role")
+        ) yield { id = id, email = email, name = name, role = role }
+
+    ///
+    /// listOrgMembers: SELECT u.id, u.email, u.name, m.role FROM org_members AS m JOIN users AS u ON u.id = m.user_id WHERE m.org_id = $1 ORDER BY u.id
+    ///
+    pub def listOrgMembers(orgId: Int64): List[ListOrgMembersRow] \ DbRead =
+        let sql = "SELECT u.id, u.email, u.name, m.role\n    FROM org_members AS m JOIN users AS u ON u.id = m.user_id\n    WHERE m.org_id = $1 ORDER BY u.id";
+        let params = List#{SqlValue.Int64(orgId)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listOrgMembersDecoder(), sql, params))
+
+    ///
+    /// deleteOrgMember: DELETE FROM org_members WHERE user_id = $1 AND org_id = $2
+    ///
+    pub def deleteOrgMember(args: { userId = Int64, orgId = Int64 }): Int32 \ DbWrite =
+        let sql = "DELETE FROM org_members WHERE user_id = $1 AND org_id = $2";
+        let params = List#{SqlValue.Int64(args#userId), SqlValue.Int64(args#orgId)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
     /// upsertOrgMember: INSERT INTO org_members (user_id, org_id, role) VALUES ($1, $2, $3) ON CONFLICT (user_id, org_id) DO UPDATE SET role = EXCLUDED.role

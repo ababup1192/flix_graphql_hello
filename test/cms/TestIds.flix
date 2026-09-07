@@ -24,3 +24,14 @@ def testTypeNameParse(): Unit \ Assert =
 def testNumericIds(): Unit \ Assert =
     Assert.assertEq(expected = ("42", "7"),
         ("${TypeId.TypeId(42i64)}", "${FieldId.FieldId(7i64)}"))
+
+/// プロジェクト slug は DNS のラベル。大文字・先頭の -・65 文字は None。
+@Test
+def testProjectSlugParse(): Unit \ Assert =
+    Assert.assertEq(expected = (Some("blog"), Some("my-shop-2"), None, None, None, "default"),
+        (ProjectSlug.parse("blog") |> Option.map(ProjectSlug.text),
+         ProjectSlug.parse("my-shop-2") |> Option.map(ProjectSlug.text),
+         ProjectSlug.parse("Blog") |> Option.map(ProjectSlug.text),
+         ProjectSlug.parse("-blog") |> Option.map(ProjectSlug.text),
+         ProjectSlug.parse(String.repeat(65, "a")) |> Option.map(ProjectSlug.text),
+         ProjectSlug.text(ProjectSlug.default())))

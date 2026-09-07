@@ -29,6 +29,7 @@ mod AuthConfig {
         mode = Mode,
         tokenHeader = String,
         bootstrap = Accounts.Bootstrap,
+        signup = Signup,
         pepper = Option[ApiKeys.Pepper]
     }
 
@@ -38,13 +39,22 @@ mod AuthConfig {
     pub def fromEnv(): Result[String, AuthConfig] \ Sys.Env =
         let version = Sys.Env.getVar("CMS_VERSION") |> Option.getWithDefault("dev");
         forM (
-            mode <- modeOf(Sys.Env.getVar("CMS_AUTH") |> Option.getWithDefault("none"), version)
+            mode   <- modeOf(Sys.Env.getVar("CMS_AUTH") |> Option.getWithDefault("none"), version);
+            signup <- signupOf(Sys.Env.getVar("CMS_SIGNUP") |> Option.getWithDefault("open"))
         ) yield {
             mode = mode,
             tokenHeader = Sys.Env.getVar("CMS_AUTH_HEADER") |> Option.getWithDefault("Cf-Access-Jwt-Assertion"),
             bootstrap = { ownerEmail = Sys.Env.getVar("CMS_BOOTSTRAP_OWNER") |> Option.map(String.toLowerCase) },
+            signup = signup,
             pepper = Sys.Env.getVar("CMS_API_KEY_PEPPER") |> Option.map(secret -> { pepperId = Sys.Env.getVar("CMS_API_KEY_PEPPER_ID") |> Option.getWithDefault("v1"), secret = secret })
         }
+
+    /// CMS_SIGNUP。open は誰でも組織を作れ、closed は既定の組織の owner だけ。
+    def signupOf(text: String): Result[String, Signup] = match text {
+        case "open"   => Ok(Signup.Open)
+        case "closed" => Ok(Signup.Closed)
+        case other    => Err("CMS_SIGNUP '${other}' は知りません（open / closed）")
+    }
 
     def modeOf(text: String, version: String): Result[String, Mode] \ Sys.Env = match text {
         case "jwks" =>
