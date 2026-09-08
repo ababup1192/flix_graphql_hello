@@ -156,6 +156,28 @@ mod LogFields {
             case CmsFailure.RequiresLogin(_)           => withCode
         }
 
+    // ---- DB の数 ----
+
+    ///
+    /// リクエストの中で足し合わせるキー。Runner は Tx ごとに observe に戻すので、受ける側で合算する。
+    ///
+    def countedKeys(): Set[String] = Set#{ "db.statements", "db.transactions", "db.retries" }
+
+    ///
+    /// observe で戻った属性を今の属性に合わせる。数えるキー（db.statements / db.transactions / db.retries）は両方の int の和、それ以外は incoming が勝つ。
+    ///
+    /// WhyNot: Fields.merge（後勝ち）をそのまま使わないのは、フィールドごとに Tx を張る Runner の値が最後の 1 フィールドの数に上書きされ、
+    /// リクエスト全体の SQL の数が読めなくなるため。
+    ///
+    pub def mergeCounts(incoming: Fields, existing: Fields): Fields =
+        Map.foldLeftWithKey((acc, key, value) -> Map.insert(key, summed(key, value, Map.get(key, existing)), acc), existing, incoming)
+
+    /// 数えるキーで両方 int なら和。それ以外は incoming の値。
+    def summed(key: String, incoming: Value, existing: Option[Value]): Value = match (existing, incoming) {
+        case (Some(Value.Int(before)), Value.Int(added)) if Set.memberOf(key, countedKeys()) => Value.Int(before + added)
+        case _ => incoming
+    }
+
     // ---- DB の失敗 ----
 
     ///

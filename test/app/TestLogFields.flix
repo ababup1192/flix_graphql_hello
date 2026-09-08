@@ -199,4 +199,13 @@ mod TestLogFields {
             expected = (Some("rid"), None),
             (LogFields.requestIdOf(Fields.empty() |> Fields.str("request.id", "rid")), LogFields.requestIdOf(Fields.empty())))
 
+    /// observe で戻った属性の合わせ方。数えるキー（db.statements / db.transactions / db.retries）は和、それ以外は後から来た物が勝つ。無かったキーはそのまま入る。
+    @Test
+    def testMergeCountsSumsCountedKeys(): Unit \ Assert =
+        let existing = Fields.empty() |> Fields.int("db.statements", 7i64) |> Fields.int("db.transactions", 1i64) |> Fields.str("credential.kind", "jwt");
+        let incoming = Fields.empty() |> Fields.int("db.statements", 3i64) |> Fields.int("db.transactions", 1i64) |> Fields.int("db.retries", 1i64) |> Fields.str("credential.kind", "invalid");
+        Assert.assertEq(
+            expected = Fields.empty() |> Fields.int("db.statements", 10i64) |> Fields.int("db.transactions", 2i64) |> Fields.int("db.retries", 1i64) |> Fields.str("credential.kind", "invalid"),
+            LogFields.mergeCounts(incoming, existing))
+
 }

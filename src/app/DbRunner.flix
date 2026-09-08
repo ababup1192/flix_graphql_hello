@@ -81,16 +81,47 @@ mod DbRunner {
     ///
     pub def transactObserved(pool: Pool, projectId: Option[ProjectId], observe: Log.Fields -> Unit \ IO, thunk: Unit -> a \ ef): Result[DbFailure, Result[CmsFailure, a]] \ (ef - {Db, CmsErr}) + IO =
         let counter = Ref.fresh(Static, 0);
+        let statements = Ref.fresh(Static, 0);
         notePool(observe, pool);
         let outcome = retryWith(counter, () -> {
-            let inTx = () -> CmsErr.runWithResult(() -> Db.guard(thunk));
+            let inTx = () -> CmsErr.runWithResult(() -> counting(statements, () -> Db.guard(thunk)));
             match projectId {
                 case Some(found) => TenantTx.withLazyTxResult(pool, found, inTx)
                 case None        => Pool.withLazyTxResult(pool, inTx)
             }
         });
         noteRetries(observe, Ref.get(counter));
+        noteStatements(observe, Ref.get(statements));
         outcome
+
+    ///
+    /// SQL の数を数え、外側の handler（withLazyTx の接続）へそのまま転送する。fetch / execute / executeReturning を 1 と数える。
+    ///
+    /// WhyNot: Db.guard の外に置くのは、一番内側の handler の直下に try を置く決まりのため（handler が try の内側に入ると例外が素通りする）。
+    /// CmsErr.runWithResult の内側に置くのは、業務エラーで抜けた後も数えた値を Ref から読めるため。
+    ///
+    def counting(counter: Ref[Int32, Static], thunk: Unit -> a \ ef): a \ ef + {SqlRead, SqlWrite, IO} =
+        run {
+            thunk()
+        } with handler SqlRead {
+            def fetch(sql, params, resume) = { tally(counter); resume(SqlRead.fetch(sql, params)) }
+        } with handler SqlWrite {
+            def execute(sql, params, resume) = { tally(counter); resume(SqlWrite.execute(sql, params)) }
+            def executeReturning(sql, params, resume) = { tally(counter); resume(SqlWrite.executeReturning(sql, params)) }
+        }
+
+    /// 1 つ数える。
+    def tally(counter: Ref[Int32, Static]): Unit \ IO =
+        Ref.put(Ref.get(counter) + 1, counter)
+
+    ///
+    /// 出した SQL の数と、この Tx を 1 つとしてリクエストの行に。受ける側（LogFields.mergeCounts）が同じリクエストの分を足し合わせる。
+    /// SQL を 1 本も出さなかった Tx（純粋なフィールド）も 1 と数える（transact を呼んだ回数）。
+    ///
+    def noteStatements(observe: Log.Fields -> Unit \ IO, statements: Int32): Unit \ IO =
+        observe(Log.Fields.empty()
+            |> Log.Fields.int("db.statements", Int32.toInt64(statements))
+            |> Log.Fields.int("db.transactions", 1i64))
 
     ///
     /// transact の結果を GraphQL のフィールドの結果に。DB の失敗と業務エラーは GraphqlErrors が写し、成功はリゾルバの戻りをそのまま。
@@ -116,10 +147,22 @@ mod DbRunner {
     /// このファイルと TenantTx だけ（`scripts/check-tx.sh` が見張る）。
     ///
     pub def withTx(pool: Pool, scope: Option[ProjectId], thunk: Unit -> a \ ef): Result[DbFailure, a] \ (ef - Db) + IO =
-        retrying(() -> match scope {
-            case Some(found) => TenantTx.withLazyTx(pool, found, () -> Db.guard(thunk))
-            case None        => Pool.withLazyTx(pool, () -> Db.guard(thunk))
-        })
+        withTxObserved(pool, scope, _ -> (), thunk)
+
+    ///
+    /// `withTx` に加えて、出した SQL の数と Tx の数（db.statements / db.transactions）を observe でリクエストの行に戻す。
+    ///
+    pub def withTxObserved(pool: Pool, scope: Option[ProjectId], observe: Log.Fields -> Unit \ IO, thunk: Unit -> a \ ef): Result[DbFailure, a] \ (ef - Db) + IO =
+        let statements = Ref.fresh(Static, 0);
+        let outcome = retrying(() -> {
+            let inTx = () -> counting(statements, () -> Db.guard(thunk));
+            match scope {
+                case Some(found) => TenantTx.withLazyTx(pool, found, inTx)
+                case None        => Pool.withLazyTx(pool, inTx)
+            }
+        });
+        noteStatements(observe, Ref.get(statements));
+        outcome
 
     ///
     /// 一時的な失敗は 3 回まで再試行し、DbFailure を Result にする。Tx を張らない物（`withTx` と、Tx の外の DB 操作）用。

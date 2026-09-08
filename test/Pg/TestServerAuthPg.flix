@@ -63,12 +63,12 @@ mod TestServerAuthPg {
                 Some("認証に失敗しました: JWT は無し")),
             outcome)
 
-    /// Runner が Context の observe に戻した属性を集めて問い合わせる。戻り値は (observe に来た属性, errors[].code)。
+    /// Runner が Context の observe に戻した属性を集めて問い合わせる。戻り値は (observe に来た認証の属性。SQL の数（db.*）は除く, errors[].code)。
     def askObserved(engine: Graphql.Engine, credential: Credential, queryText: String): (Log.Fields, Option[String]) \ IO =
         let observed = Ref.fresh(Static, Log.Fields.empty());
         let context = { observe = fields -> Ref.put(Map.union(fields, Ref.get(observed)), observed) | Context.withCredential(credential) };
         let response = Graphql.executeWith(engine, GraphqlTestKit.queryOnly(queryText), context);
-        (Ref.get(observed), GraphqlTestKit.firstErrorField("extensions", response) |> Value.field("code") |> Value.asStr)
+        (Ref.get(observed) |> Map.filterWithKey((key, _) -> not String.startsWith(prefix = "db.", key)), GraphqlTestKit.firstErrorField("extensions", response) |> Value.field("code") |> Value.asStr)
 
     ///
     /// Runner が observe に戻す身元の属性と、それで決まるリクエストの行の重さ:

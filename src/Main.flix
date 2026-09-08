@@ -270,7 +270,8 @@ def unavailable(message: String): HttpResponse \ Observe =
 ///
 /// エンジンで Graphql effect を本物の実行にし、時計を入れる。実行ごとに Context に span を入れ（Runner がリゾルバの中の行に付ける）、
 /// 操作の名前と種類、errors[] の code を extra に積む（リクエストの行に乗る）。Runner が決めた身元の属性（user.id / api_key.name、
-/// 検証に落ちた印）は Context の observe で extra に戻す。Runner の側が勝つ（Map.union は左が勝つ）ので、ヘッダから読んだ credential.kind を上書きできる。
+/// 検証に落ちた印）は Context の observe で extra に戻す。Runner の側が勝つ（LogFields.mergeCounts は incoming が勝つ）ので、ヘッダから読んだ credential.kind を上書きできる。
+/// SQL と Tx の数（db.statements / db.transactions）はフィールドごとに戻るので、mergeCounts が足し合わせる。
 ///
 /// WhyNot: observe を effect にしないのは、Runner は graphql-java の Java コールバックの中で動き、effect はそこを越えられないため。
 /// Ref を閉じ込めたラムダは値なので越えられる。
@@ -280,7 +281,7 @@ def runObserved(engine: Graphql.Engine, contextFields: Log.Fields, extra: Ref[Lo
         thunk()
     } with handler Graphql {
         def execute(request, context, resume) = {
-            let observe = fields -> Ref.put(Map.union(fields, Ref.get(extra)), extra);
+            let observe = fields -> Ref.put(LogFields.mergeCounts(fields, Ref.get(extra)), extra);
             let response = Graphql.executeWith(engine, request, { log = contextFields, observe = observe | context });
             Ref.put(Ref.get(extra) |> LogFields.graphql(request, response), extra);
             resume(response)
