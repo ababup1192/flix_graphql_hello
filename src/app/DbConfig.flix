@@ -5,11 +5,25 @@
 /// - CMS_DB_USER / CMS_DB_PASSWORD: 省略時は "cms"（docker-compose.yml と同じ）。表の所有者。migration に使う
 /// - CMS_DB_APP_USER / CMS_DB_APP_PASSWORD: リクエストに使うアプリ用のロール（RLS が効く）。PASSWORD が無ければ所有者で繋ぐ
 /// - CMS_DB_TIMEOUT_SECONDS: 接続ごとに DB 側で効かせる時間の上限（idle_in_transaction_session_timeout / statement_timeout / lock_timeout）。既定 30。0 で無効
+/// - CMS_DB_LEAK_DETECTION_SECONDS: 借りたまま返さない接続を HikariCP が警告するまでの秒数。既定 0（無効）
 ///
 mod DbConfig {
 
     /// CMS_DB_TIMEOUT_SECONDS の既定（秒）。
     pub def defaultTimeoutSeconds(): Int32 = 30
+
+    ///
+    /// プールの設定。接続数と待ちは sqlfx の既定のまま、漏れの検出だけ CMS_DB_LEAK_DETECTION_SECONDS で足す。
+    ///
+    pub def poolFromEnv(connection: Jdbc.ConnectionConfig): Pool.PoolConfig \ Sys.Env =
+        { leakDetectionThresholdMs = leakDetectionSeconds(Sys.Env.getVar("CMS_DB_LEAK_DETECTION_SECONDS")) * 1000
+        | Pool.defaultConfig(connection) }
+
+    ///
+    /// CMS_DB_LEAK_DETECTION_SECONDS の値を秒にする。無い・数字でない・負なら 0（無効）。
+    ///
+    pub def leakDetectionSeconds(raw: Option[String]): Int32 =
+        raw |> Option.flatMap(Int32.fromString) |> Option.filter(seconds -> seconds >= 0) |> Option.getWithDefault(0)
 
     ///
     /// アプリ用のロールの接続設定。CMS_DB_APP_PASSWORD が無ければ None（所有者で繋ぐ。FORCE ROW LEVEL SECURITY なので policy 自体は効く）。

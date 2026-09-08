@@ -29,4 +29,12 @@ mod TestDbConfig {
             expected = table |> List.map(snd),
             table |> List.map(match (raw, _) -> DbConfig.timeoutSeconds(raw)))
 
+    /// 無い・数字でない・負なら 0（漏れの検出は無効）。
+    @Test
+    def testLeakDetectionSecondsTable(): Unit \ Assert =
+        let table = List#{ (None, 0), (Some("60"), 60), (Some("abc"), 0), (Some("-3"), 0), (Some("0"), 0) };
+        Assert.assertEq(
+            expected = table |> List.map(snd),
+            table |> List.map(match (raw, _) -> DbConfig.leakDetectionSeconds(raw)))
+
 }

@@ -249,7 +249,7 @@ mod TestServer {
     /// DB に届けば 200 と {"status": "ok"}。クエリ文字列が付いていても同じ。
     @Test
     def testServerHealthOk(): Unit \ Assert =
-        Assert.assertEq(expected = ((200, Ok(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str("dev"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }) }))), 200),
+        Assert.assertEq(expected = ((200, Ok(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str("dev"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }), "pool" => Value.Obj(Map#{ "active" => Value.Int(1), "idle" => Value.Int(2), "waiting" => Value.Int(0), "total" => Value.Int(3), "max" => Value.Int(10) }) }))), 200),
             GraphqlFake.runWithEcho(() -> {
                 let response = handle({ version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" });
                 ((response#status, JsonValue.parse(response#body)),
@@ -261,7 +261,7 @@ mod TestServer {
     def testServerHealthFailure(): Unit \ Assert =
         let response = GraphqlFake.runWithEcho(() ->
             serve(Server.defaultConfig(), HealthFake.failing("connection refused"), Credential.Missing, { version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" }));
-        Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }) }))),
+        Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }), "pool" => Value.Obj(Map#{ "active" => Value.Int(1), "idle" => Value.Int(2), "waiting" => Value.Int(0), "total" => Value.Int(3), "max" => Value.Int(10) }) }))),
             (response#status, JsonValue.parse(response#body)))
 
     /// /health への POST は 405 で Allow: GET。

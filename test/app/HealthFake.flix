@@ -11,11 +11,15 @@ mod HealthFake {
     pub def busy(): HttpServer.Connections =
         { active = 1, max = 256 }
 
+    /// 上限 10 本のうち 1 本を使っていて、待ちは無い。
+    pub def pool(): Pool.PoolStats =
+        { active = 1, idle = 2, waiting = 0, total = 3, max = 10 }
+
     ///
     /// checkDb が常に Ok を返す。ワーカーは 1 度も回っていない事にし、runJobs は何もせず空を返す。
     ///
     pub def ok(): Health[{}] =
-        { checkDb = _ -> Ok(()), jobsSummary = _ -> idle(), runJobs = _ -> Nil, connections = _ -> busy() }
+        { checkDb = _ -> Ok(()), jobsSummary = _ -> idle(), runJobs = _ -> Nil, connections = _ -> busy(), poolStats = _ -> pool() }
 
     ///
     /// checkDb が常に message の Err を返す。

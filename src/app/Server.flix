@@ -114,12 +114,17 @@ mod Server {
         }
 
     ///
-    /// GET /health。DB に届けば {"status": "ok", "version": "...", "jobs": {"lastTickAt": ...}, "connections": {"active": 1, "max": 256}}、届かなければ 503 で理由を付ける。
+    /// GET /health。DB に届けば {"status": "ok", "version": "...", "jobs": {"lastTickAt": ...}, "connections": {"active": 1, "max": 256}, "pool": {"active": 1, ...}}、届かなければ 503 で理由を付ける。
+    /// connections は HTTP の接続、pool は DB の接続プール（別の物）。
     ///
     def healthRoute(version: String, health: Health[ef], _routeRequest: RouteRequest): HttpResponse \ ef =
         let summary = (health#jobsSummary)();
         let connected = (health#connections)();
+        let stats = (health#poolStats)();
         let connections = Value.Obj(Map#{ "active" => Value.Int(connected#active), "max" => Value.Int(connected#max) });
+        let pool = Value.Obj(Map#{
+            "active" => Value.Int(stats#active), "idle" => Value.Int(stats#idle), "waiting" => Value.Int(stats#waiting),
+            "total" => Value.Int(stats#total), "max" => Value.Int(stats#max) });
         let jobs = Value.Obj(Map#{
             "lastTickAt" => summary#lastTickAt |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null),
             "pendingSchedules" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#pendingSchedules)),
@@ -127,8 +132,8 @@ mod Server {
             "pendingDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#pendingDeliveries)),
             "failedDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedDeliveries)) });
         match (health#checkDb)() {
-            case Ok(())       => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str(version), "jobs" => jobs, "connections" => connections })) }
-            case Err(message) => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str(version), "db" => Value.Str(message), "jobs" => jobs, "connections" => connections })) }
+            case Ok(())       => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str(version), "jobs" => jobs, "connections" => connections, "pool" => pool })) }
+            case Err(message) => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str(version), "db" => Value.Str(message), "jobs" => jobs, "connections" => connections, "pool" => pool })) }
         }
 
     ///

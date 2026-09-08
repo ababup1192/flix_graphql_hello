@@ -6,6 +6,7 @@
 /// - jobsSummary: バックグラウンドワーカーのまとめ（最終実行時刻と待ち・失敗の件数）
 /// - runJobs: 外部トリガーから 1 周回す。失敗した所の説明（空なら全部通った）
 /// - connections: HTTP の同時接続の今の数と上限
+/// - poolStats: DB の接続プールの数字（HTTP の接続数とは別）
 ///
 /// WhyNot: effect にしないのは、入力（プール・ワーカー・Listener）が起動時に固定で、読む所が Server の直下なので
 /// 値で渡しても引数が 1 本しか増えないため。差し替えには当たるが、IdGen / ObjectStore のように深い所で使う物ではない。
@@ -15,7 +16,8 @@ pub type alias Health[ef: Eff] = {
     checkDb     = Unit -> Result[String, Unit] \ ef,
     jobsSummary = Unit -> BackgroundJobs.Summary \ ef,
     runJobs     = Unit -> List[String] \ ef,
-    connections = Unit -> HttpServer.Connections \ ef
+    connections = Unit -> HttpServer.Connections \ ef,
+    poolStats   = Unit -> Pool.PoolStats \ ef
 }
 
 mod Health {
@@ -27,7 +29,8 @@ mod Health {
         { checkDb     = _ -> ping(pool),
           jobsSummary = _ -> BackgroundJobs.summary(pool, jobs),
           runJobs     = _ -> BackgroundJobs.tick(pool, jobs),
-          connections = _ -> HttpServer.connections(listener) }
+          connections = _ -> HttpServer.connections(listener),
+          poolStats   = _ -> Pool.stats(pool) }
 
     ///
     /// プールから接続を 1 本借りて SELECT 1 を投げる。借りられない・届かないは理由付きの Err。

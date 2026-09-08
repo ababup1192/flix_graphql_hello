@@ -207,6 +207,22 @@ sum(count_over_time({service="cms"} | json | __error__ != "" [5m])) > 0
 
 `/health` の `connections` は `{"active": 今つないでいる数, "max": CMS_MAX_CONNECTIONS}`。active が max に張り付いていれば 503 が出ている。
 
+### DB の接続プール
+
+`/health` の `pool` は DB の接続プールの数字（HTTP の `connections` とは別）で、`{"active": 借りている数, "idle": 空き, "waiting": 借りるのを待っているスレッド, "total": 開いている接続, "max": 上限}`。
+`waiting` が 0 より大きい状態が続けば枯渇していて、`active` が `max` に張り付いたまま `waiting` も減らないなら接続が返っていない（漏れ）。
+リクエストの行にも、待ちが出ている時だけ `db.pool.waiting` / `db.pool.active` が付く。
+
+DB の失敗の行（`message: "field failed"`）には `error.kind` が付く。`connectionLost` なら DB に届いていない（落ちている）、`timeout` なら届くが遅い（`statement_timeout` か borrow 待ち）、`deadlock` はロックの競合。
+一時的な失敗で呼び直した時は、リクエストの行に `db.retries`（1〜2）が付く。
+
+`CMS_DB_LEAK_DETECTION_SECONDS` を入れると HikariCP が「借りたまま返らない接続」を見張るが、**警告の行は出ない**（cms は HikariCP の SLF4J を `slf4j-nop` で黙らせている。出すと Flix のテストが標準エラーで落ちるため）。
+気付き方は `/health` の `pool.active` が張り付く事の方で、しきい値の設定は将来 SLF4J の束縛を差し替えた時のために置いてある。
+
+**`/health` は DB が落ちている時に 15〜20 秒返らない**（Dockerfile の `HEALTHCHECK --timeout=3s` は毎回 timeout 扱いになる）。
+今の sqlfx の API には `Pool.withConnection` に待ちの上限を渡す口が無く、ping の前に `SET LOCAL statement_timeout` を置いても接続を借りる所で待つので効かない。
+短くするには sqlfx 側に borrow の上限を渡す口が要る（次の回し）。それまでは「`/health` が返らない = DB に届いていない」として扱う。
+
 予約公開と再起動: プロセスが落ちた時に実行中だった仕事は失われないが、`claimed_at` の回復で拾い直すのは 10 分後になる（その分だけ公開が遅れる）。
 
 ## keep-alive と同時接続
@@ -234,6 +250,7 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_DSN` / `CMS_DB_USER` / `CMS_DB_PASSWORD` | PostgreSQL。表の所有者（migration に使う） | 必須 / cms / cms |
 | `CMS_DB_APP_USER` / `CMS_DB_APP_PASSWORD` | リクエストに使うロール。起動時に所有者が作り、表の読み書きだけ許す（RLS が効く）。PASSWORD が無ければ所有者で繋ぐ | cms_app / 無し |
 | `CMS_DB_TIMEOUT_SECONDS` | 接続ごとに DB 側で効かせる時間の上限（秒）。`idle_in_transaction_session_timeout` / `statement_timeout` / `lock_timeout` を同じ値にする（pgjdbc の `options` で接続時に付ける）。アプリの不具合で Tx が開いたままでも DB 側が切る。0 で無効。`CMS_DSN` に `options=` を書いた時はそちらが優先 | 30 |
+| `CMS_DB_LEAK_DETECTION_SECONDS` | 借りたまま返らない接続を HikariCP が見張るまでの秒数。0 で無効。警告の行は出ない（`slf4j-nop`。上の「DB の接続プール」） | 0 |
 | `CMS_MIGRATE` | `apply`（起動時に当てる）か `check`（未適用なら起動しない） | イメージは apply、手元は check |
 | `CMS_CORS_ORIGINS` | 許すオリジン（カンマ区切り） | 無し |
 | `CMS_VERSION` | `/health` に出す版 | イメージのビルド時に git の sha |

@@ -61,6 +61,18 @@ mod DbRunner {
         else observe(Log.Fields.empty() |> Log.Fields.int("db.retries", Int32.toInt64(retries)))
 
     ///
+    /// 待ちが出ている時だけ、プールの数字をリクエストの行に。枯渇（待ち行列）を後から数えられるようにする。
+    ///
+    /// WhyNot: 待ちが 0 の時も出さないのは、全リクエストに 2 つキーが増えて、平常時のログが太るため。
+    ///
+    def notePool(observe: Log.Fields -> Unit \ IO, pool: Pool): Unit \ IO =
+        let stats = Pool.stats(pool);
+        if (stats#waiting <= 0) ()
+        else observe(Log.Fields.empty()
+            |> Log.Fields.int("db.pool.waiting", Int32.toInt64(stats#waiting))
+            |> Log.Fields.int("db.pool.active", Int32.toInt64(stats#active)))
+
+    ///
     /// 印付き（projectId があれば RLS の印）の遅延 Tx で thunk を走らせる。一時的な失敗は 3 回まで再試行し、
     /// 業務エラーは ROLLBACK の上で Ok(Err(failure)) として返す。
     ///
@@ -74,6 +86,7 @@ mod DbRunner {
     pub def transactObserved(pool: Pool, projectId: Option[ProjectId], observe: Log.Fields -> Unit \ IO, thunk: Unit -> a \ ef): Result[DbFailure, Result[CmsFailure, a]] \ (ef - {Db, CmsErr}) + IO =
         let stash = Ref.fresh(Static, None);
         let counter = Ref.fresh(Static, 0);
+        notePool(observe, pool);
         let outcome = retryWith(counter, () -> {
             let inTx = () -> match CmsErr.runWithResult(() -> guarded(thunk)) {
                 case Ok(value)    => value
