@@ -1,7 +1,8 @@
 ///
 /// 今のリクエストの主体（Actor）を持つ effect。Tenant と同じ形で、Runner がリクエストごとに handler を入れる。
-/// ユースケースは `Session.require(permission)` を 1 行呼ぶ。effect を足したのに呼ばない関数は「未使用の effect」で
-/// コンパイルが落ちるので、権限の検査の書き忘れが見つかる。
+/// ユースケースの入口は権限の証明 `Granted[p]`（`Session.grant()` が作る）を引数で受け、呼ぶ側が証明を作って渡す。
+/// 証明を作らずに呼ぶと引数が足りずにコンパイルが落ちるので、権限の検査の書き忘れが見つかる。
+/// `Session.require(permission)` は証明に移していないユースケースの形（第 2 段で全部を移す）。
 ///
 pub eff Session {
     /// 今の主体
@@ -11,10 +12,34 @@ pub eff Session {
 mod Session {
 
     ///
+    /// 権限の証明の本体（署名では alias の `Granted[p]` で書く）。中身の Seal はこの mod の外からは作れないので、作れるのは grant / grantOn だけ。
+    ///
+    pub enum Granted[_p](Seal)
+
+    enum Seal {
+        case Seal
+    }
+
+    ///
     /// 主体を決めて f を走らせる。
     ///
     pub def runWith(actor: Actor, f: Unit -> a \ ef): a \ ef - Session =
         run f() with handler Session { def current(resume) = resume(actor) }
+
+    ///
+    /// この操作の証明。できなければ forbidden。対象は指定しない。
+    /// p は渡す先の引数の型（`Granted[ManageTypes]` など）から決まる。
+    ///
+    pub def grant(): Granted[p] \ Session + CmsErr with Perm[p] =
+        grantOn(Authz.anyResource())
+
+    ///
+    /// この対象に対するこの操作の証明。できなければ forbidden。
+    ///
+    pub def grantOn(resource: Authz.Resource): Granted[p] \ Session + CmsErr with Perm[p] =
+        let proof = Granted.Granted(Seal.Seal);
+        requireOn(Perm.permission(proof), resource);
+        proof
 
     ///
     /// この操作ができなければ forbidden。対象は指定しない。

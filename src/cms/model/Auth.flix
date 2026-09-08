@@ -108,7 +108,7 @@ mod OrgRole {
 }
 
 ///
-/// 操作の種類。ユースケースが `Session.require` で要求する。
+/// 操作の種類。ユースケースが `Session.grant()`（証明 `Granted[p]`。印の型は Granted.flix）か `Session.require` で要求する。
 ///
 pub enum Permission with Eq, Order, ToString {
     /// 下書きと型の定義を読む（管理 API の Query 全部）
