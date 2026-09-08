@@ -11,16 +11,16 @@ mod TestServer {
         serve(Server.defaultConfig(), HealthFake.ok(), Credential.Missing, request)
 
     ///
-    /// Server.handle をログ無し・属性無しで呼ぶ（Route は Log と Observe を持つ）。
+    /// Server.handle をログ無し・属性無し・匿名で呼ぶ（Route は Log と Observe を持つ）。
     ///
     def serve(config: ServerConfig, health: Health[{}], credential: Credential, request: HttpRequest): HttpResponse \ Graphql =
-        ServerTestKit.quietly(() -> Server.handle(config, health, credential, request))
+        ServerTestKit.quietly(() -> Server.handle(config, health, credential, Ok(Authentication.anonymous()), request))
 
     ///
     /// Server.handle を呼び、(ステータス, リクエストの行に積んだ error.code) を返す。
     ///
     def rejectionOf(config: ServerConfig, request: HttpRequest): (Int32, Option[String]) \ Graphql =
-        let (response, fields) = fst(Log.runWithList(() -> Observe.collect(() -> Server.handle(config, HealthFake.ok(), Credential.Missing, request))));
+        let (response, fields) = fst(Log.runWithList(() -> Observe.collect(() -> Server.handle(config, HealthFake.ok(), Credential.Missing, Ok(Authentication.anonymous()), request))));
         (response#status, Map.get("error.code", fields) |> Option.flatMap(Value.asStr))
 
     /// メソッドとパスとヘッダだけのリクエスト。
@@ -151,26 +151,28 @@ mod TestServer {
         Assert.assertEq(expected = cases |> List.map(snd),
             GraphqlFake.runWithEcho(() -> cases |> List.map(match ((config, request), _) -> rejectionOf(config, request))))
 
-    /// MCP の本文を読む前の検査: 415 / 403 / 400 / 401 と error.code。403 は Origin（scheme + host）も積む。通る物は Ok。
+    /// MCP の本文を読む前の検査: 415 / 403 / 400 / 401 と error.code。403 は Origin（scheme + host）も積む。通る物は認証済みユーザー。
     @Test
     def testServerMcpPrecheckTable(): Unit \ Assert =
         let json = ("Content-Type", "application/json") :: Nil;
-        let routeRequest = (headers, credential) -> { request = requestOf("POST", "/mcp", headers, "{}"), params = Map.empty(), credential = credential };
+        let key = Actor.ApiKey("ci", ApiKeyScope.Read);
+        let routeRequest = (headers, credential, auth) -> { request = requestOf("POST", "/mcp", headers, "{}"), params = Map.empty(), credential = credential, auth = auth };
         let summarize = outcome -> match outcome {
-            case Ok(())                  => Ok(())
+            case Ok(actor)               => Ok(actor)
             case Err((response, fields)) => Err((response#status, Map.get("error.code", fields) |> Option.flatMap(Value.asStr), Map.get("origin", fields) |> Option.flatMap(Value.asStr)))
         };
         let cases = List#{
-            ((Nil, Credential.Missing),                                                                          Err((415, Some("unsupported_media_type"), None))),
-            ((("Origin", "https://evil.example.com/path?q=1") :: json, Credential.ApiKey("cms_x")),               Err((403, Some("origin"), Some("https://evil.example.com")))),
-            ((("MCP-Protocol-Version", "2099-01-01") :: json, Credential.ApiKey("cms_x")),                       Err((400, Some("protocol_version"), None))),
-            ((json, Credential.Preview("pv_x")),                                                                Err((400, Some("preview_token"), None))),
-            ((json, Credential.Invalid("PAT は失効しています")),                                                 Err((401, Some("unauthenticated"), None))),
-            ((("Origin", "https://admin.example.com") :: json, Credential.ApiKey("cms_x")),                      Ok(())),
-            ((json, Credential.Missing),                                                                         Ok(()))
+            ((Nil, Credential.Missing, Ok(Authentication.anonymous())),                                                                Err((415, Some("unsupported_media_type"), None))),
+            ((("Origin", "https://evil.example.com/path?q=1") :: json, Credential.ApiKey("cms_x"), Ok({ actor = key, log = Map.empty() })), Err((403, Some("origin"), Some("https://evil.example.com")))),
+            ((("MCP-Protocol-Version", "2099-01-01") :: json, Credential.ApiKey("cms_x"), Ok({ actor = key, log = Map.empty() })),      Err((400, Some("protocol_version"), None))),
+            ((json, Credential.Preview("pv_x"), Ok(Authentication.anonymous())),                                                       Err((400, Some("preview_token"), None))),
+            ((json, Credential.PersonalToken("cmspat_x"), Err(Rejection.DeadToken(PatRejection.Revoked))),                              Err((401, Some("unauthenticated"), None))),
+            ((json, Credential.Invalid("JWT は無し"), Err(Rejection.Invalid("JWT は無し"))),                                             Err((401, Some("unauthenticated"), None))),
+            ((("Origin", "https://admin.example.com") :: json, Credential.ApiKey("cms_x"), Ok({ actor = key, log = Map.empty() })),     Ok(key)),
+            ((json, Credential.Missing, Ok(Authentication.anonymous())),                                                               Ok(Actor.Anonymous))
         };
         Assert.assertEq(expected = cases |> List.map(snd),
-            cases |> List.map(match ((headers, credential), _) -> Server.mcpPrecheck(adminConfig(), routeRequest(headers, credential)) |> summarize))
+            cases |> List.map(match ((headers, credential, auth), _) -> Server.mcpPrecheck(adminConfig(), routeRequest(headers, credential, auth)) |> summarize))
 
     /// parse に落ちた MCP の本文の理由: 壊れた JSON は bad_json、形の違う物は bad_request。message は応答の物。
     @Test
@@ -350,7 +352,7 @@ mod TestServer {
         let slugOf = (baseDomain, path, host) -> Observe.ignore(() ->
             Server.wrapProjectFromHost(baseDomain, Server.dispatch(table, (_, routeRequest) ->
                 { status = 200, headers = Nil, body = Map.get(Router.projectSlugParam(), routeRequest#params) |> Option.getWithDefault("") }))
-                ({ request = { version = "HTTP/1.1", method = "GET", path = path, headers = ("Host", host) :: Nil, body = "" }, params = Map.empty(), credential = Credential.Missing })#body);
+                ({ request = { version = "HTTP/1.1", method = "GET", path = path, headers = ("Host", host) :: Nil, body = "" }, params = Map.empty(), credential = Credential.Missing, auth = Ok(Authentication.anonymous()) })#body);
         Assert.assertEq(expected = ("shop", "business", ""),
             (slugOf(Some("example.com"), "/p/shop/graphql", "consumer.example.com"),
              slugOf(Some("example.com"), "/admin/graphql", "business.example.com"),

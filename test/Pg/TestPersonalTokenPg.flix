@@ -5,10 +5,9 @@
 ///
 mod TestPersonalTokenPg {
 
-    /// 管理 API と Account API の両方の Schema。同じプールと依存で組む。
-    def schemas(pool: Pool): (Schema, Schema) \ IO =
-        let deps = PgTestSupport.deps();
-        (AdminSchema.make(deps, AdminRunner.make(pool, deps, ProjectId.default())), AccountSchema.make(deps, AccountRunner.make(pool, deps)))
+    /// 管理 API と Account API の両方。同じプールで組む。
+    def schemas(pool: Pool): (PgTestSupport.Api, PgTestSupport.Api) \ IO =
+        (PgTestSupport.adminApi(pool), PgTestSupport.accountApi(pool))
 
     /// Account API でこの名前と scope の PAT を発行し、生のトークンを返す。
     def issueVia(account: String -> (Value, Option[String]) \ IO, name: String, scope: String): String \ IO =

@@ -11,8 +11,8 @@ mod TestAccountPg {
     ///
     @Test
     def testPgAccountCreateOrganizationAndProject(): Unit \ {IO, Assert} =
-        let (before, created, createdProject, badSlug, reserved, after) = PgTestSupport.withAccountApi(() -> (), (schema, _) -> {
-            let ask = PgTestSupport.askAs(schema, PgTestSupport.bearer("alice", "alice@example.com"));
+        let (before, created, createdProject, badSlug, reserved, after) = PgTestSupport.withAccountApi(() -> (), (api, _) -> {
+            let ask = PgTestSupport.askAs(api, PgTestSupport.bearer("alice", "alice@example.com"));
             let before = ask("{ me { email organizations { role } projects { role } } }");
             let created = ask("mutation { createOrganization(name: \"Acme\") { id name } }");
             let orgId = GraphqlTestKit.stringAt(List#{"createOrganization", "id"}, created);
@@ -40,10 +40,10 @@ mod TestAccountPg {
     ///
     @Test
     def testPgAccountOrganizationMembers(): Unit \ {IO, Assert} =
-        let (added, members, memberAdds, outsiderSees, memberSees, lastOwner, removed) = PgTestSupport.withAccountApi(() -> (), (schema, _) -> {
-            let alice = PgTestSupport.askAs(schema, PgTestSupport.bearer("alice", "alice@example.com"));
-            let bob = PgTestSupport.askAs(schema, PgTestSupport.bearer("bob", "bob@example.com"));
-            let carol = PgTestSupport.askAs(schema, PgTestSupport.bearer("carol", "carol@example.com"));
+        let (added, members, memberAdds, outsiderSees, memberSees, lastOwner, removed) = PgTestSupport.withAccountApi(() -> (), (api, _) -> {
+            let alice = PgTestSupport.askAs(api, PgTestSupport.bearer("alice", "alice@example.com"));
+            let bob = PgTestSupport.askAs(api, PgTestSupport.bearer("bob", "bob@example.com"));
+            let carol = PgTestSupport.askAs(api, PgTestSupport.bearer("carol", "carol@example.com"));
             let bobId = GraphqlTestKit.stringAt(List#{"me", "id"}, bob("{ me { id } }"));
             let aliceId = GraphqlTestKit.stringAt(List#{"me", "id"}, alice("{ me { id } }"));
             discard carol("{ me { id } }");
@@ -75,9 +75,9 @@ mod TestAccountPg {
     ///
     @Test
     def testPgAccountRequiresLogin(): Unit \ {IO, Assert} =
-        let (anonymousMe, anonymousCreate, withKey) = PgTestSupport.withAccountApi(() -> (), (schema, _) -> {
-            let anonymous = PgTestSupport.askAs(schema, Credential.Missing);
-            let keyed = PgTestSupport.askAs(schema, Credential.ApiKey("cms_whatever"));
+        let (anonymousMe, anonymousCreate, withKey) = PgTestSupport.withAccountApi(() -> (), (api, _) -> {
+            let anonymous = PgTestSupport.askAs(api, Credential.Missing);
+            let keyed = PgTestSupport.askAs(api, Credential.ApiKey("cms_whatever"));
             (anonymous("{ me { email } }"),
              anonymous("mutation { createOrganization(name: \"x\") { id } }") |> snd,
              keyed("{ me { email } }") |> snd)

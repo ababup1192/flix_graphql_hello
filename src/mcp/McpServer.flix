@@ -98,6 +98,10 @@ mod McpServer {
     ///
     /// 1 メッセージを処理する。serverVersion は serverInfo.version（/health と同じ）。execute は admin engine への GraphQL。
     ///
+    /// WhyNot: @DontInline を付けるのは、呼ぶ側（Server.mcpRoute）が Graphql と Observe を持つ CPS の frame で、
+    /// ここから先のツールの表ごと inline されると JVM のメソッドの上限（64 KB）を超えるため（2026-09-08 に "Method too large" で実測）。
+    ///
+    @DontInline
     pub def dispatch(serverVersion: String, message: Message, execute: GraphqlRequest -> GraphqlResponse \ ef): Reply \ ef = match message {
         case Message.Notification(_, _)              => Reply.Accepted
         case Message.Request(id, "initialize", params) => Reply.Body(resultBody(id, initializeResult(serverVersion, params)))

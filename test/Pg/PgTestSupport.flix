@@ -1,5 +1,5 @@
 ///
-/// 実 PG のテストで共有する部品: 接続設定、migrations の当て直し、接続の開閉、身元（owner / Bearer / pepper）、
+/// 実 PG のテストで共有する部品: 接続設定、migrations の当て直し、接続の開閉、Credential（owner / Bearer / pepper）と認証、
 /// スキーマとエンジンの組み立て、プール越しの Tx、名前付きの比較。
 ///
 mod PgTestSupport {
@@ -160,21 +160,43 @@ mod PgTestSupport {
         result
 
     ///
-    /// テーブルを作り直して seed を当て、その結果と管理 API の Schema を body に渡す。seed が失敗するのはテストの前提が壊れている。
+    /// テストが問い合わせる API。スキーマと、認証（リクエストに 1 回。Main.runRoute と同じ）に要るプール・エンジンの種類・プロジェクト（Account は無し）。
     ///
-    pub def withAdminApi(seeding: Unit -> b \ ef2, body: (Schema, b) -> a \ ef): a \ (ef2 - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr, IdGen, Tenant, Session, ObjectStore}) + ef + IO =
+    pub type alias Api = { schema = Schema, engine = Engine, pool = Pool, scope = Option[ProjectId] }
+
+    ///
+    /// 既定のプロジェクトの管理 API。
+    ///
+    pub def adminApi(pool: Pool): Api \ IO = adminApiOf(pool, ProjectId.default())
+
+    ///
+    /// このプロジェクトの管理 API。
+    ///
+    pub def adminApiOf(pool: Pool, projectId: ProjectId): Api \ IO =
+        { schema = AdminSchema.make(deps(), AdminRunner.make(pool, deps(), projectId)), engine = Engine.Admin, pool = pool, scope = Some(projectId) }
+
+    ///
+    /// Account API（Tenant 無し）。
+    ///
+    pub def accountApi(pool: Pool): Api \ IO =
+        { schema = AccountSchema.make(deps(), AccountRunner.make(pool, deps())), engine = Engine.Account, pool = pool, scope = None }
+
+    ///
+    /// テーブルを作り直して seed を当て、その結果と管理 API を body に渡す。seed が失敗するのはテストの前提が壊れている。
+    ///
+    pub def withAdminApi(seeding: Unit -> b \ ef2, body: (Api, b) -> a \ ef): a \ (ef2 - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr, IdGen, Tenant, Session, ObjectStore}) + ef + IO =
         withPool(pool -> {
             let seeded = seed(seeding);
-            body(AdminSchema.make(deps(), AdminRunner.make(pool, deps(), ProjectId.default())), seeded)
+            body(adminApi(pool), seeded)
         })
 
     ///
-    /// テーブルを作り直して seed を当て、Account API（Tenant 無し）の Schema を body に渡す。
+    /// テーブルを作り直して seed を当て、Account API を body に渡す。
     ///
-    pub def withAccountApi(seeding: Unit -> b \ ef2, body: (Schema, b) -> a \ ef): a \ (ef2 - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr, IdGen, Tenant, Session, ObjectStore}) + ef + IO =
+    pub def withAccountApi(seeding: Unit -> b \ ef2, body: (Api, b) -> a \ ef): a \ (ef2 - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr, IdGen, Tenant, Session, ObjectStore}) + ef + IO =
         withPool(pool -> {
             let seeded = seed(seeding);
-            body(AccountSchema.make(deps(), AccountRunner.make(pool, deps())), seeded)
+            body(accountApi(pool), seeded)
         })
 
     ///
@@ -183,21 +205,57 @@ mod PgTestSupport {
     pub def deps(): Deps \ IO = Deps.forTest(storage())
 
     ///
-    /// bootstrap の owner（owner@test）としての身元。初回の問い合わせで users が作られ、既定の組織の owner になる。
+    /// bootstrap の owner（owner@test）としての Credential。初回の問い合わせで users が作られ、既定の組織の owner になる。
     ///
     pub def ownerCredential(): Credential = Credential.Bearer("test", "owner", "owner@test", "Owner")
 
     ///
-    /// この身元でスキーマ（管理 API / Account API）に問い合わせる ask。
+    /// 認証をリクエストに 1 回（Main.runRoute と同じ形。scope のプロジェクトの印を置いた Tx で Authentication.resolve）。
+    /// 認証の Tx が戻す属性（SQL の数）は observe に。DB の失敗はテストの前提が壊れている。
     ///
-    pub def askAs(schema: Schema, credential: Credential): String -> (Value, Option[String]) \ IO =
-        queryText -> GraphqlTestKit.askWith(schema, Context.withCredential(credential), queryText)
+    pub def authenticateObserved(pool: Pool, engine: Engine, scope: Option[ProjectId], observe: Log.Fields -> Unit \ IO, credential: Credential): Result[Rejection, Authenticated] \ IO =
+        IdGen.runWithRandom(() -> Time.Clock.runWithIO(() ->
+            DbRunner.withTxObserved(pool, scope, observe, () -> Authentication.resolve(deps(), engine, scope, credential))))
+            |> sqlOrBug
 
     ///
-    /// owner として管理 API に問い合わせる。
+    /// 認証をリクエストに 1 回。既定のプロジェクト（Account はプロジェクト無し）。
     ///
-    pub def askOwner(schema: Schema): String -> (Value, Option[String]) \ IO =
-        askAs(schema, ownerCredential())
+    pub def authenticate(pool: Pool, engine: Engine, credential: Credential): Result[Rejection, Authenticated] \ IO =
+        authenticateObserved(pool, engine, defaultScope(engine), _ -> (), credential)
+
+    /// エンジンの種類ごとの既定のプロジェクト。
+    def defaultScope(engine: Engine): Option[ProjectId] = match engine {
+        case Engine.Account => None
+        case _              => Some(ProjectId.default())
+    }
+
+    ///
+    /// この Credential で組み立て済みのエンジン（既定のプロジェクト）に問い合わせる ask。
+    ///
+    pub def askEngineAs(pool: Pool, engine: Engine, built: Graphql.Engine, credential: Credential): String -> (Value, Option[String]) \ IO =
+        askScopedAs(pool, engine, defaultScope(engine), built, credential)
+
+    ///
+    /// 問い合わせごとに認証し、断られたら Runner の手前で断られた形（data は Null、errors[].message）にする。
+    ///
+    def askScopedAs(pool: Pool, engine: Engine, scope: Option[ProjectId], built: Graphql.Engine, credential: Credential): String -> (Value, Option[String]) \ IO =
+        queryText -> match authenticateObserved(pool, engine, scope, _ -> (), credential) {
+            case Err(rejection) => (Value.Null, Some(Rejection.message(rejection)))
+            case Ok(found)      => GraphqlTestKit.askEngineWith(built, Context.withActor(found#actor), queryText)
+        }
+
+    ///
+    /// この Credential で API（管理 API / Account API）に問い合わせる ask。
+    ///
+    pub def askAs(api: Api, credential: Credential): (String -> (Value, Option[String]) \ IO) \ IO =
+        askScopedAs(api#pool, api#engine, api#scope, GraphqlTestKit.engineOrBug(api#schema), credential)
+
+    ///
+    /// owner として API に問い合わせる。
+    ///
+    pub def askOwner(api: Api): (String -> (Value, Option[String]) \ IO) \ IO =
+        askAs(api, ownerCredential())
 
     ///
     /// テーブルを作り直して seed を当て、コンテンツ API に問い合わせる ask を body に渡す。エンジンは定義から組み直す（目印を毎回見る）。
@@ -212,7 +270,7 @@ mod PgTestSupport {
         withPool(pool -> {
             discard seed(seeding);
             let cache = ContentEngine.create(deps());
-            body(pool, queryText -> GraphqlTestKit.askEngineWith(engineOrBug(cache, pool), Context.withCredential(ownerCredential()), queryText))
+            body(pool, queryText -> askEngineAs(pool, Engine.Content, engineOrBug(cache, pool), ownerCredential())(queryText))
         })
 
     ///

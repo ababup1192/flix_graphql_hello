@@ -13,10 +13,12 @@ mod TestErrorCodesPg {
         case other             => bug!("violations が配列ではありません: ${other}")
     }
 
-    /// 1 回問い合わせて errors[0].extensions を返す。エラーが無ければ Null。
-    def extensionsOf(engine: Graphql.Engine, credential: Credential, queryText: String): Value \ IO =
-        GraphqlTestKit.firstErrorField("extensions",
-            Graphql.executeWith(engine, GraphqlTestKit.queryOnly(queryText), Context.withCredential(credential)))
+    /// 1 回問い合わせて errors[0].extensions を返す。エラーが無ければ Null。認証で断られた物は Runner の手前の形（code だけ）。
+    def extensionsOf(api: PgTestSupport.Api, engine: Graphql.Engine, credential: Credential, queryText: String): Value \ IO =
+        match PgTestSupport.authenticate(api#pool, api#engine, credential) {
+            case Err(rejection) => Value.Obj(Map#{ "code" => Value.Str(ErrorCode.text(Rejection.code(rejection))) })
+            case Ok(found)      => GraphqlTestKit.firstErrorField("extensions", Graphql.executeWith(engine, GraphqlTestKit.queryOnly(queryText), Context.withActor(found#actor)))
+        }
 
     ///
     /// 管理 API のそれぞれの失敗に、分類（code）と手掛かりが付く。
@@ -29,11 +31,11 @@ mod TestErrorCodesPg {
     ///
     @Test
     def testPgErrorCodesInAdminApi(): Unit \ {IO, Assert} =
-        let (entryId, invalid, notFound, forbidden, conflict, deadToken, brokenJwt) = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
-            let engine = GraphqlTestKit.engineOrBug(schema);
+        let (entryId, invalid, notFound, forbidden, conflict, deadToken, brokenJwt) = PgTestSupport.withAdminApi(() -> (), (api, _) -> {
+            let engine = GraphqlTestKit.engineOrBug(api#schema);
             let owner = PgTestSupport.ownerCredential();
-            let ask = queryText -> GraphqlTestKit.askEngineWith(engine, Context.withCredential(owner), queryText);
-            let extensions = (credential, queryText) -> extensionsOf(engine, credential, queryText);
+            let ask = PgTestSupport.askEngineAs(api#pool, api#engine, engine, owner);
+            let extensions = (credential, queryText) -> extensionsOf(api, engine, credential, queryText);
             let createType = "mutation { createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { id } }";
             let typeId = GraphqlTestKit.stringAt(List#{"createContentType", "id"}, ask(createType));
             let entryId = GraphqlTestKit.stringAt(List#{"createEntry", "id"},

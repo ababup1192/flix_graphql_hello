@@ -23,14 +23,18 @@ mod TestMcpPg {
         JsonValue.toJsonString(Value.Obj(Map#{ "jsonrpc" => Value.Str("2.0"), "id" => Value.Int(1), "method" => Value.Str("tools/call"),
             "params" => Value.Obj(Map#{ "name" => Value.Str(tool), "arguments" => arguments }) }))
 
-    /// 管理 API のエンジンでリクエストを処理し、(status, body の JSON) を返す。
-    def handle(engine: Graphql.Engine, credential: Credential, request: HttpRequest): (Int32, Value) \ IO =
-        let response = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handle(config(), HealthFake.ok(), credential, request)));
+    /// 管理 API のエンジンでリクエストを処理し、(status, body の JSON) を返す。認証（リクエストに 1 回）は Main.runRoute と同じく handle の前。
+    def handle(api: PgTestSupport.Api, engine: Graphql.Engine, credential: Credential, request: HttpRequest): (Int32, Value) \ IO =
+        handleAuthenticated(engine, credential, PgTestSupport.authenticate(api#pool, api#engine, credential), request)
+
+    /// 認証の結果を渡して処理する。
+    def handleAuthenticated(engine: Graphql.Engine, credential: Credential, auth: Result[Rejection, Authenticated], request: HttpRequest): (Int32, Value) \ IO =
+        let response = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handle(config(), HealthFake.ok(), credential, auth, request)));
         (response#status, JsonValue.parse(response#body) |> Result.getWithDefault(Value.Null))
 
     /// ツールを 1 つ呼び、result.content[0].text を JSON に読んで (isError, text の JSON) にする。
-    def call(engine: Graphql.Engine, credential: Credential, tool: String, arguments: Value): (Value, Value) \ IO =
-        let (_, body) = handle(engine, credential, post(Nil, callBody(tool, arguments)));
+    def call(api: PgTestSupport.Api, engine: Graphql.Engine, credential: Credential, tool: String, arguments: Value): (Value, Value) \ IO =
+        let (_, body) = handle(api, engine, credential, post(Nil, callBody(tool, arguments)));
         let result = Value.field("result", body);
         (Value.field("isError", result), contentJson(result))
 
@@ -43,8 +47,8 @@ mod TestMcpPg {
     def obj(pairs: List[(String, Value)]): Value = Value.Obj(List.toMap(pairs))
 
     /// posts 型（title: TEXT, body: RICH_TEXT）を owner が管理 API で作る。
-    def seedPosts(schema: Schema): Unit \ IO =
-        let ask = PgTestSupport.askOwner(schema);
+    def seedPosts(api: PgTestSupport.Api): Unit \ IO =
+        let ask = PgTestSupport.askOwner(api);
         let typeId = GraphqlTestKit.stringAt(List#{"createContentType", "id"}, ask("mutation { createContentType(input: { apiId: \"posts\", name: \"投稿\", previewUrl: \"https://site.example.com/preview/{id}\" }) { id } }"));
         discard ask("mutation { addField(typeId: \"${typeId}\", input: { apiId: \"title\", name: \"題\", kind: TEXT }) { id } }");
         discard ask("mutation { addField(typeId: \"${typeId}\", input: { apiId: \"body\", name: \"本文\", kind: RICH_TEXT }) { id } }")
@@ -68,11 +72,11 @@ mod TestMcpPg {
     @Test
     def testPgMcpAllTools(): Unit \ {IO, Assert} =
         let markdown = "# 見出し\n\n本文";
-        let outcome = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
-            seedPosts(schema);
-            let engine = GraphqlTestKit.engineOrBug(schema);
+        let outcome = PgTestSupport.withAdminApi(() -> (), (api, _) -> {
+            seedPosts(api);
+            let engine = GraphqlTestKit.engineOrBug(api#schema);
             let owner = PgTestSupport.ownerCredential();
-            let tool = (name, arguments) -> call(engine, owner, name, arguments);
+            let tool = (name, arguments) -> call(api, engine, owner, name, arguments);
             let types = tool("list_types", Value.Null);
             let posts = tool("get_type", obj(List#{ ("apiId", Value.Str("posts")) }));
             let created = tool("create_entry", obj(List#{ ("type", Value.Str("posts")), ("fields", obj(List#{ ("title", Value.Str("Hello")), ("body", Value.Str(markdown)) })) }));
@@ -159,16 +163,16 @@ mod TestMcpPg {
     ///
     @Test
     def testPgMcpBusinessErrors(): Unit \ {IO, Assert} =
-        let outcome = PgTestSupport.withAdminApi(seedShop, (schema, shopEntryId) -> {
-            seedPosts(schema);
-            let engine = GraphqlTestKit.engineOrBug(schema);
+        let outcome = PgTestSupport.withAdminApi(seedShop, (api, shopEntryId) -> {
+            seedPosts(api);
+            let engine = GraphqlTestKit.engineOrBug(api#schema);
             let owner = PgTestSupport.ownerCredential();
-            let readKey = GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, PgTestSupport.askOwner(schema)("mutation { createApiKey(name: \"reader\", scope: READ) { key } }"));
-            let created = call(engine, owner, "create_entry", obj(List#{ ("type", Value.Str("posts")), ("fields", obj(List#{ ("title", Value.Str("a")) })) }));
+            let readKey = GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, PgTestSupport.askOwner(api)("mutation { createApiKey(name: \"reader\", scope: READ) { key } }"));
+            let created = call(api, engine, owner, "create_entry", obj(List#{ ("type", Value.Str("posts")), ("fields", obj(List#{ ("title", Value.Str("a")) })) }));
             let entryId = Value.field("id", snd(created)) |> Value.asStr |> Option.getWithDefault("");
-            let forbidden = call(engine, Credential.ApiKey(readKey), "create_entry", obj(List#{ ("type", Value.Str("posts")), ("fields", obj(Nil)) }));
-            let notFound = call(engine, owner, "get_entry", obj(List#{ ("id", Value.Str(shopEntryId)) }));
-            let conflict = call(engine, owner, "update_entry", obj(List#{ ("id", Value.Str(entryId)), ("fields", obj(Nil)), ("expectedVersion", Value.Int(99)) }));
+            let forbidden = call(api, engine, Credential.ApiKey(readKey), "create_entry", obj(List#{ ("type", Value.Str("posts")), ("fields", obj(Nil)) }));
+            let notFound = call(api, engine, owner, "get_entry", obj(List#{ ("id", Value.Str(shopEntryId)) }));
+            let conflict = call(api, engine, owner, "update_entry", obj(List#{ ("id", Value.Str(entryId)), ("fields", obj(Nil)), ("expectedVersion", Value.Int(99)) }));
             (fst(forbidden), Value.field("code", snd(forbidden)),
              fst(notFound), Value.field("code", snd(notFound)), Value.field("entity", snd(notFound)),
              fst(conflict), Value.field("code", snd(conflict)), Value.field("actualVersion", snd(conflict)))
@@ -192,19 +196,19 @@ mod TestMcpPg {
     @Test
     def testPgMcpHttpStatuses(): Unit \ {IO, Assert} =
         let listBody = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}";
-        let outcome = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
-            let engine = GraphqlTestKit.engineOrBug(schema);
-            let viaHeaders = request -> handle(engine, credentialOf(request), request);
+        let outcome = PgTestSupport.withAdminApi(() -> (), (api, _) -> {
+            let engine = GraphqlTestKit.engineOrBug(api#schema);
+            let viaHeaders = request -> handle(api, engine, credentialOf(request), request);
             let badJwt = viaHeaders(post(("Authorization", "Bearer not-a-jwt") :: Nil, listBody));
             let deadPat = viaHeaders(post(("Authorization", "Bearer cmspat_nope") :: Nil, callBody("list_types", Value.Null)));
             let badOrigin = viaHeaders(post(("Origin", "https://evil.example.com") :: Nil, listBody));
             let noOrigin = viaHeaders(post(Nil, listBody));
             let goodOrigin = viaHeaders(post(("Origin", "https://admin.example.com") :: Nil, listBody));
-            let initialized = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handle(config(), HealthFake.ok(), Credential.Missing, post(Nil, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}"))));
+            let initialized = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handle(config(), HealthFake.ok(), Credential.Missing, Ok(Authentication.anonymous()), post(Nil, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}"))));
             let badVersion = viaHeaders(post(("MCP-Protocol-Version", "2099-01-01") :: Nil, listBody));
             let preview = viaHeaders(post(("X-Preview-Token", "pv_x") :: Nil, listBody));
             let get = viaHeaders({ version = "HTTP/1.1", method = "GET", path = "/mcp", headers = Nil, body = "" });
-            let badJwtHeader = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handle(config(), HealthFake.ok(), Credential.Invalid("JWT は無し"), post(Nil, listBody))))#headers |> Http.findHeader("WWW-Authenticate");
+            let badJwtHeader = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handle(config(), HealthFake.ok(), Credential.Invalid("JWT は無し"), Err(Rejection.Invalid("JWT は無し")), post(Nil, listBody))))#headers |> Http.findHeader("WWW-Authenticate");
             (fst(badJwt), badJwtHeader, fst(deadPat), fst(badOrigin), fst(noOrigin), fst(goodOrigin), (initialized#status, initialized#body), fst(badVersion), fst(preview), fst(get))
         });
         Assert.assertEq(

@@ -94,8 +94,8 @@ mod TestWebhooksPg {
     ///
     @Test
     def testPgWebhookAdminApi(): Unit \ {IO, Assert} =
-        let (created, listed, updated, badUrl, deleted, afterDelete) = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
-            let ask = PgTestSupport.askOwner(schema);
+        let (created, listed, updated, badUrl, deleted, afterDelete) = PgTestSupport.withAdminApi(() -> (), (api, _) -> {
+            let ask = PgTestSupport.askOwner(api);
             let created = ask("mutation { createWebhook(input: { name: \"site\", url: \"https://example.com/hook\", events: [ENTRY_PUBLISHED] }) { webhook { id name events active } secret } }");
             let id = created |> fst |> Value.path(List#{"createWebhook", "webhook", "id"}) |> Value.asStr |> Option.getWithDefault("?");
             let secret = created |> fst |> Value.path(List#{"createWebhook", "secret"}) |> Value.asStr |> Option.getWithDefault("");

@@ -1,8 +1,8 @@
 # src/cms のユースケースで、DB に触るのに Session を持ってよい pub def（scripts/check-session.sh が突き合わせる）。
-# 足すのは次のどれかだけ: 外向きの id の写し、同じ Tx に積む outbox、Runner が主体を決める前（認証の解決・起動）に呼ぶ物、
+# 足すのは次のどれかだけ: 外向きの id の写し、同じ Tx に積む outbox、認証（Credential → Actor。Authentication と Main.runRoute）と起動が呼ぶ物、
 # 公開の読み（asset は stage を持たない）。人の操作の入口は Session.require を持たせ、ここには足さない。
 
-# Runner が主体（Actor）を決める前に呼ぶ（認証の解決・起動）
+# 認証（src/app/Authentication）と起動（Main）が、認証済みユーザーを決める前に呼ぶ
 Accounts.actorFor
 Accounts.resolveUser
 Accounts.resolveUserById

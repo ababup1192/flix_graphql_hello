@@ -151,8 +151,8 @@ mod TestPublishPg {
     ///     same: diff(versionId → DRAFT) = []
     @Test
     def testPgDiffRichTextViaAdminApi(): Unit \ {IO, Assert} =
-        let outcome = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
-            let ask = PgTestSupport.askOwner(schema);
+        let outcome = PgTestSupport.withAdminApi(() -> (), (api, _) -> {
+            let ask = PgTestSupport.askOwner(api);
             let typeId = GraphqlTestKit.stringAt(List#{"createContentType", "id"}, ask("mutation { createContentType(input: { apiId: \"posts\", name: \"投稿\" }) { id } }"));
             discard ask("mutation { addField(typeId: \"${typeId}\", input: { apiId: \"body\", name: \"本文\", kind: RICH_TEXT }) { id } }");
             let created = ask("mutation { createEntry(typeId: \"${typeId}\", fields: { body: ${CmsTestKit.docOf("a")} }) { id version } }");

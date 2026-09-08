@@ -21,8 +21,8 @@ mod TestPreviewPg {
         let (own, other, listing, published, tampered, url) = PgTestSupport.withContentApiAndPool(seed, (pool, _) -> {
             let issued = PgTestSupport.mutateOrBug(pool, () -> PreviewTokens.issue(PgTestSupport.pepper(), CmsTestKit.entryId("e1"), { ttlSeconds = 3600i64, nowMillis = farFuture() }));
             let engine = PgTestSupport.contentEngine(pool);
-            let asPreview = queryText -> GraphqlTestKit.askEngineWith(engine, Context.withCredential(Credential.Preview(issued#token)), queryText);
-            let asTampered = queryText -> GraphqlTestKit.askEngineWith(engine, Context.withCredential(Credential.Preview(issued#token + "x")), queryText);
+            let asPreview = PgTestSupport.askEngineAs(pool, Engine.Content, engine, Credential.Preview(issued#token));
+            let asTampered = PgTestSupport.askEngineAs(pool, Engine.Content, engine, Credential.Preview(issued#token + "x"));
             (asPreview("{ blog(id: \"e1\", stage: DRAFT) { id title } }"),
              asPreview("{ blog(id: \"e2\", stage: DRAFT) { id } }") |> snd,
              asPreview("{ blogs(stage: DRAFT) { totalCount } }") |> snd,
@@ -51,8 +51,8 @@ mod TestPreviewPg {
         let (issued, tooLong) = PgTestSupport.withAdminApi(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
             let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
             discard ContentEntries.create(blogs#id, None, CmsTestKit.entryData(Nil))
-        }), (schema, _) -> {
-            let ask = PgTestSupport.askOwner(schema);
+        }), (api, _) -> {
+            let ask = PgTestSupport.askOwner(api);
             (ask("mutation { createPreviewToken(entryId: \"e1\") { entryId url } }"),
              ask("mutation { createPreviewToken(entryId: \"e1\", expiresInSeconds: 999999) { token } }") |> fst |> Value.path(List#{"createPreviewToken", "token"}) |> Value.asStr |> Option.map(token -> String.startsWith(prefix = "pv_", token)))
         });

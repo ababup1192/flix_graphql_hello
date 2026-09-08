@@ -88,9 +88,10 @@ pub enum Engine with Eq, Order, ToString {
 ///
 /// - request: 届いたリクエストそのまま
 /// - params: パターンの Param の名前 → 生の文字列。型付きの id は handler の入口で parse する
-/// - credential: ヘッダから読んだ身元。middleware（Credentials.wrap）が入れる
+/// - credential: ヘッダから読んだ Credential。middleware（Credentials.wrap）が入れる。キャッシュの可否と MCP のプレビュートークンの断りが見る
+/// - auth: 認証の結果（認証済みユーザーか、断る理由）。エンジンのある行では Main.runRoute がプロジェクトと同じ Tx で決めて入れる
 ///
-pub type alias RouteRequest = { request = HttpRequest, params = Map[String, String], credential = Credential }
+pub type alias RouteRequest = { request = HttpRequest, params = Map[String, String], credential = Credential, auth = Result[Rejection, Authenticated] }
 
 ///
 /// 1 ルートの処理。

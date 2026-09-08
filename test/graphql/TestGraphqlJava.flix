@@ -88,11 +88,11 @@ mod TestGraphqlJava {
     @Test
     def testGraphqlJavaContextReachesChild(): Unit \ {Assert, IO} =
         let itemType = objectType("Item", () ->
-            field0("user", Out.option(Out.string()), (context, _item) -> Ok(match context#credential { case Credential.ApiKey(raw) => Some(raw) case _ => None })) :: Nil);
+            field0("user", Out.option(Out.string()), (context, _item) -> Ok(match context#actor { case Actor.ApiKey(name, _) => Some(name) case _ => None })) :: Nil);
         let schema = queryOnlySchema(field0("item", Out.obj(itemType), (_context, _root) -> Ok(())) :: Nil);
         Assert.assertEq(expected = Ok(Value.Obj(Map#{ "item" => Value.Obj(Map#{ "user" => Value.Str("u1") }) })),
             Graphql.buildEngine(schema)
-                |> Result.map(engine -> Graphql.executeWith(engine, queryOnly("{ item { user } }"), Context.withCredential(Credential.ApiKey("u1"))))
+                |> Result.map(engine -> Graphql.executeWith(engine, queryOnly("{ item { user } }"), Context.withActor(Actor.ApiKey("u1", ApiKeyScope.Read))))
                 |> Result.map(response -> response#data))
 
     // ---- エラーの報告 ----

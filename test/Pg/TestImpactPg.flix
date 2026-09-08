@@ -120,8 +120,8 @@ mod TestImpactPg {
     /// 管理 API を通した形。publishCheck / impact が SDL の型で返る。依存は直接の物が id 順、cascades は依存の順（b2 → その先の b3 → p1）。
     @Test
     def testPgImpactViaAdminApi(): Unit \ {IO, Assert} =
-        let (check, impact) = PgTestSupport.withAdminApi(() -> discard seedGraph(), (schema, _) -> {
-            let ask = PgTestSupport.askOwner(schema);
+        let (check, impact) = PgTestSupport.withAdminApi(() -> discard seedGraph(), (api, _) -> {
+            let ask = PgTestSupport.askOwner(api);
             (ask("{ publishCheck(id: \"b1\") { ok violations { path message } unpublishedDependencies { id } } }"),
              ask("{ impact(id: \"b1\", action: PUBLISH) { breaks { via } cascades { id } } }"))
         });

@@ -87,7 +87,7 @@ mod TestCors {
     def testCorsWrapPreflightAndPassThrough(): Unit \ Assert =
         let allowedMethods = path -> if (path == "/graphql") Method.Post :: Nil else Nil;
         let pipeline = Cors.wrap(adminOnly(), allowedMethods, _ -> { status = 404, headers = Nil, body = "" });
-        let call = path -> pipeline({ request = { version = "HTTP/1.1", method = "OPTIONS", path = path, headers = ("origin", "https://admin.example.com") :: Nil, body = "" }, params = Map.empty(), credential = Credential.Missing });
+        let call = path -> pipeline({ request = { version = "HTTP/1.1", method = "OPTIONS", path = path, headers = ("origin", "https://admin.example.com") :: Nil, body = "" }, params = Map.empty(), credential = Credential.Missing, auth = Ok(Authentication.anonymous()) });
         Assert.assertEq(
             expected = ((204, Some("https://admin.example.com"), Some("POST, OPTIONS")), (404, Some("https://admin.example.com"), None)),
             (call("/graphql") |> summarize, call("/nope") |> summarize))

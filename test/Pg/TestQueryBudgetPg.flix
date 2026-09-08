@@ -21,12 +21,16 @@ mod TestQueryBudgetPg {
     def listQuery(typeId: String): String =
         "{ entries(typeId: \"${typeId}\", first: ${entryCount()}) { totalCount nodes { id typeId version stage fields publishedAt createdAt updatedAt versions { id } diff(from: { stage: DRAFT }, to: { stage: DRAFT }) { path } } } }"
 
-    /// この身元で問い合わせ、Runner が observe に戻した属性（合算）と先頭の errors[].message を返す。
-    def measure(engine: Graphql.Engine, credential: Credential, queryText: String): (Log.Fields, Option[String]) \ IO =
+    /// この Credential で認証してから問い合わせ、認証の Tx と Runner が observe に戻した属性（合算）と先頭の errors[].message を返す。
+    def measure(api: PgTestSupport.Api, engine: Graphql.Engine, credential: Credential, queryText: String): (Log.Fields, Option[String]) \ IO =
         let observed = Ref.fresh(Static, Log.Fields.empty());
-        let context = { observe = fields -> Ref.put(LogFields.mergeCounts(fields, Ref.get(observed)), observed) | Context.withCredential(credential) };
-        let response = Graphql.executeWith(engine, GraphqlTestKit.queryOnly(queryText), context);
-        (Ref.get(observed), GraphqlTestKit.firstMessage(response))
+        let observe = fields -> Ref.put(LogFields.mergeCounts(fields, Ref.get(observed)), observed);
+        match PgTestSupport.authenticateObserved(api#pool, api#engine, api#scope, observe, credential) {
+            case Err(rejection) => (Ref.get(observed), Some(Rejection.message(rejection)))
+            case Ok(found)      =>
+                let response = Graphql.executeWith(engine, GraphqlTestKit.queryOnly(queryText), { observe = observe | Context.withActor(found#actor) });
+                (Ref.get(observed), GraphqlTestKit.firstMessage(response))
+        }
 
     /// (名前, db.statements, db.transactions, エラー)。数が無ければ -1。
     def budget(name: String, measured: (Log.Fields, Option[String])): (String, Int32, Int32, Option[String]) =
@@ -43,16 +47,16 @@ mod TestQueryBudgetPg {
     ///
     @Test
     def testPgQueryBudget(): Unit \ {IO, Assert} =
-        let budgets = PgTestSupport.withAdminApi(seed, (schema, _) -> {
-            let engine = GraphqlTestKit.engineOrBug(schema);
+        let budgets = PgTestSupport.withAdminApi(seed, (api, _) -> {
+            let engine = GraphqlTestKit.engineOrBug(api#schema);
             let owner = PgTestSupport.ownerCredential();
-            let ask = PgTestSupport.askOwner(schema);
+            let ask = PgTestSupport.askOwner(api);
             let typeId = GraphqlTestKit.stringAt(List#{"contentType", "id"}, ask("{ contentType(apiId: \"blogs\") { id } }"));
             let key = GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, ask("mutation { createApiKey(name: \"ci\", scope: WRITE, role: EDITOR) { key } }"));
             List#{
-                budget("jwt entries 50x10", measure(engine, owner, listQuery(typeId))),
-                budget("jwt contentTypes name", measure(engine, owner, "{ contentTypes { name } }")),
-                budget("api-key entries 50x10", measure(engine, Credential.ApiKey(key), listQuery(typeId)))
+                budget("jwt entries 50x10", measure(api, engine, owner, listQuery(typeId))),
+                budget("jwt contentTypes name", measure(api, engine, owner, "{ contentTypes { name } }")),
+                budget("api-key entries 50x10", measure(api, engine, Credential.ApiKey(key), listQuery(typeId)))
             }
         });
         List.forEach(match (name, statements, transactions, _) -> println("query budget: ${name}: db.statements=${statements} db.transactions=${transactions}"), budgets);

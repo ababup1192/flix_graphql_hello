@@ -5,7 +5,8 @@
 pub type alias AccountEff = Db + CmsErr + IdGen + Session + Time.Clock.Clock + Log
 
 ///
-/// Account API の Runner。リゾルバ 1 つを「最初の SQL で借りる接続 1 本・Tx 1 つ」に包み、認証して、失敗を GraphQL のエラーに写す。
+/// Account API の Runner。リゾルバ 1 つを「最初の SQL で借りる接続 1 本・Tx 1 つ」に包み、失敗を GraphQL のエラーに写す。
+/// 認証（鍵とプレビュートークンの断りを含む）はリクエストに 1 回済んでいる。
 ///
 mod AccountRunner {
 
@@ -15,38 +16,9 @@ mod AccountRunner {
     pub def make(pool: Pool, deps: Deps): Runner[AccountEff] =
         (context, f) -> runOne(pool, deps, context, f)
 
-    ///
-    /// 1 フィールドぶん。Invalid（ログインの JWT が付いていたが検証に落ちた）と ApiKey は SQL を出さずに断る。PAT は本人として通し、
-    /// 死んだ PAT（期限切れ・失効・知らない）はリゾルバの SQL を出さずに同じ形で断る。
-    ///
-    /// WhyNot: API キーを Anonymous 扱いにして通さないのは、鍵はプロジェクトの読み取り用で、組織の操作に使う理由が無く、
-    /// 黙って匿名になると「鍵が効いていない」と読み違えるため。
-    ///
     def runOne(pool: Pool, deps: Deps, context: Context, f: Unit -> Result[FieldError, JavaValue.Boxed] \ AccountEff + IO): Result[FieldError, JavaValue.Boxed] \ IO =
-        match context#credential {
-            case Credential.Invalid(reason) => Err(GraphqlErrors.unauthenticated("認証に失敗しました: ${reason}"))
-            case Credential.ApiKey(_)       => Err(GraphqlErrors.requiresLogin("Account API は API キーでは使えません。ログインしてください"))
-            case Credential.Preview(_)      => Err(GraphqlErrors.requiresLogin("Account API はプレビュートークンでは使えません。ログインしてください"))
-            case credential =>
-                AppEnv.runWithoutProject(deps, context#log, () -> {
-                    let requestId = LogFields.requestIdOf(context#log);
-                    match authenticate(pool, deps, context#observe, credential) {
-                        case Err(failure)       => DbRunner.toFieldResult(requestId, Err(failure))
-                        case Ok(Err(rejection)) => { (context#observe)(LogFields.rejectedCredential(Log.Fields.empty())); Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection))) }
-                        case Ok(Ok(resolved))   => {
-                            (context#observe)(resolved#log);
-                            Log.withFields(resolved#log, () -> DbRunner.transactObserved(pool, None, context#observe, resolved#actor, f) |> DbRunner.toFieldResult(requestId))
-                        }
-                    }
-                })
-        }
-
-    ///
-    /// 認証（Credential → Actor）を自分の Tx で行い、PAT の使用時刻を書く。
-    ///
-    def authenticate(pool: Pool, deps: Deps, observe: Log.Fields -> Unit \ IO, credential: Credential): Result[ApplicationFailure, Result[PatRejection, RequestIdentity.Resolved]] \ IO + IdGen + Time.Clock.Clock =
-        DbRunner.withTxObserved(pool, None, observe, () ->
-            RequestIdentity.resolveForAccount(deps, credential) |> Result.map(resolved -> { RequestIdentity.touch(resolved); resolved }))
-            |> Result.mapErr(ApplicationFailure.Infrastructure)
+        AppEnv.runWithoutProject(deps, context#log, () ->
+            DbRunner.transactObserved(pool, None, context#observe, context#actor, f)
+                |> DbRunner.toFieldResult(LogFields.requestIdOf(context#log)))
 
 }

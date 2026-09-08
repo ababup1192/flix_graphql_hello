@@ -185,8 +185,8 @@ def dispatch(runtime: Runtime, request: HttpRequest): HttpResponse \ IO =
       with Log.runWith(runtime#sink)
 
 ///
-/// middleware（request id → CORS → Host のプロジェクト → 身元）を通してルート表で振り分け、行の engine に合わせてエンジンを入れて実行する。
-/// 404 / 405 / 503 も CORS と X-Request-Id を通る。処理の中で決まる属性（credential.kind / project / graphql.*、Route が Observe に積む mcp.* や 4xx の理由）は
+/// middleware（request id → CORS → Host のプロジェクト → Credential）を通してルート表で振り分け、行の engine に合わせてエンジンを入れて実行する。
+/// 404 / 405 / 503 も CORS と X-Request-Id を通る。処理の中で決まる属性（credential.kind / project / user.id / graphql.*、Route が Observe に積む mcp.* や 4xx の理由）は
 /// extra に積み、リクエストの行に乗せる。
 ///
 /// WhyNot: リクエストの行を HttpServer の onServed でなくここで出すのは、onServed には request id も身元も GraphQL の結果も無く、
@@ -202,7 +202,7 @@ def serveRequest(runtime: Runtime, requestId: String, span: Log.Fields, request:
                 Server.wrapProjectFromHost(runtime#baseDomain,
                     Credentials.wrap(tokenHeaderOf(runtime#deps#auth), verifierOf(runtime#deps#auth, runtime#jwks),
                         Server.dispatch(runtime#routes, (found, routeRequest) -> runRoute(runtime, span, extra, found, routeRequest))))));
-    let response = Observe.runWithRef(extra, () -> pipeline({ request = request, params = Map.empty(), credential = Credential.Missing }));
+    let response = Observe.runWithRef(extra, () -> pipeline({ request = request, params = Map.empty(), credential = Credential.Missing, auth = Ok(Authentication.anonymous()) }));
     let fields = Ref.get(extra)
         |> LogFields.response(response#status, System.currentTimeMillis() - startedAt, Int32.toInt64(Http.utf8Length(request#body)), Int32.toInt64(Http.utf8Length(response#body)));
     Log.emit({ severity = LogFields.responseSeverity(request#path, response#status, false, fields), message = "request", fields = fields });
@@ -233,12 +233,17 @@ def emitServed(served: HttpServer.Served): Unit \ {IO, Log} =
     Log.emit({ severity = LogFields.responseSeverity(served#path, served#status, Option.nonEmpty(served#failure), base), message = "request", fields = fields })
 
 ///
-/// 一致した行を実行する。engine が None ならエンジン無し、Account ならプロジェクトを見ない。
-/// Content / Admin は params の projectSlug（無ければ既定プロジェクト）を id に解き、無ければ 404、エンジンを組めなければ 503。
-/// 身元の種類とプロジェクト slug をリクエストの行（extra）と、リゾルバに渡す span（Context の log）に足す。
+/// 一致した行を実行する。engine が None ならエンジン無し（認証もしない）。
+/// エンジンのある行は、プロジェクト（Account は見ない。Content / Admin は params の projectSlug、無ければ既定プロジェクト）を決めて
+/// 同じ Tx で認証（Credential → Actor）を 1 回行い、プロジェクトが無ければ 404、DB に届かなければ 503、エンジンを組めなければ 503。
+/// 認証に落ちた物は断らずに handler へ渡し、handler が形を決める（/graphql は 200 + errors[]、/mcp は 401）。
+/// Credential の種類・プロジェクト slug・認証の属性（user.id / api_key.name、検証に落ちた印）をリクエストの行（extra）と、リゾルバに渡す span（Context の log）に足す。
 ///
 /// WhyNot: エンジンの要らない道（/health、/jobs/tick）でエンジンを組まないのは、型定義が壊れた時に死活監視まで 503 になり、
 /// プロジェクトの SELECT が余分に走るため。
+///
+/// WhyNot: 認証を middleware（Credentials.wrap の隣）に置かないのは、API キーの解決と membership の検索がプロジェクトの RLS の印の下で行を見るので、
+/// プロジェクトが決まってからでないと SQL を出せないため。
 ///
 def runRoute(runtime: Runtime, span: Log.Fields, extra: Ref[Log.Fields, Static], found: Route[{Graphql, Log, Observe, IO}], routeRequest: RouteRequest): HttpResponse \ {IO, Log, Observe} =
     let projectSlug = Map.get(Router.projectSlugParam(), routeRequest#params);
@@ -246,21 +251,55 @@ def runRoute(runtime: Runtime, span: Log.Fields, extra: Ref[Log.Fields, Static],
         |> Log.Fields.str("credential.kind", LogFields.credentialKind(routeRequest#credential))
         |> Log.Fields.opt("project", projectSlug |> Option.withDefault(default = runtime#defaultProjectSlug));
     Ref.put(Ref.get(extra) |> Log.Fields.merge(routeFields), extra);
-    let contextFields = span |> Log.Fields.merge(routeFields);
-    let execute = () -> (found#handle)(routeRequest);
     match found#engine {
-        case None                 => Graphql.runWithoutEngine(execute)
-        case Some(Engine.Account) => runObserved(runtime#accountEngine, contextFields, extra, execute)
-        case Some(engine)         =>
-            match resolveProject(runtime#pool, runtime#defaultProject, projectSlug) {
-                case Err(message)        => unavailable(message)
-                case Ok(None)            => { let message = "プロジェクト '${projectSlug |> Option.getWithDefault("")}' がありません"; Observe.note(Log.Fields.empty() |> LogFields.rejection("no_project", message)); Server.notFound(message) }
-                case Ok(Some(projectId)) => match engineOf(runtime, engine, projectId) {
-                    case Ok(built)    => runObserved(built, contextFields, extra, execute)
-                    case Err(message) => unavailable(message)
+        case None         => Graphql.runWithoutEngine(() -> (found#handle)(routeRequest))
+        case Some(engine) =>
+            match locate(runtime, engine, projectSlug, routeRequest#credential, observeInto(extra)) {
+                case Err(message)              => unavailable(message)
+                case Ok(None)                  => { let message = "プロジェクト '${projectSlug |> Option.getWithDefault("")}' がありません"; Observe.note(Log.Fields.empty() |> LogFields.rejection("no_project", message)); Server.notFound(message) }
+                case Ok(Some((scope, auth)))   => {
+                    let authFields = Authentication.logFields(auth);
+                    Ref.put(Ref.get(extra) |> Log.Fields.merge(authFields), extra);
+                    let contextFields = span |> Log.Fields.merge(routeFields) |> Log.Fields.merge(authFields);
+                    match engineOf(runtime, engine, scope) {
+                        case Ok(built)    => runObserved(built, contextFields, extra, () -> (found#handle)({ auth = auth | routeRequest }))
+                        case Err(message) => unavailable(message)
+                    }
                 }
             }
     }
+
+///
+/// プロジェクトを決めて、同じ Tx で認証する。Account はプロジェクトを見ない（scope は None）。
+/// Content / Admin はパスか Host のプロジェクト slug（形が違うか無ければ Ok(None) = 404）、無ければ既定プロジェクト（Ok(None) なら 404）。
+/// プロジェクトが決まったらその RLS の印を置いてから認証する。Err は DB の失敗（503）。
+///
+/// WhyNot: プロジェクトの解決と認証を別の Tx にしないのは、/p/ と Host の経路で Tx が 2 つになり、接続の借り直しが 1 回増えるため。
+/// 既定プロジェクトの経路は SQL 無しでプロジェクトが決まるので、認証の Tx が 1 つ増えるだけ。
+///
+/// WhyNot: IdGen / Clock の handler を withTx の内側に入れないのは、handler の内側で飛んだ JVM の例外が Db.guard を素通りするため（docs/flix-conventions.md）。
+///
+def locate(runtime: Runtime, engine: Engine, projectSlug: Option[String], credential: Credential, observe: Log.Fields -> Unit \ IO): Result[String, Option[(Option[ProjectId], Result[Rejection, Authenticated])]] \ IO =
+    IdGen.runWithRandom(() -> Time.Clock.runWithIO(() ->
+        DbRunner.withTxObserved(runtime#pool, None, observe, () ->
+            match scopeOf(engine, runtime#defaultProject, projectSlug) {
+                case None        => None
+                case Some(scope) => { TenantTx.stampTx(scope, Actor.Anonymous); Some((scope, Authentication.resolve(runtime#deps, engine, scope, credential))) }
+            })))
+        |> Result.mapErr(DbRunner.failureMessage)
+
+///
+/// エンジンが見るプロジェクト。Account は無し（Some(None)）。Content / Admin はプロジェクト slug から引き、無ければ None（404）。
+///
+def scopeOf(engine: Engine, defaultProject: Option[ProjectId], projectSlug: Option[String]): Option[Option[ProjectId]] \ DbRead = match (engine, projectSlug) {
+    case (Engine.Account, _)  => Some(None)
+    case (_, None)            => defaultProject |> Option.map(Some)
+    case (_, Some(text))      => ProjectSlug.parse(text) |> Option.flatMap(Projects.findBySlug) |> Option.map(Some)
+}
+
+/// Runner と認証の Tx が戻す属性（SQL の数など）を extra に足す。数えるキーは足し合わせる。
+def observeInto(extra: Ref[Log.Fields, Static], fields: Log.Fields): Unit \ IO =
+    Ref.put(LogFields.mergeCounts(fields, Ref.get(extra)), extra)
 
 /// 503。理由をリクエストの行に積む。
 def unavailable(message: String): HttpResponse \ Observe =
@@ -269,9 +308,8 @@ def unavailable(message: String): HttpResponse \ Observe =
 
 ///
 /// エンジンで Graphql effect を本物の実行にし、時計を入れる。実行ごとに Context に span を入れ（Runner がリゾルバの中の行に付ける）、
-/// 操作の名前と種類、errors[] の code を extra に積む（リクエストの行に乗る）。Runner が決めた身元の属性（user.id / api_key.name、
-/// 検証に落ちた印）は Context の observe で extra に戻す。Runner の側が勝つ（LogFields.mergeCounts は incoming が勝つ）ので、ヘッダから読んだ credential.kind を上書きできる。
-/// SQL と Tx の数（db.statements / db.transactions）はフィールドごとに戻るので、mergeCounts が足し合わせる。
+/// 操作の名前と種類、errors[] の code を extra に積む（リクエストの行に乗る）。Runner が戻す SQL と Tx の数（db.statements / db.transactions）は
+/// フィールドごとに戻るので、Context の observe（observeInto）が足し合わせる。
 ///
 /// WhyNot: observe を effect にしないのは、Runner は graphql-java の Java コールバックの中で動き、effect はそこを越えられないため。
 /// Ref を閉じ込めたラムダは値なので越えられる。
@@ -281,20 +319,21 @@ def runObserved(engine: Graphql.Engine, contextFields: Log.Fields, extra: Ref[Lo
         thunk()
     } with handler Graphql {
         def execute(request, context, resume) = {
-            let observe = fields -> Ref.put(LogFields.mergeCounts(fields, Ref.get(extra)), extra);
-            let response = Graphql.executeWith(engine, request, { log = contextFields, observe = observe | context });
+            let response = Graphql.executeWith(engine, request, { log = contextFields, observe = observeInto(extra) | context });
             Ref.put(Ref.get(extra) |> LogFields.graphql(request, response), extra);
             resume(response)
         }
     }
 
 ///
-/// 行の engine に合う、このプロジェクトのエンジン。コンテンツ API は型の定義から組み（目印で組み直す）、管理 API はプロジェクトごとに 1 つ。
+/// 行の engine に合う、このプロジェクトのエンジン。コンテンツ API は型の定義から組み（目印で組み直す）、管理 API はプロジェクトごとに 1 つ、
+/// Account API は 1 つ（プロジェクトを見ない）。
 ///
-def engineOf(runtime: Runtime, engine: Engine, projectId: ProjectId): Result[String, Graphql.Engine] \ IO = match engine {
-    case Engine.Content => ContentEngine.current(runtime#engineCache, runtime#pool, projectId)
-    case Engine.Admin   => AdminEngine.current(runtime#adminEngines, runtime#pool, projectId)
-    case Engine.Account => Ok(runtime#accountEngine)
+def engineOf(runtime: Runtime, engine: Engine, scope: Option[ProjectId]): Result[String, Graphql.Engine] \ IO = match (engine, scope) {
+    case (Engine.Account, _)               => Ok(runtime#accountEngine)
+    case (Engine.Content, Some(projectId)) => ContentEngine.current(runtime#engineCache, runtime#pool, projectId)
+    case (Engine.Admin, Some(projectId))   => AdminEngine.current(runtime#adminEngines, runtime#pool, projectId)
+    case (_, None)                         => Err("プロジェクトが決まっていません")
 }
 
 ///
@@ -304,24 +343,12 @@ def tokenHeaderOf(auth: AuthConfig.AuthConfig): String =
     match auth#mode { case AuthConfig.Mode.Dev => "X-Dev-User" case _ => auth#tokenHeader }
 
 ///
-/// ログインのトークンの検証（発行元の JWKS、dev、閉じている）。身元の読み取りは Credentials.wrap（PAT → トークン → X-Api-Key → X-Preview-Token の順）。
+/// ログインのトークンの検証（発行元の JWKS、dev、閉じている）。Credential の読み取りは Credentials.wrap（PAT → トークン → X-Api-Key → X-Preview-Token の順）。
 ///
 def verifierOf(auth: AuthConfig.AuthConfig, jwks: TokenVerifier.JwksCache, token: String): Result[String, Principal] \ IO = match auth#mode {
     case AuthConfig.Mode.Jwks(config) => Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> TokenVerifier.runWithJwks(config, jwks, () -> TokenVerifier.verify(token))))
     case AuthConfig.Mode.Dev          => TokenVerifier.runDev(() -> TokenVerifier.verify(token))
     case AuthConfig.Mode.Closed       => Err("管理 API は閉じています（CMS_AUTH=none）")
-}
-
-///
-/// パスか Host のプロジェクト slug からプロジェクトを決める。無ければ既定プロジェクト（SQL を出さない）。
-/// 形が違うか無いプロジェクト slug は None（404）。
-///
-def resolveProject(pool: Pool, defaultProject: Option[ProjectId], projectSlug: Option[String]): Result[String, Option[ProjectId]] \ IO = match projectSlug {
-    case None       => Ok(defaultProject)
-    case Some(text) => match ProjectSlug.parse(text) {
-        case None       => Ok(None)
-        case Some(slug) => DbRunner.withTx(pool, None, () -> Projects.findBySlug(slug)) |> Result.mapErr(DbRunner.failureMessage)
-    }
 }
 
 ///

@@ -98,9 +98,9 @@ mod TestAuthPg {
     ///
     @Test
     def testPgAuthViaAdminApi(): Unit \ {IO, Assert} =
-        let (me, anonymousMe, anonymousMutation, invited) = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
-            let ask = PgTestSupport.askOwner(schema);
-            let anonymous = queryText -> GraphqlTestKit.askWith(schema, Context.anonymous(), queryText);
+        let (me, anonymousMe, anonymousMutation, invited) = PgTestSupport.withAdminApi(() -> (), (api, _) -> {
+            let ask = PgTestSupport.askOwner(api);
+            let anonymous = queryText -> GraphqlTestKit.askWith(api#schema, Context.anonymous(), queryText);
             (ask("{ me { email roles permissions organizations { organization { name } role } projects { project { slug } role } } }"),
              anonymous("{ me { email } }"),
              anonymous("mutation { createContentType(input: { apiId: \"blogs\", name: \"x\" }) { id } }") |> snd,
@@ -121,7 +121,8 @@ mod TestAuthPg {
             (me, anonymousMe, anonymousMutation, invited))
 
     ///
-    /// コンテンツ API。public なら誰でも公開中を読めるが下書きは readDraft が要り、private にすると鍵か役割が無い読みは止まる。
+    /// コンテンツ API。public なら誰でも公開中を読めるが下書きは readDraft が要り、private にすると鍵か役割が無い読みは止まる
+    /// （匿名は UNAUTHENTICATED の文言、メンバーでない人は FORBIDDEN の文言。どちらも認証で断られるのでリゾルバは走らない）。
     ///
     @Test
     def testPgContentApiVisibility(): Unit \ {IO, Assert} =
@@ -133,26 +134,29 @@ mod TestAuthPg {
             discard ContentEntries.publish(entry#id, "tester", false);
             PgTestSupport.asOwner(() -> ApiKeys.create(pepper, readKey("site"), 0i64))#key
         });
-        let (publicRead, anonymousDraft, ownerDraft, privateAnonymous, privateWithKey) = PgTestSupport.withContentApiAndPool(seed, (pool, askOwner) -> {
+        let (publicRead, anonymousDraft, ownerDraft, privateAnonymous, privateStranger, privateWithKey) = PgTestSupport.withContentApiAndPool(seed, (pool, askOwner) -> {
             let engine = PgTestSupport.contentEngine(pool);
-            let anonymous = queryText -> GraphqlTestKit.askEngineWith(engine, Context.anonymous(), queryText);
+            let anonymous = PgTestSupport.askEngineAs(pool, Engine.Content, engine, Credential.Missing);
+            let stranger = PgTestSupport.askEngineAs(pool, Engine.Content, engine, PgTestSupport.bearer("stranger", "stranger@example.com"));
             let publicRead = anonymous("{ blogs { totalCount } }");
             let anonymousDraft = anonymous("{ blogs(stage: DRAFT) { totalCount } }") |> snd;
             let ownerDraft = askOwner("{ blogs(stage: DRAFT) { totalCount } }");
             discard PgTestSupport.mutate(pool, () -> AuthQueries.updateProjectVisibility({ projectId = ProjectId.toInt64(ProjectId.default()), visibility = "private" }));
             let privateAnonymous = anonymous("{ blogs { totalCount } }") |> snd;
+            let privateStranger = stranger("{ blogs { totalCount } }") |> snd;
             let key = PgTestSupport.mutateOrBug(pool, () -> CmsTestKit.withIds(List#{"k9"}, () ->
                 PgTestSupport.asOwner(() -> ApiKeys.create(pepper, readKey("site2"), 0i64))#key));
-            let privateWithKey = GraphqlTestKit.askEngineWith(engine, Context.withCredential(Credential.ApiKey(key)), "{ blogs { totalCount } }");
-            (publicRead, anonymousDraft, ownerDraft, privateAnonymous, privateWithKey)
+            let privateWithKey = PgTestSupport.askEngineAs(pool, Engine.Content, engine, Credential.ApiKey(key))("{ blogs { totalCount } }");
+            (publicRead, anonymousDraft, ownerDraft, privateAnonymous, privateStranger, privateWithKey)
         });
         Assert.assertEq(
             expected = (
                 (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(1) }) }), None),
                 Some("この操作（readDraft）の権限がありません"),
                 (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(1) }) }), None),
-                Some("auth: このプロジェクトは非公開です。API キーを X-Api-Key で渡してください"),
+                Some("このプロジェクトは非公開です。API キーを X-Api-Key で渡してください"),
+                Some("このプロジェクトのメンバーではありません"),
                 (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(1) }) }), None)),
-            (publicRead, anonymousDraft, ownerDraft, privateAnonymous, privateWithKey))
+            (publicRead, anonymousDraft, ownerDraft, privateAnonymous, privateStranger, privateWithKey))
 
 }

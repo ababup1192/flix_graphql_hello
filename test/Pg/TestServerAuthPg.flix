@@ -3,7 +3,7 @@
 /// `Authorization: Bearer cmspat_...`（PAT）と `X-Api-Key`（WRITE の鍵）で管理 API の mutation が通る事を、ヘッダの読み取りから確かめる。
 ///
 /// WhyNot: ソケットを開かないのは、HttpServer.listen が戻らず止める口も無いので、テストの region が終わらないため。
-/// ヘッダ → Credential（Credentials）→ Runner → ユースケースの道は同じ。
+/// ヘッダ → Credential（Credentials）→ 認証（Authentication。リクエストに 1 回）→ Runner → ユースケースの道は同じ。
 ///
 mod TestServerAuthPg {
 
@@ -16,10 +16,12 @@ mod TestServerAuthPg {
         { version = "HTTP/1.1", method = "POST", path = "/admin/graphql", headers = ("Content-Type", "application/json") :: headers,
           body = JsonValue.toJsonString(Value.Obj(Map#{ "query" => Value.Str(queryText) })) }
 
-    /// 管理 API のエンジンでリクエストを処理し、(status, body の JSON) を返す。
-    def handle(engine: Graphql.Engine, request: HttpRequest): (Int32, Value) \ IO =
+    /// 管理 API のエンジンでリクエストを処理し、(status, body の JSON) を返す。認証は Main.runRoute と同じく handle の前に 1 回。
+    def handle(pool: Pool, engine: Graphql.Engine, request: HttpRequest): (Int32, Value) \ IO =
         let config = { cors = Cors.none(), version = "test", jobsToken = None, cacheMaxAge = None };
-        let response = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handle(config, HealthFake.ok(), credentialOf(request), request)));
+        let credential = credentialOf(request);
+        let auth = PgTestSupport.authenticate(pool, Engine.Admin, credential);
+        let response = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handle(config, HealthFake.ok(), credential, auth, request)));
         (response#status, JsonValue.parse(response#body) |> Result.getWithDefault(Value.Null))
 
     ///
@@ -34,20 +36,19 @@ mod TestServerAuthPg {
     def testPgServerAcceptsPatAndWriteApiKey(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withPool(pool -> {
             PgTestSupport.seed(() -> ());
-            let deps = PgTestSupport.deps();
-            let admin = AdminSchema.make(deps, AdminRunner.make(pool, deps, ProjectId.default()));
-            let account = AccountSchema.make(deps, AccountRunner.make(pool, deps));
+            let admin = PgTestSupport.adminApi(pool);
+            let account = PgTestSupport.accountApi(pool);
             let owner = PgTestSupport.askOwner(admin);
             let accountOwner = PgTestSupport.askAs(account, PgTestSupport.ownerCredential());
             let token = GraphqlTestKit.stringAt(List#{"createPersonalAccessToken", "token"}, accountOwner("mutation { createPersonalAccessToken(name: \"cli\", scope: WRITE) { token } }"));
             let key = GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, owner("mutation { createApiKey(name: \"ci\", scope: WRITE, role: EDITOR) { key } }"));
-            let engine = GraphqlTestKit.engineOrBug(admin);
-            let viaPat = handle(engine, post(("Authorization", "Bearer ${token}") :: Nil, "mutation { createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { id apiId } }"));
+            let engine = GraphqlTestKit.engineOrBug(admin#schema);
+            let viaPat = handle(pool, engine, post(("Authorization", "Bearer ${token}") :: Nil, "mutation { createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { id apiId } }"));
             let typeId = Value.path(List#{"data", "createContentType", "id"}, snd(viaPat)) |> Value.asStr |> Option.getWithDefault("");
-            let viaLowercase = handle(engine, post(("authorization", "bearer ${token}") :: Nil, "{ me { email } }"));
-            let viaKey = handle(engine, post(("X-Api-Key", key) :: Nil, "mutation { createEntry(typeId: \"${typeId}\", fields: {}) { stage } }"));
-            let anonymous = handle(engine, post(Nil, "mutation { createContentType(input: { apiId: \"tags\", name: \"x\" }) { id } }"));
-            let badBearer = handle(engine, post(("Authorization", "Bearer not-a-jwt") :: Nil, "{ me { email } }"));
+            let viaLowercase = handle(pool, engine, post(("authorization", "bearer ${token}") :: Nil, "{ me { email } }"));
+            let viaKey = handle(pool, engine, post(("X-Api-Key", key) :: Nil, "mutation { createEntry(typeId: \"${typeId}\", fields: {}) { stage } }"));
+            let anonymous = handle(pool, engine, post(Nil, "mutation { createContentType(input: { apiId: \"tags\", name: \"x\" }) { id } }"));
+            let badBearer = handle(pool, engine, post(("Authorization", "Bearer not-a-jwt") :: Nil, "{ me { email } }"));
             (fst(viaPat), Value.path(List#{"data", "createContentType", "apiId"}, snd(viaPat)),
              Value.path(List#{"data", "me", "email"}, snd(viaLowercase)),
              fst(viaKey), Value.path(List#{"data", "createEntry", "stage"}, snd(viaKey)),
@@ -63,27 +64,28 @@ mod TestServerAuthPg {
                 Some("認証に失敗しました: JWT は無し")),
             outcome)
 
-    /// Runner が Context の observe に戻した属性を集めて問い合わせる。戻り値は (observe に来た認証の属性。SQL の数（db.*）は除く, errors[].code)。
-    def askObserved(engine: Graphql.Engine, credential: Credential, queryText: String): (Log.Fields, Option[String]) \ IO =
-        let observed = Ref.fresh(Static, Log.Fields.empty());
-        let context = { observe = fields -> Ref.put(Map.union(fields, Ref.get(observed)), observed) | Context.withCredential(credential) };
-        let response = Graphql.executeWith(engine, GraphqlTestKit.queryOnly(queryText), context);
-        (Ref.get(observed) |> Map.filterWithKey((key, _) -> not String.startsWith(prefix = "db.", key)), GraphqlTestKit.firstErrorField("extensions", response) |> Value.field("code") |> Value.asStr)
+    /// 認証して、リクエストの行に積む属性（Authentication.logFields。Main.runRoute と同じ）と、断られた時の code を返す。
+    def authObserved(pool: Pool, credential: Credential): (Log.Fields, Option[String]) \ IO =
+        let auth = PgTestSupport.authenticate(pool, Engine.Admin, credential);
+        let code = match auth {
+            case Err(rejection) => Some(ErrorCode.text(Rejection.code(rejection)))
+            case Ok(_)          => None
+        };
+        (Authentication.logFields(auth), code)
 
     ///
-    /// Runner が observe に戻す身元の属性と、それで決まるリクエストの行の重さ:
+    /// 認証がリクエストの行に積む属性と、それで決まる行の重さ:
     ///   知らない鍵                → credential.kind = invalid、200 でも Warn
     ///   editor の鍵              → api_key.name = ci、Info
     ///   死んだ PAT（失効）        → credential.kind = invalid、UNAUTHENTICATED、Warn
     ///   owner（ログインの JWT） → user.id、Info
     ///
     @Test
-    def testPgRunnerObservesIdentityForRequestLog(): Unit \ {IO, Assert} =
+    def testPgAuthenticationLogFieldsForRequestLog(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withPool(pool -> {
             PgTestSupport.seed(() -> ());
-            let deps = PgTestSupport.deps();
-            let admin = AdminSchema.make(deps, AdminRunner.make(pool, deps, ProjectId.default()));
-            let account = AccountSchema.make(deps, AccountRunner.make(pool, deps));
+            let admin = PgTestSupport.adminApi(pool);
+            let account = PgTestSupport.accountApi(pool);
             let owner = PgTestSupport.askOwner(admin);
             let accountOwner = PgTestSupport.askAs(account, PgTestSupport.ownerCredential());
             let key = GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, owner("mutation { createApiKey(name: \"ci\", scope: WRITE, role: EDITOR) { key } }"));
@@ -91,11 +93,10 @@ mod TestServerAuthPg {
             let patId = GraphqlTestKit.stringAt(List#{"createPersonalAccessToken", "id"}, created);
             let pat = GraphqlTestKit.stringAt(List#{"createPersonalAccessToken", "token"}, created);
             discard accountOwner("mutation { revokePersonalAccessToken(id: \"${patId}\") }");
-            let engine = GraphqlTestKit.engineOrBug(admin);
             let ownerPublicId = GraphqlTestKit.stringAt(List#{"me", "id"}, owner("{ me { id } }"));
             List#{Credential.ApiKey("cms_unknown"), Credential.ApiKey(key), Credential.PersonalToken(pat), PgTestSupport.ownerCredential()}
                 |> List.map(credential -> {
-                    let (fields, code) = askObserved(engine, credential, "{ me { id } }");
+                    let (fields, code) = authObserved(pool, credential);
                     let withCodes = fields |> Log.Fields.opt("graphql.error_codes", code);
                     (Map.toList(fields), LogFields.responseSeverity("/admin/graphql", 200, false, withCodes))
                 })

@@ -34,8 +34,8 @@ mod TestAdminMutationsPg {
     @Test
     def testPgAdminSchemaAndWebhookMutations(): Unit \ {IO, Assert} =
         let errors = Ref.fresh(Static, Nil);
-        let outcome = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
-            let ask = recording(PgTestSupport.askOwner(schema), errors);
+        let outcome = PgTestSupport.withAdminApi(() -> (), (api, _) -> {
+            let ask = recording(PgTestSupport.askOwner(api), errors);
             let webhookCreated = ask("mutation { createWebhook(input: { name: \"site\", url: \"https://example.com/hook\", events: [SCHEMA_CHANGED] }) { webhook { id name url events active createdAt } secret } }");
             let webhookId = GraphqlTestKit.stringAt(List#{"createWebhook", "webhook", "id"}, webhookCreated);
             let typeCreated = ask("mutation { createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { id apiId kind name singular plural previewUrl fields { id } createdAt updatedAt } }");
@@ -106,8 +106,8 @@ mod TestAdminMutationsPg {
     @Test
     def testPgAdminEntryMutations(): Unit \ {IO, Assert} =
         let errors = Ref.fresh(Static, Nil);
-        let outcome = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
-            let ask = recording(PgTestSupport.askOwner(schema), errors);
+        let outcome = PgTestSupport.withAdminApi(() -> (), (api, _) -> {
+            let ask = recording(PgTestSupport.askOwner(api), errors);
             let (typeId, _, _) = createBlogs(ask);
             let created = ask("mutation { createEntry(typeId: \"${typeId}\", fields: { title: \"a\", body: \"x\" }) { id typeId version stage fields publishedAt createdAt updatedAt versions { id } } }");
             let entryId = GraphqlTestKit.stringAt(List#{"createEntry", "id"}, created);
@@ -184,8 +184,8 @@ mod TestAdminMutationsPg {
     @Test
     def testPgAdminAssetMutations(): Unit \ {IO, Assert} =
         let errors = Ref.fresh(Static, Nil);
-        let outcome = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
-            let ask = recording(PgTestSupport.askOwner(schema), errors);
+        let outcome = PgTestSupport.withAdminApi(() -> (), (api, _) -> {
+            let ask = recording(PgTestSupport.askOwner(api), errors);
             let upload = ask("mutation { createUploadUrl(input: { fileName: \"photo x.png\", mime: \"image/png\", size: 5 }) { asset { id status fileName mime size width alt } uploadUrl expiresInSeconds } }");
             let assetId = GraphqlTestKit.stringAt(List#{"createUploadUrl", "asset", "id"}, upload);
             let putStatus = PgTestSupport.putTo(GraphqlTestKit.stringAt(List#{"createUploadUrl", "uploadUrl"}, upload), "image/png", "hello");
@@ -228,9 +228,9 @@ mod TestAdminMutationsPg {
     @Test
     def testPgAdminProjectMutations(): Unit \ {IO, Assert} =
         let errors = Ref.fresh(Static, Nil);
-        let outcome = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
-            let ask = recording(PgTestSupport.askOwner(schema), errors);
-            let alice = recording(queryText -> GraphqlTestKit.askWith(schema, Context.withCredential(Credential.Bearer("test", "alice", "alice@example.com", "Alice")), queryText), errors);
+        let outcome = PgTestSupport.withAdminApi(() -> (), (api, _) -> {
+            let ask = recording(PgTestSupport.askOwner(api), errors);
+            let alice = recording(PgTestSupport.askAs(api, Credential.Bearer("test", "alice", "alice@example.com", "Alice")), errors);
             let me = ask("{ me { email name roles } }");
             let visibility = ask("mutation { updateProjectVisibility(visibility: PRIVATE) { slug name visibility } }");
             let invitedAlice = ask("mutation { inviteMember(email: \"alice@example.com\", role: EDITOR) { id email role createdAt } }");

@@ -27,9 +27,9 @@ mod TestApiKeyWritePg {
     ///
     @Test
     def testPgWriteApiKeyByRole(): Unit \ {IO, Assert} =
-        let outcome = PgTestSupport.withAdminApi(() -> CmsTestKit.withIds(List#{"e1"}, seed), (schema, seeded) -> {
+        let outcome = PgTestSupport.withAdminApi(() -> CmsTestKit.withIds(List#{"e1"}, seed), (api, seeded) -> {
             let (blogs, _) = seeded;
-            let owner = PgTestSupport.askOwner(schema);
+            let owner = PgTestSupport.askOwner(api);
             let writerKey = GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, owner("mutation { createApiKey(name: \"ci\", scope: WRITE, role: WRITER) { key role scope } }"));
             let editorIssued = owner("mutation { createApiKey(name: \"deploy\", scope: WRITE, role: EDITOR) { id key role expiresAt } }");
             let editorKey = GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, editorIssued);
@@ -37,8 +37,8 @@ mod TestApiKeyWritePg {
             let readWithRole = owner("mutation { createApiKey(name: \"x\", scope: READ, role: WRITER) { id } }") |> snd;
             let writeWithoutRole = owner("mutation { createApiKey(name: \"y\", scope: WRITE) { id } }") |> snd;
             let writeViewer = owner("mutation { createApiKey(name: \"v\", scope: WRITE, role: VIEWER) { id } }") |> snd;
-            let writer = PgTestSupport.askAs(schema, Credential.ApiKey(writerKey));
-            let editor = PgTestSupport.askAs(schema, Credential.ApiKey(editorKey));
+            let writer = PgTestSupport.askAs(api, Credential.ApiKey(writerKey));
+            let editor = PgTestSupport.askAs(api, Credential.ApiKey(editorKey));
             let created = writer("mutation { createEntry(typeId: \"${TypeId.toInt64(blogs)}\", fields: { title: \"hi\" }) { id stage } }");
             let entryId = GraphqlTestKit.stringAt(List#{"createEntry", "id"}, created);
             let writerPublishes = writer("mutation { publishEntry(id: \"${entryId}\") { id } }") |> snd;
@@ -93,16 +93,14 @@ mod TestApiKeyWritePg {
     def testPgDeadApiKeysAreAnonymous(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withPool(pool -> {
             let (blogs, shop) = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"e1"}, seed));
-            let deps = PgTestSupport.deps();
-            let schema = AdminSchema.make(deps, AdminRunner.make(pool, deps, ProjectId.default()));
-            let shopSchema = AdminSchema.make(deps, AdminRunner.make(pool, deps, shop));
-            let owner = PgTestSupport.askOwner(schema);
-            let shopOwner = PgTestSupport.askOwner(shopSchema);
+            let api = PgTestSupport.adminApi(pool);
+            let owner = PgTestSupport.askOwner(api);
+            let shopOwner = PgTestSupport.askOwner(PgTestSupport.adminApiOf(pool, shop));
             let pastExpiry = owner("mutation { createApiKey(name: \"old\", scope: WRITE, role: WRITER, expiresAt: \"2000-01-01T00:00:00Z\") { key expiresAt } }") |> snd;
             let revokedIssued = owner("mutation { createApiKey(name: \"gone\", scope: WRITE, role: WRITER) { id key } }");
             discard owner("mutation { revokeApiKey(id: \"${GraphqlTestKit.stringAt(List#{"createApiKey", "id"}, revokedIssued)}\") }");
             let shopKey = GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, shopOwner("mutation { createApiKey(name: \"shop\", scope: WRITE, role: OWNER) { key } }"));
-            let createWith = key -> PgTestSupport.askAs(schema, Credential.ApiKey(key))("mutation { createEntry(typeId: \"${TypeId.toInt64(blogs)}\", fields: { title: \"hi\" }) { id } }") |> snd;
+            let createWith = key -> PgTestSupport.askAs(api, Credential.ApiKey(key))("mutation { createEntry(typeId: \"${TypeId.toInt64(blogs)}\", fields: { title: \"hi\" }) { id } }") |> snd;
             (pastExpiry,
              createWith(GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, revokedIssued)),
              createWith(shopKey),
@@ -160,11 +158,10 @@ mod TestApiKeyWritePg {
         });
         let outcome = PgTestSupport.withPool(pool -> {
             let key = PgTestSupport.seed(seedWithKey);
-            let deps = PgTestSupport.deps();
             let engine = PgTestSupport.contentEngine(pool);
-            let admin = AdminSchema.make(deps, AdminRunner.make(pool, deps, ProjectId.default()));
+            let admin = PgTestSupport.adminApi(pool);
             let lastUsed = () -> PgTestSupport.mutateOrBug(pool, () -> PgTestSupport.asOwner(() -> ApiKeys.list() |> List.map(found -> Option.nonEmpty(found#lastUsedAt))));
-            let viaContent = GraphqlTestKit.askEngineWith(engine, Context.withCredential(Credential.ApiKey(key)), "{ blogs { totalCount } }");
+            let viaContent = PgTestSupport.askEngineAs(pool, Engine.Content, engine, Credential.ApiKey(key))("{ blogs { totalCount } }");
             let afterContent = lastUsed();
             let viaAdmin = PgTestSupport.askAs(admin, Credential.ApiKey(key))("{ contentTypes { apiId } }") |> snd;
             (viaContent, afterContent, viaAdmin, lastUsed())

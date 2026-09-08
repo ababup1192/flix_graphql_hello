@@ -1,44 +1,25 @@
 ///
 /// リクエスト単位の情報。すべてのリゾルバに第 1 引数として届く。
-/// credential はリクエストの身元。Runner が Tx の中で主体（Actor）に解決する。
-/// log はリクエストの span（request.id など）。Runner がリゾルバの中の行に付ける。入れるのは Graphql の handler を持つ側（Main）。
-/// observe は Runner が決めた事（user.id / api_key.name、鍵が知らない物だった印）をリクエストの行に戻す口。
+/// actor は認証済みユーザー。認証はリクエストに 1 回、Graphql の handler を持つ側（Main.runRoute）が Tx の外で済ませてここに入れる。
+/// log はリクエストの span（request.id、user.id など）。Runner がリゾルバの中の行に付ける。
+/// observe は Runner が決めた事（SQL の数、再試行の回数）をリクエストの行に戻す口。
 ///
 /// WhyNot: 戻す口が関数の値なのは、リゾルバは graphql-java の Java コールバックの中で呼ばれて effect が外の handler に届かず、
 /// 戻り値は graphql-java がフィールドの値として使うため。値として持ち込んだ物にしか書けない。
 ///
-pub type alias Context = { credential = Credential, log = Log.Fields, observe = Log.Fields -> Unit \ IO }
-
-///
-/// リクエストが持ってきた身元。誰が確かめたかを区別する（Runner が DB の役割と突き合わせて主体にする）。
-///
-/// - Bearer(issuer, subject, email, name): 発行元の JWT を検証済みの本人
-/// - ApiKey(生の鍵): 公開 API の鍵。hash はここではしない
-/// - PersonalToken(生のトークン): `Authorization: Bearer cmspat_...` の Personal Access Token。hash はここではしない
-/// - Missing: 何も付いていない（公開の読み取り、または未ログイン）
-/// - Invalid(理由): 付いていたが検証に落ちた。中身は含めない
-///
-pub enum Credential with Eq, Order, ToString {
-    case Bearer(String, String, String, String)
-    case ApiKey(String)
-    case PersonalToken(String)
-    /// X-Preview-Token の生の値
-    case Preview(String)
-    case Missing
-    case Invalid(String)
-}
+pub type alias Context = { actor = Actor, log = Log.Fields, observe = Log.Fields -> Unit \ IO }
 
 mod Context {
 
     ///
-    /// 認証していない Context。JWT 検証を入れるまでは全リクエストがこれ。
+    /// 認証していない Context。匿名。
     ///
-    pub def anonymous(): Context = { credential = Credential.Missing, log = Map.empty(), observe = _ -> () }
+    pub def anonymous(): Context = withActor(Actor.Anonymous)
 
     ///
-    /// 身元付きの context。
+    /// 認証済みユーザー付きの context。
     ///
-    pub def withCredential(credential: Credential): Context = { credential = credential, log = Map.empty(), observe = _ -> () }
+    pub def withActor(actor: Actor): Context = { actor = actor, log = Map.empty(), observe = _ -> () }
 
 }
 

@@ -100,16 +100,16 @@ mod TestContentEntriesPg {
     /// 管理 API のエンジンを通して JSON scalar が往復する。数値は Int、null で消す、規則外のキーは invalid。
     @Test
     def testPgAdminEntryRoundTrip(): Unit \ {IO, Assert} =
-        let outcome = PgTestSupport.withAdminApi(blogsWithFields, (schema, blogs) -> {
+        let outcome = PgTestSupport.withAdminApi(blogsWithFields, (api, blogs) -> {
             let typeId = "${blogs}";
-            let created = PgTestSupport.askOwner(schema)(
+            let created = PgTestSupport.askOwner(api)(
                 "mutation { createEntry(typeId: \"${typeId}\", id: \"e1\", fields: { title: \"hello\", views: 7 }) { id version stage fields } }");
-            let updated = PgTestSupport.askOwner(schema)(
+            let updated = PgTestSupport.askOwner(api)(
                 "mutation { updateEntry(id: \"e1\", expectedVersion: 1, fields: { views: null }) { version fields } }");
-            let badKey = GraphqlTestKit.askRequest(schema, GraphqlTestKit.request(
+            let badKey = GraphqlTestKit.askRequest(api#schema, GraphqlTestKit.request(
                 "mutation($f: JSON!) { updateEntry(id: \"e1\", expectedVersion: 2, fields: $f) { version } }",
                 Map#{ "f" => Value.Obj(Map#{ "Bad Key" => Value.Int(1) }) })) |> snd;
-            let listed = PgTestSupport.askOwner(schema)( "{ entries(typeId: \"${typeId}\") { totalCount nodes { id } } }");
+            let listed = PgTestSupport.askOwner(api)( "{ entries(typeId: \"${typeId}\") { totalCount nodes { id } } }");
             (created, updated, badKey, listed)
         });
         Assert.assertEq(
