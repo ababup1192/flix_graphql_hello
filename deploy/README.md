@@ -274,9 +274,12 @@ OOM のような事故の後、プロセスは生きているのに接続プー�
 **`/health` を叩かれた時にも同じ判断が 1 回進む**（見張りのスレッドが OOM で死んでも、リクエストのスレッドは生きているので評価が止まらない）。次の 4 つがそろった時だけ終わる。
 
 1. 起動から `CMS_SELF_HEAL_WARMUP_SECONDS`（既定 300 秒）経っている（起動直後の DB 待ちで落ちない）
-2. プール経由の ping が `CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS`（既定 90 秒）以上続けて失敗している
-3. その間に、**プールを通さない新しい接続**では DB に届いた（DB 自体が落ちている時は終わらない。終わっても直らないため）
-3'. その間に、リクエストの Tx が **1 度も閉じていない**（閉じていれば接続は流れていて、ping が落ちるのはプールが満杯なだけ。読むだけの文書が実行の間 1 本を握る形では、混んでいるだけで ping が借り待ちの上限で落ちる）
+2. プール経由の ping が続けて失敗している
+3. その間に、**プールを通さない新しい接続**では DB に届いた（DB 自体が落ちている時は終わらない。終わっても直らないため）。
+    しかも届き始めてから `CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS`（既定 90 秒）以上、ping の失敗が続いている（DB が落ちていた時間は数えない。数えると DB が起きた瞬間に条件がそろって落ちる。2026-09-09 の実機 E2E で `docker compose start postgres` と同じ秒に exit 3 した）
+3'. その間に、接続が **1 本もプールに返っていない**（返っていれば接続は流れていて、ping が落ちるのはプールが満杯か、PG の復旧直後に Hikari が接続を作り直している最中なだけ。読むだけの文書が実行の間 1 本を握る形では、混んでいるだけで ping が借り待ちの上限で落ちる）。
+    記録は HikariCP の tracker で、Tx の COMMIT / ROLLBACK（フィールドごとの Tx、リクエストの Tx、認証や版を読むだけの Tx）も `/health` の ping の返却も全部拾う。
+    2026-09-08 の実機 E2E では「リクエストの Tx が閉じた」だけを見ていて、304（版を読むだけ）の負荷中に PG を止めて起こすと、復旧の 2.4 秒後に 200 が返り始めたのに 3.4 秒後に exit 3 した（pool total 0 / waiting 53。作り直しの列に並んだ ping が借り待ちで落ち、新しい接続は通る、で 4 + 1 条件が揃った）
 4. プロセスごとの jitter（0 秒から `CMS_SELF_HEAL_JITTER_SECONDS`。既定 10 秒）も過ぎている（複数台が同じ時刻に落ちない）
 
 終わる時は `{"severity":"error","message":"self-heal: exiting","reason":...,"db.pool.active":...}` を出し、停止（SIGTERM）と同じ drain をしてから**終了コード 3**。
@@ -288,6 +291,13 @@ OOM で JVM 自身が落ちる時（`-XX:+ExitOnOutOfMemoryError`）の最後の
 
 旗を付けない環境（手元で jar を直に起動する時など）でも main スレッドが死んだ時に 1 にならないよう、cms は `listen` を Throwable で受け、
 `{"severity":"fatal","message":"main thread died","exception.type":...}` を出して 3 で終わる。drain はしない（JVM が壊れている時で、DB の呼び出しも同じ理由で詰まるため）。
+
+**`unable to create native thread` の OutOfMemoryError には `-XX:+ExitOnOutOfMemoryError` が効かない**（OpenJDK 23、2026-09-08 の実機 E2E で実測。旗はヒープの OOM で JVM を落とす物で、
+スレッドを作れなかった OOM は普通の例外として投げられる）。cms 側では、リゾルバの中で起きた OOM は graphql-java が `CompletionException` に包んで投げ返すので、
+外側だけ見ると Exception として 500 で飲み込まれ、プロセスが壊れたまま生き残っていた（HttpServer の再送出も効かなかった）。
+今は cause の連鎖まで見て fatal と判定し、リクエストのスレッドなら `request thread died`、仕事のスレッドなら `jobs fatal`、見張りのスレッドなら `watch fatal` を出して**終了コード 3** で終わる（drain はしない。`main thread died` と同じ）。
+この OOM の元（GraphQL のフィールドごとに `HttpClient` が作られ、`HttpClient-N-SelectorManager` のスレッドが GC まで残る Flix 0.75.3 の `Net.Http.runWithIO`）は
+プロセスで 1 つの `HttpClient` を使い回す handler（`OutboundHttp`）に置き換えて塞いだ（管理 API の entries 50 × 10 で 1 リクエスト 1,095 スレッド → 0）。
 
 見張りのスレッド自体が止まった時は、`/health` が 503 と `"reason": "watch stalled"` を返す（最後に回ってから 30 秒より古い時）。
 リクエストの行には `jobs.stalled_ms` / `watch.stalled_ms` が付く。
