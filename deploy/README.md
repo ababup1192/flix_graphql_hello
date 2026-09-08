@@ -352,6 +352,8 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_JOBS` | `on` ならプロセス内のバックグラウンドワーカー（予約公開と Webhook の配信）を回す。`off` は外部トリガーか別の worker で回す時 | on |
 | `CMS_JOBS_TOKEN` | `POST /jobs/tick`（外部トリガー）を許す `X-Jobs-Token` の値。無ければその口は閉じる | 無し |
 | `CMS_JOBS_DRAIN_SECONDS` | 自己回復（exit 3）で実行中の仕事を待つ秒数 | 15 |
+| `CMS_SCHEDULER_CHUNK_SIZE` | 予約公開の tick が 1 回の claim で拾う件数。tick はこの件数を予算の中で繰り返し拾う | 100 |
+| `CMS_SCHEDULER_TICK_BUDGET_SECONDS` | 予約公開の 1 回の tick で claim を繰り返す上限の秒数。尽きたら残りは次の tick（2 秒後）が拾う。`/health` の stall の上限（30 秒）と `CMS_JOBS_DRAIN_SECONDS` より短くする | 10 |
 | `CMS_SHUTDOWN_TIMEOUT_SECONDS` | SIGTERM で HTTP の接続と実行中の仕事を待つ秒数。超えたら `shutdown timed out` と終了コード 2。compose の `stop_grace_period` はこれより長くする | 20 |
 | `CMS_SELF_HEAL` | `on` / `off`。接続プールが壊れたまま戻らない時に自分で終わって再起動させる（下の「自己回復」） | on |
 | `CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS` | プール経由で DB に届かない状態がこれだけ続いたら終わる | 90 |
