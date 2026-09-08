@@ -73,18 +73,21 @@ mod Shutdown {
     ///
     /// WhyNot: Runtime.addShutdownHook（Runnable）を使わないのは、Runnable の `run` が Flix の予約語で書けないため。
     ///
-    pub def installHook(listener: HttpServer.Listener, state: BackgroundJobs.State, timeoutMs: Int64, sink: Log.Sink): Unit \ IO =
+    pub def installHook(listener: HttpServer.Listener, state: BackgroundJobs.State, pool: Pool, timeoutMs: Int64, sink: Log.Sink): Unit \ IO =
         let onSignal = new SignalHandler {
             def handle(_this: SignalHandler, _signal: Signal): Unit \ IO =
-                System.exit(Log.runWith(sink, () -> stop(listener, state, timeoutMs)))
+                System.exit(Log.runWith(sink, () -> stop(listener, state, pool, timeoutMs)))
         };
         discard Signal.handle(new Signal("TERM"), onSignal);
         discard Signal.handle(new Signal("INT"), onSignal)
 
     ///
-    /// 停止の本体。`shutting down` を出し、listen を閉じ、接続と仕事を期限まで待って終了コードを返す。
+    /// 停止の本体。`shutting down` を出し、listen を閉じ、接続と仕事を期限まで待ち、プールを閉じて終了コードを返す。
     ///
-    pub def stop(listener: HttpServer.Listener, state: BackgroundJobs.State, timeoutMs: Int64): Int32 \ {IO, Log} =
+    /// WhyNot: プールを閉じるのを drain の後にするのは、drain の中の tick がまだ接続を使うため。期限切れ（exit 2）でも閉じる。
+    /// 握られたままの接続（読むだけの文書の Tx）は Hikari が閉じる時に切るので、PostgreSQL 側に idle in transaction が残らない。
+    ///
+    pub def stop(listener: HttpServer.Listener, state: BackgroundJobs.State, pool: Pool, timeoutMs: Int64): Int32 \ {IO, Log} =
         Log.info("shutting down", Log.Fields.empty());
         // 新しい接続と新しい tick を止める（listen を閉じ、ワーカーの stopping フラグを立てる）
         HttpServer.close(listener);
@@ -93,6 +96,8 @@ mod Shutdown {
         let deadline = System.currentTimeMillis() + timeoutMs;
         let connections = awaitConnections(listener, deadline);
         let drained = BackgroundJobs.drain(state, deadline);
+        // 接続プールを閉じる（待ち切れなかった時も）
+        Pool.close(pool);
         // 残った物から終了コードを決める（待ち切れなければ warn の行）
         report({ connections = connections, inTick = not drained })
 

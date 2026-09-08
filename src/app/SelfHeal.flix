@@ -35,8 +35,9 @@ mod SelfHeal {
     /// - pingOk: プールから借りた接続で SELECT 1 が通ったか
     /// - freshOk: プールを通さない新しい接続で SELECT 1 が通ったか（pingOk が true の時は見ない）
     /// - stats: その時のプールの数字
+    /// - txClosedAt: リクエストの Tx をプロセスで最後に COMMIT / ROLLBACK した時刻。無ければ None
     ///
-    pub type alias Observation = { at = Int64, pingOk = Bool, freshOk = Bool, stats = Pool.PoolStats }
+    pub type alias Observation = { at = Int64, pingOk = Bool, freshOk = Bool, stats = Pool.PoolStats, txClosedAt = Option[Int64] }
 
     ///
     /// watchの結果。Exit は理由（ログの reason に出す）を持つ。
@@ -85,25 +86,35 @@ mod SelfHeal {
             Sys.Env.getVar("CMS_SELF_HEAL_WARMUP_SECONDS"), Sys.Env.getVar("CMS_SELF_HEAL_JITTER_SECONDS"), fraction)
 
     ///
-    /// 観測の列（古い順）から決める。次の 4 つが全部そろった時だけ Exit。
+    /// 観測の列（古い順）から決める。次の 5 つが全部そろった時だけ Exit。
     ///
     /// 1. 起動から warmupMs 経っている
     /// 2. プール経由の ping が minUnhealthyMs 以上続けて失敗している
     /// 3. その間に、プールを通さない新しい接続では DB に届いた
     /// 4. jitter を足した長さも過ぎている
+    /// 5. その間に、リクエストの Tx が 1 度も閉じていない（閉じていれば接続は流れていて、ping が落ちるのはプールが満杯なだけ）
+    ///
+    /// WhyNot: 5 を見ないと、読むだけの文書が応答まで接続を握る形では、混んでいるだけで ping が借り待ちの上限で落ち続け、
+    /// 壊れていないプロセスを終わらせるため。
     ///
     pub def decide(settings: Settings, startedAt: Int64, observations: List[Observation]): Decision =
         match (List.last(observations), List.head(unhealthySuffix(observations))) {
-            case (Some(latest), Some(first)) => decideOn(settings, startedAt, latest#at - first#at, latest, unhealthySuffix(observations))
+            case (Some(latest), Some(first)) => decideOn(settings, startedAt, first, latest, unhealthySuffix(observations))
             case _                           => Decision.Keep
         }
 
-    /// 4 つの条件を順に見る。
-    def decideOn(settings: Settings, startedAt: Int64, unhealthyMs: Int64, latest: Observation, streak: List[Observation]): Decision =
+    /// 5 つの条件を順に見る。
+    def decideOn(settings: Settings, startedAt: Int64, first: Observation, latest: Observation, streak: List[Observation]): Decision =
+        let unhealthyMs = latest#at - first#at;
         if (latest#at - startedAt < settings#warmupMs) Decision.Keep
         else if (unhealthyMs < settings#minUnhealthyMs + settings#jitterMs) Decision.Keep
         else if (not List.exists(seen -> seen#freshOk, streak)) Decision.Keep
+        else if (txClosedSince(first#at, latest)) Decision.Keep
         else Decision.Exit("DB の接続プールから ${unhealthyMs} ms 続けて届かず、プールを通さない新しい接続では届いている")
+
+    /// 失敗が続き始めてから、リクエストの Tx が閉じたか。閉じた時刻は単調に進むので最新の観測だけ見れば足りる。
+    def txClosedSince(sinceAt: Int64, latest: Observation): Bool =
+        latest#txClosedAt |> Option.exists(closedAt -> closedAt >= sinceAt)
 
     /// 末尾に続いている失敗だけ（間に 1 回でも成功があれば、そこで切れる）。
     def unhealthySuffix(observations: List[Observation]): List[Observation] =
@@ -117,19 +128,20 @@ mod SelfHeal {
     /// - connection: プールを通さない接続を 1 本開くための接続情報
     /// - seen: 直近の観測（古い順。窓の外は捨てる）
     /// - exiting: 終わりの道に入った印
+    /// - lastTxClosedAt: リクエストの Tx を最後に閉じた時刻（DbRunner.closeRequestTx が置く）
     ///
     /// WhyNot: exiting を持つのは、step を呼ぶ経路が 2 つ（watchのスレッドと /health のリクエストのスレッド）あり、
     /// 同じ Exit で drain と System.exit が二重に走らないようにするため。
     ///
-    pub type alias Watch = { settings = Settings, startedAt = Int64, connection = Jdbc.ConnectionConfig, seen = Ref[List[Observation], Static], exiting = Ref[Bool, Static] }
+    pub type alias Watch = { settings = Settings, startedAt = Int64, connection = Jdbc.ConnectionConfig, seen = Ref[List[Observation], Static], exiting = Ref[Bool, Static], lastTxClosedAt = Ref[Option[Int64], Static] }
 
     ///
     /// 覚えておく観測の数。2 秒ごとなので 300 個で 10 分。minUnhealthyMs（既定 90 秒）より十分に長い。
     ///
     def windowSize(): Int32 = 300
 
-    pub def createWatch(settings: Settings, startedAt: Int64, connection: Jdbc.ConnectionConfig): Watch \ IO =
-        { settings = settings, startedAt = startedAt, connection = connection, seen = Ref.fresh(Static, Nil), exiting = Ref.fresh(Static, false) }
+    pub def createWatch(settings: Settings, startedAt: Int64, connection: Jdbc.ConnectionConfig, lastTxClosedAt: Ref[Option[Int64], Static]): Watch \ IO =
+        { settings = settings, startedAt = startedAt, connection = connection, seen = Ref.fresh(Static, Nil), exiting = Ref.fresh(Static, false), lastTxClosedAt = lastTxClosedAt }
 
     ///
     /// 終わりの道を 1 回だけ通す。まだ誰も通っていなければ印を置いて true。
@@ -144,7 +156,7 @@ mod SelfHeal {
     /// 借り待ちの分だけ応答が倍に伸びるため（実験 4 回目の対照 4 で 10.3 秒）。ping は呼ぶ側が 1 回打ってその結果を渡す。
     ///
     pub def observe(watch: Watch, pool: Pool, pingOk: Bool): Observation \ IO =
-        { at = System.currentTimeMillis(), pingOk = pingOk, freshOk = not pingOk and freshOk(watch#connection), stats = Pool.stats(pool) }
+        { at = System.currentTimeMillis(), pingOk = pingOk, freshOk = not pingOk and freshOk(watch#connection), stats = Pool.stats(pool), txClosedAt = Ref.get(watch#lastTxClosedAt) }
 
     ///
     /// 観測を 1 つ積んで決める。

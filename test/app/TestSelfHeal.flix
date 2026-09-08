@@ -17,17 +17,21 @@ mod TestSelfHeal {
     /// at 秒から 2 秒ごとに count 回の観測。
     def observations(fromSeconds: Int64, count: Int32, pingOk: Bool, freshOk: Bool): List[Observation] =
         List.range(0, count) |> List.map(index ->
-            { at = (fromSeconds + Int32.toInt64(index) * 2i64) * 1000i64, pingOk = pingOk, freshOk = freshOk, stats = stats() })
+            { at = (fromSeconds + Int32.toInt64(index) * 2i64) * 1000i64, pingOk = pingOk, freshOk = freshOk, stats = stats(), txClosedAt = None })
 
     /// 起動から 400 秒まわった後に、DB に届かない観測が seconds 秒ぶん続く列。
     def unhealthyFor(seconds: Int64, freshOk: Bool): List[Observation] =
         observations(300i64, 50, true, false) ::: observations(400i64, Int64.clampToInt32(min = 0, max = 1000, seconds / 2i64) + 1, false, freshOk)
 
+    /// 最後に Tx を閉じた時刻（秒）を、その時刻以降の観測に載せる（Ref の値をその時に読んだ形）。
+    def withTxClosedAt(closedSeconds: Int64, seen: List[Observation]): List[Observation] =
+        seen |> List.map(found -> if (found#at >= closedSeconds * 1000i64) { txClosedAt = Some(closedSeconds * 1000i64) | found } else found)
+
     ///
-    /// Exit するのは 4 つが揃った時だけ。1 つでも欠けたら Keep。
+    /// Exit するのは 5 つが揃った時だけ。1 つでも欠けたら Keep。
     ///
     /// warmup 中 / 失敗が短い / 新しい接続でも届かない（DB 自体が落ちている）/ jitter の分をまだ待っている /
-    /// ping が戻った、のどれでも Keep。
+    /// ping が戻った / 失敗の間にリクエストの Tx が閉じた（満杯なだけ）、のどれでも Keep。
     ///
     @Test
     def testDecideTable(): Unit \ Assert =
@@ -44,7 +48,11 @@ mod TestSelfHeal {
             (({ jitterMs = 30000i64 | settings() }, 0i64, unhealthyFor(100i64, true)), Decision.Keep),
             // 揃った後に ping が戻った
             ((settings(), 0i64, unhealthyFor(100i64, true) ::: observations(600i64, 1, true, false)), Decision.Keep),
-            // 4 つとも揃った
+            // 失敗は 100 秒続いているが、その間（450 秒）にリクエストの Tx が閉じている（プールは流れていて、ping が落ちるのは満杯なだけ）
+            ((settings(), 0i64, withTxClosedAt(450i64, unhealthyFor(100i64, true))), Decision.Keep),
+            // 失敗が始まる前（350 秒）に Tx が閉じたきり → 窓の間には閉じていないので Exit
+            ((settings(), 0i64, withTxClosedAt(350i64, unhealthyFor(100i64, true))), Decision.Exit("DB の接続プールから 100000 ms 続けて届かず、プールを通さない新しい接続では届いている")),
+            // 5 つとも揃った
             ((settings(), 0i64, unhealthyFor(100i64, true)), Decision.Exit("DB の接続プールから 100000 ms 続けて届かず、プールを通さない新しい接続では届いている"))
         };
         Assert.assertEq(
@@ -53,7 +61,7 @@ mod TestSelfHeal {
 
     /// 秒で観測を並べる（全部 DB に届かず、プールを通さない接続では届く）。
     def unhealthyAt(seconds: List[Int64]): List[Observation] =
-        seconds |> List.map(second -> { at = second * 1000i64, pingOk = false, freshOk = true, stats = stats() })
+        seconds |> List.map(second -> { at = second * 1000i64, pingOk = false, freshOk = true, stats = stats(), txClosedAt = None })
 
     ///
     /// 判断は観測の列（それぞれの at）だけで決まる。見張りのスレッドと /health の 2 経路から交互に呼ばれて
@@ -80,7 +88,7 @@ mod TestSelfHeal {
     /// 終わりの道は 1 回だけ通る（2 経路から同じ Exit が出ても drain と exit が二重に走らない）。
     @Test
     def testClaimExitOnce(): Unit \ {Assert, IO} =
-        let watch = SelfHeal.createWatch(settings(), 0i64, { url = "jdbc:none", user = "u", password = "p" });
+        let watch = SelfHeal.createWatch(settings(), 0i64, { url = "jdbc:none", user = "u", password = "p" }, Ref.fresh(Static, None));
         Assert.assertEq(
             expected = List#{true, false, false},
             List.range(0, 3) |> List.map(_ -> SelfHeal.claimExit(watch)))

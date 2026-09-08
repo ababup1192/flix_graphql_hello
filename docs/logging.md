@@ -48,7 +48,9 @@
 | `error.kind` | string | リゾルバの失敗の行 | DB の失敗の種類（sqlfx の TransientDbErr の名前 `deadlock` / `timeout` / `connectionLost`）。再試行で枯渇した物は最後の失敗の種類。「DB が落ちた」と「DB が遅い」を読み分ける。制約違反などには付かない |
 | `db.retries` | int | リクエストの行 | 一時的な失敗で呼び直した回数。1 以上の時だけ。リクエストの中の Tx 全部の和 |
 | `db.statements` | int | リクエストの行 | そのリクエストで出した SQL の数（fetch / execute / executeReturning を 1 と数える。RLS の印と認証の SQL を含む）。Tx ごとに DbRunner が observe で戻し（認証の Tx も Runner の Tx も）、受ける側（`LogFields.mergeCounts`）が足す。上限は `test/Pg/TestQueryBudgetPg` |
-| `db.transactions` | int | リクエストの行 | そのリクエストで張った Tx の数（`DbRunner.transact` / `withTx` を呼んだ回数。SQL を出さなかった物も数える）。認証の 1 つ + ルートフィールドと入れ子のフィールドの数 |
+| `db.transactions` | int | リクエストの行 | そのリクエストで張った Tx の数。読むだけの文書は認証の 1 つ + リクエストの Tx 1 つ（接続を借りた時だけ）。mutation を含む文書は認証の 1 つ + ルートフィールドと入れ子のフィールドの数（`DbRunner.transact` を呼んだ回数。SQL を出さなかった物も数える） |
+| `db.tx.outcome` | string | リクエストの行（読むだけの文書） | リクエストの Tx の結末。`committed` / `rolled_back`（DB の失敗で Broken。残りのフィールドは INTERNAL）/ `none`（SQL を出さなかった。接続を借りていない） |
+| `db.tx.held_ms` | int | リクエストの行（読むだけの文書で接続を借りた物） | 接続を借りてから COMMIT / ROLLBACK して返すまでのミリ秒。応答の書き出しは含まない。プールの本数の目安に使う（`deploy/README.md`） |
 | `db.pool.waiting` | int | リクエストの行 | DB の接続プールを借りるのを待っているスレッドの数。Runner の入口で 1 回読み、1 以上の時だけ |
 | `db.pool.active` | int | リクエストの行、`self-heal: exiting` の行 | 借りられている接続の数。リクエストの行には `db.pool.waiting` が付く時だけ |
 | `db.pool.idle` | int | `self-heal: exiting` の行 | 空いている接続の数 |
