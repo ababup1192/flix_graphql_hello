@@ -85,7 +85,8 @@ mod TestPublishPg {
 
     /// 差分: CHANGED の entry で PUBLISHED → DRAFT を取ると、変えたフィールド 1 件だけ出る。未公開の entry の PUBLISHED は notFound。
     ///
-    ///   create(Old/old) → publish → update(title: New) → diff(PUBLISHED, DRAFT) = [title: Old → New]
+    ///   create(Old/old) → publish → update(title: New) → diff(PUBLISHED, DRAFT) = [title: Changed(Old, New)]
+    ///   create(Alone/alone) だけ                        → diff(PUBLISHED, DRAFT) = NotFound(Entry, "d2 (published)")
     @Test
     def testPgDiffPublishedToDraft(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"d1", "d2"}, () -> {
@@ -105,7 +106,9 @@ mod TestPublishPg {
     /// 差分: versionId 同士で restore 前後の差が読める。restore した後の下書きは元のバージョンと同じ（差分無し）。他の entry のバージョンは notFound。
     ///
     ///   create(Old) → saveVersion(v1) → update(New) → saveVersion(v2) → restore(v1)
-    ///     diff(v1, v2) = [title: Old → New] / diff(v1, DRAFT) = [] / other の diff(v1, DRAFT) = notFound
+    ///     diff(v1, v2)    = [title: Changed(Old, New)]
+    ///     diff(v1, DRAFT) = []
+    ///     other の diff(v1, DRAFT) = NotFound(Version, "1")
     @Test
     def testPgDiffBetweenVersions(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"b1", "b2"}, () -> {
@@ -126,31 +129,39 @@ mod TestPublishPg {
             Nil,
             Err(CmsFailure.NotFound(Entity.Version, "1"))))), result)
 
-    /// 差分（GraphQL 越し）: RICH_TEXT の差分は TEXT で lines が出る。versionId を渡す形も通る。
+    /// 差分（GraphQL 越し）: RICH_TEXT の差分は kind = TEXT で lines に出て、before / after / children は null。versionId を渡す形も通る。
     ///
     ///   createEntry(body: "a") → publishEntry → updateEntry(body: "b") → saveVersion
-    ///     diff(PUBLISHED → DRAFT) = [body TEXT: - a / + b] / diff(versionId → DRAFT) = []
+    ///     text: diff(PUBLISHED → DRAFT) = [body: TEXT, lines = [DEL a, ADD b]]
+    ///     same: diff(versionId → DRAFT) = []
     @Test
     def testPgDiffRichTextViaAdminApi(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withAdminApi(() -> (), (schema, _) -> {
             let ask = PgTestSupport.askOwner(schema);
             let typeId = GraphqlTestKit.stringAt(List#{"createContentType", "id"}, ask("mutation { createContentType(input: { apiId: \"posts\", name: \"投稿\" }) { id } }"));
             discard ask("mutation { addField(typeId: \"${typeId}\", input: { apiId: \"body\", name: \"本文\", kind: RICH_TEXT }) { id } }");
-            let docOf = text -> "{ type: \"doc\", content: [{ type: \"paragraph\", content: [{ type: \"text\", text: \"${text}\" }] }] }";
-            let created = ask("mutation { createEntry(typeId: \"${typeId}\", fields: { body: ${docOf("a")} }) { id version } }");
+            let created = ask("mutation { createEntry(typeId: \"${typeId}\", fields: { body: ${CmsTestKit.docOf("a")} }) { id version } }");
             let entryId = GraphqlTestKit.stringAt(List#{"createEntry", "id"}, created);
             let published = ask("mutation { publishEntry(id: \"${entryId}\") { version } }");
-            discard ask("mutation { updateEntry(id: \"${entryId}\", fields: { body: ${docOf("b")} }, expectedVersion: ${GraphqlTestKit.intAt(List#{"publishEntry", "version"}, published)}) { version } }");
+            let version = GraphqlTestKit.intAt(List#{"publishEntry", "version"}, published);
+            discard ask("mutation { updateEntry(id: \"${entryId}\", fields: { body: ${CmsTestKit.docOf("b")} }, expectedVersion: ${version}) { version } }");
             let saved = ask("mutation { saveVersion(id: \"${entryId}\") { id } }");
             let versionId = GraphqlTestKit.stringAt(List#{"saveVersion", "id"}, saved);
             ask("{ entry(id: \"${entryId}\") { text: diff(from: { stage: PUBLISHED }, to: { stage: DRAFT }) { path kind before after children { path } lines { kind text } } same: diff(from: { versionId: \"${versionId}\" }, to: { stage: DRAFT }) { path } } }")
         });
-        Assert.assertEq(
-            expected = (Value.Obj(Map#{ "entry" => Value.Obj(Map#{
-                "text" => Value.List(Value.Obj(Map#{ "path" => Value.Str("body"), "kind" => Value.Str("TEXT"), "before" => Value.Null, "after" => Value.Null, "children" => Value.Null,
-                    "lines" => Value.List(Value.Obj(Map#{ "kind" => Value.Str("DEL"), "text" => Value.Str("a") }) :: Value.Obj(Map#{ "kind" => Value.Str("ADD"), "text" => Value.Str("b") }) :: Nil) }) :: Nil),
-                "same" => Value.List(Nil) }) }), None),
-            outcome)
+        let change = GraphqlTestKit.listAt(List#{"entry", "text"}, outcome) |> List.head |> Option.getWithDefault(Value.Null);
+        let picked = GraphqlTestKit.pick(List#{List#{"path"}, List#{"kind"}, List#{"before"}, List#{"after"}, List#{"children"}, List#{"lines"}}, change);
+        let same = GraphqlTestKit.valueAt(List#{"entry", "same"}, outcome);
+        CmsTestKit.assertSameValue(
+            Value.List(List#{
+                Value.Str("body"), Value.Str("TEXT"), Value.Null, Value.Null, Value.Null,
+                Value.List(List#{diffLine("DEL", "a"), diffLine("ADD", "b")}),
+                Value.List(Nil)}),
+            Value.List(picked ::: same :: Nil))
+
+    /// GraphQL の DiffLine（{ kind, text }）の応答。
+    def diffLine(kind: String, text: String): Value =
+        Value.Obj(Map#{ "kind" => Value.Str(kind), "text" => Value.Str(text) })
 
     /// 復元した下書きは公開し直せる。公開側は復元した中身になり、CHANGED は消える。
     ///

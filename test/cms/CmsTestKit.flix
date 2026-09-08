@@ -130,7 +130,33 @@ mod CmsTestKit {
     pub def messageOr(pick: a -> b, thunk: Unit -> a \ ef): Result[String, b] \ ef - CmsErr =
         CmsErr.runWithResult(thunk) |> Result.map(pick) |> Result.mapErr(CmsErr.toMessage)
 
+    ///
+    /// GraphQL の Value を比べる。違えば、両方を整形した JSON の行差分（`- 期待` / `+ 実際`）だけを文面にする。
+    ///
+    /// WhyNot: assertEq に任せないのは、応答の木が 1 行の ToString で出ると、どこが違うのか読めないため。
+    ///
+    pub def assertSameValue(expected: Value, actual: Value): Unit \ Assert =
+        Assert.assertEqWithMsg(expected = expected, actual, "Value が違います:\n" + valueDiff(expected, actual))
+
+    /// 整形した JSON の行差分のうち、違う行だけを改行で繋ぐ。
+    def valueDiff(expected: Value, actual: Value): String =
+        EntryDiff.diffLines(prettyJson(expected), prettyJson(actual))
+            |> List.filterMap(line -> match line {
+                case DiffLine.Same(_)    => None
+                case DiffLine.Del(text)  => Some("- ${text}")
+                case DiffLine.Add(text)  => Some("+ ${text}")
+            })
+            |> List.join("\n")
+
+    def prettyJson(value: Value): String = Util.Json.toPrettyString(2, JsonValue.toJson(value))
+
     // ---- richText の doc の組み立て ----
+
+    ///
+    /// GraphQL の引数に書く、平文の段落 1 つの doc のリテラル。
+    ///
+    pub def docOf(text: String): String =
+        "{ type: \"doc\", content: [{ type: \"paragraph\", content: [{ type: \"text\", text: \"${text}\" }] }] }"
 
     ///
     /// 子を持つノード。attrs は空なら付けない。content は空でも付ける（doc と空の段落の形）。

@@ -83,6 +83,13 @@ mod GraphqlTestKit {
         Value.path(path, fst(response))
 
     ///
+    /// 1 つの値から path を複数まとめて取る（valueAt の複数 path 版）。無い path は Null。
+    /// 応答の data ではなく値を受けるのは、配列の 1 要素（listAt の中身）からも取れるようにするため。
+    ///
+    pub def pick(paths: List[List[String]], value: Value): List[Value] =
+        paths |> List.map(path -> Value.path(path, value))
+
+    ///
     /// ask の応答の data から path の Int（version など）を取る。無ければ -1。
     ///
     pub def intAt(path: List[String], response: (Value, Option[String])): Int32 =
