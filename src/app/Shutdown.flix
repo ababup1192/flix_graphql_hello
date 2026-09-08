@@ -86,11 +86,14 @@ mod Shutdown {
     ///
     pub def stop(listener: HttpServer.Listener, state: BackgroundJobs.State, timeoutMs: Int64): Int32 \ {IO, Log} =
         Log.info("shutting down", Log.Fields.empty());
+        // 新しい接続と新しい tick を止める（listen を閉じ、ワーカーの stopping フラグを立てる）
         HttpServer.close(listener);
         Ref.put(true, state#stopping);
+        // 同じ deadline で、処理中の接続 → 実行中の tick の順に待つ（drain）
         let deadline = System.currentTimeMillis() + timeoutMs;
         let connections = awaitConnections(listener, deadline);
         let drained = BackgroundJobs.drain(state, deadline);
+        // 残った物から終了コードを決める（待ち切れなければ warn の行）
         report({ connections = connections, inTick = not drained })
 
     ///

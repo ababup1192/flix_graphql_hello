@@ -44,8 +44,10 @@ mod BackgroundJobs {
     /// 止まらずに回す。失敗はログに出して次の周へ。停止が始まったら抜ける。周ごとに Log を sink で入れ直す（spawn の中なので Main の handler は届かない）。
     ///
     pub def runForever(pool: Pool, state: State, sink: Log.Sink): Unit \ IO =
+        // 停止が始まっていれば 1 行出して抜ける（stopping フラグはラウンドの先頭でだけ見る）
         if (Ref.get(state#stopping)) Log.runWith(sink, () -> Log.info("jobs stopping", Log.Fields.empty()))
         else {
+            // 1 ラウンド回して interval ぶん sleep し、次のラウンドへ
             round(pool, state, sink);
             Thread.sleep(intervalMs());
             runForever(pool, state, sink)
@@ -60,9 +62,12 @@ mod BackgroundJobs {
     pub def watchForever(pool: Pool, state: State, heal: Option[SelfHeal.Watch], sink: Log.Sink): Unit \ IO =
         if (Ref.get(state#stopping)) ()
         else {
+            // ラウンドの先頭で lastWatch（heartbeat）を更新する。/health はこの古さで watch のスレッドが生きているかを見る
             let startedAt = System.currentTimeMillis();
             Ref.put(Some(startedAt), state#lastWatch);
+            // プール経由で ping を 1 回打ち、その結果で自己回復の判断を 1 回進める（JVM の例外は catch で受ける）
             guardedWatch(sink, () -> healCheck(pool, state, heal, Result.isOk(Health.ping(pool))));
+            // 1 ラウンドに掛かった時間を interval から引いて sleep し、次のラウンドへ
             Thread.sleep(nextWaitMs(healIntervalMs(), System.currentTimeMillis() - startedAt));
             watchForever(pool, state, heal, sink)
         }
@@ -129,8 +134,11 @@ mod BackgroundJobs {
 
     /// 1 周。失敗は Error の行にする（1 周に 1 行ずつ）。
     def round(pool: Pool, state: State, sink: Log.Sink): Unit \ IO =
+        // tick を JVM の例外の catch の中で回し、失敗の説明を集める
         let messages = guarded(sink, () -> tick(pool, state));
+        // 失敗 1 つにつき Error の行を 1 つ
         Log.runWith(sink, () -> List.forEach(message -> Log.Fields.empty() |> Log.Fields.str("error.message", message) |> Log.error("jobs tick failed"), messages));
+        // 例外で tick が途中で抜けた時も、inTick フラグを必ず下ろす
         Ref.put(false, state#inTick)
 
     ///
@@ -206,17 +214,22 @@ mod BackgroundJobs {
     pub def tick(pool: Pool, state: State): List[String] \ {IO, Log} =
         if (Ref.get(state#stopping)) Nil
         else {
+            // inTick フラグを立てる（停止の drain が待つ対象）
             Ref.put(true, state#inTick);
+            // 回復と掃除: 実行中のまま残った行を戻し、古い記録を消す（プロジェクトを跨ぐので RLS の印は無し）
             let recovered = DbRunner.withTx(pool, None, () -> {
                     discard SchedulesQueries.recoverStuckSchedules(staleMinutes());
                     discard WebhooksQueries.recoverStuckDeliveries(staleMinutes());
                     discard SchedulesQueries.purgeOldSchedules(keepDays());
                     discard WebhooksQueries.purgeOldDeliveries(keepDays())
                 }) |> Result.mapErr(failure -> "回復と掃除ができません: ${failure}");
+            // 予約公開と Webhook の配信。部分ごとに JVM の例外を catch し、片方が落ちても残りは進める
             let scheduled = guardedPart("予約公開", () -> Scheduler.tick(pool));
             let delivered = Net.Http.runWithIO(() -> guardedPart("Webhook", () -> WebhookDispatcher.tick(pool)));
+            // lastTick（heartbeat）を更新し、inTick フラグを下ろす
             Ref.put(Some(System.currentTimeMillis()), state#lastTick);
             Ref.put(false, state#inTick);
+            // 失敗した部分の説明だけを集める
             List#{ recovered |> Result.map(_ -> ()), scheduled |> Result.map(_ -> ()), delivered |> Result.map(_ -> ()) }
                 |> List.filterMap(outcome -> match outcome { case Ok(()) => None case Err(message) => Some(message) })
         }

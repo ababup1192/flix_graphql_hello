@@ -137,6 +137,7 @@ import graphql.analysis.MaxQueryDepthInstrumentation
     /// Value.Obj を JavaValue.toObject に通せば同じ java.util.Map が出て、変換を 1 か所に保てるため。
     ///
     def toExecutionInput(request: GraphqlRequest, context: Context): ExecutionInput \ IO =
+        // variables は Java の Map に、context は root の (Context, ()) に載せる
         let variables: JMap[String, Object] = unchecked_cast(JavaValue.toObject(Value.Obj(request#variables)) as JMap[String, Object]);
         let root = JavaValue.toObjectOfBoxed(JavaValue.box((context, ())));
         let builder = ExecutionInput.newExecutionInput(request#queryText).variables(variables).root(root);
@@ -151,25 +152,40 @@ import graphql.analysis.MaxQueryDepthInstrumentation
     ///
     def makeExecutableSchema(sdl: String, types: List[TypeDecl]): Result[String, GraphQLSchema] \ IO =
         try {
+            // SDL をパースして型の登録簿にする
             let registry = new SchemaParser().parse(sdl);
-            let codeRegistryBuilder = GraphQLCodeRegistry.newCodeRegistry();
-            List.forEach(decl -> match decl {
-                case TypeDecl.ObjectDecl(object) => List.forEach(field ->
-                    discard codeRegistryBuilder.dataFetcher(FieldCoordinates.coordinates(object#name, field#info#name), toDataFetcher(field)),
-                    object#fields)
-                case _ => ()
-            }, types);
-            let builder = RuntimeWiring.newRuntimeWiring().codeRegistry(codeRegistryBuilder.build());
-            List.forEach(decl -> match decl {
-                case TypeDecl.ScalarDecl("JSON")       => discard builder.scalar(ExtendedScalars.Json)
-                case TypeDecl.UnionDecl(union)         => registerTypeResolver(builder, union#name)
-                case TypeDecl.InterfaceDecl(interface) => registerTypeResolver(builder, interface#name)
-                case _                                 => ()
-            }, types);
+            // フィールドごとの DataFetcher と、scalar / union / interface の配線を RuntimeWiring にまとめる
+            let builder = RuntimeWiring.newRuntimeWiring().codeRegistry(wireDataFetchers(types));
+            wireTypes(builder, types);
+            // 登録簿と配線を突き合わせて実行できるスキーマにする（型検査もここ）
             Ok(new SchemaGenerator().makeExecutableSchema(registry, builder.build()))
         } catch {
             case e: GraphQLException => Err("スキーマを組み立てられません: ${e.getMessage()}")
         }
+
+    ///
+    /// 全オブジェクト型の全フィールドに DataFetcher を配線した GraphQLCodeRegistry を作る。
+    ///
+    def wireDataFetchers(types: List[TypeDecl]): GraphQLCodeRegistry \ IO =
+        let codeRegistryBuilder = GraphQLCodeRegistry.newCodeRegistry();
+        List.forEach(decl -> match decl {
+            case TypeDecl.ObjectDecl(object) => List.forEach(field ->
+                discard codeRegistryBuilder.dataFetcher(FieldCoordinates.coordinates(object#name, field#info#name), toDataFetcher(field)),
+                object#fields)
+            case _ => ()
+        }, types);
+        codeRegistryBuilder.build()
+
+    ///
+    /// JSON scalar の実装と、union / interface の TypeResolver を RuntimeWiring の builder に登録する。
+    ///
+    def wireTypes(builder: RuntimeWiring$Builder, types: List[TypeDecl]): Unit \ IO =
+        List.forEach(decl -> match decl {
+            case TypeDecl.ScalarDecl("JSON")       => discard builder.scalar(ExtendedScalars.Json)
+            case TypeDecl.UnionDecl(union)         => registerTypeResolver(builder, union#name)
+            case TypeDecl.InterfaceDecl(interface) => registerTypeResolver(builder, interface#name)
+            case _                                 => ()
+        }, types)
 
     ///
     /// union / interface に TypeResolver を登録する。

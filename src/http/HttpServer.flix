@@ -134,11 +134,14 @@ mod HttpServer {
     pub def acceptLoop(listener: Listener, onServed: Served -> Unit \ IO, handle: HttpRequest -> HttpResponse \ IO): Unit \ IO =
         region rc {
             def loop() = match accept(listener#server) {
+                // サーバソケットが閉じられた。ループを抜ける（起きたスレッドはそのまま）
                 case None         => ()
                 case Some(socket) =>
+                    // 空き枠を 1 つ借りられればスレッドを起こす。返すのは serveThenRelease
                     if (listener#limiter.tryAcquire()) {
                         spawn serveThenRelease(socket, listener#limiter, onServed, listener#config, handle) @ rc
                     } else {
+                        // 枠が無い。このスレッドで 503 を書いて閉じる
                         reject(socket, onServed)
                     };
                     loop()
@@ -210,11 +213,13 @@ mod HttpServer {
     /// serve の後に必ず枠を返す。serve が例外で抜けても返す。
     ///
     def serveThenRelease(socket: Socket, limiter: Semaphore, onServed: Served -> Unit \ IO, config: ListenConfig, handle: HttpRequest -> HttpResponse \ IO): Unit \ IO =
+        // serve の中で拾えなかった例外（close の失敗など）もここで 500 の Served にする
         try {
             serve(socket, onServed, config, handle)
         } catch {
             case e: Throwable => report(e, System.currentTimeMillis(), onServed)
         };
+        // 枠を返す。ここまで来れば接続は閉じている
         limiter.release()
 
     ///
@@ -230,8 +235,10 @@ mod HttpServer {
     ///
     def serve(socket: Socket, onServed: Served -> Unit \ IO, config: ListenConfig, handle: HttpRequest -> HttpResponse \ IO): Unit \ IO =
         try {
+            // 読み書きの口を作る。書く方は UTF-8 固定、読む方は 1 バイト先読みできる BufferedInputStream
             let writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
             let input: InputStream = checked_cast(new BufferedInputStream(socket.getInputStream()));
+            // keep-alive の間、同じ接続でリクエストを順に受ける
             serveLoop(socket, input, writer, onServed, config, handle, 1);
             // WhyNot: close を serveLoop の try の中に置かないのは、応答を書き終えた後の close の失敗で catch に入り、閉じかけの
             // ソケットへ 500 をもう一度書いてしまうため
@@ -254,16 +261,15 @@ mod HttpServer {
     /// writer を try の外で先に作るのは、catch の中から 500 を書き戻すため。
     ///
     def serveLoop(socket: Socket, input: InputStream, writer: PrintWriter, onServed: Served -> Unit \ IO, config: ListenConfig, handle: HttpRequest -> HttpResponse \ IO, served: Int32): Unit \ IO =
+        // 待ちの上限。1 回目は読み取り、2 回目以降は keep-alive の idle
         socket.setSoTimeout(if (served == 1) config#readTimeoutMs else config#idleTimeoutMs);
         if (awaitRequest(input)) {
             let started = System.currentTimeMillis();
+            // 1 リクエストを読んで応答を書く。読めなければそのステータス、途中で例外なら 500。どちらも接続は閉じる
             let connection = try {
                 match readRequest(input) {
                     case Ok(request) => respond(writer, request, started, onServed, handle, served)
-                    case Err(read)   =>
-                        let wrote = write(writer, Http.Connection.Close, { status = read#status, headers = Nil, body = "" });
-                        onServed(unreadable(read, started, writeFailure(wrote)));
-                        Http.Connection.Close
+                    case Err(read)   => writeReadFailure(writer, read, started, onServed)
                 }
             } catch {
                 case e: Throwable =>
@@ -271,6 +277,7 @@ mod HttpServer {
                     discard write(writer, Http.Connection.Close, { status = 500, headers = Nil, body = "" });
                     Http.Connection.Close
             };
+            // 続けられるなら同じ接続で次を待つ
             match connection {
                 case Http.Connection.KeepAlive => serveLoop(socket, input, writer, onServed, config, handle, served + 1)
                 case Http.Connection.Close     => ()
@@ -279,26 +286,42 @@ mod HttpServer {
             ()
 
     ///
+    /// 読めなかったリクエストに、そのステータス（400 / 413 / 431）を空のボディで書き、Served を onServed に流す。接続は閉じる。
+    ///
+    def writeReadFailure(writer: PrintWriter, read: ReadFailure, started: Int64, onServed: Served -> Unit \ IO): Http.Connection \ IO =
+        let wrote = write(writer, Http.Connection.Close, { status = read#status, headers = Nil, body = "" });
+        onServed(unreadable(read, started, writeFailure(wrote)));
+        Http.Connection.Close
+
+    ///
     /// 読めたリクエストを handle に渡して応答を書き、Served を onServed に流す。handle が投げれば 500 で閉じる。
     ///
     /// WhyNot: handle の例外を Exception に絞らず Throwable で受けるのは、handle の中で起きる RuntimeException も
     /// Error（VerifyError）も同じ理由で消えるため。OutOfMemoryError は onServed に流した後で再送出する。
     ///
     def respond(writer: PrintWriter, request: HttpRequest, started: Int64, onServed: Served -> Unit \ IO, handle: HttpRequest -> HttpResponse \ IO, served: Int32): Http.Connection \ IO =
+        // handle を呼ぶ。投げれば 500 と Close、投げなければ応答と keep-alive の判断
         let (response, next, failure) = try {
             let response = handle(request);
             (response, Http.shouldKeepAlive(request, response#status, served), None)
         } catch {
             case e: Throwable => ({ status = 500, headers = Nil, body = "" }, Http.Connection.Close, Some(e))
         };
+        // 応答を書き、Served を onServed に流す
         let wrote = write(writer, next, response);
-        onServed({
-            method = request#method, path = sanitizePath(request#path), headers = request#headers, status = response#status,
-            elapsedMs = System.currentTimeMillis() - started,
-            requestBytes = Int32.toInt64(Http.utf8Length(request#body)), responseBytes = Int32.toInt64(Http.utf8Length(response#body)),
-            failure = match failure { case Some(_) => failure case None => writeFailure(wrote) } });
+        onServed(servedOf(request, response, started, wrote, failure));
+        // OutOfMemoryError だけは流した後で再送出する
         Option.forEach(rethrowIfFatal, failure);
         next
+
+    ///
+    /// 読めたリクエスト 1 つの Served。failure は handle の例外が優先で、無ければ書けたかどうか。
+    ///
+    def servedOf(request: HttpRequest, response: HttpResponse, started: Int64, wrote: Bool, failure: Option[Throwable]): Served \ IO =
+        { method = request#method, path = sanitizePath(request#path), headers = request#headers, status = response#status,
+          elapsedMs = System.currentTimeMillis() - started,
+          requestBytes = Int32.toInt64(Http.utf8Length(request#body)), responseBytes = Int32.toInt64(Http.utf8Length(response#body)),
+          failure = match failure { case Some(_) => failure case None => writeFailure(wrote) } }
 
     ///
     /// 次のリクエストの先頭 1 バイトが来るまで待つ。来れば true（バイトは戻す）。EOF かタイムアウトなら false。

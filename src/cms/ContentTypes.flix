@@ -71,17 +71,26 @@ mod ContentTypes {
     ///
     pub def create(draft: ContentTypeDraft): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
-        let names = {
-            apiId    = draft#apiId,
-            singular = draft#singular |> Option.getWithDefault(Naming.deriveSingular(draft#apiId)),
-            plural   = draft#plural |> Option.getWithDefault(Naming.derivePlural(draft#apiId))
-        };
+        // 名前を揃える。singular / plural が無ければ apiId から導く
+        let names = buildTypeNames(draft);
         let derived = Option.isEmpty(draft#singular) and Option.isEmpty(draft#plural);
+        // 既存の全型と突き合わせて名前の規則を検査する。導いた名前の違反は apiId の物にする
         let others = listAll();
         CmsErr.raiseIfAny(typeNameViolations(others, names, Nil) |> List.map(violation -> if (derived) blameApiId(violation) else violation));
+        // 行を作り、Webhook に積む
         let inserted = ContentTypesQueries.insertContentType({ +projectId = Tenant.currentId() | ContentTypeRows.typeInsert(names, draft) }) |> Rows.expectId;
         notifySchema(names#apiId);
         load(TypeId.TypeId(inserted))
+
+    ///
+    /// 作る型の apiId / singular / plural。省かれた singular / plural は apiId から導く。
+    ///
+    def buildTypeNames(draft: ContentTypeDraft): Naming.TypeNames =
+        {
+            apiId    = draft#apiId,
+            singular = draft#singular |> Option.getWithDefault(Naming.deriveSingular(draft#apiId)),
+            plural   = draft#plural |> Option.getWithDefault(Naming.derivePlural(draft#apiId))
+        }
 
     /// 型の変更を Webhook に積む（同じ Tx）。
     def notifySchema(apiId: ApiId): Unit \ Db + IdGen + Tenant =
@@ -101,13 +110,16 @@ mod ContentTypes {
     pub def update(id: TypeId, changes: ContentTypeChanges): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
         let existing = load(id);
+        // 変えた後の名前（触っていない項目は今の物）
         let names = {
             apiId    = existing#apiId,
             singular = changes#singular |> Option.getWithDefault(existing#singular),
             plural   = changes#plural |> Option.getWithDefault(existing#plural)
         };
+        // 自分を除いた全型と突き合わせて名前の規則を検査する（生える型名は自分のフィールドまで見る）
         let others = listAll() |> List.filter(other -> other#id != id);
         CmsErr.raiseIfAny(typeNameViolations(others, names, existing#fields));
+        // 触った項目だけ UPDATE し、Webhook に積む
         discard ContentTypesQueries.updateContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() }, ContentTypeRows.typeChanges(changes));
         notifySchema(existing#apiId);
         load(id)

@@ -12,7 +12,9 @@ mod ContentSchemaBuilder {
     /// 型の定義から Schema を組む。`_types: Int!`（型の数）は常に生やす（graphql-java は空の Query を許さないので、型が無くても組める）。
     ///
     pub def build(types: List[ContentType], runner: Runner[ContentEff]): Schema =
+        // 型を生やせないフィールド（空の OBJECT / BLOCKS）を落とした定義で組む
         let buildable = types |> List.map(owner -> { fields = withShape(owner#fields) | owner });
+        // 型ごとの Query のフィールド（singleton は 1 つ、collection は 1 件と一覧）
         let rootFields = buildable |> List.flatMap(rootFieldsOf(buildable));
         let typeCount = Schema.field0("_types", Out.int32(), (_context, _root) -> Ok(List.length(types))) |> Field.withDescription("content type の数。型を作るとここに Query が生える");
         Schema.make(Schema.objectType("Query", () -> typeCount :: rootFields), None, runner)
@@ -61,6 +63,7 @@ mod ContentSchemaBuilder {
     /// `<plural>(where, orderBy, first, skip, stage): <Singular>Connection!`
     ///
     def manyField(all: List[ContentType], owner: ContentType): Field[Unit, ContentEff] =
+        // 引数の定義。SDL に出す物（infos）と、入力を読む物（Arg.decode）を同じ値から出す
         let whereArg = Schema.arg("where", GqlCodec.option(whereCodec(owner)));
         let orderArg = Schema.arg("orderBy", GqlCodec.option(GqlCodec.list(orderByCodec(owner))));
         let firstArg = Schema.arg("first", GqlCodec.option(GqlCodec.int32())) |> Arg.withDefaultValue(Value.Int(20));
@@ -68,6 +71,7 @@ mod ContentSchemaBuilder {
         let stage = stageArg();
         let infos = Arg.info(whereArg) :: Arg.info(orderArg) :: Arg.info(firstArg) :: Arg.info(skipArg) :: Arg.info(stage) :: Nil;
         Schema.fieldRaw(ApiId.text(owner#plural), infos, Out.obj(connectionType(all, owner)), (_context, _root, args) ->
+            // 引数を復号し、ページの上限に収めて一覧を引く
             forM (
                 filter  <- Arg.decode(whereArg, args);
                 orderBy <- Arg.decode(orderArg, args);
@@ -309,26 +313,30 @@ mod ContentSchemaBuilder {
     /// `<Singular>Where`。葉の条件と、OR / AND（それぞれ WhereLeaf のリスト）。
     ///
     def whereCodec(owner: ContentType): GqlCodec[Where] =
+        // 葉の引数と、それを束ねる OR / AND の引数
         let leaves = leafArgs(owner);
         let leaf = leafCodec(owner, leaves);
         let orArg = Schema.arg("OR", GqlCodec.option(GqlCodec.list(leaf)));
         let andArg = Schema.arg("AND", GqlCodec.option(GqlCodec.list(leaf)));
         let infos = List.map(leafInfo, leaves) ::: Arg.info(andArg) :: Arg.info(orArg) :: Nil;
         GqlCodec.inputObject("${TypeName.text(owner#singular)}Where", infos, fields ->
+            // 入力から条件の一覧にする。自分の葉 → AND（平らに繋ぐ）→ OR（1 つの AnyOf）の順
             forM (
                 own  <- decodeLeaves(leaves, fields);
                 ands <- Arg.decodeField(andArg, fields);
                 ors  <- Arg.decodeField(orArg, fields)
-            ) yield {
-                let anded = ands |> Option.getWithDefault(Nil) |> List.flatten;
-                // WhyNot: OR: [] を「条件無し」にしないのは、どれにも合わない集合の OR は偽であり、全件に広がると絞り込みのつもりが漏れになるため
-                let ored = match ors {
-                    case None         => Nil
-                    case Some(Nil)    => Condition.Never :: Nil
-                    case Some(groups) => Condition.AnyOf(groups) :: Nil
-                };
-                own ::: anded ::: ored
-            })
+            ) yield own ::: (ands |> Option.getWithDefault(Nil) |> List.flatten) ::: orConditions(ors))
+
+    ///
+    /// OR の入力を条件にする。無ければ空、空の並びなら Never、あれば AnyOf 1 つ。
+    ///
+    /// WhyNot: OR: [] を「条件無し」にしないのは、どれにも合わない集合の OR は偽であり、全件に広がると絞り込みのつもりが漏れになるため
+    ///
+    def orConditions(ors: Option[List[Where]]): List[Condition] = match ors {
+        case None         => Nil
+        case Some(Nil)    => Condition.Never :: Nil
+        case Some(groups) => Condition.AnyOf(groups) :: Nil
+    }
 
     ///
     /// `<Singular>WhereLeaf`。葉の条件だけ（OR / AND を持たない）。葉は Where と同じ物を受け取る（同一である事を構造で保つ）。

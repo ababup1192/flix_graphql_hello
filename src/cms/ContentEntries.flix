@@ -92,19 +92,28 @@ mod ContentEntries {
     ///
     pub def create(typeId: TypeId, givenId: Option[EntryId], given: EntryData): Entry \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.WriteEntries);
+        // 型を引き、中身を揃えて下書きの規則（と singleton の件数）で検査する
         let owner = ContentTypes.get(typeId);
         let data = EntryValidation.normalize(owner#fields, given);
         CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data) ::: singletonViolations(owner));
+        // id を決める。渡されていればそれ、無ければ振る
         // WhyNot: Option.getWithDefault(IdGen.freshEntryId()) にしないのは、引数が先に評価されて id を渡した時も 1 つ消費するため
         let id = match givenId {
             case Some(chosen) => chosen
             case None        => IdGen.freshEntryId()
         };
-        let taken = EntriesQueries.entryExists({ id = EntryId.text(id), projectId = Tenant.currentId() }) |> Option.nonEmpty;
-        CmsErr.raiseIfAny(if (taken) Violation.Violation("id", "'${id}' は既にあります（ゴミ箱の物を含む）") :: Nil else Nil);
+        ensureIdFree(id);
+        // entry の行を作り、下書きの中身を置く
         discard EntriesQueries.insertEntry({ id = EntryId.text(id), typeId = TypeId.toInt64(typeId), projectId = Tenant.currentId() });
         writeContent(id, Stage.Draft, owner, data);
         load(id)
+
+    ///
+    /// その id の entry が無い事（ゴミ箱の物を含む）。あれば invalid。
+    ///
+    def ensureIdFree(id: EntryId): Unit \ DbRead + CmsErr + Tenant =
+        let taken = EntriesQueries.entryExists({ id = EntryId.text(id), projectId = Tenant.currentId() }) |> Option.nonEmpty;
+        CmsErr.raiseIfAny(if (taken) Violation.Violation("id", "'${id}' は既にあります（ゴミ箱の物を含む）") :: Nil else Nil)
 
     ///
     /// 下書きを直す。patch のキーだけ上書きし、null で消す。expectedVersion が今の版と違えば conflict。
@@ -113,6 +122,7 @@ mod ContentEntries {
         Session.require(Permission.WriteEntries);
         let existing = load(id);
         let owner = ContentTypes.get(existing#typeId);
+        // 今の下書き（型に無いキーは落とす）に patch を重ね、版の照合と検査は writeDraft
         writeDraft(owner, existing, EntryValidation.merge(EntryValidation.prune(owner#fields, existing#data), patch), expectedVersion)
 
     ///
@@ -143,21 +153,36 @@ mod ContentEntries {
 
     /// 公開の本体。visited は withDependencies で辿った entry（循環を 1 度で止める）。権限は publish が見る。
     def publishWithin(visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant + Session =
+        // 下書きを読み、公開の規則で検査する（unique は advisory lock 付き）
         let existing = load(id);
         let owner = ContentTypes.get(existing#typeId);
         let data = EntryValidation.prune(owner#fields, existing#data);
         let report = reportOf(true, owner, existing, data);
         CmsErr.raiseIfAny(report#violations);
+        // 未公開の参照先を先に公開するか、invalid で止める
         let pending = report#unpublishedDependencies |> List.map(dependency -> dependency#id);
+        publishDependencies(visited, id, author, withDependencies, pending);
+        // published の行を書き、版を積み、entry を公開中にする
+        commitPublished(owner, existing, data, author);
+        notify(WebhookEvent.EntryPublished, id, existing#typeId);
+        load(id)
+
+    ///
+    /// 未公開の参照先の扱い。withDependencies なら（この entry を visited に足して）先に再帰的に公開し、でなければ invalid。
+    ///
+    def publishDependencies(visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool, pending: List[EntryId]): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         if (withDependencies)
             List.forEach(dependency -> if (List.memberOf(dependency, id :: visited)) () else discard publishWithin(id :: visited, dependency, author, true), pending)
         else
-            CmsErr.raiseIfAny(pending |> List.map(dependency -> Violation.Violation("references", "参照先 '${dependency}' が未公開です（withDependencies: true で一緒に公開できます）")));
-        writeContent(id, Stage.Published, owner, data);
+            CmsErr.raiseIfAny(pending |> List.map(dependency -> Violation.Violation("references", "参照先 '${dependency}' が未公開です（withDependencies: true で一緒に公開できます）")))
+
+    ///
+    /// 検査を通った中身を published の行へ写し、版を積み、entry を公開中にする。
+    ///
+    def commitPublished(owner: ContentType, existing: Entry, data: EntryData, author: String): Unit \ DbWrite + Tenant =
+        writeContent(existing#id, Stage.Published, owner, data);
         discard EntriesQueries.insertVersion(EntryRows.versionInsert(existing, author, VersionReason.Publish));
-        discard EntriesQueries.markPublished({ id = EntryId.text(id), projectId = Tenant.currentId() });
-        notify(WebhookEvent.EntryPublished, id, existing#typeId);
-        load(id)
+        discard EntriesQueries.markPublished({ id = EntryId.text(existing#id), projectId = Tenant.currentId() })
 
     ///
     /// 公開できるかを書き込まずに答える（dry-run）。違反を全部集め、未公開の参照先も返す。
@@ -167,6 +192,7 @@ mod ContentEntries {
         Session.require(Permission.ReadDraft);
         let existing = load(id);
         let owner = ContentTypes.get(existing#typeId);
+        // publish 本体と同じ検査を、ロック無しで
         reportOf(false, owner, existing, EntryValidation.prune(owner#fields, existing#data))
 
     ///
@@ -188,7 +214,9 @@ mod ContentEntries {
     ///
     pub def impact(id: EntryId, action: ImpactAction): Impact \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ReadDraft);
+        // 無ければ notFound
         discard load(id);
+        // 操作ごとに、壊れる参照元（breaks）と一緒に動く参照先（cascades）を集める
         match action {
             case ImpactAction.Publish   => { breaks = Nil, cascades = dependenciesOf(id :: Nil, id) |> List.filterMap(lookup) }
             case ImpactAction.Unpublish => { breaks = referrers(id, Stage.Published), cascades = Nil }
@@ -222,16 +250,34 @@ mod ContentEntries {
     ///
     pub def unpublish(id: EntryId): Entry \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.PublishEntries);
-        let key = EntryId.text(id);
-        let published = EntryRows.stageToDb(Stage.Published);
         let existing = load(id);
-        let referrers = EntriesQueries.publishedReferrers({ toEntryId = key, projectId = Tenant.currentId() }) |> List.map(EntryRows.referrerText) |> List.filter(referrer -> referrer != key);
-        CmsErr.raiseIfAny(referrers |> List.map(referrer -> Violation.Violation("references", "公開中の entry '${referrer}' が参照しています。先にそちらを取り下げるか、参照を外してください")));
-        discard EntriesQueries.deleteLinks({ fromEntryId = key, stage = published, projectId = Tenant.currentId() });
-        discard EntriesQueries.deleteContent({ entryId = key, stage = published });
-        discard EntriesQueries.markUnpublished({ id = key, projectId = Tenant.currentId() });
+        // 公開中の他の entry が参照していれば取り下げられない
+        CmsErr.raiseIfAny(publishedReferrerViolations(id));
+        // published の行（参照・中身・印）を消す
+        deletePublished(id);
+        // 公開中だった時だけ Webhook に積む
         if (existing#stage == Stage.Published) notify(WebhookEvent.EntryUnpublished, id, existing#typeId) else ();
         load(id)
+
+    ///
+    /// 公開中の中身でこの entry を参照している他の entry ごとの違反。自分自身の参照は数えない。
+    ///
+    def publishedReferrerViolations(id: EntryId): List[Violation] \ DbRead + Tenant =
+        let key = EntryId.text(id);
+        EntriesQueries.publishedReferrers({ toEntryId = key, projectId = Tenant.currentId() })
+            |> List.map(EntryRows.referrerText)
+            |> List.filter(referrer -> referrer != key)
+            |> List.map(referrer -> Violation.Violation("references", "公開中の entry '${referrer}' が参照しています。先にそちらを取り下げるか、参照を外してください"))
+
+    ///
+    /// published の行を消す。参照（entry_links）、中身、entry の公開中の印の順。
+    ///
+    def deletePublished(id: EntryId): Unit \ DbWrite + Tenant =
+        let key = EntryId.text(id);
+        let published = EntryRows.stageToDb(Stage.Published);
+        discard EntriesQueries.deleteLinks({ fromEntryId = key, stage = published, projectId = Tenant.currentId() });
+        discard EntriesQueries.deleteContent({ entryId = key, stage = published });
+        discard EntriesQueries.markUnpublished({ id = key, projectId = Tenant.currentId() })
 
     // ---- バージョン ----
 

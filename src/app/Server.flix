@@ -127,13 +127,24 @@ mod Server {
     /// リクエストのスレッドは OOM の後も生きている側で、Docker の HEALTHCHECK が叩く限りここで判断が進む。
     ///
     def healthRoute(version: String, health: Health[ef], _routeRequest: RouteRequest): HttpResponse \ {Observe, ef} =
+        // DB へ 1 回だけ ping し、その結果で自己回復の判断を 1 回進める
         let db = (health#checkDb)();
         (health#heal)(db);
+        // 仕事の tick と watch が止まっていないか（stall）。止まっていればリクエストの行に経過を積む
         let stall = (health#stall)();
         Option.forEach(found -> Observe.note(Log.Fields.empty() |> Log.Fields.int(Health.stallKey(found), Health.stallMs(found))), stall);
+        // 本文に出す値（ワーカーのまとめ・HTTP の接続数・DB のプール）を読む
         let summary = (health#jobsSummary)();
         let connected = (health#connections)();
         let stats = (health#poolStats)();
+        // status と理由を足して応答にする
+        healthResponse(healthBody(version, summary, connected, stats), db, stall)
+
+    ///
+    /// /health の本文のうち、status 以外の部分（version / jobs / connections / pool）を組む。
+    /// 件数は Int32 に収める（数えられなかった -1 はそのまま）。
+    ///
+    def healthBody(version: String, summary: BackgroundJobs.Summary, connected: HttpServer.Connections, stats: Pool.PoolStats): Map[String, Value] =
         let connections = Value.Obj(Map#{ "active" => Value.Int(connected#active), "max" => Value.Int(connected#max) });
         let pool = Value.Obj(Map#{
             "active" => Value.Int(stats#active), "idle" => Value.Int(stats#idle), "waiting" => Value.Int(stats#waiting),
@@ -144,7 +155,12 @@ mod Server {
             "failedSchedules" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedSchedules)),
             "pendingDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#pendingDeliveries)),
             "failedDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedDeliveries)) });
-        let base = Map#{ "version" => Value.Str(version), "jobs" => jobs, "connections" => connections, "pool" => pool };
+        Map#{ "version" => Value.Str(version), "jobs" => jobs, "connections" => connections, "pool" => pool }
+
+    ///
+    /// /health の応答。DB に届いて stall が無ければ 200 と status ok、stall があれば 503 と reason、DB に届かなければ 503 と db の理由。
+    ///
+    def healthResponse(base: Map[String, Value], db: Result[String, Unit], stall: Option[Health.Stall]): HttpResponse =
         match (db, stall) {
             case (Ok(()), None)          => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map.insert("status", Value.Str("ok"), base))) }
             case (Ok(()), Some(found))   => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(base |> Map.insert("status", Value.Str("error")) |> Map.insert("reason", Value.Str(Health.stallReason(found))))) }
@@ -157,10 +173,12 @@ mod Server {
     def jobsTick(jobsToken: Option[String], health: Health[ef], routeRequest: RouteRequest): HttpResponse \ {Observe, ef} =
         let given = Http.findHeader("X-Jobs-Token", routeRequest#request#headers);
         match jobsToken {
+            // 外部トリガーを閉じている設定では、経路の存在も見せない
             case None => reject(404, Nil, "no_route", "not found")
             case Some(expected) =>
                 if (given != Some(expected)) reject(403, Nil, "jobs_token", "X-Jobs-Token が違います")
                 else {
+                    // tick を 1 回回し、失敗した所の説明を並べて返す
                     let failures = (health#runJobs)();
                     { status = if (List.isEmpty(failures)) 200 else 500, headers = Nil,
                       body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str(if (List.isEmpty(failures)) "ok" else "error"), "failures" => Value.List(failures |> List.map(Value.Str)) })) }
@@ -174,11 +192,14 @@ mod Server {
     /// Observe に積んでリクエストの行に乗せる。
     ///
     def mcpRoute(config: ServerConfig, routeRequest: RouteRequest): HttpResponse \ {Graphql, Observe} =
+        // 本文を読む前の検査（Content-Type / Origin / プロトコル版 / 認証）。落ちた理由はリクエストの行に積む
         match mcpPrecheck(config, routeRequest) {
             case Err((response, fields)) => { Observe.note(fields); response }
+            // 本文を JSON-RPC のメッセージに読む
             case Ok(actor)               => match McpServer.parse(routeRequest#request#body) {
                 case Err(errorBody) => { Observe.note(mcpParseRejection(errorBody)); jsonResponse(400, Nil, errorBody) }
                 case Ok(message)    =>
+                    // 認証済みユーザーで実行し、tools/call の属性を積んで HTTP に写す
                     let reply = McpServer.dispatch(config#version, message, executeAs(actor));
                     noteMcpCall(message, reply);
                     toMcpResponse(reply)
@@ -212,15 +233,19 @@ mod Server {
     ///
     pub def mcpPrecheck(config: ServerConfig, routeRequest: RouteRequest): Result[(HttpResponse, Log.Fields), Actor] =
         let request = routeRequest#request;
+        // JSON-RPC のエラー本文と、リクエストの行に積む理由の組
         let rejected = (status, headers, code, message) -> (jsonResponse(status, headers, McpServer.errorBody(Value.Null, McpServer.invalidRequestCode(), message)), Log.Fields.empty() |> LogFields.rejection(code, message));
+        // Content-Type が JSON でなければ 415（本文は GraphQL と同じ errors[] の形）
         if (not isJson(request)) {
             let message = "Content-Type: application/json で送ってください";
             Err((errorResponse(415, Nil, message), Log.Fields.empty() |> LogFields.rejection("unsupported_media_type", message)))
         }
+        // Origin が許可外なら 403（行には origin も積む）
         else if (not McpServer.isOriginAllowed(config#cors, request#headers)) {
             let (response, fields) = rejected(403, Nil, "origin", "この Origin からは受け付けません");
             Err((response, fields |> LogFields.origin(Http.findHeader("Origin", request#headers) |> Option.getWithDefault(""))))
         }
+        // プロトコル版 → 資格証明の種類 → 認証の結果の順に見て、通れば認証済みユーザー
         else match (McpServer.protocolVersionOf(request#headers), routeRequest#credential, routeRequest#auth) {
             case (Err(version), _, _)                => Err(rejected(400, Nil, "protocol_version", "MCP-Protocol-Version '${version}' には対応していません（${List.join(" / ", McpServer.supportedProtocolVersions())}）"))
             case (Ok(_), Credential.Preview(_), _)   => Err(rejected(400, Nil, "preview_token", "プレビュートークンはこの経路では受け付けません（API キーか PAT で）"))
@@ -249,15 +274,21 @@ mod Server {
     def executeBody(routeRequest: RouteRequest): HttpResponse \ {Graphql, Observe} =
         if (not isJson(routeRequest#request)) reject(415, Nil, "unsupported_media_type", "Content-Type: application/json で送ってください")
         else {
-            let parsed = JsonValue.parse(routeRequest#request#body)
-                |> Result.mapErr(message -> ("bad_json", "invalid JSON: ${message}"))
-                |> Result.flatMap(body -> toRequest(body) |> Result.mapErr(message -> ("bad_request", message)));
-            match (parsed, routeRequest#auth) {
+            // 本文の形の失敗は 400、認証に落ちていれば errors[] の 1 件、両方通れば実行
+            match (parseBody(routeRequest#request#body), routeRequest#auth) {
                 case (Ok(request), Ok(found))     => { status = 200, headers = Nil, body = JsonValue.toJsonString(toValue(Graphql.execute(request, Context.withActor(found#actor)))) }
                 case (Ok(_), Err(rejection))      => rejectGraphql(rejection)
                 case (Err((code, message)), _)    => reject(400, Nil, code, message)
             }
         }
+
+    ///
+    /// POST の本文を GraphqlRequest に読む。Err は (error.code, 文言)。壊れた JSON は bad_json、形が違えば bad_request。
+    ///
+    def parseBody(body: String): Result[(String, String), GraphqlRequest] =
+        JsonValue.parse(body)
+            |> Result.mapErr(message -> ("bad_json", "invalid JSON: ${message}"))
+            |> Result.flatMap(parsed -> toRequest(parsed) |> Result.mapErr(message -> ("bad_request", message)))
 
     ///
     /// 認証に落ちたリクエストの GraphQL の応答。200 で data は null、errors[] は path の無い 1 件（extensions.code に分類）。
@@ -284,26 +315,36 @@ mod Server {
     ///
     def executeQueryString(cacheMaxAge: Option[Int32], routeRequest: RouteRequest): HttpResponse \ {Graphql, Observe} =
         let credential = routeRequest#credential;
-        let params = Http.parseQueryString(routeRequest#request#path);
-        let parsed = forM (
-            queryText <- Map.get("query", params) |> Option.filter(text -> not String.isEmpty(text)) |> Option.toOk("query パラメータが要ります（?query=...）");
-            variables <- Map.get("variables", params) |> Option.filter(text -> not String.isEmpty(text))
-                |> Option.map(text -> JsonValue.parse(text) |> Result.mapErr(message -> "variables が JSON ではありません: ${message}") |> Result.flatMap(toVariables))
-                |> Option.getWithDefault(Ok(Map.empty()))
-        ) yield { queryText = queryText, variables = variables, operationName = Map.get("operationName", params) |> Option.filter(text -> not String.isEmpty(text)) };
-        match (parsed, routeRequest#auth) {
+        // クエリ文字列の形の失敗は 400、mutation は 405、認証に落ちていれば errors[] の 1 件（キャッシュ不可）、通れば実行
+        match (parseQueryParams(Http.parseQueryString(routeRequest#request#path)), routeRequest#auth) {
             case (Err(message), _) => reject(400, Nil, "bad_request", message)
             case (Ok(graphqlRequest), _) if not isReadOnly(graphqlRequest#queryText) => reject(405, ("Allow", "POST") :: Nil, "method_not_allowed", "GET は query だけです。mutation は POST で送ってください")
             case (Ok(_), Err(rejection)) => rejectGraphql(rejection) |> withNoStore
             case (Ok(graphqlRequest), Ok(found)) => {
                     let response = Graphql.execute(graphqlRequest, Context.withActor(found#actor));
-                    let cacheable = cacheMaxAge |> Option.filter(_ -> credential == Credential.Missing and List.isEmpty(response#errors));
-                    let cacheControl = match cacheable {
-                        case Some(seconds) => "public, max-age=${seconds}, s-maxage=${seconds}, stale-while-revalidate=${seconds}"
-                        case None          => "private, no-store"
-                    };
-                    { status = 200, headers = ("Cache-Control", cacheControl) :: varyHeader() :: Nil, body = JsonValue.toJsonString(toValue(response)) }
+                    { status = 200, headers = ("Cache-Control", cacheControlOf(cacheMaxAge, credential, response)) :: varyHeader() :: Nil, body = JsonValue.toJsonString(toValue(response)) }
                 }
+        }
+
+    ///
+    /// GET のクエリ文字列（query / variables / operationName）を GraphqlRequest に読む。空の値は無い物と同じ。
+    /// query が無ければ Err、variables が JSON でないかオブジェクトでなければ Err。
+    ///
+    def parseQueryParams(params: Map[String, String]): Result[String, GraphqlRequest] =
+        forM (
+            queryText <- Map.get("query", params) |> Option.filter(text -> not String.isEmpty(text)) |> Option.toOk("query パラメータが要ります（?query=...）");
+            variables <- Map.get("variables", params) |> Option.filter(text -> not String.isEmpty(text))
+                |> Option.map(text -> JsonValue.parse(text) |> Result.mapErr(message -> "variables が JSON ではありません: ${message}") |> Result.flatMap(toVariables))
+                |> Option.getWithDefault(Ok(Map.empty()))
+        ) yield { queryText = queryText, variables = variables, operationName = Map.get("operationName", params) |> Option.filter(text -> not String.isEmpty(text)) }
+
+    ///
+    /// GET の応答に付ける Cache-Control。Credential 無しで errors が無く、cacheMaxAge があれば public（CDN に乗せる）、それ以外は no-store。
+    ///
+    def cacheControlOf(cacheMaxAge: Option[Int32], credential: Credential, response: GraphqlResponse): String =
+        match cacheMaxAge |> Option.filter(_ -> credential == Credential.Missing and List.isEmpty(response#errors)) {
+            case Some(seconds) => "public, max-age=${seconds}, s-maxage=${seconds}, stale-while-revalidate=${seconds}"
+            case None          => "private, no-store"
         }
 
     /// 認証に落ちた GET の応答はキャッシュさせない。

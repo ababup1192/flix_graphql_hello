@@ -82,17 +82,25 @@ mod DbRunner {
     pub def transactObserved(pool: Pool, scope: Option[ProjectId], observe: Log.Fields -> Unit \ IO, actor: Actor, thunk: Unit -> a \ ef): Result[ApplicationFailure, a] \ (ef - {Db, CmsErr, Session}) + IO =
         let counter = Ref.fresh(Static, 0);
         let statements = Ref.fresh(Static, 0);
+        // 借りる前に、待ちが出ていればプールの数字をリクエストの行に
         notePool(observe, pool);
+        // retry → RLS の印付き Tx → 業務エラー → Session → SQL の数え → JVM の例外の catch（Db.guard）→ 本体、の順に包む
         let outcome = retryWith(counter, () ->
             TenantTx.withLazyTxResult(pool, scope, actor, () ->
                 CmsErr.runWithResult(() -> Session.runWith(actor, () -> counting(statements, () -> Db.guard(thunk))))));
+        // 再試行の回数と SQL の数をリクエストの行に
         noteRetries(observe, Ref.get(counter));
         noteStatements(observe, Ref.get(statements));
-        match outcome {
-            case Err(failure)     => Err(ApplicationFailure.Infrastructure(failure))
-            case Ok(Err(failure)) => Err(ApplicationFailure.Domain(failure))
-            case Ok(Ok(value))    => Ok(value)
-        }
+        toApplicationResult(outcome)
+
+    ///
+    /// Tx の結果を ApplicationFailure に寄せる。DB の失敗は Infrastructure、業務エラーは Domain、成功はそのまま。
+    ///
+    def toApplicationResult(outcome: Result[DbFailure, Result[CmsErr.CmsFailure, a]]): Result[ApplicationFailure, a] = match outcome {
+        case Err(failure)     => Err(ApplicationFailure.Infrastructure(failure))
+        case Ok(Err(failure)) => Err(ApplicationFailure.Domain(failure))
+        case Ok(Ok(value))    => Ok(value)
+    }
 
     ///
     /// SQL の数を数え、外側の handler（withLazyTx の接続）へそのまま転送する。fetch / execute / executeReturning を 1 と数える。
@@ -149,7 +157,9 @@ mod DbRunner {
     ///
     pub def withTxObserved(pool: Pool, scope: Option[ProjectId], observe: Log.Fields -> Unit \ IO, thunk: Unit -> a \ ef): Result[DbFailure, a] \ (ef - Db) + IO =
         let statements = Ref.fresh(Static, 0);
+        // retry → RLS の印付き Tx → SQL の数え → JVM の例外の catch（Db.guard）→ 本体、の順に包む（業務エラーと Session は無し）
         let outcome = retrying(() -> TenantTx.withLazyTx(pool, scope, () -> counting(statements, () -> Db.guard(thunk))));
+        // SQL の数をリクエストの行に
         noteStatements(observe, Ref.get(statements));
         outcome
 

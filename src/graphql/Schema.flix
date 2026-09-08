@@ -514,7 +514,9 @@ mod Field {
     pub def erase(runner: Runner[ef], field: Field[source, ef]): ErasedField =
         let Field.Field(inner) = field;
         {
+            // SDL に出す情報。typeRef は runner で型消去した物
             info  = { name = inner#name, args = inner#args, typeRef = (inner#typeRef)(runner), description = inner#description, deprecated = inner#deprecated },
+            // 親が箱詰めした (Context, source) を開き、リゾルバを runner の中で呼ぶ
             fetch = (boxed, args) -> {
                 let (_, untagged) = JavaValue.untag(boxed);
                 let (context, src): (Context, source) = JavaValue.unbox(untagged);

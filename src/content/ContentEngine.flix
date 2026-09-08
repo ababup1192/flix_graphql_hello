@@ -29,26 +29,41 @@ mod ContentEngine {
     ///
     pub def current(cache: Cache, pool: Pool, projectId: ProjectId): Result[String, Graphql.Engine] \ IO =
         let Cache.Cache(deps, engines) = cache;
+        // 前に組めた物（目印とエンジン）。無ければ None
         let stored = EngineCache.get(projectId, engines);
+        // 今の目印を読む。読めなければ前の物で続ける
         match readFingerprint(pool, projectId) {
-            case Err(message)     => stored |> Option.map(snd) |> Option.toOk(message)
+            case Err(message)     => storedOr(stored, message)
             case Ok(fingerprint) => match stored {
+                // 目印が同じなら前の物をそのまま返す
                 case Some((known, engine)) if known == fingerprint => Ok(engine)
+                // 目印が変わった（か初回）。組み直して置く。組めなければ前の物で続ける
                 case _ => match rebuild(pool, deps, projectId) {
                     case Ok(engine)   => { EngineCache.put(projectId, fingerprint, engine, engines); Ok(engine) }
-                    case Err(message) => stored |> Option.map(snd) |> Option.toOk(message)
+                    case Err(message) => storedOr(stored, message)
                 }
             }
         }
 
     ///
+    /// 前に組めたエンジンがあればそれ、無ければ message の Err。読み込みや組み直しに失敗した時の落とし先。
+    ///
+    def storedOr(stored: Option[(String, Graphql.Engine)], message: String): Result[String, Graphql.Engine] =
+        stored |> Option.map(snd) |> Option.toOk(message)
+
+    ///
     /// 定義を読んで組み直す。
     ///
     def rebuild(pool: Pool, deps: Deps, projectId: ProjectId): Result[String, Graphql.Engine] \ IO =
+        // 定義の一覧を 1 つの Tx で読む（主体は System。RLS の印はプロジェクトの物）
         Tenant.runWith(projectId, () -> DbRunner.transact(pool, Some(projectId), Actor.System, ContentTypes.list))
             |> Result.mapErr(failure -> "content type の定義を読めません: ${ApplicationFailure.describe(failure)}")
+            // 定義 → Schema → graphql-java のエンジン
             |> Result.flatMap(types -> Graphql.buildEngine(ContentSchemaBuilder.build(types, ContentRunner.make(pool, deps, projectId))))
 
+    ///
+    /// 目印を読む。content type の件数と最新の updated_at を "件数/時刻" の文字列にする（型が無ければ "0/-"）。
+    ///
     def readFingerprint(pool: Pool, projectId: ProjectId): Result[String, String] \ IO =
         read(pool, projectId, "content type の目印を読めません", () -> ContentTypesQueries.schemaFingerprint(ProjectId.toInt64(projectId)))
             |> Result.map(row -> match row {

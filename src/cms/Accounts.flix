@@ -13,7 +13,20 @@ mod Accounts {
     /// 本人からユーザー。無ければ作り、email / name が変わっていれば更新する。招待と bootstrap もここで処理する。
     ///
     pub def resolveUser(bootstrap: Bootstrap, principal: Principal): User \ Db + IdGen =
-        let user = match AuthQueries.findUserByIdentity({ issuer = principal#issuer, subject = principal#subject }) {
+        // 発行元と subject でユーザーを引く。無ければ作り、プロファイルが変わっていれば更新する
+        let user = findOrCreateUser(principal);
+        // RLS の印。以後この Tx では、自分の memberships と自分宛の invitations がプロジェクトを跨いで見える
+        discard TenantQueries.stampUser({ userId = "${user#id}", email = user#email });
+        // 招待の受け入れと、最初の owner の bootstrap
+        acceptInvitations(user);
+        bootstrapOwner(bootstrap, user);
+        user
+
+    ///
+    /// 発行元と subject で 1 人。いれば email / name を今の物に揃え（変わっていた時だけ UPDATE）、いなければ users に作る。
+    ///
+    def findOrCreateUser(principal: Principal): User \ Db + IdGen =
+        match AuthQueries.findUserByIdentity({ issuer = principal#issuer, subject = principal#subject }) {
             case Some(row) =>
                 if (row#email != principal#email or row#name != principal#name)
                     discard AuthQueries.updateUserProfile({ id = row#id, email = principal#email, name = principal#name })
@@ -23,12 +36,7 @@ mod Accounts {
                 let publicId = IdGen.freshPublicId();
                 let id = AuthQueries.insertUser({ publicId = publicId, issuer = principal#issuer, subject = principal#subject, email = principal#email, name = principal#name }) |> Rows.expectId;
                 { id = UserId.UserId(id), publicId = publicId, issuer = principal#issuer, subject = principal#subject, email = principal#email, name = principal#name }
-        };
-        // RLS の印。以後この Tx では、自分の memberships と自分宛の invitations がプロジェクトを跨いで見える
-        discard TenantQueries.stampUser({ userId = "${user#id}", email = user#email });
-        acceptInvitations(user);
-        bootstrapOwner(bootstrap, user);
-        user
+        }
 
     ///
     /// PAT で来た人。users を引いて RLS の印を置く。招待の受け入れと bootstrap はしない（PAT は既にログインした人が作る物）。

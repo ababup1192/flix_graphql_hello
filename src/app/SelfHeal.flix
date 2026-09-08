@@ -154,8 +154,10 @@ mod SelfHeal {
     /// （実験 3 回目の S5 で 2 回とも再現）。リクエストのスレッドは OOM の後も生きているので、/health からも同じ step を進める。
     ///
     pub def step(watch: Watch, seen: Observation): Decision \ IO =
+        // 観測を末尾に積み、窓の外の古い物を捨てて覚え直す
         let window = (Ref.get(watch#seen) ::: seen :: Nil) |> keepLast(windowSize());
         Ref.put(window, watch#seen);
+        // 窓の中の観測の列だけで決める
         decide(watch#settings, watch#startedAt, window)
 
     /// 末尾の count 個だけ残す。

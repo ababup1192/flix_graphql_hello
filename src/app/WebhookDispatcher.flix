@@ -41,28 +41,41 @@ mod WebhookDispatcher {
     def deliverOne(pool: Pool, claimed: { id = String, projectId = Int64, projectSlug = String, webhookId = Int64, event = String, payload = Util.Json.Json, attempts = Int32, createdAt = Timestamp.Timestamp }): Result[String, Unit] \ {IO, Http, Log} =
         let projectId = ProjectId.ProjectId(claimed#projectId);
         let projectLabel = Log.Fields.empty() |> Log.Fields.str("project", claimed#projectSlug);
+        // 送り先（url と secret）をそのプロジェクトの RLS の印を置いた Tx で引く。HTTP はこの Tx の外で送る
         let target = DbRunner.withTx(pool, Some(projectId), () -> WebhooksQueries.findWebhookForDelivery({ id = claimed#webhookId, projectId = claimed#projectId }))
             |> Result.mapErr(failure -> "Webhook を引けません: ${failure}");
         Result.flatMap(found -> match found {
+            // 積んだ後に Webhook が消えた物は失敗として書く（送らない）
             case None => record(pool, claimed, projectId, projectLabel, Err((0, "Webhook が消えています")))
             case Some(webhook) => {
-                // 積んだ時刻を本文にも入れる（受け手が本文だけ保存しても時刻が残る）
-                let body = Util.Json.toCompactString(withAt(claimed#createdAt, claimed#payload));
+                // 本文と署名付きのリクエストを組んで POST し、結果を別の Tx で書く
                 let timestamp = Int64.toString(System.currentTimeMillis() / 1000i64);
-                let request = HttpRequest.post(webhook#url, body)
-                    |> HttpRequest.withContentType("application/json")
-                    |> HttpRequest.setHeader("X-Cms-Event", claimed#event)
-                    |> HttpRequest.setHeader("X-Cms-Delivery", claimed#id)
-                    |> HttpRequest.setHeader("X-Cms-Timestamp", timestamp)
-                    |> HttpRequest.setHeader("X-Cms-Signature", signature(webhook#secret, { timestamp = timestamp, body = body }))
-                    |> HttpRequest.withTimeout(Time.Duration.seconds(10));
-                let outcome = match Net.Http.send(request) {
-                    case Ok(response) => if (HttpResponse.isSuccess(response)) Ok(HttpResponse.status(response)) else Err((HttpResponse.status(response), "HTTP ${HttpResponse.status(response)}"))
-                    case Err(error)   => Err((0, describeSendError(error)))
-                };
+                let outcome = Net.Http.send(buildRequest(webhook, claimed, timestamp)) |> toOutcome;
                 record(pool, claimed, projectId, projectLabel |> Log.Fields.str("webhook.id", webhook#publicId), outcome)
             }
         }, target)
+
+    ///
+    /// 配信 1 件の HTTP リクエストを組む。本文は payload に積んだ時刻を足した JSON、ヘッダは event / delivery id / timestamp / 署名。タイムアウトは 10 秒。
+    ///
+    def buildRequest(webhook: { url = String, secret = String | r1 }, claimed: { id = String, event = String, payload = Util.Json.Json, createdAt = Timestamp.Timestamp | r2 }, timestamp: String): HttpRequest =
+        // 積んだ時刻を本文にも入れる（受け手が本文だけ保存しても時刻が残る）
+        let body = Util.Json.toCompactString(withAt(claimed#createdAt, claimed#payload));
+        HttpRequest.post(webhook#url, body)
+            |> HttpRequest.withContentType("application/json")
+            |> HttpRequest.setHeader("X-Cms-Event", claimed#event)
+            |> HttpRequest.setHeader("X-Cms-Delivery", claimed#id)
+            |> HttpRequest.setHeader("X-Cms-Timestamp", timestamp)
+            |> HttpRequest.setHeader("X-Cms-Signature", signature(webhook#secret, { timestamp = timestamp, body = body }))
+            |> HttpRequest.withTimeout(Time.Duration.seconds(10))
+
+    ///
+    /// 送った結果を record の形に。2xx は Ok(status)、それ以外の応答は Err(status, "HTTP status")、繋がらなかった物は Err(0, 理由)。
+    ///
+    def toOutcome(sent: Result[IoError.IoError, HttpResponse]): Result[(Int32, String), Int32] = match sent {
+        case Ok(response) => if (HttpResponse.isSuccess(response)) Ok(HttpResponse.status(response)) else Err((HttpResponse.status(response), "HTTP ${HttpResponse.status(response)}"))
+        case Err(error)   => Err((0, describeSendError(error)))
+    }
 
     ///
     /// 送れなかった理由の人向けの文。last_error とログの error.message に入れる。
@@ -95,6 +108,7 @@ mod WebhookDispatcher {
     /// 結果を書く。失敗は回数に応じて次の時刻を置き、使い切れば failed。labels はログの行に付ける project / webhook.id。
     ///
     def record(pool: Pool, claimed: { id = String, attempts = Int32 | r }, projectId: ProjectId, labels: Log.Fields, outcome: Result[(Int32, String), Int32]): Result[String, Unit] \ {IO, Log} =
+        // 書く内容: 届けば delivered、失敗は回数に応じて次の時刻（retry）か failed
         let write = () -> match outcome {
             case Ok(status) => discard WebhooksQueries.markDelivered({ id = claimed#id, projectId = ProjectId.toInt64(projectId), lastStatus = status })
             case Err((status, reason)) => match retryDelaySeconds(claimed#attempts) {
@@ -102,6 +116,7 @@ mod WebhookDispatcher {
                 case None        => discard WebhooksQueries.markFailed({ id = claimed#id, projectId = ProjectId.toInt64(projectId), lastStatus = status, lastError = reason })
             }
         };
+        // 仕事の行を先に出してから、そのプロジェクトの RLS の印を置いた Tx で書く
         match outcome {
             case Ok(status)       => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = JobLog.JobOutcome.Delivered, detail = "HTTP ${status}" }, labels |> outcomeFields(outcome))
             case Err((_, reason)) => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = if (Option.isEmpty(retryDelaySeconds(claimed#attempts))) JobLog.JobOutcome.Failed else JobLog.JobOutcome.RetryLater, detail = reason }, labels |> outcomeFields(outcome))

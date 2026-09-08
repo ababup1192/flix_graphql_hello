@@ -93,11 +93,14 @@ mod Authentication {
     ///
     pub def resolve(deps: Deps, engine: Engine, scope: Option[ProjectId], credential: Credential): Result[Rejection, Authenticated] \ Db + IdGen + Time.Clock.Clock =
         match (engine, scope, credential) {
+            // 壊れたログインの JWT: コンテンツ API は匿名に落として可視性だけ見る。他は SQL を出さずに断る
             case (Engine.Content, Some(projectId), Credential.Invalid(_)) => guardVisibility(projectId, rejected()#auth)
             case (_, _, Credential.Invalid(reason))          => Err(Rejection.Invalid(reason))
+            // エンジンごとの解決。Admin は使用時刻を書き、Content は private なプロジェクトの匿名とメンバー外を断る
             case (Engine.Account, _, found)                  => resolveForAccount(deps, found)
             case (Engine.Admin, Some(projectId), found)      => resolveForProject(deps, projectId, found) |> Result.map(resolved -> { touch(resolved); resolved#auth })
             case (Engine.Content, Some(projectId), found)    => resolveForProject(deps, projectId, found) |> Result.flatMap(resolved -> guardVisibility(projectId, resolved#auth))
+            // プロジェクトの要るエンジンにプロジェクト無しで来る事は無い（Main.runRoute が先に解決する）
             case (Engine.Admin, None, _)                     => bug!("管理 API はプロジェクト無しでは認証できない")
             case (Engine.Content, None, _)                   => bug!("コンテンツ API はプロジェクト無しでは認証できない")
         }
