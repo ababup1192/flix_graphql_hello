@@ -306,12 +306,12 @@ mod TestPublishPg {
             discard ContentEntries.create(blogs, None, titled("A", "same"));
             discard ContentEntries.create(blogs, None, titled("B", "same"))
         }));
-        Assert.assertEq(expected = Ok(Err("fields.slug: 'same' は公開中の entry 'a' が使っています")), PgTestSupport.withPool(raceSameSlug))
+        Assert.assertEq(expected = Err("fields.slug: 'same' は公開中の entry 'a' が使っています"), PgTestSupport.withPool(raceSameSlug))
 
     ///
     /// T1 が A を公開して commit せずに待つあいだに T2 が B を公開しにいき、T1 を commit させてから T2 の結果を返す。
     ///
-    def raceSameSlug(pool: Pool): Result[DbFailure, Result[String, Stage]] \ {IO, Chan, NonDet} =
+    def raceSameSlug(pool: Pool): Result[String, Stage] \ {IO, Chan, NonDet} =
         region rc {
             let (started, startedRx) = Channel.buffered(1);
             let (release, releaseRx) = Channel.buffered(1);
@@ -331,10 +331,10 @@ mod TestPublishPg {
 
 
     ///
-    /// プール越しに 1 つの Tx で publish し、(DB の失敗, (業務エラーの文言, stage)) の形で返す。
+    /// プール越しに 1 つの Tx で publish し、(失敗の文言, stage) の形で返す。
     ///
-    def publishOutcome(pool: Pool, id: String): Result[DbFailure, Result[String, Stage]] \ IO =
-        Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() ->
-            DbRunner.transact(pool, Some(ProjectId.default()), () -> ContentEntries.publish(CmsTestKit.entryId(id), "tester", false)))))
-            |> Result.map(Result.map(entry -> entry#stage) >> Result.mapErr(CmsErr.toMessage))
+    def publishOutcome(pool: Pool, id: String): Result[String, Stage] \ IO =
+        PgTestSupport.mutate(pool, () -> ContentEntries.publish(CmsTestKit.entryId(id), "tester", false))
+            |> Result.map(entry -> entry#stage)
+            |> Result.mapErr(ApplicationFailure.describe)
 }

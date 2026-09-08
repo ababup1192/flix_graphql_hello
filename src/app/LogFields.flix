@@ -156,6 +156,18 @@ mod LogFields {
             case CmsFailure.RequiresLogin(_)           => withCode
         }
 
+    ///
+    /// Tx の失敗の属性。DB の失敗は error.code = INTERNAL と種類（error.kind）と文言、業務エラーは `failure` と同じ。
+    ///
+    pub def applicationFailure(found: ApplicationFailure, fields: Fields): Fields = match found {
+        case ApplicationFailure.Infrastructure(dbFailure) =>
+            fields
+                |> Fields.str("error.code", ErrorCode.text(ErrorCode.Internal))
+                |> Fields.opt("error.kind", dbErrorKind(dbFailure))
+                |> Fields.str("error.message", DbRunner.failureMessage(dbFailure))
+        case ApplicationFailure.Domain(cmsFailure) => failure(cmsFailure, fields)
+    }
+
     // ---- DB の数 ----
 
     ///

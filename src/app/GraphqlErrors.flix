@@ -1,5 +1,5 @@
 ///
-/// 業務エラー（CmsFailure）と DB の失敗を、GraphQL の errors[] に出す形（message と extensions）へ写す。
+/// Tx の失敗（ApplicationFailure。業務エラーと DB の失敗）と認証の失敗を、GraphQL の errors[] に出す形（message と extensions）へ写す。
 /// 分類 → extensions.code の対応を持つのはここだけで、管理 API・Account API・コンテンツ API は
 /// 全部 DbRunner.toFieldResult 経由でここを通る。
 ///
@@ -55,18 +55,19 @@ mod GraphqlErrors {
     pub def internalMessage(): String = "データベースの処理に失敗しました"
 
     ///
-    /// DB の失敗。クライアントからは直せない。一時的な失敗も、直らない失敗も INTERNAL。
+    /// Tx の失敗。業務エラーは分類ごとの extensions、DB の失敗はクライアントからは直せないので一時的な物も直らない物も INTERNAL。
     /// INTERNAL にだけ extensions.requestId を付け、問い合わせとログの行を繋げる。
     ///
     /// WhyNot: 他の分類に requestId を付けないのは、NOT_FOUND / INVALID はクライアントが自分で直せる物で、
     /// 応答ヘッダの X-Request-Id で十分なため。INTERNAL は「この id を添えて問い合わせてください」と言う場面。
     ///
     /// WhyNot: Transient を別の分類（UNAVAILABLE など）にしないのは、Runner が再試行を使い切った後は Permanent の
-    /// RetryExhausted で来るので、ここに Transient が来るのは再試行を通らない道（ContentEngine の read）だけのため。
+    /// RetryExhausted で来るので、ここに Transient が来るのは再試行を通らない道だけのため。
     ///
-    pub def fromDbFailure(requestId: Option[String], failure: Failure): FieldError = match failure {
-        case Failure.Transient(_)    => internal(requestId)
-        case Failure.Permanent(_)    => internal(requestId)
+    pub def fromApplicationFailure(requestId: Option[String], failure: ApplicationFailure): FieldError = match failure {
+        case ApplicationFailure.Domain(found)                       => toFieldError(found)
+        case ApplicationFailure.Infrastructure(Failure.Transient(_)) => internal(requestId)
+        case ApplicationFailure.Infrastructure(Failure.Permanent(_)) => internal(requestId)
     }
 
     def internal(requestId: Option[String]): FieldError =

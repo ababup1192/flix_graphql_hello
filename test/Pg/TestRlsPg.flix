@@ -141,7 +141,7 @@ mod TestRlsPg {
         let unstampedTx = PgTestSupport.withPool(pool ->
             DbError.runWithFailure(() -> Pool.withLazyTx(pool, () -> List.length(ContentTypesQueries.listContentTypes(ProjectId.toInt64(ProjectId.default()))))));
         let stampedTx = PgTestSupport.withPool(pool ->
-            DbError.runWithFailure(() -> TenantTx.withLazyTx(pool, ProjectId.default(), () -> List.length(ContentTypesQueries.listContentTypes(ProjectId.toInt64(ProjectId.default()))))));
+            DbError.runWithFailure(() -> TenantTx.withLazyTx(pool, Some(ProjectId.default()), () -> List.length(ContentTypesQueries.listContentTypes(ProjectId.toInt64(ProjectId.default()))))));
         Assert.assertEq(expected = (Err(true), Ok(0), Ok(2)), (crossInsert, unstampedTx, stampedTx))
 
 }

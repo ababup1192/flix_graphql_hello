@@ -10,7 +10,7 @@ mod TestContentSchemaBuilder {
         (_, f) -> match DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> ObjectStore.runWithFake(Map.empty(), () -> Log.runWith(Log.Sink.silent(), () -> DbTest.runWithRows(Nil, f))))))) {
             case Ok(Ok(result))   => result
             case Ok(Err(failure)) => Err(GraphqlErrors.toFieldError(failure))
-            case Err(failure)     => Err(GraphqlErrors.fromDbFailure(None, failure))
+            case Err(failure)     => Err(GraphqlErrors.fromApplicationFailure(None, ApplicationFailure.Infrastructure(failure)))
         }
 
     ///

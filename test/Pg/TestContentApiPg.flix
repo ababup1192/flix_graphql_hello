@@ -86,13 +86,13 @@ mod TestContentApiPg {
                 tags#id
             });
             let withTags = askTags();
-            let tagsDeleted = tagsCreated |> Result.map(Result.map(tagsId -> PgTestSupport.mutate(pool, () -> ContentTypes.delete(tagsId))));
+            let tagsDeleted = tagsCreated |> Result.map(tagsId -> PgTestSupport.mutate(pool, () -> ContentTypes.delete(tagsId)));
             let withoutTags = askTags();
             (before, added, after, noTags, withTags, tagsDeleted, withoutTags)
         });
         Assert.assertEq(
-            expected = (true, Ok(Ok(())), Value.Obj(Map#{ "blog" => Value.Obj(Map#{ "excerpt" => Value.Null }) }),
-                        (Value.Null, true), (Value.Obj(Map#{ "tags" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }) }), false), Ok(Ok(Ok(Ok(())))), (Value.Null, true)),
+            expected = (true, Ok(()), Value.Obj(Map#{ "blog" => Value.Obj(Map#{ "excerpt" => Value.Null }) }),
+                        (Value.Null, true), (Value.Obj(Map#{ "tags" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }) }), false), Ok(Ok(())), (Value.Null, true)),
             outcome)
 
 }

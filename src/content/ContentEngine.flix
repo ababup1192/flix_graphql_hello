@@ -45,8 +45,8 @@ mod ContentEngine {
     /// 定義を読んで組み直す。
     ///
     def rebuild(pool: Pool, deps: Deps, projectId: ProjectId): Result[String, Graphql.Engine] \ IO =
-        read(pool, projectId, "content type の定義を読めません", () -> Tenant.runWith(projectId, () -> Session.runWith(Actor.System, () -> CmsErr.runWithResult(ContentTypes.list))))
-            |> Result.flatMap(loaded -> loaded |> Result.mapErr(failure -> "content type の定義を読めません: ${CmsErr.toMessage(failure)}"))
+        Tenant.runWith(projectId, () -> DbRunner.transact(pool, Some(projectId), Actor.System, ContentTypes.list))
+            |> Result.mapErr(failure -> "content type の定義を読めません: ${ApplicationFailure.describe(failure)}")
             |> Result.flatMap(types -> Graphql.buildEngine(ContentSchemaBuilder.build(types, ContentRunner.make(pool, deps, projectId))))
 
     def readFingerprint(pool: Pool, projectId: ProjectId): Result[String, String] \ IO =

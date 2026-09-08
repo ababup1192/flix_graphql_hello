@@ -1,5 +1,6 @@
 ///
-/// GraphQL の Runner が共通で使う DB の包み。再試行の回数、業務エラーと Tx の関係、DbFailure の文言をここで 1 つに決める。
+/// GraphQL の Runner が共通で使う DB の包み。再試行の回数、業務エラーと Tx の関係、Session の handler の位置、DbFailure の文言をここで 1 つに決める。
+/// Tx を張る入口は `transact`（認証済みユーザー付き。業務エラー込み）と `withTx` の 2 つ。
 ///
 /// WhyNot: Retry を withLazyTx の外に置くのは、connectionLost した接続で再試行しても無駄なため（sqlfx の流儀）。
 /// 借りるのは thunk の中なので、再試行は新しい接続になる。
@@ -11,7 +12,6 @@
 mod DbRunner {
 
     use DbError.DbFailure
-    use CmsErr.CmsFailure
 
     ///
     /// JVM の例外の網は sqlfx の `Db.guard`（fatal は再送出、それ以外は DbErr.other）。ここでは置く位置だけを決める。
@@ -19,7 +19,7 @@ mod DbRunner {
     /// WhyNot: sqlfx の withLazyTx が最内側で catch する事に任せないのは、その catch の内側に `run … with handler`
     /// （CmsErr.runWithResult / Session.runWith）が入ると、その中で飛んだ例外が catch を素通りするため（2026-09-08 に 0.3.1 と
     /// 0.4.0 の両方で実測。effect の操作を外の handler へ投げるだけなら catch は効く）。一番内側の handler の直下に置く必要があるので、
-    /// transact は CmsErr の内側で、Runner は Session の内側で f を直に包む（`Session.runWith(actor, () -> Db.guard(f))`）。
+    /// transact は CmsErr → Session → SQL の数え → Db.guard(f) の順に入れ、f を直に包む。Session の handler はここだけ。
     ///
     ///
     /// 再試行の待ち方。3 回、200 ms から 2 倍、2 秒で頭打ち、full jitter。
@@ -69,30 +69,30 @@ mod DbRunner {
             |> Log.Fields.int("db.pool.active", Int32.toInt64(stats#active)))
 
     ///
-    /// 印付き（projectId があれば RLS の印）の遅延 Tx で thunk を走らせる。一時的な失敗は 3 回まで再試行し、
-    /// 業務エラーは ROLLBACK の上で Ok(Err(failure)) として返す。
+    /// 認証済みユーザー（actor）の Tx で thunk を走らせる。BEGIN の直後に RLS の印（scope のプロジェクト、人なら本人）を置き、
+    /// Session の handler をここで入れる。一時的な失敗は 3 回まで再試行し、業務エラーは ROLLBACK の上で Domain、DB の失敗は Infrastructure。
     ///
-    pub def transact(pool: Pool, projectId: Option[ProjectId], thunk: Unit -> a \ ef): Result[DbFailure, Result[CmsFailure, a]] \ (ef - {Db, CmsErr}) + IO =
-        transactObserved(pool, projectId, _ -> (), thunk)
+    pub def transact(pool: Pool, scope: Option[ProjectId], actor: Actor, thunk: Unit -> a \ ef): Result[ApplicationFailure, a] \ (ef - {Db, CmsErr, Session}) + IO =
+        transactObserved(pool, scope, _ -> (), actor, thunk)
 
     ///
-    /// `transact` に加えて、再試行した回数（1 以上の時だけ）を observe でリクエストの行に戻す。
+    /// `transact` に加えて、再試行した回数（1 以上の時だけ）と SQL の数を observe でリクエストの行に戻す。
     /// Runner は Context の observe を渡す（graphql-java のコールバックの中なので Observe effect は届かない）。
     ///
-    pub def transactObserved(pool: Pool, projectId: Option[ProjectId], observe: Log.Fields -> Unit \ IO, thunk: Unit -> a \ ef): Result[DbFailure, Result[CmsFailure, a]] \ (ef - {Db, CmsErr}) + IO =
+    pub def transactObserved(pool: Pool, scope: Option[ProjectId], observe: Log.Fields -> Unit \ IO, actor: Actor, thunk: Unit -> a \ ef): Result[ApplicationFailure, a] \ (ef - {Db, CmsErr, Session}) + IO =
         let counter = Ref.fresh(Static, 0);
         let statements = Ref.fresh(Static, 0);
         notePool(observe, pool);
-        let outcome = retryWith(counter, () -> {
-            let inTx = () -> CmsErr.runWithResult(() -> counting(statements, () -> Db.guard(thunk)));
-            match projectId {
-                case Some(found) => TenantTx.withLazyTxResult(pool, found, inTx)
-                case None        => Pool.withLazyTxResult(pool, inTx)
-            }
-        });
+        let outcome = retryWith(counter, () ->
+            TenantTx.withLazyTxResult(pool, scope, actor, () ->
+                CmsErr.runWithResult(() -> Session.runWith(actor, () -> counting(statements, () -> Db.guard(thunk))))));
         noteRetries(observe, Ref.get(counter));
         noteStatements(observe, Ref.get(statements));
-        outcome
+        match outcome {
+            case Err(failure)     => Err(ApplicationFailure.Infrastructure(failure))
+            case Ok(Err(failure)) => Err(ApplicationFailure.Domain(failure))
+            case Ok(Ok(value))    => Ok(value)
+        }
 
     ///
     /// SQL の数を数え、外側の handler（withLazyTx の接続）へそのまま転送する。fetch / execute / executeReturning を 1 と数える。
@@ -127,24 +127,19 @@ mod DbRunner {
     /// transact の結果を GraphQL のフィールドの結果に。DB の失敗と業務エラーは GraphqlErrors が写し、成功はリゾルバの戻りをそのまま。
     /// DB の失敗（リゾルバの例外もここに来る）は Error の行を出し、requestId を INTERNAL の extensions に付ける。
     ///
-    pub def toFieldResult(requestId: Option[String], outcome: Result[DbFailure, Result[CmsFailure, Result[FieldError, a]]]): Result[FieldError, a] \ Log = match outcome {
-        case Err(failure)     => {
-            Log.Fields.empty()
-                |> Log.Fields.str("error.code", ErrorCode.text(ErrorCode.Internal))
-                |> Log.Fields.opt("error.kind", LogFields.dbErrorKind(failure))
-                |> Log.Fields.str("error.message", failureMessage(failure))
-                |> Log.error("field failed");
-            Err(GraphqlErrors.fromDbFailure(requestId, failure))
+    pub def toFieldResult(requestId: Option[String], outcome: Result[ApplicationFailure, Result[FieldError, a]]): Result[FieldError, a] \ Log = match outcome {
+        case Err(ApplicationFailure.Infrastructure(failure)) => {
+            Log.Fields.empty() |> LogFields.applicationFailure(ApplicationFailure.Infrastructure(failure)) |> Log.error("field failed");
+            Err(GraphqlErrors.fromApplicationFailure(requestId, ApplicationFailure.Infrastructure(failure)))
         }
-        case Ok(Err(failure)) => Err(GraphqlErrors.toFieldError(failure))
-        case Ok(Ok(result))   => result
+        case Err(ApplicationFailure.Domain(failure)) => Err(GraphqlErrors.fromApplicationFailure(requestId, ApplicationFailure.Domain(failure)))
+        case Ok(result)                              => result
     }
 
     ///
-    /// CmsErr を使わない Tx。scope があれば RLS の印付き。一時的な失敗は 3 回まで再試行し、JVM の例外は Db.guard で DbErr にする。
-    /// 仕事の tick、プロジェクト slug の解決、content type の目印のような、ユースケースを通さず SQL を出す所用。
-    /// Tx を張る入口は `transact`（業務エラー込み）と `withTx` の 2 つ。src/ で withLazyTx を直に呼べるのは
-    /// このファイルと TenantTx だけ（`scripts/check-tx.sh` が見張る）。
+    /// CmsErr も Session も使わない Tx。scope があれば RLS の印付き。一時的な失敗は 3 回まで再試行し、JVM の例外は Db.guard で DbErr にする。
+    /// 仕事の tick、プロジェクト slug の解決、認証（Credential → Actor）、content type の目印のような、ユースケースを通さず SQL を出す所用。
+    /// src/ で withLazyTx を直に呼べるのはこのファイルと TenantTx だけ（`scripts/check-tx.sh` が見張る）。
     ///
     pub def withTx(pool: Pool, scope: Option[ProjectId], thunk: Unit -> a \ ef): Result[DbFailure, a] \ (ef - Db) + IO =
         withTxObserved(pool, scope, _ -> (), thunk)
@@ -154,13 +149,7 @@ mod DbRunner {
     ///
     pub def withTxObserved(pool: Pool, scope: Option[ProjectId], observe: Log.Fields -> Unit \ IO, thunk: Unit -> a \ ef): Result[DbFailure, a] \ (ef - Db) + IO =
         let statements = Ref.fresh(Static, 0);
-        let outcome = retrying(() -> {
-            let inTx = () -> counting(statements, () -> Db.guard(thunk));
-            match scope {
-                case Some(found) => TenantTx.withLazyTx(pool, found, inTx)
-                case None        => Pool.withLazyTx(pool, inTx)
-            }
-        });
+        let outcome = retrying(() -> TenantTx.withLazyTx(pool, scope, () -> counting(statements, () -> Db.guard(thunk))));
         noteStatements(observe, Ref.get(statements));
         outcome
 

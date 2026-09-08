@@ -78,16 +78,19 @@ mod PgTestSupport {
         withDb(thunk) |> seededOrBug
 
     ///
-    /// プール越しに 1 つの Tx で書く（withDb の外から、コンテンツ API のエンジンと同じ接続先を触る）。
+    /// プール越しに 1 つの Tx で System として書く（withDb の外から、コンテンツ API のエンジンと同じ接続先を触る）。Runner と同じ transact を通る。
     ///
-    pub def mutate(pool: Pool, thunk: Unit -> a \ ef): Result[DbFailure, Result[CmsErr.CmsFailure, a]] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, CmsErr, IdGen, Tenant, Session, ObjectStore}) + IO =
-        Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() -> withStorage(() -> DbRunner.transact(pool, Some(ProjectId.default()), thunk)))))
+    pub def mutate(pool: Pool, thunk: Unit -> a \ ef): Result[ApplicationFailure, a] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, CmsErr, IdGen, Tenant, Session, ObjectStore}) + IO =
+        Tenant.runWith(ProjectId.default(), () -> IdGen.runWithRandom(() -> withStorage(() -> DbRunner.transact(pool, Some(ProjectId.default()), Actor.System, thunk))))
 
     ///
     /// mutate の結果を取り出す。失敗するのはテストの前提が壊れているので止める。
     ///
     pub def mutateOrBug(pool: Pool, thunk: Unit -> a \ ef): a \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, CmsErr, IdGen, Tenant, Session, ObjectStore}) + IO =
-        mutate(pool, thunk) |> seededOrBug
+        match mutate(pool, thunk) {
+            case Ok(found)    => found
+            case Err(failure) => bug!("mutate: ${ApplicationFailure.describe(failure)}")
+        }
 
     ///
     /// テスト用の pepper（CmsTestKit と同じ物）。

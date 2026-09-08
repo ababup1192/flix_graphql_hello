@@ -80,16 +80,23 @@ mod TestGraphqlErrors {
     def testGraphqlErrorsInternalCarriesRequestId(): Unit \ Assert =
         Assert.assertEq(
             expected = (Map#{ "code" => Value.Str("INTERNAL"), "requestId" => Value.Str("01J9ZK3Q8R6S4T2V1W0X9Y8Z7A") }, Map#{ "code" => Value.Str("INTERNAL") }),
-            (FieldError.extensions(GraphqlErrors.fromDbFailure(Some("01J9ZK3Q8R6S4T2V1W0X9Y8Z7A"), DbError.Failure.Permanent(DbError.DbErrorKind.Other("boom")))),
-             FieldError.extensions(GraphqlErrors.fromDbFailure(None, DbError.Failure.Permanent(DbError.DbErrorKind.Other("boom"))))))
+            (FieldError.extensions(GraphqlErrors.fromApplicationFailure(Some("01J9ZK3Q8R6S4T2V1W0X9Y8Z7A"), ApplicationFailure.Infrastructure(DbError.Failure.Permanent(DbError.DbErrorKind.Other("boom"))))),
+             FieldError.extensions(GraphqlErrors.fromApplicationFailure(None, ApplicationFailure.Infrastructure(DbError.Failure.Permanent(DbError.DbErrorKind.Other("boom")))))))
+
+    /// 業務エラーも同じ入口から写る（Domain は toFieldError と同じ形）。
+    @Test
+    def testGraphqlErrorsDomainFailureKeepsCode(): Unit \ Assert =
+        Assert.assertEq(
+            expected = Map#{ "code" => Value.Str("NOT_FOUND"), "entity" => Value.Str("Entry"), "id" => Value.Str("e1") },
+            FieldError.extensions(GraphqlErrors.fromApplicationFailure(Some("rid"), ApplicationFailure.Domain(CmsFailure.NotFound(Entity.Entry, "e1")))))
 
     /// toFieldResult は DB の失敗の時だけ Error の行を 1 つ出し（error.code は INTERNAL）、業務エラーと成功では出さない。
     @Test
     def testToFieldResultLogsOnlyDbFailure(): Unit \ Assert =
-        let outcomes: List[Result[DbError.DbFailure, Result[CmsFailure, Result[FieldError, Int32]]]] = List#{
-            Err(DbError.Failure.Transient(DbError.TransientKind.ConnectionLost("connection lost"))),
-            Ok(Err(CmsFailure.NotFound(Entity.Entry, "e1"))),
-            Ok(Ok(Ok(1)))
+        let outcomes: List[Result[ApplicationFailure, Result[FieldError, Int32]]] = List#{
+            Err(ApplicationFailure.Infrastructure(DbError.Failure.Transient(DbError.TransientKind.ConnectionLost("connection lost")))),
+            Err(ApplicationFailure.Domain(CmsFailure.NotFound(Entity.Entry, "e1"))),
+            Ok(Ok(1))
         };
         let (results, lines) = Log.runWithList(() -> outcomes |> List.map(outcome -> DbRunner.toFieldResult(Some("rid"), outcome) |> Result.map(_ -> ()) |> Result.mapErr(FieldError.code)));
         Assert.assertEq(

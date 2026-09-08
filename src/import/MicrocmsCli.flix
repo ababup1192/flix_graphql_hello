@@ -11,14 +11,13 @@ mod MicrocmsCli {
     pub def execute(dir: String, pool: Pool, deps: Deps, projectId: ProjectId, count: Int32): Result[String, String] \ {IO, Fs.FileRead} =
         forM (
             apis <- readApis(dir);
-            outcome <- AppEnv.runWith(deps, Log.Fields.empty(), projectId, () -> Session.runWith(Actor.System, () ->
-                    DbRunner.transact(pool, Some(projectId), () -> {
+            outcome <- AppEnv.runWith(deps, Log.Fields.empty(), projectId, () ->
+                    DbRunner.transact(pool, Some(projectId), Actor.System, () -> {
                         let types = MicrocmsImport.importSchema(apis);
                         let created = MicrocmsImport.seedDummy(apis, types, count);
                         (Map.size(types), created |> Map.valuesOf |> List.map(List.length) |> List.sum)
-                    })))
-                |> Result.mapErr(failure -> "DB の失敗: ${failure}")
-                |> Result.flatMap(Result.mapErr(CmsErr.toMessage))
+                    }))
+                |> Result.mapErr(ApplicationFailure.describe)
         ) yield {
             let (types, entries) = outcome;
             "microCMS のスキーマ ${List.length(apis)} 件を写しました: 型 ${types}、ダミーの entry ${entries}（全部公開済み）"

@@ -1,5 +1,5 @@
 ///
-/// 時刻の来た予約（scheduled_actions）を拾い、そのプロジェクトの印と System の主体で publish / unpublish を実行する。
+/// 時刻の来た予約（scheduled_actions）を拾い、そのプロジェクトの印と System の認証済みユーザーで publish / unpublish を実行する。
 /// 実行は既存のユースケースをそのまま呼ぶので、公開の検査も Webhook の積み込みも通常の公開と同じ。
 ///
 mod Scheduler {
@@ -22,12 +22,15 @@ mod Scheduler {
         let labels = Log.Fields.empty() |> Log.Fields.str("project", claimed#projectSlug) |> Log.Fields.str("id", claimed#entryId);
         let outcome = match (EntryId.parse(claimed#entryId), ScheduleAction.parse(claimed#action)) {
             case (Some(entryId), Some(action)) =>
-                Tenant.runWith(projectId, () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() ->
-                    DbRunner.transact(pool, Some(projectId), () -> match action {
+                match Tenant.runWith(projectId, () -> IdGen.runWithRandom(() ->
+                    DbRunner.transact(pool, Some(projectId), Actor.System, () -> match action {
                         case ScheduleAction.Publish   => discard ContentEntries.publish(entryId, "scheduler", claimed#withDependencies)
                         case ScheduleAction.Unpublish => discard ContentEntries.unpublish(entryId)
-                    }))))
-                    |> Result.map(Result.mapErr(failure -> (CmsErr.toMessage(failure), Log.Fields.empty() |> LogFields.failure(failure))))
+                    }))) {
+                    case Ok(())                                          => Ok(Ok(()))
+                    case Err(ApplicationFailure.Domain(failure))         => Ok(Err((CmsErr.toMessage(failure), Log.Fields.empty() |> LogFields.failure(failure))))
+                    case Err(ApplicationFailure.Infrastructure(failure)) => Err(failure)
+                }
             // 知らない操作や壊れた id は failed にして先へ進む（新しい版が積んだ物を古い版が拾った時など）
             case _ => Ok(Err(("知らない予約です: ${claimed#action} ${claimed#entryId}", Log.Fields.empty())))
         };
