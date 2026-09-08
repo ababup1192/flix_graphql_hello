@@ -69,7 +69,7 @@ mod TestSchedulesPg {
             discard PgTestSupport.executeSql("UPDATE scheduled_actions SET status = 'running', claimed_at = now() - interval '1 hour' WHERE id = $1", SqlValue.Str(stuckId) :: Nil);
             let untouched = ServerTestKit.quietly(() -> Scheduler.tick(pool));
             let beforeRecovery = statusOf(pool, stuckId);
-            let jobs = BackgroundJobs.createState(15i64, None, OutboundHttp.newClient());
+            let jobs = BackgroundJobs.createState(15i64, None, OutboundHttp.newClient(), Scheduler.defaultConfig());
             let failures = ServerTestKit.quietly(() -> BackgroundJobs.tick(pool, jobs));
             (cancelled, cancelAgainRejected, untouched, beforeRecovery, failures, statusOf(pool, stuckId), stageOf(pool, "e1"), Option.nonEmpty(Ref.get(jobs#lastTick)))
         });

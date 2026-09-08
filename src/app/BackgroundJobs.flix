@@ -34,14 +34,15 @@ mod BackgroundJobs {
     /// - drainMs: 停止時に実行中の 1 tickを待つ上限（ミリ秒。CMS_JOBS_DRAIN_SECONDS）
     /// - purge: CDN の purge の送り先（CMS_CDN_PURGE_URL / CMS_CDN_PURGE_TOKEN）。None なら purge は積まない・送らない
     /// - http: Webhook の POST と CDN の purge に使う HttpClient（プロセスで 1 つ。OutboundHttp）
+    /// - scheduler: 予約公開の tick の設定（チャンクの件数と予算。CMS_SCHEDULER_CHUNK_SIZE / CMS_SCHEDULER_TICK_BUDGET_SECONDS）
     ///
     /// WhyNot: lastWatch を /health からの step で更新しないのは、この値が指すのは「watchのスレッドが生きているか」で、
     /// リクエストのスレッドが進めた事を混ぜると、死んだスレッドを生きていると読ませてしまうため。
     ///
-    pub type alias State = { lastTick = Ref[Option[Int64], Static], lastWatch = Ref[Option[Int64], Static], stopping = Ref[Bool, Static], inTick = Ref[Bool, Static], drainMs = Int64, purge = Option[PurgeTarget], http = HttpClient }
+    pub type alias State = { lastTick = Ref[Option[Int64], Static], lastWatch = Ref[Option[Int64], Static], stopping = Ref[Bool, Static], inTick = Ref[Bool, Static], drainMs = Int64, purge = Option[PurgeTarget], http = HttpClient, scheduler = Scheduler.Config }
 
-    pub def createState(drainSeconds: Int64, purge: Option[PurgeTarget], http: HttpClient): State \ IO =
-        { lastTick = Ref.fresh(Static, None), lastWatch = Ref.fresh(Static, None), stopping = Ref.fresh(Static, false), inTick = Ref.fresh(Static, false), drainMs = drainSeconds * 1000i64, purge = purge, http = http }
+    pub def createState(drainSeconds: Int64, purge: Option[PurgeTarget], http: HttpClient, scheduler: Scheduler.Config): State \ IO =
+        { lastTick = Ref.fresh(Static, None), lastWatch = Ref.fresh(Static, None), stopping = Ref.fresh(Static, false), inTick = Ref.fresh(Static, false), drainMs = drainSeconds * 1000i64, purge = purge, http = http, scheduler = scheduler }
 
     ///
     /// 止まらずに回す。失敗はログに出して次のtickへ。停止が始まったら抜ける。tickごとに Log を sink で入れ直す（spawn の中なので Main の handler は届かない）。
@@ -230,7 +231,7 @@ mod BackgroundJobs {
                     discard CdnPurgesQueries.purgeOldPurges(keepDays())
                 }) |> Result.mapErr(failure -> "回復と掃除ができません: ${failure}");
             // 予約公開と Webhook の配信。部分ごとに JVM の例外を catch し、片方が落ちても残りは進める
-            let scheduled = guardedPart("予約公開", () -> Scheduler.tick(pool));
+            let scheduled = guardedPart("予約公開", () -> Scheduler.tickWith(state#scheduler, pool));
             let delivered = OutboundHttp.runWith(state#http, () -> guardedPart("Webhook", () -> WebhookDispatcher.tick(pool)));
             let purged = purgeTick(pool, state);
             // lastTick（heartbeat）を更新し、inTick フラグを下ろす

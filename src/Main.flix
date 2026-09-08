@@ -14,7 +14,7 @@ import java.lang.Throwable
 /// CMS_DB_MAX_CONNECTIONS（接続プールの上限。既定 10）、CMS_DB_BORROW_TIMEOUT_SECONDS（接続を借りるのを待つ上限。既定 2）、ASSET_*（StorageConfig。省略時は asset 無し）、
 /// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_BASE_DOMAIN（`{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。省略時は /p/ だけ）、
 /// CMS_DEFAULT_PROJECT（プロジェクト slug 無しの時のプロジェクト slug。省略時は default、空ならプロジェクト slug 無しは 404）、CMS_SIGNUP（open / closed）、
-/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（自己回復の停止で実行中の仕事を待つ秒数。既定 15）、CMS_CDN_PURGE_URL / CMS_CDN_PURGE_TOKEN（両方あれば、版が進んだプロジェクトの CDN の purge を tick で送る）、CMS_SHUTDOWN_TIMEOUT_SECONDS（SIGTERM で HTTP の接続と仕事を待つ秒数。既定 20。超えたら終了コード 2）、CMS_SELF_HEAL（on / off。プールが壊れたまま戻らない時に自分で終わる。既定 on）、CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（既定 90）、CMS_SELF_HEAL_WARMUP_SECONDS（起動から見送る秒数。既定 300）、CMS_SELF_HEAL_JITTER_SECONDS（複数台が同時に終わらないための上乗せの上限。既定 10）、CMS_CACHE_S_MAXAGE / CMS_CACHE_MAX_AGE / CMS_CACHE_STALE_WHILE_REVALIDATE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 10 / 0 / 60、s-maxage と max-age が両方 0 なら no-store）、
+/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（自己回復の停止で実行中の仕事を待つ秒数。既定 15）、CMS_SCHEDULER_CHUNK_SIZE / CMS_SCHEDULER_TICK_BUDGET_SECONDS（予約公開の 1 回の tick で拾う件数と、繰り返す上限の秒数。既定 100 / 10）、CMS_CDN_PURGE_URL / CMS_CDN_PURGE_TOKEN（両方あれば、版が進んだプロジェクトの CDN の purge を tick で送る）、CMS_SHUTDOWN_TIMEOUT_SECONDS（SIGTERM で HTTP の接続と仕事を待つ秒数。既定 20。超えたら終了コード 2）、CMS_SELF_HEAL（on / off。プールが壊れたまま戻らない時に自分で終わる。既定 on）、CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（既定 90）、CMS_SELF_HEAL_WARMUP_SECONDS（起動から見送る秒数。既定 300）、CMS_SELF_HEAL_JITTER_SECONDS（複数台が同時に終わらないための上乗せの上限。既定 10）、CMS_CACHE_S_MAXAGE / CMS_CACHE_MAX_AGE / CMS_CACHE_STALE_WHILE_REVALIDATE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 10 / 0 / 60、s-maxage と max-age が両方 0 なら no-store）、
 /// CMS_MODE=import-microcms（サーバを立てず、CMS_IMPORT_DIR の microCMS のスキーマを写してダミーの entry を CMS_IMPORT_COUNT 件ずつ積んで終わる）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
 /// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health とログの version に出す版。省略時は dev）、CMS_MAX_CONNECTIONS（HTTP の同時接続の上限。超えた接続は 503。既定 256）、
 /// CMS_LOG_LEVEL（trace / debug / info / warn / error / fatal。これより軽い行は出さない。既定 info）
@@ -70,6 +70,7 @@ def start(version: String, sink: Log.Sink): Unit \ {IO, Fs.FileRead, Sys.Exit, S
 /// - baseDomain: CMS_BASE_DOMAIN（Host でプロジェクトを選ぶ。空なら None）
 /// - jobsOn: CMS_JOBS が off でない
 /// - jobsDrainSeconds: CMS_JOBS_DRAIN_SECONDS
+/// - scheduler: 予約公開の tick の設定（CMS_SCHEDULER_CHUNK_SIZE / CMS_SCHEDULER_TICK_BUDGET_SECONDS）
 /// - purge: CDN の purge の送り先（CMS_CDN_PURGE_URL / CMS_CDN_PURGE_TOKEN。両方あれば Some）
 /// - selfHeal: CMS_SELF_HEAL_*（off なら None）
 /// - maxConnections: CMS_MAX_CONNECTIONS（HTTP の同時接続の上限）
@@ -82,7 +83,7 @@ type alias EnvConfig = {
     storage = Option[StorageConfig.StorageConfig], auth = AuthConfig.AuthConfig,
     defaultProject = Option[String], defaultProjectSlug = Option[String],
     server = ServerConfig, baseDomain = Option[String],
-    jobsOn = Bool, jobsDrainSeconds = Int64, purge = Option[PurgeTarget], selfHeal = Option[SelfHeal.Settings],
+    jobsOn = Bool, jobsDrainSeconds = Int64, scheduler = Scheduler.Config, purge = Option[PurgeTarget], selfHeal = Option[SelfHeal.Settings],
     maxConnections = Int32, shutdownTimeoutMs = Int64,
     importDir = String, importCount = Int32 }
 
@@ -112,6 +113,7 @@ def readConfig(version: String): Result[String, EnvConfig] \ {IO, Sys.Env} =
           baseDomain = Sys.Env.getVar("CMS_BASE_DOMAIN") |> Option.filter(text -> not String.isEmpty(text)),
           jobsOn = Sys.Env.getVar("CMS_JOBS") |> Option.getWithDefault("on") != "off",
           jobsDrainSeconds = Sys.Env.getVar("CMS_JOBS_DRAIN_SECONDS") |> Option.flatMap(Int64.fromString) |> Option.getWithDefault(15i64),
+          scheduler = Scheduler.configFromEnv(),
           purge = CdnPurge.targetOf(Sys.Env.getVar("CMS_CDN_PURGE_URL"), Sys.Env.getVar("CMS_CDN_PURGE_TOKEN")),
           selfHeal = SelfHeal.fromEnv(healJitterFraction()),
           maxConnections = Sys.Env.getVar("CMS_MAX_CONNECTIONS") |> Option.flatMap(Int32.fromString) |> Option.filter(n -> n > 0) |> Option.getWithDefault(256),
@@ -178,7 +180,7 @@ def serve(config: EnvConfig, sink: Log.Sink, started: Started): Unit \ {IO, Sys.
     let jwks = TokenVerifier.createCache();
     let engineCache = ContentEngine.create(deps);
     // ワーカーの状態と、プールが壊れたまま戻らないかのwatch
-    let jobs = BackgroundJobs.createState(config#jobsDrainSeconds, config#purge, deps#http);
+    let jobs = BackgroundJobs.createState(config#jobsDrainSeconds, config#purge, deps#http, config#scheduler);
     // 接続がプールに最後に返った時刻。自己回復が「プールが壊れた」と「満杯」を分けるのに読む
     let lastReturnedAt = PoolActivity.create();
     PoolActivity.attach(started#pool, lastReturnedAt);

@@ -87,7 +87,7 @@ mod TestCdnPurgePg {
     def testPgCdnPurgeDisabledAndRetry(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withPool(pool -> {
             PgTestSupport.seed(seed);
-            let failures = ServerTestKit.quietly(() -> BackgroundJobs.tick(pool, BackgroundJobs.createState(15i64, None, OutboundHttp.newClient())));
+            let failures = ServerTestKit.quietly(() -> BackgroundJobs.tick(pool, BackgroundJobs.createState(15i64, None, OutboundHttp.newClient(), Scheduler.defaultConfig())));
             let whileDisabled = purges(pool);
             let received = Ref.fresh(Static, Nil);
             let failed = enqueueAndTick(500, received, pool);
