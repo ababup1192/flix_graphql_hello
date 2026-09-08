@@ -116,43 +116,27 @@ mod TestHttpServer {
     @Test
     def testReadRequestPost(): Unit \ {Assert, IO} =
         Assert.assertEq(expected = Ok(("POST", "/graphql", ("host", "x") :: ("content-length", "2") :: Nil, "{}")),
-            HttpServer.readRequest(inputOf("POST /graphql HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\n{}")) |> Result.map(toTuple))
+            HttpServer.readRequest(inputOf("POST /graphql HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\n{}")) |> Result.map(toTuple) |> Result.mapErr(failureTuple))
 
-    /// 壊れたリクエスト行は Err(400)。
-    @Test
-    def testReadRequestBadRequestLine(): Unit \ {Assert, IO} =
-        Assert.assertEq(expected = Err(400),
-            HttpServer.readRequest(inputOf("nonsense\r\n\r\n")) |> Result.map(toTuple))
+    /// 読めなかった時の Err を (status, method, path, headers) に。
+    def failureTuple(read: HttpServer.ReadFailure): (Int32, String, String, List[(String, String)]) =
+        (read#status, read#method, read#path, read#headers)
 
-    /// Content-Length が上限（1 MiB）を超えていれば Err(413)。
+    /// 読めなかったリクエスト: 壊れたリクエスト行は 400、Content-Length が上限（1 MiB）超は 413、数字でなければ 400、ヘッダが 101 行・リクエスト行や
+    /// ヘッダ 1 行が長すぎれば 431。413 / 400（Content-Length）はヘッダまで読めているので method / path（クエリは落ちる）/ headers が残り、
+    /// 431（ヘッダ）は method / path だけ、リクエスト行で落ちた物は "-"。
     @Test
-    def testReadRequestTooLarge(): Unit \ {Assert, IO} =
-        Assert.assertEq(expected = Err(413),
-            HttpServer.readRequest(inputOf("POST /graphql HTTP/1.1\r\nContent-Length: 1048577\r\n\r\n")) |> Result.map(toTuple))
-
-    /// Content-Length が数字でなければ Err(400)。
-    @Test
-    def testReadRequestMalformedContentLength(): Unit \ {Assert, IO} =
-        Assert.assertEq(expected = Err(400),
-            HttpServer.readRequest(inputOf("POST /graphql HTTP/1.1\r\nContent-Length: abc\r\n\r\n")) |> Result.map(toTuple))
-
-    /// ヘッダが 101 行あれば Err(431)。
-    @Test
-    def testReadRequestTooManyHeaderLines(): Unit \ {Assert, IO} =
-        Assert.assertEq(expected = Err(431),
-            HttpServer.readRequest(inputOf("POST /graphql HTTP/1.1\r\n" + headerText(101))) |> Result.map(toTuple))
-
-    /// リクエスト行が長すぎれば、解析より先に Err(431)。
-    @Test
-    def testReadRequestTooLongRequestLine(): Unit \ {Assert, IO} =
-        Assert.assertEq(expected = Err(431),
-            HttpServer.readRequest(inputOf(repeatA(8193) + " /graphql HTTP/1.1\r\n\r\n")) |> Result.map(toTuple))
-
-    /// ヘッダ 1 行が長すぎれば Err(431)。
-    @Test
-    def testReadRequestTooLongHeaderLine(): Unit \ {Assert, IO} =
-        Assert.assertEq(expected = Err(431),
-            HttpServer.readRequest(inputOf("POST /graphql HTTP/1.1\r\nX-Long: " + repeatA(8192) + "\r\n\r\n")) |> Result.map(toTuple))
+    def testReadRequestFailureTable(): Unit \ {Assert, IO} =
+        let cases = List#{
+            ("nonsense\r\n\r\n",                                                             (400, "-", "-", Nil)),
+            ("POST /graphql?x=1 HTTP/1.1\r\nX-Request-Id: rid-1\r\nContent-Length: 1048577\r\n\r\n", (413, "POST", "/graphql", ("x-request-id", "rid-1") :: ("content-length", "1048577") :: Nil)),
+            ("POST /graphql HTTP/1.1\r\nContent-Length: abc\r\n\r\n",                        (400, "POST", "/graphql", ("content-length", "abc") :: Nil)),
+            ("POST /graphql HTTP/1.1\r\n" + headerText(101),                                 (431, "POST", "/graphql", Nil)),
+            (repeatA(8193) + " /graphql HTTP/1.1\r\n\r\n",                                   (431, "-", "-", Nil)),
+            ("POST /graphql HTTP/1.1\r\nX-Long: " + repeatA(8192) + "\r\n\r\n",              (431, "POST", "/graphql", Nil))
+        };
+        Assert.assertEq(expected = cases |> List.map(match (_, expected) -> Err(expected)),
+            cases |> List.map(match (text, _) -> HttpServer.readRequest(inputOf(text)) |> Result.map(toTuple) |> Result.mapErr(failureTuple)))
 
     // ---- sanitizePath ----
 

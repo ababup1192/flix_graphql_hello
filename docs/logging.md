@@ -75,7 +75,7 @@
 ## 出る場所と span
 
 - リクエスト: 接続のスレッドの入口（`Main.dispatch`）で `Log.runWith(sink)` を入れ直し、`request.id` / `cf.ray` / method / path の span を張る。
-  リクエストの行は処理の後に `Main.serveRequest` が出す。Route の handler と 404 / 405 の分岐は `Observe` effect（`Observe.note`）で属性（`mcp.*`、4xx の `error.code` / `error.message`）を積み、`serveRequest` が `extra` に受ける。HttpServer が見た失敗（handle の例外、読めない 400 / 413 / 431、混雑の 503、書けなかった）は `onServed` から別に出る（request.id は無い）
+  リクエストの行は処理の後に `Main.serveRequest` が出す。Route の handler と 404 / 405 の分岐は `Observe` effect（`Observe.note`）で属性（`mcp.*`、4xx の `error.code` / `error.message`）を積み、`serveRequest` が `extra` に受ける。HttpServer が見た失敗（handle の例外、読めない 400 / 413 / 431、混雑の 503、書けなかった）は `onServed` から別に出る（413 / 431 はヘッダまで読めているので method / path と、`X-Request-Id` があれば `request.id` が付く。ULID は作らない）
 - リゾルバの中: Runner が `deps#log` で入れ直し（graphql-java の Java コールバックの中なので dispatch の handler は届かない）、Context の span に `user.id` / `api_key.name` を足す。今出るのは DB の失敗（`field failed`）だけ。
   同じ属性（と検証に落ちた印）は Context の `observe` でリクエストの行にも戻す（Ref を閉じ込めた関数の値。Java のコールバックの中から effect は届かない）
 - ワーカー: `BackgroundJobs.runForever` が周ごとに入れ直す。外部トリガー `POST /jobs/tick` はリクエストの span の中で出る

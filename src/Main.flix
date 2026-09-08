@@ -164,16 +164,17 @@ def serveRequest(runtime: Runtime, requestId: String, span: Log.Fields, request:
 /// HttpServer が見た結果のうち、serveRequest が行を出せなかった物（handle が投げた・読めなかった 400 / 413 / 431・503 の reject・書けなかった）を出す。
 /// 正常に処理して書けた物は serveRequest が出しているので出さない。
 ///
-/// WhyNot: request.id が付かないのは、この経路は dispatch に入る前か例外で抜けた後で、id を持って来られないため。
-/// 例外の行は同じスレッドの直前の行と時刻で突き合わせる。
+/// WhyNot: request.id を X-Request-Id があった時にしか付けないのは、この経路は dispatch に入る前か例外で抜けた後で、
+/// dispatch が作った ULID を持って来られないため（応答ヘッダにも付いていない）。例外の行は同じスレッドの直前の行と時刻で突き合わせる。
 ///
 def logServed(sink: Log.Sink, served: HttpServer.Served): Unit \ IO =
     if (Option.isEmpty(served#failure) and served#method != "-") ()
     else Log.runWith(sink, () -> emitServed(served))
 
-/// HttpServer の結果の行。
+/// HttpServer の結果の行。413 / 431 はヘッダまで読めているので method / path と、あれば X-Request-Id が付く。
 def emitServed(served: HttpServer.Served): Unit \ {IO, Log} =
     let base = Log.Fields.empty()
+        |> Log.Fields.opt("request.id", RequestId.ofHeaders(served#headers))
         |> Log.Fields.str("http.request.method", served#method)
         |> Log.Fields.str("url.path", served#path)
         |> LogFields.response(served#status, served#elapsedMs, served#requestBytes, served#responseBytes);

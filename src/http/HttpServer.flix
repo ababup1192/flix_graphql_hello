@@ -94,15 +94,22 @@ mod HttpServer {
     ///
     /// 1 リクエスト（または読めなかった・書けなかった接続）の結果。listen の onServed に渡す。
     ///
-    /// - method / path: リクエスト行の物。path はクエリ文字列と制御文字を落とした後。読めなかった時は "-"
+    /// - method / path: リクエスト行の物。path はクエリ文字列と制御文字を落とした後。リクエスト行を読めなかった時は "-"
+    /// - headers: 読めたヘッダ（名前は小文字）。ヘッダまで読めなかった時は空
     /// - status: 返したステータスコード
     /// - elapsedMs: 読み始めてから書き終わるまでの所要時間（ミリ秒）
     /// - requestBytes / responseBytes: ボディの UTF-8 のバイト数
     /// - failure: handle が投げた例外、ソケットの例外、書けなかった時の例外。正常なら None
     ///
     pub type alias Served = {
-        method = String, path = String, status = Int32, elapsedMs = Int64,
+        method = String, path = String, headers = List[(String, String)], status = Int32, elapsedMs = Int64,
         requestBytes = Int64, responseBytes = Int64, failure = Option[Throwable] }
+
+    ///
+    /// リクエストを読めなかった時の結果。status は返すステータスコード（400 / 413 / 431）。
+    /// method / path / headers はそこまでに読めた物（リクエスト行を読めなければ "-" と空）。413 / 431 はヘッダの後で分かるので method と path が残る。
+    ///
+    pub type alias ReadFailure = { status = Int32, method = String, path = String, headers = List[(String, String)] }
 
     ///
     /// Listener で待ち受け、接続ごとにスレッドを起こして handle に渡す。戻らない。
@@ -157,7 +164,7 @@ mod HttpServer {
         try {
             let writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
             let wrote = write(writer, Http.Connection.Close, { status = 503, headers = ("Retry-After", "1") :: Nil, body = "" });
-            onServed(unreadable(503, started, writeFailure(wrote)));
+            onServed(unreadable(unread(503), started, writeFailure(wrote)));
             socket.close()
         } catch {
             case e: Throwable =>
@@ -166,10 +173,16 @@ mod HttpServer {
         }
 
     ///
-    /// 読めなかった・書けなかった接続の Served。method / path は "-"。
+    /// 読めなかった・書けなかった接続の Served。method / path / headers は読めた所まで。
     ///
-    def unreadable(status: Int32, started: Int64, failure: Option[Throwable]): Served \ IO =
-        { method = "-", path = "-", status = status, elapsedMs = System.currentTimeMillis() - started, requestBytes = 0i64, responseBytes = 0i64, failure = failure }
+    def unreadable(read: ReadFailure, started: Int64, failure: Option[Throwable]): Served \ IO =
+        { method = read#method, path = read#path, headers = read#headers, status = read#status, elapsedMs = System.currentTimeMillis() - started, requestBytes = 0i64, responseBytes = 0i64, failure = failure }
+
+    ///
+    /// リクエスト行すら読めていない失敗。method / path は "-"、headers は空。
+    ///
+    def unread(status: Int32): ReadFailure =
+        { status = status, method = "-", path = "-", headers = Nil }
 
     ///
     /// 書けなかった時の failure。
@@ -184,7 +197,7 @@ mod HttpServer {
     /// Exception の catch を素通りし、スレッドが黙って死んでソケットも閉じないため。
     ///
     def report(error: Throwable, started: Int64, onServed: Served -> Unit \ IO): Unit \ IO =
-        onServed(unreadable(500, started, Some(error)));
+        onServed(unreadable(unread(500), started, Some(error)));
         rethrowIfFatal(error)
 
     ///
@@ -247,9 +260,9 @@ mod HttpServer {
             let connection = try {
                 match readRequest(input) {
                     case Ok(request) => respond(writer, request, started, onServed, handle, served)
-                    case Err(status) =>
-                        let wrote = write(writer, Http.Connection.Close, { status = status, headers = Nil, body = "" });
-                        onServed(unreadable(status, started, writeFailure(wrote)));
+                    case Err(read)   =>
+                        let wrote = write(writer, Http.Connection.Close, { status = read#status, headers = Nil, body = "" });
+                        onServed(unreadable(read, started, writeFailure(wrote)));
                         Http.Connection.Close
                 }
             } catch {
@@ -280,7 +293,7 @@ mod HttpServer {
         };
         let wrote = write(writer, next, response);
         onServed({
-            method = request#method, path = sanitizePath(request#path), status = response#status,
+            method = request#method, path = sanitizePath(request#path), headers = request#headers, status = response#status,
             elapsedMs = System.currentTimeMillis() - started,
             requestBytes = Int32.toInt64(Http.utf8Length(request#body)), responseBytes = Int32.toInt64(Http.utf8Length(response#body)),
             failure = match failure { case Some(_) => failure case None => writeFailure(wrote) } });
@@ -333,20 +346,23 @@ mod HttpServer {
 
     ///
     /// リクエスト行・ヘッダ・ボディを読んで HttpRequest にする。
-    /// 読めないときは返すべきステータスコードを Err に入れる。
-    /// リクエスト行が長すぎれば Err(431)、解析できなければ Err(400)。
-    /// Content-Length が読めなかったときはボディを読まずに返す。
+    /// 読めないときは返すべきステータスコードと、そこまでに読めた method / path / headers を Err に入れる（ログの行に出す）。
+    /// リクエスト行が長すぎれば 431、解析できなければ 400（どちらも method / path は "-"）。ヘッダが多すぎる・長すぎれば 431（headers は空）。
+    /// Content-Length が読めなかったときは 400 / 413 で、ボディを読まずに返す。
     ///
-    pub def readRequest(input: InputStream): Result[Int32, HttpRequest] \ IO =
-        readLine(input)
-            |> Result.flatMap(requestLine -> Http.parseRequestLine(requestLine) |> Option.toOk(400))
-            |> Result.flatMap(match (method, path, version) ->
-                readHeaderLines(input)
-                    |> Result.map(lines -> (method, path, version, Http.parseHeaders(lines))))
-            |> Result.flatMap(match (method, path, version, headers) ->
-                Http.contentLength(headers)
-                    |> Result.mapErr(statusOf)
-                    |> Result.map(length -> { method = method, path = path, version = version, headers = headers, body = readBody(input, length) }))
+    pub def readRequest(input: InputStream): Result[ReadFailure, HttpRequest] \ IO =
+        match readLine(input) |> Result.flatMap(requestLine -> Http.parseRequestLine(requestLine) |> Option.toOk(400)) {
+            case Err(status)                  => Err(unread(status))
+            case Ok((method, path, version)) => match readHeaderLines(input) {
+                case Err(status) => Err({ status = status, method = method, path = sanitizePath(path), headers = Nil })
+                case Ok(lines)   =>
+                    let headers = Http.parseHeaders(lines);
+                    match Http.contentLength(headers) {
+                        case Err(error)  => Err({ status = statusOf(error), method = method, path = sanitizePath(path), headers = headers })
+                        case Ok(length)  => Ok({ method = method, path = path, version = version, headers = headers, body = readBody(input, length) })
+                    }
+            }
+        }
 
     ///
     /// Content-Length の失敗をステータスコードにする。
