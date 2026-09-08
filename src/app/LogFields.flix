@@ -10,7 +10,9 @@ mod LogFields {
     use Log.Fields
     use Log.Severity
     use CmsErr.CmsFailure
-    use DbError.DbFailure
+    use DbError.DbErrorKind
+    use DbError.Failure
+    use DbError.TransientKind
 
     // ---- リクエスト ----
 
@@ -161,21 +163,21 @@ mod LogFields {
     /// それ以外（制約違反・schemaMismatch など）は None。再試行で枯渇した物は最後の失敗の種類を返す。
     /// 「DB が落ちた（connectionLost）」と「DB が遅い（timeout）」をログで読み分けるためのキー。
     ///
-    /// WhyNot: DbFailure でなく DbErrorKind を受けないのは、Runner が受け取るのは 1 層に落とした後の DbFailure で、
-    /// kind に戻す口が sqlfx に無いため。DbError.describe の形（先頭が種類の名前）に合わせて読む。
+    /// WhyNot: `DbError.describe` の文言を読まないのは、sqlfx が文言を変えた時にキーの値が黙って消えるため。
+    /// 値の綴りはここで決める（docs/logging.md の一覧と同じ）。
     ///
-    pub def dbErrorKind(failure: DbFailure): Option[String] =
-        let text = match failure {
-            case DbFailure.Transient(detail) => detail
-            case DbFailure.Permanent(detail) => detail
-        };
-        transientName(String.splitOn(substr = " ", text))
+    pub def dbErrorKind(failure: Failure): Option[String] = match failure {
+        case Failure.Transient(transient)                              => Some(transientName(transient))
+        case Failure.Permanent(DbErrorKind.Transient(transient))       => Some(transientName(transient))
+        case Failure.Permanent(DbErrorKind.RetryExhausted(last, _))    => Some(transientName(last))
+        case Failure.Permanent(_)                                      => None
+    }
 
-    /// 説明の語の並びから種類の名前を取る。`retryExhausted` なら次の語（最後に失敗した種類）。
-    def transientName(words: List[String]): Option[String] = match words {
-        case "retryExhausted" :: rest => transientName(rest)
-        case head :: _                => List#{"deadlock", "timeout", "connectionLost"} |> List.find(name -> name == head)
-        case Nil                      => None
+    /// 一時的な失敗の種類の名前。
+    def transientName(transient: TransientKind): String = match transient {
+        case TransientKind.Deadlock          => "deadlock"
+        case TransientKind.Timeout(_)        => "timeout"
+        case TransientKind.ConnectionLost(_) => "connectionLost"
     }
 
     ///

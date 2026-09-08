@@ -141,6 +141,6 @@ mod DbRunner {
     ///
     /// DbFailure を人が読む文言に。
     ///
-    pub def failureMessage(failure: DbFailure): String = "database error: ${failure}"
+    pub def failureMessage(failure: DbFailure): String = "database error: ${DbError.describeFailure(failure)}"
 
 }

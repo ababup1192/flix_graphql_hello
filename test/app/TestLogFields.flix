@@ -6,7 +6,9 @@ mod TestLogFields {
     use Log.Fields
     use Log.Severity
     use CmsErr.CmsFailure
-    use DbError.DbFailure
+    use DbError.DbErrorKind
+    use DbError.Failure
+    use DbError.TransientKind
 
     /// ヘッダ付きの GET。
     def get(path: String, headers: List[(String, String)]): HttpRequest =
@@ -177,14 +179,16 @@ mod TestLogFields {
     @Test
     def testDbErrorKindTable(): Unit \ Assert =
         let cases = List#{
-            (DbFailure.Transient(DbError.describe(DbError.DbErrorKind.Deadlock)),                     Some("deadlock")),
-            (DbFailure.Transient(DbError.describe(DbError.DbErrorKind.Timeout(0))),                   Some("timeout")),
-            (DbFailure.Transient(DbError.describe(DbError.DbErrorKind.ConnectionLost("no route"))),   Some("connectionLost")),
-            (DbFailure.Permanent(DbError.describe(DbError.DbErrorKind.RetryExhausted("timeout 0 after 3 attempts"))),        Some("timeout")),
-            (DbFailure.Permanent(DbError.describe(DbError.DbErrorKind.RetryExhausted("connectionLost x after 3 attempts"))), Some("connectionLost")),
-            (DbFailure.Permanent(DbError.describe(DbError.DbErrorKind.UniqueViolation("entries_pkey"))),                     None),
-            (DbFailure.Permanent(DbError.describe(DbError.DbErrorKind.SchemaMismatch("no column"))),                         None),
-            (DbFailure.Permanent(DbError.describe(DbError.DbErrorKind.Other(""))),                                          None)
+            (Failure.Transient(TransientKind.Deadlock),                                                       Some("deadlock")),
+            (Failure.Transient(TransientKind.Timeout(0)),                                                     Some("timeout")),
+            (Failure.Transient(TransientKind.ConnectionLost("no route")),                                     Some("connectionLost")),
+            (Failure.Permanent(DbErrorKind.RetryExhausted(TransientKind.Timeout(0), 3)),                      Some("timeout")),
+            (Failure.Permanent(DbErrorKind.RetryExhausted(TransientKind.ConnectionLost("x"), 3)),             Some("connectionLost")),
+            (Failure.Permanent(DbErrorKind.Transient(TransientKind.Deadlock)),                                Some("deadlock")),
+            (Failure.Permanent(DbErrorKind.UniqueViolation("entries_pkey")),                                  None),
+            (Failure.Permanent(DbErrorKind.SchemaMismatch("no column")),                                      None),
+            (Failure.Permanent(DbErrorKind.Rollback),                                                         None),
+            (Failure.Permanent(DbErrorKind.Other("")),                                                        None)
         };
         Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (failure, _) -> LogFields.dbErrorKind(failure)))
 

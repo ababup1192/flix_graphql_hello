@@ -3,7 +3,10 @@
 ///
 mod TestDbRunner {
 
+    use DbError.DbErrorKind
     use DbError.DbFailure
+    use DbError.Failure
+    use DbError.TransientKind
 
     ///
     /// 最初の failures 回だけ TransientDbErr.timeout を投げ、その後は Ok を返す thunk を回して、
@@ -25,7 +28,7 @@ mod TestDbRunner {
             (0, (Ok(1), 0)),
             (1, (Ok(2), 1)),
             (2, (Ok(3), 2)),
-            (3, (Err(DbFailure.Permanent("retryExhausted timeout 0 after 3 attempts")), 2))
+            (3, (Err(Failure.Permanent(DbErrorKind.RetryExhausted(TransientKind.Timeout(0), 3))), 2))
         };
         Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (failures, _) -> runFailing(failures)))
 

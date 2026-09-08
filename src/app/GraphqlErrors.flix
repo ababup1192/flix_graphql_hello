@@ -9,7 +9,7 @@
 mod GraphqlErrors {
 
     use CmsErr.CmsFailure
-    use DbError.DbFailure
+    use DbError.Failure
 
     ///
     /// 業務エラーの分類。CmsFailure に case を足すとここが落ちる。
@@ -49,18 +49,27 @@ mod GraphqlErrors {
     ///
     /// INTERNAL の外向きの文。
     ///
-    /// WhyNot: DbFailure の説明を入れないのは、`retryExhausted timeout 0 after 3 attempts` のような内部の再試行の言葉と
+    /// WhyNot: Failure の説明を入れないのは、`retryExhausted timeout 0 after 3 attempts` のような内部の再試行の言葉と
     /// DB の事情が外に出るため。詳細は同じ requestId のログの行（error.kind / error.message）にある。
     ///
     pub def internalMessage(): String = "データベースの処理に失敗しました"
 
     ///
-    /// DB の失敗。クライアントからは直せない。INTERNAL にだけ extensions.requestId を付け、問い合わせとログの行を繋げる。
+    /// DB の失敗。クライアントからは直せない。一時的な失敗も、直らない失敗も INTERNAL。
+    /// INTERNAL にだけ extensions.requestId を付け、問い合わせとログの行を繋げる。
     ///
     /// WhyNot: 他の分類に requestId を付けないのは、NOT_FOUND / INVALID はクライアントが自分で直せる物で、
     /// 応答ヘッダの X-Request-Id で十分なため。INTERNAL は「この id を添えて問い合わせてください」と言う場面。
     ///
-    pub def fromDbFailure(requestId: Option[String], _failure: DbFailure): FieldError =
+    /// WhyNot: Transient を別の分類（UNAVAILABLE など）にしないのは、Runner が再試行を使い切った後は Permanent の
+    /// RetryExhausted で来るので、ここに Transient が来るのは再試行を通らない道（ContentEngine の read）だけのため。
+    ///
+    pub def fromDbFailure(requestId: Option[String], failure: Failure): FieldError = match failure {
+        case Failure.Transient(_)    => internal(requestId)
+        case Failure.Permanent(_)    => internal(requestId)
+    }
+
+    def internal(requestId: Option[String]): FieldError =
         FieldError.make(ErrorCode.Internal, internalMessage(),
             requestId |> Option.map(id -> Map#{ "requestId" => Value.Str(id) }) |> Option.getWithDefault(Map.empty()))
 
