@@ -199,13 +199,11 @@ mod DbRunner {
 
     ///
     /// リクエストの Tx の持ち物を作る。接続はまだ借りない（最初の SQL で `openConnection` が借りる）。
-    /// lastClosedAt はプロセスで 1 つの Ref（SelfHeal が読む）。
     ///
-    pub def openRequestTx(pool: Pool, scope: Option[ProjectId], actor: Actor, lastClosedAt: Ref[Option[Int64], Static]): RequestTx.Handle \ IO =
+    pub def openRequestTx(pool: Pool, scope: Option[ProjectId], actor: Actor): RequestTx.Handle \ IO =
         { openConnection = () -> openConnection(pool, scope, actor),
           state = Ref.fresh(Static, RequestTx.State.Idle),
-          openedAt = Ref.fresh(Static, None),
-          lastClosedAt = lastClosedAt }
+          openedAt = Ref.fresh(Static, None) }
 
     ///
     /// 接続を借りて Tx を開く。borrow → BEGIN → SET TRANSACTION（READ ONLY, REPEATABLE READ。最初の文なので snapshot はここ）→ RLS の印。
@@ -304,7 +302,7 @@ mod DbRunner {
     }
 
     ///
-    /// リクエストの Tx を閉じる。Open は COMMIT、接続を持つ Broken は ROLLBACK、どちらも接続を返す。閉じた時刻を lastClosedAt に置く。
+    /// リクエストの Tx を閉じる。Open は COMMIT、接続を持つ Broken は ROLLBACK、どちらも接続を返す（返った時刻は PoolActivity が記録する）。
     /// COMMIT の失敗は値で返す（読んだ値は有効なので応答は変えない。Tx.commit は失敗時に ROLLBACK 済み）。
     ///
     /// WhyNot: ROLLBACK と close を別の try にしないのは、Tx.rollback が失敗を握り潰して close まで届くため。
@@ -317,7 +315,6 @@ mod DbRunner {
             case _                                     => None
         };
         let now = System.currentTimeMillis();
-        if (RequestTx.transactionsOf(state) > 0i64) Ref.put(Some(now), handle#lastClosedAt) else ();
         { outcome = RequestTx.outcomeOf(state),
           transactions = RequestTx.transactionsOf(state),
           brokenBy = RequestTx.brokenBy(state),
@@ -330,8 +327,8 @@ mod DbRunner {
     ///
     /// WhyNot: 例外の腕で閉じないのは、catch の腕に effect の op を書けないため。例外を値にして閉じてから投げ直す。
     ///
-    pub def withRequestTx(pool: Pool, scope: Option[ProjectId], actor: Actor, observe: Log.Fields -> Unit \ IO, lastClosedAt: Ref[Option[Int64], Static], body: RequestTx.Handle -> a \ IO): a \ {IO, Log} =
-        withRequestTxHandle(openRequestTx(pool, scope, actor, lastClosedAt), observe, body)
+    pub def withRequestTx(pool: Pool, scope: Option[ProjectId], actor: Actor, observe: Log.Fields -> Unit \ IO, body: RequestTx.Handle -> a \ IO): a \ {IO, Log} =
+        withRequestTxHandle(openRequestTx(pool, scope, actor), observe, body)
 
     ///
     /// `withRequestTx` の Handle を受ける形（DB 無しのテストがフェイクの Handle で閉じる道を見る）。

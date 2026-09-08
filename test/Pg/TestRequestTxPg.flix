@@ -14,7 +14,7 @@ mod TestRequestTxPg {
 
     /// scope の印でリクエストの Tx を開いて数え、閉じる。
     def countTypesWith(pool: Pool, scope: Option[ProjectId]): Int32 \ IO =
-        let handle = DbRunner.openRequestTx(pool, scope, Actor.System, Ref.fresh(Static, None));
+        let handle = DbRunner.openRequestTx(pool, scope, Actor.System);
         let count = countTypesOn(handle);
         discard DbRunner.closeRequestTx(handle);
         count
@@ -45,7 +45,7 @@ mod TestRequestTxPg {
     def testPgRequestTxRepeatableRead(): Unit \ {IO, Assert} =
         PgTestSupport.seed(seedTwoTypes);
         let counts = PgTestSupport.withPool(pool -> {
-            let handle = DbRunner.openRequestTx(pool, Some(ProjectId.default()), Actor.System, Ref.fresh(Static, None));
+            let handle = DbRunner.openRequestTx(pool, Some(ProjectId.default()), Actor.System);
             let before = countTypesOn(handle);
             discard PgTestSupport.mutateOrBug(pool, () -> ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("pages", "ページ")));
             let during = countTypesOn(handle);
@@ -62,7 +62,7 @@ mod TestRequestTxPg {
     def testPgRequestTxRejectsWrites(): Unit \ {IO, Assert} =
         PgTestSupport.seed(seedTwoTypes);
         let outcome = PgTestSupport.withPool(pool -> {
-            let handle = DbRunner.openRequestTx(pool, Some(ProjectId.default()), Actor.System, Ref.fresh(Static, None));
+            let handle = DbRunner.openRequestTx(pool, Some(ProjectId.default()), Actor.System);
             let written = RawSql.runWithAllow(() -> DbRunner.transactShared(handle, _ -> (), Actor.System, () -> Sql.execute("UPDATE content_types SET name = name", Nil)));
             let closed = DbRunner.closeRequestTx(handle);
             (match written { case RequestTx.Attempt.Ran(Err(failure)) => String.contains(substr = "read-only", ApplicationFailure.describe(failure)) case _ => false }, closed#outcome)

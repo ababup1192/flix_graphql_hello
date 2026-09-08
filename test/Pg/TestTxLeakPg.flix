@@ -88,7 +88,7 @@ mod TestTxLeakPg {
 
     /// リクエストの Tx の持ち物（既定のプロジェクトの印、System）。
     def requestTx(pool: Pool): RequestTx.Handle \ IO =
-        DbRunner.openRequestTx(pool, Some(ProjectId.default()), Actor.System, Ref.fresh(Static, None))
+        DbRunner.openRequestTx(pool, Some(ProjectId.default()), Actor.System)
 
     /// 共有の接続で 1 フィールドぶん走らせ、走ったか（Ran = true）と失敗の文言を返す。
     def fieldOn(handle: RequestTx.Handle, thunk: Unit -> a \ ef): (Bool, Option[String]) \ (ef - {Db, CmsErr, Session, RawSql}) + IO =
@@ -161,7 +161,7 @@ mod TestTxLeakPg {
         let observed = Ref.fresh(Static, Log.Fields.empty());
         let thrown = fst(Log.runWithList(() ->
             try {
-                "no exception: ${DbRunner.withRequestTx(pool, Some(ProjectId.default()), Actor.System, fields -> Ref.put(LogFields.mergeCounts(fields, Ref.get(observed)), observed), Ref.fresh(Static, None), handle -> {
+                "no exception: ${DbRunner.withRequestTx(pool, Some(ProjectId.default()), Actor.System, fields -> Ref.put(LogFields.mergeCounts(fields, Ref.get(observed)), observed), handle -> {
                     discard fieldOn(handle, () -> Sql.fetch("SELECT 1", Nil) |> List.length);
                     Integer.parseInt("boom")
                 })}"

@@ -267,7 +267,7 @@ mod PgTestSupport {
     pub def executeAs(pool: Pool, scope: Option[ProjectId], engine: Graphql.Engine, actor: Actor, observe: Log.Fields -> Unit \ IO, request: GraphqlRequest): GraphqlResponse \ IO =
         let context = { observe = observe | Context.withActor(actor) };
         if (Server.isReadOnly(request#queryText))
-            fst(Log.runWithList(() -> DbRunner.withRequestTx(pool, scope, actor, observe, Ref.fresh(Static, None), handle ->
+            fst(Log.runWithList(() -> DbRunner.withRequestTx(pool, scope, actor, observe, handle ->
                 Graphql.executeWith(engine, request, Context.withRequestTx(handle, Context.withPreload(context))))))
         else
             Graphql.executeWith(engine, request, context)

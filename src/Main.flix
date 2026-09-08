@@ -179,9 +179,10 @@ def serve(config: EnvConfig, sink: Log.Sink, started: Started): Unit \ {IO, Sys.
     let engineCache = ContentEngine.create(deps);
     // ワーカーの状態と、プールが壊れたまま戻らないかのwatch
     let jobs = BackgroundJobs.createState(config#jobsDrainSeconds, config#purge, deps#http);
-    // リクエストの Tx を最後に閉じた時刻。自己回復が「プールが壊れた」と「満杯」を分けるのに読む
-    let txClosedAt = Ref.fresh(Static, None);
-    let heal = healWatch(config, txClosedAt);
+    // 接続がプールに最後に返った時刻。自己回復が「プールが壊れた」と「満杯」を分けるのに読む
+    let lastReturnedAt = PoolActivity.create();
+    PoolActivity.attach(started#pool, lastReturnedAt);
+    let heal = healWatch(config, lastReturnedAt);
     region rc {
     // 予約公開と Webhook の配信はプロセス内のワーカーで回す。積むのはリクエストの Tx（outbox）、拾って実行するのはここ
     if (config#jobsOn) spawn BackgroundJobs.runForever(started#pool, jobs, sink) @ rc else Log.warn("jobs off (CMS_JOBS=off): POST /jobs/tick か別の worker で回してください", Log.Fields.empty());
@@ -196,7 +197,7 @@ def serve(config: EnvConfig, sink: Log.Sink, started: Started): Unit \ {IO, Sys.
     let runtime = {
         pool = started#pool, deps = deps, jwks = jwks, baseDomain = config#baseDomain, defaultProject = started#defaultProject, defaultProjectSlug = config#defaultProjectSlug,
         accountEngine = started#accountEngine, adminEngines = started#adminEngines, engineCache = engineCache,
-        config = config#server, sink = sink, routes = Server.routes(config#server, health) |> Router.withProjectPrefix, txClosedAt = txClosedAt };
+        config = config#server, sink = sink, routes = Server.routes(config#server, health) |> Router.withProjectPrefix };
     // listen。main スレッドが Throwable で抜けたら died（exit 3）
     Log.Fields.empty()
         |> Log.Fields.str("server.address", bind |> Option.getWithDefault("0.0.0.0"))
@@ -244,8 +245,8 @@ def died(error: Throwable): Unit \ {IO, Sys.Exit, Log} =
 ///
 /// プールが壊れたまま戻らないかを見張る物。CMS_SELF_HEAL=off なら None（見張らない）。
 ///
-def healWatch(config: EnvConfig, txClosedAt: Ref[Option[Int64], Static]): Option[SelfHeal.Watch] \ IO =
-    config#selfHeal |> Option.map(settings -> SelfHeal.createWatch(settings, System.currentTimeMillis(), config#db, txClosedAt))
+def healWatch(config: EnvConfig, lastReturnedAt: PoolActivity.LastReturnedAt): Option[SelfHeal.Watch] \ IO =
+    config#selfHeal |> Option.map(settings -> SelfHeal.createWatch(settings, System.currentTimeMillis(), config#db, lastReturnedAt))
 
 ///
 /// 起動後にリクエストごとに使う物の束。
@@ -253,7 +254,7 @@ def healWatch(config: EnvConfig, txClosedAt: Ref[Option[Int64], Static]): Option
 type alias Runtime = {
     pool = Pool, deps = Deps, jwks = TokenVerifier.JwksCache, baseDomain = Option[String], defaultProject = Option[ProjectId], defaultProjectSlug = Option[String],
     accountEngine = Graphql.Engine, adminEngines = AdminEngine.Cache, engineCache = ContentEngine.Cache,
-    config = ServerConfig, sink = Log.Sink, routes = List[Route[{Graphql, Log, Observe, IO}]], txClosedAt = Ref[Option[Int64], Static] }
+    config = ServerConfig, sink = Log.Sink, routes = List[Route[{Graphql, Log, Observe, IO}]] }
 
 ///
 /// 1 リクエスト（接続のスレッド）の入口。request id を決め、Log を入れ直して span（request.id / cf.ray / method / path）を張り、
@@ -447,7 +448,7 @@ def runObserved(runtime: Runtime, scope: Option[ProjectId], engine: Graphql.Engi
 ///
 def executeDocument(runtime: Runtime, scope: Option[ProjectId], engine: Graphql.Engine, request: GraphqlRequest, context: Context): GraphqlResponse \ {IO, Log} =
     if (Server.isReadOnly(request#queryText))
-        DbRunner.withRequestTx(runtime#pool, scope, context#actor, context#observe, runtime#txClosedAt, handle ->
+        DbRunner.withRequestTx(runtime#pool, scope, context#actor, context#observe, handle ->
             Graphql.executeWith(engine, request, Context.withRequestTx(handle, Context.withPreload(context))))
     else
         Graphql.executeWith(engine, request, context)

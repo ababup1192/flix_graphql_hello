@@ -106,15 +106,13 @@ mod RequestTx {
     /// - openConnection: 最初の SQL で接続を借りて Tx を開く（借りる・BEGIN・READ ONLY・RLS の印まで）。DbRunner が組む
     /// - state: 今の状態
     /// - openedAt: 接続を借りた時刻（UNIX ミリ秒）。db.tx.held_ms 用。借りていなければ None
-    /// - lastClosedAt: プロセスで最後に Tx を閉じた時刻を置く場所（SelfHeal が「満杯」と「壊れた」を分けるのに読む）
     ///
     /// WhyNot: 接続を開く関数を値で持つのは、DB 無しのテストがプールを組まずに Handle を作れるようにするため。
     ///
     pub type alias Handle = {
         openConnection = Unit -> Connection \ {IO, TransientDbErr, DbErr},
         state = Ref[State[Connection], Static],
-        openedAt = Ref[Option[Int64], Static],
-        lastClosedAt = Ref[Option[Int64], Static] }
+        openedAt = Ref[Option[Int64], Static] }
 
     ///
     /// 閉じた結果。

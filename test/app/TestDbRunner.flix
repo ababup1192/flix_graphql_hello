@@ -71,8 +71,7 @@ mod TestDbRunner {
     def idleHandle(): RequestTx.Handle \ IO =
         { openConnection = () -> bug!("接続を借りない"),
           state = Ref.fresh(Static, RequestTx.State.Idle),
-          openedAt = Ref.fresh(Static, None),
-          lastClosedAt = Ref.fresh(Static, None) }
+          openedAt = Ref.fresh(Static, None) }
 
     ///
     /// body が JVM の例外で抜けても閉じる道は通る: observe に db.transactions（0。借りていない）と db.tx.outcome（none）が戻り、
