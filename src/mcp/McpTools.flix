@@ -442,17 +442,21 @@ mod McpTools {
         let base = "path kind before after lines { kind text }";
         if (depth <= 0) base else "${base} children { ${fieldChangeSelection(depth - 1)} }"
 
+    ///
+    /// 管理 API へのリクエスト。文書の操作には `McpGetEntry` のように「Mcp + ツール名の UpperCamel」の名前を付ける（リクエストの行の graphql.operation.name と、
+    /// graphql-java のエラーの path に出る）。
+    ///
     def request(queryText: String, variables: Map[String, Value]): GraphqlRequest =
         { queryText = queryText, variables = variables, operationName = None }
 
     pub def listTypesRequest(): GraphqlRequest =
-        request("{ contentTypes { ${typeSelection()} } }", Map.empty())
+        request("query McpListTypes { contentTypes { ${typeSelection()} } }", Map.empty())
 
     pub def typeRequest(apiId: String): GraphqlRequest =
-        request("query($apiId: String!) { contentType(apiId: $apiId) { ${typeSelection()} } }", Map#{ "apiId" => Value.Str(apiId) })
+        request("query McpGetType($apiId: String!) { contentType(apiId: $apiId) { ${typeSelection()} } }", Map#{ "apiId" => Value.Str(apiId) })
 
     pub def entriesRequest(typeId: String, search: Option[String], first: Int32, skip: Int32): GraphqlRequest =
-        request("query($typeId: ID!, $search: String, $first: Int, $skip: Int) { entries(typeId: $typeId, search: $search, first: $first, skip: $skip) { totalCount nodes { ${entrySummarySelection()} fields } } }",
+        request("query McpSearchEntries($typeId: ID!, $search: String, $first: Int, $skip: Int) { entries(typeId: $typeId, search: $search, first: $first, skip: $skip) { totalCount nodes { ${entrySummarySelection()} fields } } }",
             Map#{ "typeId" => Value.Str(typeId), "search" => search |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null), "first" => Value.Int(first), "skip" => Value.Int(skip) })
 
     /// EntryVersion の中身以外（get_entry の versions に出す物）。
@@ -461,46 +465,46 @@ mod McpTools {
     /// entry（バージョンの一覧込み）と全型の定義。withVersionFields なら各バージョンの中身も（公開中の中身を読む時）。
     pub def entryRequest(id: String, withVersionFields: Bool): GraphqlRequest =
         let versionFields = if (withVersionFields) " fields" else "";
-        request("query($id: ID!) { entry(id: $id) { ${entrySummarySelection()} fields versions { ${versionSummarySelection()}${versionFields} } } contentTypes { id fields { ${fieldDefSelection(2)} } } }", Map#{ "id" => Value.Str(id) })
+        request("query McpGetEntry($id: ID!) { entry(id: $id) { ${entrySummarySelection()} fields versions { ${versionSummarySelection()}${versionFields} } } contentTypes { id fields { ${fieldDefSelection(2)} } } }", Map#{ "id" => Value.Str(id) })
 
     pub def diffRequest(id: String, fromRef: Value, toRef: Value): GraphqlRequest =
-        request("query($id: ID!, $from: VersionRef!, $to: VersionRef!) { entry(id: $id) { id diff(from: $from, to: $to) { ${fieldChangeSelection(3)} } } }",
+        request("query McpDiffEntry($id: ID!, $from: VersionRef!, $to: VersionRef!) { entry(id: $id) { id diff(from: $from, to: $to) { ${fieldChangeSelection(3)} } } }",
             Map#{ "id" => Value.Str(id), "from" => fromRef, "to" => toRef })
 
     pub def createEntryRequest(typeId: String, fields: Value): GraphqlRequest =
-        request("mutation($typeId: ID!, $fields: JSON!) { createEntry(typeId: $typeId, fields: $fields) { ${entrySummarySelection()} } }",
+        request("mutation McpCreateEntry($typeId: ID!, $fields: JSON!) { createEntry(typeId: $typeId, fields: $fields) { ${entrySummarySelection()} } }",
             Map#{ "typeId" => Value.Str(typeId), "fields" => fields })
 
     pub def updateEntryRequest(id: String, fields: Value, expectedVersion: Int32): GraphqlRequest =
-        request("mutation($id: ID!, $fields: JSON!, $expectedVersion: Int!) { updateEntry(id: $id, fields: $fields, expectedVersion: $expectedVersion) { ${entrySummarySelection()} } }",
+        request("mutation McpUpdateEntry($id: ID!, $fields: JSON!, $expectedVersion: Int!) { updateEntry(id: $id, fields: $fields, expectedVersion: $expectedVersion) { ${entrySummarySelection()} } }",
             Map#{ "id" => Value.Str(id), "fields" => fields, "expectedVersion" => Value.Int(expectedVersion) })
 
     pub def publishCheckRequest(id: String): GraphqlRequest =
-        request("query($id: ID!) { publishCheck(id: $id) { ok violations { path message } unpublishedDependencies { ${entrySummarySelection()} } } }", Map#{ "id" => Value.Str(id) })
+        request("query McpPublishCheck($id: ID!) { publishCheck(id: $id) { ok violations { path message } unpublishedDependencies { ${entrySummarySelection()} } } }", Map#{ "id" => Value.Str(id) })
 
     pub def impactRequest(id: String, action: String): GraphqlRequest =
-        request("query($id: ID!, $action: ImpactAction!) { impact(id: $id, action: $action) { breaks { entry { ${entrySummarySelection()} } via stage } cascades { ${entrySummarySelection()} } } }",
+        request("query McpImpact($id: ID!, $action: ImpactAction!) { impact(id: $id, action: $action) { breaks { entry { ${entrySummarySelection()} } via stage } cascades { ${entrySummarySelection()} } } }",
             Map#{ "id" => Value.Str(id), "action" => Value.Str(action) })
 
     pub def publishRequest(id: String, withDependencies: Bool): GraphqlRequest =
-        request("mutation($id: ID!, $withDependencies: Boolean!) { publishEntry(id: $id, withDependencies: $withDependencies) { ${entrySummarySelection()} } }",
+        request("mutation McpPublish($id: ID!, $withDependencies: Boolean!) { publishEntry(id: $id, withDependencies: $withDependencies) { ${entrySummarySelection()} } }",
             Map#{ "id" => Value.Str(id), "withDependencies" => Value.Bool(withDependencies) })
 
     pub def unpublishRequest(id: String): GraphqlRequest =
-        request("mutation($id: ID!) { unpublishEntry(id: $id) { ${entrySummarySelection()} } }", Map#{ "id" => Value.Str(id) })
+        request("mutation McpUnpublish($id: ID!) { unpublishEntry(id: $id) { ${entrySummarySelection()} } }", Map#{ "id" => Value.Str(id) })
 
     pub def deleteEntryRequest(id: String): GraphqlRequest =
-        request("mutation($id: ID!) { deleteEntry(id: $id) }", Map#{ "id" => Value.Str(id) })
+        request("mutation McpDeleteEntry($id: ID!) { deleteEntry(id: $id) }", Map#{ "id" => Value.Str(id) })
 
     pub def restoreVersionRequest(id: String, versionId: String, expectedVersion: Int32): GraphqlRequest =
-        request("mutation($id: ID!, $versionId: ID!, $expectedVersion: Int!) { restoreVersion(id: $id, versionId: $versionId, expectedVersion: $expectedVersion) { ${entrySummarySelection()} } }",
+        request("mutation McpRestoreVersion($id: ID!, $versionId: ID!, $expectedVersion: Int!) { restoreVersion(id: $id, versionId: $versionId, expectedVersion: $expectedVersion) { ${entrySummarySelection()} } }",
             Map#{ "id" => Value.Str(id), "versionId" => Value.Str(versionId), "expectedVersion" => Value.Int(expectedVersion) })
 
     pub def previewUrlRequest(id: String): GraphqlRequest =
-        request("mutation($id: ID!) { createPreviewToken(entryId: $id) { token entryId expiresAt url } }", Map#{ "id" => Value.Str(id) })
+        request("mutation McpPreviewUrl($id: ID!) { createPreviewToken(entryId: $id) { token entryId expiresAt url } }", Map#{ "id" => Value.Str(id) })
 
     pub def whoamiRequest(): GraphqlRequest =
-        request("{ viewer { kind name roles scope permissions } }", Map.empty())
+        request("query McpWhoami { viewer { kind name roles scope permissions } }", Map.empty())
 
     ///
     /// url が無い時の preview_url の案内。

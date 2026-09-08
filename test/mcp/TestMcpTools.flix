@@ -144,6 +144,29 @@ mod TestMcpTools {
                 McpTools.publishRequest("e1", true),
                 McpTools.impactRequest("e1", "UNPUBLISH") } |> List.map(variablesOf))
 
+    /// 全ツールの GraphQL 文書は「Mcp + ツール名の UpperCamel」の操作名を持つ（リクエストの行の graphql.operation.name に乗る）。種類は読む物が query、書く物が mutation。
+    @Test
+    def testOperationNameTable(): Unit \ Assert =
+        let versionRef = obj(List#{ ("stage", Value.Str("DRAFT")) });
+        let cases = List#{
+            (McpTools.listTypesRequest(),                       ("query", Some("McpListTypes"))),
+            (McpTools.typeRequest("blog"),                      ("query", Some("McpGetType"))),
+            (McpTools.entriesRequest("t1", None, 20, 0),        ("query", Some("McpSearchEntries"))),
+            (McpTools.entryRequest("e1", false),                ("query", Some("McpGetEntry"))),
+            (McpTools.diffRequest("e1", versionRef, versionRef), ("query", Some("McpDiffEntry"))),
+            (McpTools.createEntryRequest("t1", obj(Nil)),       ("mutation", Some("McpCreateEntry"))),
+            (McpTools.updateEntryRequest("e1", obj(Nil), 1),    ("mutation", Some("McpUpdateEntry"))),
+            (McpTools.publishCheckRequest("e1"),                ("query", Some("McpPublishCheck"))),
+            (McpTools.impactRequest("e1", "PUBLISH"),           ("query", Some("McpImpact"))),
+            (McpTools.publishRequest("e1", false),              ("mutation", Some("McpPublish"))),
+            (McpTools.unpublishRequest("e1"),                   ("mutation", Some("McpUnpublish"))),
+            (McpTools.deleteEntryRequest("e1"),                 ("mutation", Some("McpDeleteEntry"))),
+            (McpTools.restoreVersionRequest("e1", "v1", 1),     ("mutation", Some("McpRestoreVersion"))),
+            (McpTools.previewUrlRequest("e1"),                  ("mutation", Some("McpPreviewUrl"))),
+            (McpTools.whoamiRequest(),                          ("query", Some("McpWhoami")))
+        };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (request, _) -> Server.operationOf(request#queryText, request#operationName)))
+
     /// get_entry は versions をバージョンの一覧（中身の fields を落とした物）として返す。中身は entry の fields だけ。
     @Test
     def testGetEntryVersionsWithoutFields(): Unit \ Assert =
