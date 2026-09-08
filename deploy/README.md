@@ -97,7 +97,7 @@ RICH_TEXT のフィールドは Markdown の文字列で書け、`get_entry` の
 protocol error は JSON-RPC の -32700 / -32600 / -32601 / -32602 だけ。壊れたログインの JWT と死んだ PAT は HTTP 401（`WWW-Authenticate: Bearer error="invalid_token"`）、
 Origin ヘッダが付いていて `CMS_CORS_ORIGINS` に無ければ 403（無ければ通す。CLI は Origin を付けない）、プレビュートークンは 400。
 `content[0].text` が 256 KB を超えたら本文だけ切って `structuredContent.truncated: true` が付く。
-`tools/call` は 1 行 JSON（`{"mcp":"tools/call","tool":…,"entryId":…,"credential":"api-key","ms":…,"status":"ok"}`）でログに出る。引数は残さない。
+`tools/call` は 1 行 JSON（`{"message":"mcp tools/call","mcp.tool":…,"mcp.outcome":"ok","id":…,"credential.kind":"api-key","duration_ms":…,"request.id":…}`）でログに出る。引数は残さない（キーは [docs/logging.md](../docs/logging.md)）。
 
 ## CDN に乗せる（GET）
 
@@ -112,7 +112,7 @@ Origin ヘッダが付いていて `CMS_CORS_ORIGINS` に無ければ 403（無�
 実行中にプロセスが落ちた仕事は 10 分後に拾い直す（公開は冪等。Webhook は受け手が `X-Cms-Delivery` で重複を捨てる）。終わった記録は 30 日で消す。
 
 `/health` の `jobs` にワーカーの最終実行時刻（`lastTickAt`）と、待ち・失敗の件数（`pendingSchedules` / `failedSchedules` / `pendingDeliveries` / `failedDeliveries`。数えられなければ -1）が出る。
-外形監視で `lastTickAt` が古ければワーカーが止まっている。`failedDeliveries` が増えていれば受け手が落ちている。仕事 1 件ごとに `{"job":"webhook","id":...,"status":"delivered",...}` の 1 行 JSON もログに出る。
+外形監視で `lastTickAt` が古ければワーカーが止まっている。`failedDeliveries` が増えていれば受け手が落ちている。仕事 1 件ごとに `{"message":"job delivered","job.kind":"webhook","job.id":...,"job.outcome":"delivered","detail":"HTTP 200",...}` の 1 行 JSON もログに出る（`job.id` は `X-Cms-Delivery` と同じ）。
 
 SIGTERM / SIGINT を受けると、新しい仕事を拾うのをやめ、実行中の 1 周が終わるまで（最長 `CMS_JOBS_DRAIN_SECONDS`。既定 15 秒）待ってから終わる。compose の `stop_grace_period` はそれより長くする。
 
