@@ -31,7 +31,7 @@ mod AccountRunner {
                 run {
                     let outcome =
                         IdGen.runWithRandom(() -> Time.Clock.runWithIO(() ->
-                            DbRunner.transact(pool, None, () -> match RequestIdentity.resolveForAccount(deps, credential) {
+                            DbRunner.transactObserved(pool, None, context#observe, () -> match RequestIdentity.resolveForAccount(deps, credential) {
                                 case Err(rejection) => { (context#observe)(LogFields.rejectedCredential(Log.Fields.empty())); Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection))) }
                                 case Ok(resolved)   => { (context#observe)(resolved#log); RequestIdentity.touch(resolved); Log.withFields(resolved#log, () -> Session.runWith(resolved#actor, () -> DbRunner.guarded(f))) }
                             })));

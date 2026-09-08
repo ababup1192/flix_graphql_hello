@@ -23,7 +23,7 @@ mod ContentRunner {
             let outcome =
                 Tenant.runWith(projectId, () ->
                     Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () -> IdGen.runWithRandom(() ->
-                        DbRunner.transact(pool, Some(projectId), () -> match RequestIdentity.resolveForProject(deps, projectId, context#credential) {
+                        DbRunner.transactObserved(pool, Some(projectId), context#observe, () -> match RequestIdentity.resolveForProject(deps, projectId, context#credential) {
                             case Err(rejection) => { (context#observe)(LogFields.rejectedCredential(Log.Fields.empty())); Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection))) }
                             case Ok(resolved)   => { (context#observe)(resolved#log); guardVisibility(projectId, resolved#actor); Log.withFields(resolved#log, () -> Session.runWith(resolved#actor, () -> DbRunner.guarded(f))) }
                         }))))));

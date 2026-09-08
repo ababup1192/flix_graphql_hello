@@ -6,6 +6,7 @@ mod TestLogFields {
     use Log.Fields
     use Log.Severity
     use CmsErr.CmsFailure
+    use DbError.DbFailure
 
     /// ヘッダ付きの GET。
     def get(path: String, headers: List[(String, String)]): HttpRequest =
@@ -171,6 +172,21 @@ mod TestLogFields {
             (CmsFailure.RequiresLogin(LoginRequirement.Interactive),         List#{("error.code", Value.Str("REQUIRES_LOGIN"))})
         };
         Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (failure, _) -> Fields.empty() |> LogFields.failure(failure) |> Map.toList))
+
+    /// DB の失敗の種類。TransientDbErr の 3 つだけ名前が付き、再試行で枯渇した物は最後の失敗の種類。制約違反などは None。
+    @Test
+    def testDbErrorKindTable(): Unit \ Assert =
+        let cases = List#{
+            (DbFailure.Transient(DbError.describe(DbError.DbErrorKind.Deadlock)),                     Some("deadlock")),
+            (DbFailure.Transient(DbError.describe(DbError.DbErrorKind.Timeout(0))),                   Some("timeout")),
+            (DbFailure.Transient(DbError.describe(DbError.DbErrorKind.ConnectionLost("no route"))),   Some("connectionLost")),
+            (DbFailure.Permanent(DbError.describe(DbError.DbErrorKind.RetryExhausted("timeout 0 after 3 attempts"))),        Some("timeout")),
+            (DbFailure.Permanent(DbError.describe(DbError.DbErrorKind.RetryExhausted("connectionLost x after 3 attempts"))), Some("connectionLost")),
+            (DbFailure.Permanent(DbError.describe(DbError.DbErrorKind.UniqueViolation("entries_pkey"))),                     None),
+            (DbFailure.Permanent(DbError.describe(DbError.DbErrorKind.SchemaMismatch("no column"))),                         None),
+            (DbFailure.Permanent(DbError.describe(DbError.DbErrorKind.Other(""))),                                          None)
+        };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (failure, _) -> LogFields.dbErrorKind(failure)))
 
     /// span から request.id を読む。無ければ None。
     @Test

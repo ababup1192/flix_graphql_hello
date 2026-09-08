@@ -10,6 +10,7 @@ mod LogFields {
     use Log.Fields
     use Log.Severity
     use CmsErr.CmsFailure
+    use DbError.DbFailure
 
     // ---- リクエスト ----
 
@@ -152,6 +153,30 @@ mod LogFields {
             case CmsFailure.Forbidden(_)               => withCode
             case CmsFailure.RequiresLogin(_)           => withCode
         }
+
+    // ---- DB の失敗 ----
+
+    ///
+    /// DB の失敗の種類。sqlfx の TransientDbErr の名前（`deadlock` / `timeout` / `connectionLost`）だけを返し、
+    /// それ以外（制約違反・schemaMismatch など）は None。再試行で枯渇した物は最後の失敗の種類を返す。
+    /// 「DB が落ちた（connectionLost）」と「DB が遅い（timeout）」をログで読み分けるためのキー。
+    ///
+    /// WhyNot: DbFailure でなく DbErrorKind を受けないのは、Runner が受け取るのは 1 層に落とした後の DbFailure で、
+    /// kind に戻す口が sqlfx に無いため。DbError.describe の形（先頭が種類の名前）に合わせて読む。
+    ///
+    pub def dbErrorKind(failure: DbFailure): Option[String] =
+        let text = match failure {
+            case DbFailure.Transient(detail) => detail
+            case DbFailure.Permanent(detail) => detail
+        };
+        transientName(String.splitOn(substr = " ", text))
+
+    /// 説明の語の並びから種類の名前を取る。`retryExhausted` なら次の語（最後に失敗した種類）。
+    def transientName(words: List[String]): Option[String] = match words {
+        case "retryExhausted" :: rest => transientName(rest)
+        case head :: _                => List#{"deadlock", "timeout", "connectionLost"} |> List.find(name -> name == head)
+        case Nil                      => None
+    }
 
     ///
     /// span から request.id を読む（INTERNAL の extensions.requestId に）。

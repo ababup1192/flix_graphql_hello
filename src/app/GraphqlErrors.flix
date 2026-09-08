@@ -47,13 +47,21 @@ mod GraphqlErrors {
         FieldError.of(ErrorCode.RequiresLogin, message)
 
     ///
+    /// INTERNAL の外向きの文。
+    ///
+    /// WhyNot: DbFailure の説明を入れないのは、`retryExhausted timeout 0 after 3 attempts` のような内部の再試行の言葉と
+    /// DB の事情が外に出るため。詳細は同じ requestId のログの行（error.kind / error.message）にある。
+    ///
+    pub def internalMessage(): String = "データベースの処理に失敗しました"
+
+    ///
     /// DB の失敗。クライアントからは直せない。INTERNAL にだけ extensions.requestId を付け、問い合わせとログの行を繋げる。
     ///
     /// WhyNot: 他の分類に requestId を付けないのは、NOT_FOUND / INVALID はクライアントが自分で直せる物で、
     /// 応答ヘッダの X-Request-Id で十分なため。INTERNAL は「この id を添えて問い合わせてください」と言う場面。
     ///
-    pub def fromDbFailure(requestId: Option[String], failure: DbFailure): FieldError =
-        FieldError.make(ErrorCode.Internal, DbRunner.failureMessage(failure),
+    pub def fromDbFailure(requestId: Option[String], _failure: DbFailure): FieldError =
+        FieldError.make(ErrorCode.Internal, internalMessage(),
             requestId |> Option.map(id -> Map#{ "requestId" => Value.Str(id) }) |> Option.getWithDefault(Map.empty()))
 
     ///
