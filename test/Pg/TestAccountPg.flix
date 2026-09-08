@@ -99,7 +99,7 @@ mod TestAccountPg {
             let org = Session.runWith(Accounts.actorWithoutProject(alice, Login.Interactive), () -> Organizations.create(Signup.Open, "Acme"));
             let blog = Session.runWith(Accounts.actorWithoutProject(alice, Login.Interactive), () -> Organizations.createProject(org#id, ProjectSlug.ProjectSlug("blog"), "Blog"));
             PgTestSupport.asProject(blog#id, () -> Session.runWith(Accounts.actorFor(alice, blog#id, Login.Interactive), () ->
-                (ContentTypes.create(CmsTestKit.typeDraft("posts", "記事"))#apiId, Session.current() == Actor.User(alice#id, "alice@example.com", Role.Owner :: Nil, Login.Interactive))))
+                (ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("posts", "記事"))#apiId, Session.current() == Actor.User(alice#id, "alice@example.com", Role.Owner :: Nil, Login.Interactive))))
         });
         Assert.assertEq(expected = Ok(Ok((ApiId.ApiId("posts"), true))), result)
 

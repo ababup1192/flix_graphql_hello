@@ -56,7 +56,7 @@ mod ContentEngine {
     ///
     def rebuild(pool: Pool, deps: Deps, projectId: ProjectId): Result[String, Graphql.Engine] \ IO =
         // 定義の一覧を 1 つの Tx で読む（主体は System。RLS の印はプロジェクトの物）
-        Tenant.runWith(projectId, () -> DbRunner.transact(pool, Some(projectId), Actor.System, ContentTypes.list))
+        Tenant.runWith(projectId, () -> DbRunner.transact(pool, Some(projectId), Actor.System, () -> ContentTypes.list(Session.grant())))
             |> Result.mapErr(failure -> "content type の定義を読めません: ${ApplicationFailure.describe(failure)}")
             // 定義 → Schema → graphql-java のエンジン
             |> Result.flatMap(types -> Graphql.buildEngine(ContentSchemaBuilder.build(types, ContentRunner.make(pool, deps, projectId))))

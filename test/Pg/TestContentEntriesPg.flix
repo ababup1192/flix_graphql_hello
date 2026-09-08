@@ -10,9 +10,9 @@ mod TestContentEntriesPg {
     /// blogs 型（title / views）を作って id を返す。
     ///
     def blogsWithFields(): TypeId \ Db + CmsErr + IdGen + Tenant + Session =
-        let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-        discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, { maxLength = Some(10) | FieldConfig.empty() }));
-        discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("views", FieldKind.Number, FieldConfig.empty()));
+        let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+        discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, { maxLength = Some(10) | FieldConfig.empty() }));
+        discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("views", FieldKind.Number, FieldConfig.empty()));
         blogs#id
 
     /// 作る・読む・直す・消す。version は保存のたびに進み、JSONB を往復して中身が戻る。
@@ -114,7 +114,7 @@ mod TestContentEntriesPg {
             let blogs = blogsWithFields();
             let invalid = CmsTestKit.failureMessage(() -> ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("0123456789ab"))})));
             discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("ok"))}));
-            let blocked = CmsTestKit.failureMessage(() -> ContentTypes.delete(blogs));
+            let blocked = CmsTestKit.failureMessage(() -> ContentTypes.delete(Session.grant(), blogs));
             (invalid, blocked)
         }));
         Assert.assertEq(expected = Ok(Ok((Err("fields.title: 10 文字以内にしてください"), Err("id: entry が 1 件あります。先に消してください")))), result)

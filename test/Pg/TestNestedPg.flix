@@ -9,17 +9,17 @@ mod TestNestedPg {
     /// pages（title / related: object{label, post→pages} / sections: blocks[hero{headline}, cta{caption, url}]）を作る。
     ///
     def pagesWithNested(): TypeId \ Db + CmsErr + IdGen + Tenant + Session =
-        let pages = ContentTypes.create(CmsTestKit.typeDraft("pages", "ページ"));
-        discard ContentTypes.addField(pages#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-        let related = ContentTypes.addField(pages#id, CmsTestKit.fieldDraft("related", FieldKind.Object, FieldConfig.empty()));
-        discard ContentTypes.addField(pages#id, { parent = Some(related#id) | CmsTestKit.fieldDraft("label", FieldKind.Text, FieldConfig.empty()) });
-        discard ContentTypes.addField(pages#id, { parent = Some(related#id), target = Some(pages#id) | CmsTestKit.fieldDraft("post", FieldKind.Reference, FieldConfig.empty()) });
-        let sections = ContentTypes.addField(pages#id, { many = true | CmsTestKit.fieldDraft("sections", FieldKind.Blocks, FieldConfig.empty()) });
-        let hero = ContentTypes.addField(pages#id, { parent = Some(sections#id) | CmsTestKit.fieldDraft("hero", FieldKind.Object, FieldConfig.empty()) });
-        discard ContentTypes.addField(pages#id, { parent = Some(hero#id) | CmsTestKit.fieldDraft("headline", FieldKind.Text, FieldConfig.empty()) });
-        let cta = ContentTypes.addField(pages#id, { parent = Some(sections#id) | CmsTestKit.fieldDraft("cta", FieldKind.Object, FieldConfig.empty()) });
-        discard ContentTypes.addField(pages#id, { parent = Some(cta#id) | CmsTestKit.fieldDraft("caption", FieldKind.Text, FieldConfig.empty()) });
-        discard ContentTypes.addField(pages#id, { parent = Some(cta#id) | CmsTestKit.fieldDraft("url", FieldKind.Text, FieldConfig.empty()) });
+        let pages = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("pages", "ページ"));
+        discard ContentTypes.addField(Session.grant(), pages#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+        let related = ContentTypes.addField(Session.grant(), pages#id, CmsTestKit.fieldDraft("related", FieldKind.Object, FieldConfig.empty()));
+        discard ContentTypes.addField(Session.grant(), pages#id, { parent = Some(related#id) | CmsTestKit.fieldDraft("label", FieldKind.Text, FieldConfig.empty()) });
+        discard ContentTypes.addField(Session.grant(), pages#id, { parent = Some(related#id), target = Some(pages#id) | CmsTestKit.fieldDraft("post", FieldKind.Reference, FieldConfig.empty()) });
+        let sections = ContentTypes.addField(Session.grant(), pages#id, { many = true | CmsTestKit.fieldDraft("sections", FieldKind.Blocks, FieldConfig.empty()) });
+        let hero = ContentTypes.addField(Session.grant(), pages#id, { parent = Some(sections#id) | CmsTestKit.fieldDraft("hero", FieldKind.Object, FieldConfig.empty()) });
+        discard ContentTypes.addField(Session.grant(), pages#id, { parent = Some(hero#id) | CmsTestKit.fieldDraft("headline", FieldKind.Text, FieldConfig.empty()) });
+        let cta = ContentTypes.addField(Session.grant(), pages#id, { parent = Some(sections#id) | CmsTestKit.fieldDraft("cta", FieldKind.Object, FieldConfig.empty()) });
+        discard ContentTypes.addField(Session.grant(), pages#id, { parent = Some(cta#id) | CmsTestKit.fieldDraft("caption", FieldKind.Text, FieldConfig.empty()) });
+        discard ContentTypes.addField(Session.grant(), pages#id, { parent = Some(cta#id) | CmsTestKit.fieldDraft("url", FieldKind.Text, FieldConfig.empty()) });
         pages#id
 
     /// 子は親の children に入り、blocks の子は object しか置けない。
@@ -29,7 +29,7 @@ mod TestNestedPg {
             let pages = pagesWithNested();
             let loaded = ContentTypes.get(pages);
             let sections = loaded#fields |> List.find(field -> ApiId.text(field#apiId) == "sections");
-            let badChild = CmsTestKit.failureMessage(() -> ContentTypes.addField(pages, { parent = sections |> Option.map(field -> field#id) | CmsTestKit.fieldDraft("loose", FieldKind.Text, FieldConfig.empty()) }));
+            let badChild = CmsTestKit.failureMessage(() -> ContentTypes.addField(Session.grant(), pages, { parent = sections |> Option.map(field -> field#id) | CmsTestKit.fieldDraft("loose", FieldKind.Text, FieldConfig.empty()) }));
             (loaded#fields |> List.map(field -> ApiId.text(field#apiId)),
              sections |> Option.map(field -> Children.toList(field#children) |> List.map(variant -> (ApiId.text(variant#apiId), Children.toList(variant#children) |> List.map(child -> ApiId.text(child#apiId))))),
              badChild)
@@ -47,8 +47,8 @@ mod TestNestedPg {
             let top = ContentTypes.get(pages) |> (owner -> owner#fields);
             let ids = top |> List.map(field -> field#id);
             let childId = FieldTree.flatten(top) |> List.find(field -> ApiId.text(field#apiId) == "headline") |> Option.map(field -> field#id);
-            let reordered = ContentTypes.reorderFields(pages, List.reverse(ids)) |> (owner -> owner#fields |> List.map(field -> ApiId.text(field#apiId)));
-            let mixed = CmsTestKit.failurePaths(CmsErr.runWithResult(() -> ContentTypes.reorderFields(pages, List.reverse(ids) |> List.drop(1) |> (rest -> Option.toList(childId) ::: rest))));
+            let reordered = ContentTypes.reorderFields(Session.grant(), pages, List.reverse(ids)) |> (owner -> owner#fields |> List.map(field -> ApiId.text(field#apiId)));
+            let mixed = CmsTestKit.failurePaths(CmsErr.runWithResult(() -> ContentTypes.reorderFields(Session.grant(), pages, List.reverse(ids) |> List.drop(1) |> (rest -> Option.toList(childId) ::: rest))));
             (reordered, mixed)
         });
         Assert.assertEq(expected = Ok(Ok((List#{"sections", "related", "title"}, List#{"ids"}))), result)

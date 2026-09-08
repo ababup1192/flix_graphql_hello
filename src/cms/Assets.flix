@@ -1,14 +1,14 @@
 ///
 /// asset のユースケース。署名付き URL の発行 → ブラウザが置く → confirm で ready、と、alt の変更・削除・一覧。
 /// 中身はストレージ（ObjectStore）にあり、DB は場所と属性だけ。読み書きは今のプロジェクトに閉じる。
+/// pub の入口は権限の証明（`Granted[ReadDraft]` / `Granted[ManageAssets]`。`Session.grant()` で作る）を最初の引数で受け、自分では判定しない。
 ///
 mod Assets {
 
     ///
     /// 申し込みを検査して pending の行を作り、置き先の署名付き URL を返す。
     ///
-    pub def createUpload(request: UploadRequest): Upload \ Db + CmsErr + IdGen + Tenant + ObjectStore + Session =
-        Session.require(Permission.ManageAssets);
+    pub def createUpload(_proof: Granted[ManageAssets], request: UploadRequest): Upload \ Db + CmsErr + IdGen + Tenant + ObjectStore =
         CmsErr.raiseIfAny(AssetRules.validateUpload(request));
         let id = IdGen.freshAssetId();
         let key = "${Tenant.currentId()}/${AssetId.text(id)}/${AssetRules.safeFileName(request#fileName)}";
@@ -20,8 +20,7 @@ mod Assets {
     /// ブラウザが置いた後。ストレージに実在するかを HEAD で確かめ、その size と渡された寸法・alt で ready にする。
     /// 既に ready なら寸法と alt だけ上書きする（再送しても壊れない）。
     ///
-    pub def confirm(id: AssetId, details: AssetConfirm): Asset \ Db + CmsErr + Tenant + ObjectStore + Session =
-        Session.require(Permission.ManageAssets);
+    pub def confirm(_proof: Granted[ManageAssets], id: AssetId, details: AssetConfirm): Asset \ Db + CmsErr + Tenant + ObjectStore =
         let asset = get(id);
         let size = ObjectStore.head(asset#key) |> orStorageErr;
         match size {
@@ -38,8 +37,7 @@ mod Assets {
     ///
     /// alt を変える。ファイルの差し替えは新しい asset を作る。
     ///
-    pub def updateAlt(id: AssetId, alt: String): Asset \ Db + CmsErr + Tenant + Session =
-        Session.require(Permission.ManageAssets);
+    pub def updateAlt(_proof: Granted[ManageAssets], id: AssetId, alt: String): Asset \ Db + CmsErr + Tenant =
         discard get(id);
         discard AssetsQueries.updateAssetAlt({ id = AssetId.text(id), projectId = Tenant.currentId(), alt = alt });
         get(id)
@@ -48,8 +46,7 @@ mod Assets {
     /// 消す。entry（下書き・公開・richText の image を含む）が使っていれば invalid。
     /// ストレージの削除は DB の後で、失敗しても DB は消えたまま（孤児は掃除で拾う）。
     ///
-    pub def delete(id: AssetId): Unit \ Db + CmsErr + Tenant + ObjectStore + Session =
-        Session.require(Permission.ManageAssets);
+    pub def delete(_proof: Granted[ManageAssets], id: AssetId): Unit \ Db + CmsErr + Tenant + ObjectStore =
         let asset = get(id);
         let holders = AssetsQueries.assetHolders({ projectId = Tenant.currentId(), assetId = AssetId.text(id) }) |> List.map(row -> row#id);
         CmsErr.raiseIfAny(if (List.isEmpty(holders)) Nil else Violation.Violation("id", "entry '${List.join("', '", holders)}' が使っています。先に外してください") :: Nil);
@@ -59,15 +56,13 @@ mod Assets {
     ///
     /// この asset を中身（下書き・公開・本文の image）に持つ entry の id。
     ///
-    pub def holders(id: AssetId): List[EntryId] \ DbRead + Tenant + CmsErr + Session =
-        Session.require(Permission.ReadDraft);
+    pub def holders(_proof: Granted[ReadDraft], id: AssetId): List[EntryId] \ DbRead + Tenant =
         AssetsQueries.assetHolders({ projectId = Tenant.currentId(), assetId = AssetId.text(id) }) |> List.filterMap(row -> EntryId.parse(row#id))
 
     ///
     /// id で 1 つ（管理 API）。無ければ None。他のプロジェクトの物も None。
     ///
-    pub def find(id: AssetId): Option[Asset] \ DbRead + Tenant + CmsErr + Session =
-        Session.require(Permission.ReadDraft);
+    pub def find(_proof: Granted[ReadDraft], id: AssetId): Option[Asset] \ DbRead + Tenant =
         lookup(id)
 
     /// id で 1 つ。権限は見ない（ユースケースの内部で使う）。
@@ -86,8 +81,7 @@ mod Assets {
     ///
     /// 一覧。新しい順。
     ///
-    pub def list(first: Int32, skip: Int32): AssetPage \ DbRead + Tenant + CmsErr + Session =
-        Session.require(Permission.ReadDraft);
+    pub def list(_proof: Granted[ReadDraft], first: Int32, skip: Int32): AssetPage \ DbRead + Tenant =
         {
             assets = AssetsQueries.listAssets({ projectId = Tenant.currentId(), limit = Int32.toInt64(first), offset = Int32.toInt64(skip) }) |> List.map(AssetRows.toAsset),
             totalCount = AssetsQueries.countAssets(Tenant.currentId()) |> Rows.total

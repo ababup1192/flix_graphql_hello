@@ -26,15 +26,15 @@ mod TestRlsPg {
     ///
     def seedAllTables(): ProjectId \ Db + CmsErr + IdGen + Tenant + Session + ObjectStore =
         let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
-        let tags = ContentTypes.create(CmsTestKit.typeDraft("tags", "タグ"));
-        discard ContentTypes.addField(tags#id, CmsTestKit.fieldDraft("label", FieldKind.Text, FieldConfig.empty()));
-        let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-        discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-        discard ContentTypes.addField(blogs#id, { target = Some(tags#id) | CmsTestKit.fieldDraft("tag", FieldKind.Reference, FieldConfig.empty()) });
+        let tags = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("tags", "タグ"));
+        discard ContentTypes.addField(Session.grant(), tags#id, CmsTestKit.fieldDraft("label", FieldKind.Text, FieldConfig.empty()));
+        let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+        discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+        discard ContentTypes.addField(Session.grant(), blogs#id, { target = Some(tags#id) | CmsTestKit.fieldDraft("tag", FieldKind.Reference, FieldConfig.empty()) });
         let tag = ContentEntries.create(tags#id, None, CmsTestKit.entryData(List#{("label", Json.JString("news"))}));
         let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hello")), ("tag", Json.JString(EntryId.text(tag#id)))}));
         discard ContentEntries.saveVersion(entry#id, "tester");
-        discard Assets.createUpload({ fileName = "photo.png", mime = "image/png", size = 5i64 });
+        discard Assets.createUpload(Session.grant(), { fileName = "photo.png", mime = "image/png", size = 5i64 });
         discard Webhooks.create({ name = "site", url = "https://example.com/hook", events = List#{WebhookEvent.EntryPublished}, active = true });
         shop
 

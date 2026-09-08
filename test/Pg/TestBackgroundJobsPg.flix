@@ -16,8 +16,8 @@ mod TestBackgroundJobsPg {
     ///
     def publishEntries(count: Int32): String \ Db + CmsErr + IdGen + Tenant + Session =
         let issued = Webhooks.create(hook());
-        let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-        discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+        let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+        discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
         List.range(1, count + 1) |> List.forEach(number -> {
             let entry = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("e${number}")), CmsTestKit.entryData(List#{("title", Json.JString("e${number}"))}));
             discard ContentEntries.publish(entry#id, "tester", false)

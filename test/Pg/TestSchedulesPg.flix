@@ -11,8 +11,8 @@ mod TestSchedulesPg {
 
     /// blogs（title は required）に e1（title 有り）と e2（title 無し）を置く。
     def seedEntries(): Unit \ Db + CmsErr + IdGen + Tenant + Session =
-        let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-        discard ContentTypes.addField(blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
+        let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+        discard ContentTypes.addField(Session.grant(), blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
         discard ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("ok"))}));
         discard ContentEntries.create(blogs#id, None, CmsTestKit.entryData(Nil))
 
@@ -92,8 +92,8 @@ mod TestSchedulesPg {
                 discard Webhooks.create(hook());
                 PgTestSupport.asProject(shop, () -> {
                     discard Webhooks.create(hook());
-                    let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-                    discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+                    let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+                    discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
                     discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("s1")), CmsTestKit.entryData(List#{("title", Json.JString("shop"))}));
                     discard Schedules.schedule(CmsTestKit.entryId("s1"), ScheduleAction.Publish, past(), false)
                 });
@@ -135,10 +135,10 @@ mod TestSchedulesPg {
     def testPgScheduleWithDependencies(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withPool(pool -> {
             let aloneId = PgTestSupport.seed(() -> {
-                let profiles = ContentTypes.create(CmsTestKit.typeDraft("profiles", "書き手"));
-                discard ContentTypes.addField(profiles#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
-                let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-                discard ContentTypes.addField(blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
+                let profiles = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("profiles", "書き手"));
+                discard ContentTypes.addField(Session.grant(), profiles#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
+                let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+                discard ContentTypes.addField(Session.grant(), blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
                 discard ContentEntries.create(profiles#id, Some(CmsTestKit.entryId("p1")), CmsTestKit.entryData(List#{("name", Json.JString("山田"))}));
                 discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("profile", Json.JString("p1"))}));
                 Schedules.schedule(CmsTestKit.entryId("b1"), ScheduleAction.Publish, past(), false)#id

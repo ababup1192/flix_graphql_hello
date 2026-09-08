@@ -10,8 +10,8 @@ mod TestCdnCachePg {
 
     /// blogs（title）に b1 を公開済みで置く。b2 は下書き。
     def seed(): Unit \ Db + CmsErr + IdGen + Tenant + Session =
-        let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-        discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+        let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+        discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
         discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString("one"))}));
         discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b2")), CmsTestKit.entryData(List#{("title", Json.JString("two"))}));
         discard ContentEntries.publish(CmsTestKit.entryId("b1"), "tester", false)

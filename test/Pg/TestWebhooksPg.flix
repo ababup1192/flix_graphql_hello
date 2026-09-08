@@ -35,8 +35,8 @@ mod TestWebhooksPg {
         let outcome = PgTestSupport.withPool(pool -> {
             let issued = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1", "e1"}, () -> {
                 let issued = Webhooks.create(draft(List#{WebhookEvent.EntryPublished, WebhookEvent.EntryUnpublished, WebhookEvent.SchemaChanged}));
-                let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-                discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+                let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+                discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
                 let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
                 discard ContentEntries.publish(entry#id, "tester", false);
                 discard ContentEntries.unpublish(entry#id);
@@ -125,7 +125,7 @@ mod TestWebhooksPg {
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"w1", "w2", "e1"}, () -> {
             let active = Webhooks.create(draft(List#{WebhookEvent.EntryDeleted}));
             let inactive = Webhooks.create({ active = false | draft(List#{WebhookEvent.EntryDeleted, WebhookEvent.SchemaChanged}) });
-            let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
+            let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
             let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(Nil));
             ContentEntries.delete(entry#id);
             (Webhooks.deliveries(active#webhook#publicId, 20) |> List.map(delivery -> delivery#event),
@@ -143,7 +143,7 @@ mod TestWebhooksPg {
         let outcome = PgTestSupport.withPool(pool -> {
             let issued = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1"}, () -> {
                 let issued = Webhooks.create(draft(List#{WebhookEvent.SchemaChanged}));
-                discard ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
+                discard ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
                 issued
             }));
             let received = Ref.fresh(Static, Nil);
@@ -169,7 +169,7 @@ mod TestWebhooksPg {
         let outcome = PgTestSupport.withPool(pool -> {
             discard PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1"}, () -> {
                 discard Webhooks.create(draft(List#{WebhookEvent.SchemaChanged}));
-                ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"))
+                ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"))
             }));
             DbError.runWithFailure(() -> Jdbc.withConnection(PgTestSupport.appConfig(), conn -> {
                 Tx.begin(conn);
@@ -194,8 +194,8 @@ mod TestWebhooksPg {
         let outcome = PgTestSupport.withPool(pool -> {
             let issued = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1"}, () -> {
                 let issued = Webhooks.create(draft(List#{WebhookEvent.SchemaChanged}));
-                let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-                discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+                let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+                discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
                 issued
             }));
             let received = Ref.fresh(Static, Nil);

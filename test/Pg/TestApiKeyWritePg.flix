@@ -8,8 +8,8 @@ mod TestApiKeyWritePg {
 
     /// blogs 型（title）を作り、shop プロジェクトも作る。戻り値は (blogs の型 id, shop)。
     def seed(): (TypeId, ProjectId) \ Db + CmsErr + IdGen + Tenant + Session =
-        let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-        discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+        let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+        discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
         (blogs#id, Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店"))
 
     /// apiKeys の一覧を name で並べ、(name, scope, role, lastUsedAt が付いたか) にする。
@@ -150,8 +150,8 @@ mod TestApiKeyWritePg {
     @Test
     def testPgContentApiDoesNotTouchApiKey(): Unit \ {IO, Assert} =
         let seedWithKey = () -> CmsTestKit.withIds(List#{"e1", "k1"}, () -> {
-            let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+            let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+            discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
             discard ContentEntries.publish(entry#id, "tester", false);
             PgTestSupport.asOwner(() -> ApiKeys.create(PgTestSupport.pepper(), { name = "site", scope = ApiKeyScope.ReadDraft, expiresAt = None }, 0i64))#key

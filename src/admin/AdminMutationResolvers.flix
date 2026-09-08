@@ -5,31 +5,52 @@ mod AdminMutationResolvers {
 
     /// Mutation.createContentType
     pub def createContentType(): GeneratedAdmin.MutationCreateContentTypeResolver[AdminEff] =
-        (_context, input) -> Ok(ContentTypes.create(AdminMapping.typeDraft(input)))
+        (_context, input) -> Ok(createType(input))
+
+    def createType(input: GeneratedAdmin.ContentTypeInput): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
+        ContentTypes.create(Session.grant(), AdminMapping.typeDraft(input))
 
     /// Mutation.updateContentType
     pub def updateContentType(): GeneratedAdmin.MutationUpdateContentTypeResolver[AdminEff] =
-        (_context, id, patch) -> Ok(ContentTypes.update(AdminMapping.typeId("id", id), AdminMapping.typeChanges(patch)))
+        (_context, id, patch) -> Ok(updateType(id, patch))
+
+    def updateType(id: Id, patch: GeneratedAdmin.ContentTypePatch): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
+        ContentTypes.update(Session.grant(), AdminMapping.typeId("id", id), AdminMapping.typeChanges(patch))
 
     /// Mutation.deleteContentType。消した id を返す
     pub def deleteContentType(): GeneratedAdmin.MutationDeleteContentTypeResolver[AdminEff] =
-        (_context, id) -> { ContentTypes.delete(AdminMapping.typeId("id", id)); Ok(id) }
+        (_context, id) -> { deleteType(id); Ok(id) }
+
+    def deleteType(id: Id): Unit \ Db + CmsErr + IdGen + Tenant + Session =
+        ContentTypes.delete(Session.grant(), AdminMapping.typeId("id", id))
 
     /// Mutation.addField
     pub def addField(): GeneratedAdmin.MutationAddFieldResolver[AdminEff] =
-        (_context, typeId, input) -> Ok(ContentTypes.addField(AdminMapping.typeId("typeId", typeId), AdminMapping.fieldDraft(input)))
+        (_context, typeId, input) -> Ok(addFieldTo(typeId, input))
+
+    def addFieldTo(typeId: Id, input: GeneratedAdmin.FieldInput): FieldDef \ Db + CmsErr + IdGen + Tenant + Session =
+        ContentTypes.addField(Session.grant(), AdminMapping.typeId("typeId", typeId), AdminMapping.fieldDraft(input))
 
     /// Mutation.updateField
     pub def updateField(): GeneratedAdmin.MutationUpdateFieldResolver[AdminEff] =
-        (_context, id, patch) -> Ok(ContentTypes.updateField(AdminMapping.fieldId("id", id), AdminMapping.fieldChanges(patch)))
+        (_context, id, patch) -> Ok(updateFieldOf(id, patch))
+
+    def updateFieldOf(id: Id, patch: GeneratedAdmin.FieldPatch): FieldDef \ Db + CmsErr + IdGen + Tenant + Session =
+        ContentTypes.updateField(Session.grant(), AdminMapping.fieldId("id", id), AdminMapping.fieldChanges(patch))
 
     /// Mutation.removeField。消した id を返す
     pub def removeField(): GeneratedAdmin.MutationRemoveFieldResolver[AdminEff] =
-        (_context, id) -> { ContentTypes.removeField(AdminMapping.fieldId("id", id)); Ok(id) }
+        (_context, id) -> { removeFieldOf(id); Ok(id) }
+
+    def removeFieldOf(id: Id): Unit \ Db + CmsErr + IdGen + Tenant + Session =
+        ContentTypes.removeField(Session.grant(), AdminMapping.fieldId("id", id))
 
     /// Mutation.reorderFields
     pub def reorderFields(): GeneratedAdmin.MutationReorderFieldsResolver[AdminEff] =
-        (_context, typeId, ids) -> Ok(ContentTypes.reorderFields(AdminMapping.typeId("typeId", typeId), ids |> List.map(AdminMapping.fieldId("ids"))))
+        (_context, typeId, ids) -> Ok(reorderFieldsOf(typeId, ids))
+
+    def reorderFieldsOf(typeId: Id, ids: List[Id]): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
+        ContentTypes.reorderFields(Session.grant(), AdminMapping.typeId("typeId", typeId), ids |> List.map(AdminMapping.fieldId("ids")))
 
     /// Mutation.createEntry
     pub def createEntry(): GeneratedAdmin.MutationCreateEntryResolver[AdminEff] =
@@ -64,23 +85,38 @@ mod AdminMutationResolvers {
 
     /// Mutation.createUploadUrl
     pub def createUploadUrl(): GeneratedAdmin.MutationCreateUploadUrlResolver[AdminEff] =
-        (_context, input) -> Ok(Assets.createUpload(AdminMapping.uploadRequest(input)))
+        (_context, input) -> Ok(createUpload(input))
+
+    def createUpload(input: GeneratedAdmin.UploadInput): Upload \ Db + CmsErr + IdGen + Tenant + ObjectStore + Session =
+        Assets.createUpload(Session.grant(), AdminMapping.uploadRequest(input))
 
     /// Mutation.confirmAsset。input を省けば寸法も alt も無し
     pub def confirmAsset(): GeneratedAdmin.MutationConfirmAssetResolver[AdminEff] =
-        (_context, id, input) -> Ok(Assets.confirm(AdminMapping.assetId("id", id), AdminMapping.assetConfirm(input)))
+        (_context, id, input) -> Ok(confirmUpload(id, input))
+
+    def confirmUpload(id: Id, input: Option[GeneratedAdmin.AssetConfirmInput]): Asset \ Db + CmsErr + Tenant + ObjectStore + Session =
+        Assets.confirm(Session.grant(), AdminMapping.assetId("id", id), AdminMapping.assetConfirm(input))
 
     /// Mutation.updateAsset
     pub def updateAsset(): GeneratedAdmin.MutationUpdateAssetResolver[AdminEff] =
-        (_context, id, patch) -> Ok(Assets.updateAlt(AdminMapping.assetId("id", id), patch#alt))
+        (_context, id, patch) -> Ok(updateAssetAlt(id, patch#alt))
+
+    def updateAssetAlt(id: Id, alt: String): Asset \ Db + CmsErr + Tenant + Session =
+        Assets.updateAlt(Session.grant(), AdminMapping.assetId("id", id), alt)
 
     /// Mutation.deleteAsset。消した id を返す
     pub def deleteAsset(): GeneratedAdmin.MutationDeleteAssetResolver[AdminEff] =
-        (_context, id) -> { Assets.delete(AdminMapping.assetId("id", id)); Ok(id) }
+        (_context, id) -> { deleteAssetOf(id); Ok(id) }
+
+    def deleteAssetOf(id: Id): Unit \ Db + CmsErr + Tenant + ObjectStore + Session =
+        Assets.delete(Session.grant(), AdminMapping.assetId("id", id))
 
     /// Mutation.updateProjectVisibility
     pub def updateProjectVisibility(): GeneratedAdmin.MutationUpdateProjectVisibilityResolver[AdminEff] =
-        (_context, visibility) -> Ok(Projects.updateVisibility(AdminMapping.visibilityOf(visibility)))
+        (_context, visibility) -> Ok(updateVisibility(visibility))
+
+    def updateVisibility(visibility: GeneratedAdmin.Visibility): Project \ Db + CmsErr + Tenant + Session =
+        Projects.updateVisibility(Session.grant(), AdminMapping.visibilityOf(visibility))
 
     /// Mutation.inviteMember
     pub def inviteMember(): GeneratedAdmin.MutationInviteMemberResolver[AdminEff] =

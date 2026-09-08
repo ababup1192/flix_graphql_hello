@@ -20,7 +20,7 @@ mod MicrocmsImport {
     ///
     pub def importSchema(apis: List[Api]): Types \ Db + CmsErr + IdGen + Tenant + Session =
         CmsErr.raiseIfAny(apis |> List.flatMap(MicrocmsSchema.unsupported) |> List.map(problem -> Violation.Violation("schema", "写せないフィールド ${problem}")));
-        let types = apis |> List.map(api -> (api#endpoint, ContentTypes.create(typeDraft(api))#id)) |> List.toMap;
+        let types = apis |> List.map(api -> (api#endpoint, ContentTypes.create(Session.grant(), typeDraft(api))#id)) |> List.toMap;
         List.forEach(api -> addFields(types, api), apis);
         types
 
@@ -38,15 +38,15 @@ mod MicrocmsImport {
         let typeId = Map.get(api#endpoint, types) |> Option.getWithDefault(TypeId.TypeId(0i64));
         List.forEach(field -> match field#kind {
             case Kind.Repeater(variants) =>
-                let blocks = ContentTypes.addField(typeId, draftOf(field, FieldKind.Blocks, true, None, None));
+                let blocks = ContentTypes.addField(Session.grant(), typeId, draftOf(field, FieldKind.Blocks, true, None, None));
                 List.forEach(variantId -> match List.find(custom -> custom#fieldId == variantId, api#customFields) {
                     case None => ()
                     case Some(custom) =>
-                        let variant = ContentTypes.addField(typeId, { apiId = apiIdOf(custom#fieldId), name = custom#name, kind = FieldKind.Object, many = false, required = false, unique = false, localized = false, target = None, parent = Some(blocks#id), config = FieldConfig.empty() });
+                        let variant = ContentTypes.addField(Session.grant(), typeId, { apiId = apiIdOf(custom#fieldId), name = custom#name, kind = FieldKind.Object, many = false, required = false, unique = false, localized = false, target = None, parent = Some(blocks#id), config = FieldConfig.empty() });
                         // microCMS は custom field と同名の子（serviceValuePoint の中の serviceValuePoint）を許すが、この CMS の apiId は型の中で一意なので、子に Value を付けて逃がす
-                        List.forEach(child -> discard ContentTypes.addField(typeId, leafDraft(types, childRenamed(custom#fieldId, child), Some(variant#id))), custom#fields)
+                        List.forEach(child -> discard ContentTypes.addField(Session.grant(), typeId, leafDraft(types, childRenamed(custom#fieldId, child), Some(variant#id))), custom#fields)
                 }, variants)
-            case _ => discard ContentTypes.addField(typeId, leafDraft(types, field, None))
+            case _ => discard ContentTypes.addField(Session.grant(), typeId, leafDraft(types, field, None))
         }, api#fields)
 
     /// variant と同名の子は `<名前>Value` に改名する。値を作る時も同じ名前にする。
@@ -144,12 +144,12 @@ mod MicrocmsImport {
     /// ダミーの画像を 1 つ置いて READY にする。中身は PNG ではなく短い文字列（器の確認なので描画はしない）。
     def placeDummyImage(): AssetId \ Db + CmsErr + IdGen + Tenant + Session + ObjectStore + Net.Http.Http =
         let body = "dummy";
-        let upload = Assets.createUpload({ fileName = "dummy.png", mime = "image/png", size = Int32.toInt64(String.length(body)) });
+        let upload = Assets.createUpload(Session.grant(), { fileName = "dummy.png", mime = "image/png", size = Int32.toInt64(String.length(body)) });
         match Net.Http.send(HttpRequest.put(upload#uploadUrl, body) |> HttpRequest.withContentType("image/png")) {
             case Ok(response) if HttpResponse.isSuccess(response) => ()
             case Ok(response) => CmsErr.invalid(Violation.Violation("asset", "ダミー画像を置けません（HTTP ${HttpResponse.status(response)}）") :: Nil)
             case Err(error)   => CmsErr.invalid(Violation.Violation("asset", "ダミー画像を置けません: ${error}") :: Nil)
         };
-        Assets.confirm(upload#asset#id, { width = Some(1), height = Some(1), alt = Some("ダミー画像") })#id
+        Assets.confirm(Session.grant(), upload#asset#id, { width = Some(1), height = Some(1), alt = Some("ダミー画像") })#id
 
 }

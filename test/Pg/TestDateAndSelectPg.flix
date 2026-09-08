@@ -13,10 +13,10 @@ mod TestDateAndSelectPg {
     ///   e3  2026-09-20T18:00:00+09:00                  topics: TECH
     ///
     def seed(): Unit \ Db + CmsErr + IdGen + Tenant + Session =
-        let events = ContentTypes.create(CmsTestKit.typeDraft("events", "イベント"));
-        discard ContentTypes.addField(events#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-        discard ContentTypes.addField(events#id, CmsTestKit.fieldDraft("heldOn", FieldKind.Date, FieldConfig.empty()));
-        discard ContentTypes.addField(events#id, { many = true | CmsTestKit.fieldDraft("topics", FieldKind.Select, { options = List#{"NEWS", "TECH"} | FieldConfig.empty() }) });
+        let events = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("events", "イベント"));
+        discard ContentTypes.addField(Session.grant(), events#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+        discard ContentTypes.addField(Session.grant(), events#id, CmsTestKit.fieldDraft("heldOn", FieldKind.Date, FieldConfig.empty()));
+        discard ContentTypes.addField(Session.grant(), events#id, { many = true | CmsTestKit.fieldDraft("topics", FieldKind.Select, { options = List#{"NEWS", "TECH"} | FieldConfig.empty() }) });
         let topics = names -> Json.JArray(names |> List.map(Json.JString) |> List.toVector);
         discard ContentEntries.create(events#id, Some(CmsTestKit.entryId("e1")), CmsTestKit.entryData(List#{("title", Json.JString("e1")), ("heldOn", Json.JString("2026-09-01")), ("topics", topics(List#{"NEWS"}))}));
         discard ContentEntries.create(events#id, Some(CmsTestKit.entryId("e2")), CmsTestKit.entryData(List#{("title", Json.JString("e2")), ("heldOn", Json.JString("2026-09-10T09:00:00Z")), ("topics", topics(List#{"NEWS", "TECH"}))}));
@@ -70,9 +70,9 @@ mod TestDateAndSelectPg {
     @Test
     def testPgDateAndSelectValidation(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withDb(() -> {
-            let events = ContentTypes.create(CmsTestKit.typeDraft("events", "イベント"));
-            discard ContentTypes.addField(events#id, CmsTestKit.fieldDraft("heldOn", FieldKind.Date, FieldConfig.empty()));
-            discard ContentTypes.addField(events#id, { many = true | CmsTestKit.fieldDraft("topics", FieldKind.Select, { options = List#{"NEWS"} | FieldConfig.empty() }) });
+            let events = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("events", "イベント"));
+            discard ContentTypes.addField(Session.grant(), events#id, CmsTestKit.fieldDraft("heldOn", FieldKind.Date, FieldConfig.empty()));
+            discard ContentTypes.addField(Session.grant(), events#id, { many = true | CmsTestKit.fieldDraft("topics", FieldKind.Select, { options = List#{"NEWS"} | FieldConfig.empty() }) });
             let badDate = CmsTestKit.failurePaths(CmsErr.runWithResult(() -> ContentEntries.create(events#id, None, CmsTestKit.entryData(List#{("heldOn", Json.JString("someday"))}))));
             let badTopic = CmsTestKit.failurePaths(CmsErr.runWithResult(() -> ContentEntries.create(events#id, None, CmsTestKit.entryData(List#{("topics", Json.JArray(Vector#{Json.JString("SPORTS")}))}))));
             let saved = ContentEntries.create(events#id, None, CmsTestKit.entryData(List#{("heldOn", Json.JString("2026-09-08"))}));

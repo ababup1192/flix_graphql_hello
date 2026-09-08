@@ -27,9 +27,9 @@ mod TestMicrocmsPg {
             (Map.size(types), created |> Map.valuesOf |> List.map(List.length) |> List.sum)
         };
         let (blog, services, blocks, summary) = PgTestSupport.withContentApiAndPool(seed, (pool, ask) -> {
-            let summary = PgTestSupport.mutateOrBug(pool, () -> List.length(ContentTypes.list()));
+            let summary = PgTestSupport.mutateOrBug(pool, () -> List.length(ContentTypes.list(Session.grant())));
             let blocks = PgTestSupport.mutateOrBug(pool, () ->
-                ContentTypes.findByApiId(CmsTestKit.apiId("insidesaleServices"))
+                ContentTypes.findByApiId(Session.grant(), CmsTestKit.apiId("insidesaleServices"))
                     |> Option.flatMap(owner -> ContentEntries.list(owner#id, { search = "", first = 1, skip = 0 })#entries |> List.head)
                     |> Option.flatMap(entry -> Map.get(CmsTestKit.apiId("implementationCases"), entry#data))
                     |> Option.map(Util.Json.toCompactString));

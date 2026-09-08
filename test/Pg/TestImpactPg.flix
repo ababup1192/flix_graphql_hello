@@ -22,12 +22,12 @@ mod TestImpactPg {
     ///   b3 { title: "three" }
     ///
     def seedGraph(): (EntryId, EntryId, EntryId, EntryId) \ Db + CmsErr + Tenant + IdGen + Session =
-        let profiles = ContentTypes.create(CmsTestKit.typeDraft("profiles", "書き手"));
-        discard ContentTypes.addField(profiles#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
-        let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-        discard ContentTypes.addField(blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
-        discard ContentTypes.addField(blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
-        discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("body", FieldKind.RichText, FieldConfig.empty()));
+        let profiles = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("profiles", "書き手"));
+        discard ContentTypes.addField(Session.grant(), profiles#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
+        let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+        discard ContentTypes.addField(Session.grant(), blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
+        discard ContentTypes.addField(Session.grant(), blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
+        discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("body", FieldKind.RichText, FieldConfig.empty()));
         let p1 = ContentEntries.create(profiles#id, Some(CmsTestKit.entryId("p1")), CmsTestKit.entryData(List#{("name", Json.JString("山田"))}));
         let b3 = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b3")), CmsTestKit.entryData(List#{("title", Json.JString("three"))}));
         let b2 = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b2")), CmsTestKit.entryData(List#{("title", Json.JString("two")), ("body", docLinkingTo("b3"))}));
@@ -86,7 +86,7 @@ mod TestImpactPg {
         let result = PgTestSupport.withDb(() -> {
             let (p1, b1, b2, b3) = seedGraph();
             let blogs = ContentEntries.get(b1)#typeId;
-            discard ContentTypes.addField(blogs, { unique = true | CmsTestKit.fieldDraft("slug", FieldKind.Text, FieldConfig.empty()) });
+            discard ContentTypes.addField(Session.grant(), blogs, { unique = true | CmsTestKit.fieldDraft("slug", FieldKind.Text, FieldConfig.empty()) });
             discard ContentEntries.update(b3, CmsTestKit.entryData(List#{("body", docLinkingTo("b2")), ("slug", Json.JString("same"))}), 1);
             discard ContentEntries.publish(b3, "tester", true);
             discard ContentEntries.update(b1, CmsTestKit.entryData(List#{("slug", Json.JString("same"))}), 1);

@@ -55,7 +55,7 @@ mod TestContentTypes {
     /// list は 2 本の SELECT で、型ごとにフィールドを付けて返す。
     @Test
     def testContentTypesList(): Unit \ {Assert, IO} =
-        let (result, sqls) = record(() -> ContentTypes.list());
+        let (result, sqls) = record(() -> ContentTypes.list(Session.grant()));
         Assert.assertEq(expected = (Ok(List#{("blogs", List#{"title", "body"}), ("tags", Nil)}), List#{"SELECT", "SELECT"}),
             (result |> Result.map(List.map(contentType -> (ApiId.text(contentType#apiId), contentType#fields |> List.map(field -> ApiId.text(field#apiId))))), sqls))
 
@@ -71,14 +71,14 @@ mod TestContentTypes {
     /// 既にある apiId は invalid で、INSERT は発行されない。
     @Test
     def testContentTypesCreateDuplicateWritesNothing(): Unit \ {Assert, IO} =
-        let (result, sqls) = record(() -> ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事")));
+        let (result, sqls) = record(() -> ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事")));
         Assert.assertEq(expected = (List#{"apiId"}, false), (CmsTestKit.failurePaths(result), List.memberOf("INSERT", sqls)))
 
     /// 通れば INSERT が発行され、singular / plural は apiId から導かれる。
     @Test
     def testContentTypesCreateDerivesNames(): Unit \ {Assert, IO} =
         let (_, statements) = DbTest.runRecordingWith(rowsFor, 1, () -> DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Tenant.runWith(ProjectId.default(), () -> CmsTestKit.asSystem(() ->
-            ContentTypes.create(CmsTestKit.typeDraft("profiles", "記事")))))));
+            ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("profiles", "記事")))))));
         let insert = statements |> List.find(statement -> String.startsWith(prefix = "INSERT", statement#sql));
         Assert.assertEq(expected = Some(List#{SqlValue.Int64(1i64), SqlValue.Str("profiles"), SqlValue.Str("collection"), SqlValue.Str("記事"), SqlValue.Str("Profile"), SqlValue.Str("profiles"), SqlValue.Str("")}),
             insert |> Option.map(statement -> statement#params))
@@ -88,7 +88,7 @@ mod TestContentTypes {
     /// 同じ型に既にある apiId は invalid。
     @Test
     def testContentTypesAddFieldDuplicate(): Unit \ {Assert, IO} =
-        let (result, _) = record(() -> ContentTypes.addField(TypeId.TypeId(1i64), CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty())));
+        let (result, _) = record(() -> ContentTypes.addField(Session.grant(), TypeId.TypeId(1i64), CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty())));
         Assert.assertEq(expected = List#{"apiId"}, CmsTestKit.failurePaths(result))
 
     /// 通れば末尾の位置（既存の max + 1）で INSERT され、型の updated_at を触る。
@@ -96,7 +96,7 @@ mod TestContentTypes {
     def testContentTypesAddFieldAppends(): Unit \ {Assert, IO} =
         let slugConfig = { sourceField = Some(CmsTestKit.apiId("title")) | FieldConfig.empty() };
         let (_, statements) = DbTest.runRecordingWith(rowsFor, 1, () -> DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Tenant.runWith(ProjectId.default(), () -> CmsTestKit.asSystem(() ->
-            ContentTypes.addField(TypeId.TypeId(1i64), CmsTestKit.fieldDraft("slug", FieldKind.Slug, slugConfig)))))));
+            ContentTypes.addField(Session.grant(), TypeId.TypeId(1i64), CmsTestKit.fieldDraft("slug", FieldKind.Slug, slugConfig)))))));
         let insert = statements |> List.find(statement -> String.startsWith(prefix = "INSERT", statement#sql));
         Assert.assertEq(expected = (Some(SqlValue.Int32(2)), true),
             (insert |> Option.flatMap(statement -> List.last(statement#params)),
@@ -106,13 +106,13 @@ mod TestContentTypes {
     @Test
     def testContentTypesAddFieldToMissingType(): Unit \ {Assert, IO} =
         let (result, _) = DbTest.runRecordingWith(_ -> Some(Nil), 0, () -> DbError.runWithFailure(() -> CmsErr.runWithResult(() -> Tenant.runWith(ProjectId.default(), () -> CmsTestKit.asSystem(() ->
-            ContentTypes.addField(TypeId.TypeId(7i64), CmsTestKit.fieldDraft("x", FieldKind.Text, FieldConfig.empty())))))));
+            ContentTypes.addField(Session.grant(), TypeId.TypeId(7i64), CmsTestKit.fieldDraft("x", FieldKind.Text, FieldConfig.empty())))))));
         Assert.assertEq(expected = Ok(Err(CmsFailure.NotFound(Entity.ContentType, "7"))), result |> Result.map(Result.map(_ -> ())))
 
     /// reorderFields は全 id を過不足なく渡さないと invalid。
     @Test
     def testContentTypesReorderNeedsAllIds(): Unit \ {Assert, IO} =
-        let (result, _) = record(() -> ContentTypes.reorderFields(TypeId.TypeId(1i64), List#{FieldId.FieldId(10i64)}));
+        let (result, _) = record(() -> ContentTypes.reorderFields(Session.grant(), TypeId.TypeId(1i64), List#{FieldId.FieldId(10i64)}));
         Assert.assertEq(expected = List#{"ids"}, CmsTestKit.failurePaths(result))
 
 }

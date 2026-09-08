@@ -23,9 +23,9 @@ mod TestContentVersionPg {
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
             let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
             let initial = Projects.contentVersion();
-            let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
+            let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
             let afterType = Projects.contentVersion();
-            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+            discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             let afterField = Projects.contentVersion();
             let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
             let afterCreate = Projects.contentVersion();
