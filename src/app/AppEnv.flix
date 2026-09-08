@@ -1,6 +1,6 @@
 ///
 /// リクエストとバックグラウンドの仕事に共通の環境の handler。id の採番、今のプロジェクト、asset の置き先、HTTP、時計、ログを
-/// 1 か所で入れ、Runner / CLI はここを呼ぶだけにする。Tx（DbRunner）と主体（Session）はこの中で張る。
+/// 1 か所で入れ、Runner / CLI はここを呼ぶだけにする。HTTP は deps の HttpClient（プロセスで 1 つ）で捌く（OutboundHttp）。Tx（DbRunner）と主体（Session）はこの中で張る。
 ///
 /// WhyNot: Session をここで入れないのは、主体が Tx の中（身元の解決）で決まるため。プロジェクトと依存は Tx の前に決まっている。
 ///
@@ -17,7 +17,7 @@ mod AppEnv {
           with IdGen.runWithRandom
           with Tenant.runWith(projectId)
           with ObjectStore.runWith(deps#storage)
-          with Net.Http.runWithIO
+          with OutboundHttp.runWith(deps#http)
           with Time.Clock.runWithIO
           with Log.withFields(span)
           with Log.runWith(deps#log)
@@ -29,7 +29,7 @@ mod AppEnv {
         run f()
           with IdGen.runWithRandom
           with ObjectStore.runWith(deps#storage)
-          with Net.Http.runWithIO
+          with OutboundHttp.runWith(deps#http)
           with Time.Clock.runWithIO
           with Log.withFields(span)
           with Log.runWith(deps#log)

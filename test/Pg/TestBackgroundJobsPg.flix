@@ -62,7 +62,7 @@ mod TestBackgroundJobsPg {
             touch("UPDATE webhook_deliveries SET status = 'delivered', created_at = now() - interval '40 days' WHERE id = $1", d1);
             touch("UPDATE webhook_deliveries SET created_at = now() - interval '40 days', next_attempt_at = now() + interval '1 day' WHERE id = $1", d2);
             touch("UPDATE webhook_deliveries SET status = 'failed', created_at = now() - interval '10 days' WHERE id = $1", d3);
-            let jobs = BackgroundJobs.createState(15i64, None);
+            let jobs = BackgroundJobs.createState(15i64, None, OutboundHttp.newClient());
             let failures = ServerTestKit.quietly(() -> BackgroundJobs.tick(pool, jobs));
             let summary = BackgroundJobs.summary(pool, jobs);
             (failures,
@@ -86,7 +86,7 @@ mod TestBackgroundJobsPg {
             let (d1, d2) = match deliveryIds(pool, webhookId) { case a :: b :: Nil => (a, b) case other => bug!("配信が 2 件ではありません: ${other}") };
             touch("UPDATE webhook_deliveries SET status = 'sending', attempts = 1, claimed_at = now() - interval '1 hour' WHERE id = $1", d1);
             touch("UPDATE webhook_deliveries SET status = 'sending', attempts = 1, claimed_at = now() - interval '1 minute' WHERE id = $1", d2);
-            let failures = ServerTestKit.quietly(() -> BackgroundJobs.tick(pool, BackgroundJobs.createState(15i64, None)));
+            let failures = ServerTestKit.quietly(() -> BackgroundJobs.tick(pool, BackgroundJobs.createState(15i64, None, OutboundHttp.newClient())));
             (failures, deliveryStates(pool, webhookId) == List#{(d1, DeliveryStatus.Pending, 2), (d2, DeliveryStatus.Sending, 1)})
         });
         Assert.assertEq(expected = (Nil, true), outcome)

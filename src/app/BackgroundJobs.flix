@@ -9,6 +9,7 @@ mod BackgroundJobs {
     import java.lang.System
     import java.lang.Thread
     import java.lang.Throwable
+    import java.net.http.HttpClient
 
     /// tick の間隔（ミリ秒）。
     pub def intervalMs(): Int64 = 2000i64
@@ -32,14 +33,15 @@ mod BackgroundJobs {
     /// - inTick: 1 tickの途中
     /// - drainMs: 停止時に実行中の 1 tickを待つ上限（ミリ秒。CMS_JOBS_DRAIN_SECONDS）
     /// - purge: CDN の purge の送り先（CMS_CDN_PURGE_URL / CMS_CDN_PURGE_TOKEN）。None なら purge は積まない・送らない
+    /// - http: Webhook の POST と CDN の purge に使う HttpClient（プロセスで 1 つ。OutboundHttp）
     ///
     /// WhyNot: lastWatch を /health からの step で更新しないのは、この値が指すのは「watchのスレッドが生きているか」で、
     /// リクエストのスレッドが進めた事を混ぜると、死んだスレッドを生きていると読ませてしまうため。
     ///
-    pub type alias State = { lastTick = Ref[Option[Int64], Static], lastWatch = Ref[Option[Int64], Static], stopping = Ref[Bool, Static], inTick = Ref[Bool, Static], drainMs = Int64, purge = Option[PurgeTarget] }
+    pub type alias State = { lastTick = Ref[Option[Int64], Static], lastWatch = Ref[Option[Int64], Static], stopping = Ref[Bool, Static], inTick = Ref[Bool, Static], drainMs = Int64, purge = Option[PurgeTarget], http = HttpClient }
 
-    pub def createState(drainSeconds: Int64, purge: Option[PurgeTarget]): State \ IO =
-        { lastTick = Ref.fresh(Static, None), lastWatch = Ref.fresh(Static, None), stopping = Ref.fresh(Static, false), inTick = Ref.fresh(Static, false), drainMs = drainSeconds * 1000i64, purge = purge }
+    pub def createState(drainSeconds: Int64, purge: Option[PurgeTarget], http: HttpClient): State \ IO =
+        { lastTick = Ref.fresh(Static, None), lastWatch = Ref.fresh(Static, None), stopping = Ref.fresh(Static, false), inTick = Ref.fresh(Static, false), drainMs = drainSeconds * 1000i64, purge = purge, http = http }
 
     ///
     /// 止まらずに回す。失敗はログに出して次のtickへ。停止が始まったら抜ける。tickごとに Log を sink で入れ直す（spawn の中なので Main の handler は届かない）。
@@ -75,7 +77,7 @@ mod BackgroundJobs {
 
     ///
     /// watchの 1 tickを JVM の例外から守る。Throwable が飛んだら Error の行にして次のtickへ進める。
-    /// JVM 自体が壊れている物（OutOfMemoryError）はログした上で再送出する。
+    /// JVM 自体が壊れている物（OutOfMemoryError）は `watch fatal` を出して終了コード 3 で終わる（Shutdown.crash）。
     ///
     /// WhyNot: watchに網を掛けないままにしないのは、ping や Pool.stats が投げるとwatchのスレッドだけが黙って死に、
     /// /health が `watch stalled` を返すまで 30 秒は誰にも分からないため。
@@ -84,7 +86,7 @@ mod BackgroundJobs {
         match attempt(() -> Log.runWith(sink, thunk)) {
             case Ok(())           => ()
             case Err(Ok(message)) => Log.runWith(sink, () -> Log.Fields.empty() |> Log.Fields.str("error.message", message) |> Log.error("watch failed"))
-            case Err(Err(fatal))  => { Log.runWith(sink, () -> Log.Fields.empty() |> Log.exception(fatal) |> Log.fatal("watch fatal")); throw fatal }
+            case Err(Err(fatal))  => Shutdown.crash(sink, "watch fatal", fatal)
         }
 
     ///
@@ -144,13 +146,13 @@ mod BackgroundJobs {
 
     ///
     /// 1 tickを JVM の例外から守る。Throwable が飛んだら失敗の説明にして返し、次のtickへ進める。
-    /// JVM 自体が壊れている物（OutOfMemoryError）はログした上で再送出する。Log は sink で try の内側に入れる。
+    /// JVM 自体が壊れている物（OutOfMemoryError）は `jobs fatal` を出して終了コード 3 で終わる（Shutdown.crash）。Log は sink で try の内側に入れる。
     ///
     /// WhyNot: tick の中の DbRunner に任せないのは、Tx の外（Scheduler / Dispatcher の Java interop や、リゾルバと同じ VerifyError）で
     /// 飛んだ Error は Exception の catch を素通りし、ワーカーのスレッドだけが黙って死んでプロセスは生き残るため。
     ///
     /// WhyNot: Log の handler を try の外（runForever）に置いたまま Log を effect で受けないのは、tick の中の run
-    /// （Net.Http.runWithIO など）から Log の op が try を越えて外の handler へ出ると、その run の中で飛んだ例外を
+    /// （OutboundHttp.runWith など）から Log の op が try を越えて外の handler へ出ると、その run の中で飛んだ例外を
     /// この catch が拾えなくなるため（2026-09-08 に実測。test/app/TestJvmCatchNesting）。handler が try の内側なら拾える。
     ///
     /// WhyNot: catch の中で Log を呼ばないのは、effect の操作を catch の腕に書くと JVM の VerifyError になるため（2026-09-08 に実測）。
@@ -160,12 +162,12 @@ mod BackgroundJobs {
         match attempt(() -> Log.runWith(sink, thunk)) {
             case Ok(messages)     => messages
             case Err(Ok(message)) => List#{"tick の途中で例外: ${message}"}
-            case Err(Err(fatal))  => { Log.runWith(sink, () -> Log.Fields.empty() |> Log.exception(fatal) |> Log.fatal("jobs fatal")); throw fatal }
+            case Err(Err(fatal))  => { Shutdown.crash(sink, "jobs fatal", fatal); Nil }
         }
 
     ///
     /// 仕事の 1 部分（予約公開・Webhook）を JVM の例外から守る。飛んだら label 付きの失敗の説明にして、残りの部分へ進める。
-    /// JVM 自体が壊れている物（OutOfMemoryError）はそのまま再送出する（外の guarded がログする）。
+    /// JVM 自体が壊れている物（OutOfMemoryError）はそのまま再送出する（外の guarded が終了コード 3 で終わる）。
     ///
     /// WhyNot: 外の guarded だけに任せないのは、外部トリガー（POST /jobs/tick）はリクエストの Log の handler の下で tick を呼び、
     /// そこでは handler を try の内側に入れられない（リクエストの span を失う）ため。部分ごとの網は handler の入れ子に
@@ -229,8 +231,8 @@ mod BackgroundJobs {
                 }) |> Result.mapErr(failure -> "回復と掃除ができません: ${failure}");
             // 予約公開と Webhook の配信。部分ごとに JVM の例外を catch し、片方が落ちても残りは進める
             let scheduled = guardedPart("予約公開", () -> Scheduler.tick(pool));
-            let delivered = Net.Http.runWithIO(() -> guardedPart("Webhook", () -> WebhookDispatcher.tick(pool)));
-            let purged = purgeTick(pool, state#purge);
+            let delivered = OutboundHttp.runWith(state#http, () -> guardedPart("Webhook", () -> WebhookDispatcher.tick(pool)));
+            let purged = purgeTick(pool, state);
             // lastTick（heartbeat）を更新し、inTick フラグを下ろす
             Ref.put(Some(System.currentTimeMillis()), state#lastTick);
             Ref.put(false, state#inTick);
@@ -242,11 +244,11 @@ mod BackgroundJobs {
     ///
     /// CDN の purge の部分。送り先が無ければ何もしない。積む → 送る。
     ///
-    def purgeTick(pool: Pool, purge: Option[PurgeTarget]): Result[String, Int32] \ {IO, Log} = match purge {
+    def purgeTick(pool: Pool, state: State): Result[String, Int32] \ {IO, Log} = match state#purge {
         case None         => Ok(0)
         case Some(target) =>
             guardedPart("CDN purge", () -> CdnPurge.enqueue(pool))
-                |> Result.flatMap(_ -> Net.Http.runWithIO(() -> guardedPart("CDN purge", () -> CdnPurge.tick(pool, target))))
+                |> Result.flatMap(_ -> OutboundHttp.runWith(state#http, () -> guardedPart("CDN purge", () -> CdnPurge.tick(pool, target))))
     }
 
     ///

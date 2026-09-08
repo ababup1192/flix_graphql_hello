@@ -12,7 +12,7 @@ mod TestBackgroundJobs {
     /// 停止は `shutting down` を先に出し、tick の途中でなければすぐ `jobs drained`。その後は新しい tick を始めない（stopping）。
     @Test
     def testShutdownLogsThenStops(): Unit \ {Assert, IO} =
-        let state = BackgroundJobs.createState(1i64, None);
+        let state = BackgroundJobs.createState(1i64, None, OutboundHttp.newClient());
         let (_, records) = Log.runWithList(() -> BackgroundJobs.shutdown(state));
         Assert.assertEq(
             expected = (List#{(Log.Severity.Info, "shutting down"), (Log.Severity.Info, "jobs drained")}, true),

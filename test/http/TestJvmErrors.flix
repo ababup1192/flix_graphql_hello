@@ -8,15 +8,28 @@ mod TestJvmErrors {
     import java.lang.StackOverflowError
     import java.lang.Throwable
     import java.lang.VerifyError
+    import java.util.concurrent.CompletionException
 
+    /// OutOfMemoryError を cause に持つ物。
+    def wrapping(cause: Throwable): Throwable \ IO =
+        checked_cast(new CompletionException(cause))
+
+    ///
     /// Exception も、VerifyError / StackOverflowError も飲み込んでよい。OutOfMemoryError だけ fatal。
+    /// graphql-java が包む CompletionException のように cause の連鎖の中にあっても fatal（2 段でも）。包みの中が StackOverflowError なら fatal ではない。
+    ///
     @Test
     def testIsFatalTable(): Unit \ {Assert, IO} =
+        let oom: Throwable = checked_cast(new OutOfMemoryError("unable to create native thread"));
         let table: List[(Throwable, Bool)] = List#{
-            (checked_cast(new RuntimeException("x")), false),
-            (checked_cast(new VerifyError("boom")),   false),
-            (checked_cast(new StackOverflowError()),  false),
-            (checked_cast(new OutOfMemoryError()),    true)
+            (checked_cast(new RuntimeException("x")),                          false),
+            (checked_cast(new VerifyError("boom")),                            false),
+            (checked_cast(new StackOverflowError()),                           false),
+            (oom,                                                              true),
+            (wrapping(oom),                                                    true),
+            (wrapping(wrapping(oom)),                                          true),
+            (wrapping(checked_cast(new RuntimeException("x"))),                false),
+            (wrapping(checked_cast(new StackOverflowError())),                 false)
         };
         Assert.assertEq(
             expected = table |> List.map(snd),

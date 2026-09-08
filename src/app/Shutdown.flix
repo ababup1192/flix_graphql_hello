@@ -15,6 +15,7 @@ mod Shutdown {
 
     import java.lang.System
     import java.lang.Thread
+    import java.lang.Throwable
     import sun.misc.Signal
     import sun.misc.SignalHandler
 
@@ -61,6 +62,22 @@ mod Shutdown {
         case Outcome.TimedOut => 2
         case Outcome.Crashed  => 3
     }
+
+    ///
+    /// JVM 自体が壊れている例外（OutOfMemoryError）をスレッドの境界で受けた時の道。fatal の行を出して終了コード 3 で終わる。
+    /// リクエストのスレッド（Main.logServed）、仕事と watch のスレッド（BackgroundJobs.guarded / guardedWatch）が呼ぶ。
+    ///
+    /// WhyNot: drain してから終わらないのは、ここに来るのは OOM のように JVM 自体が壊れている時で、drain の中の DB の呼び出しも
+    /// 同じ理由で詰まり、停止が終わらなくなるため（main スレッドの `main thread died` と同じ）。
+    ///
+    /// WhyNot: 再送出してスレッドを死なせるだけにしないのは、`unable to create native thread` の OutOfMemoryError では JVM の
+    /// `-XX:+ExitOnOutOfMemoryError` が効かず（2026-09-08 の実機 E2E で実測）、プロセスが壊れたまま生き残るため。
+    ///
+    /// WhyNot: 2 つのスレッドから同時に来ても印で守らないのは、System.exit は 2 回目の呼び出しが 1 回目の終了を待つだけで、二重に走らないため。
+    ///
+    pub def crash(sink: Log.Sink, message: String, error: Throwable): Unit \ IO =
+        Log.runWith(sink, () -> Log.fatal(message, Log.exception(error, Log.Fields.empty())));
+        System.exit(exitCode(Outcome.Crashed))
 
     ///
     /// CMS_SHUTDOWN_TIMEOUT_SECONDS の値を秒にする。無い・数字でない・0 以下なら既定の 20。

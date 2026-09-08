@@ -151,7 +151,7 @@ def boot(config: EnvConfig, sink: Log.Sink): Result[String, Started] \ {IO, Fs.F
         _              <- ensureAppRole(config#owner, config#app);
         pool           <- openPool(config#pool);
         // 依存と既定プロジェクト
-        deps           <- Ok({ storage = config#storage, auth = config#auth, log = sink });
+        deps           <- Ok({ storage = config#storage, auth = config#auth, http = OutboundHttp.newClient(), log = sink });
         defaultProject <- resolveDefaultProject(pool, config#defaultProject);
         // エンジン。管理 API は既定プロジェクトの分を先に組んで、型定義が壊れていれば起動で止める
         accountEngine  <- AccountSchema.engine(pool, deps);
@@ -178,7 +178,7 @@ def serve(config: EnvConfig, sink: Log.Sink, started: Started): Unit \ {IO, Sys.
     let jwks = TokenVerifier.createCache();
     let engineCache = ContentEngine.create(deps);
     // ワーカーの状態と、プールが壊れたまま戻らないかのwatch
-    let jobs = BackgroundJobs.createState(config#jobsDrainSeconds, config#purge);
+    let jobs = BackgroundJobs.createState(config#jobsDrainSeconds, config#purge, deps#http);
     // リクエストの Tx を最後に閉じた時刻。自己回復が「プールが壊れた」と「満杯」を分けるのに読む
     let txClosedAt = Ref.fresh(Static, None);
     let heal = healWatch(config, txClosedAt);
@@ -283,7 +283,7 @@ def serveRequest(runtime: Runtime, requestId: String, span: Log.Fields, request:
     // request id → CORS → Host のプロジェクト → Credential → ルート表
     let pipeline =
         Server.dispatch(runtime#routes, (found, routeRequest) -> runRoute(runtime, span, extra, found, routeRequest))
-            |> Credentials.wrap(tokenHeaderOf(runtime#deps#auth), verifierOf(runtime#deps#auth, runtime#jwks))
+            |> Credentials.wrap(tokenHeaderOf(runtime#deps#auth), verifierOf(runtime#deps, runtime#jwks))
             |> Server.wrapProjectFromHost(runtime#baseDomain)
             |> Cors.wrap(runtime#config#cors, Router.allowedMethods(runtime#routes))
             |> RequestId.wrap(requestId);
@@ -297,14 +297,16 @@ def serveRequest(runtime: Runtime, requestId: String, span: Log.Fields, request:
 
 ///
 /// HttpServer が見た結果のうち、serveRequest が行を出せなかった物（handle が投げた・読めなかった 400 / 413 / 431・503 の reject・書けなかった）を出す。
-/// 正常に処理して書けた物は serveRequest が出しているので出さない。
+/// 正常に処理して書けた物は serveRequest が出しているので出さない。handle が投げた物が fatal（OutOfMemoryError。CompletionException の包みの中でも）なら
+/// `request thread died` を出して終了コード 3 で終わる（Shutdown.crash）。
 ///
 /// WhyNot: request.id を X-Request-Id があった時にしか付けないのは、この経路は dispatch に入る前か例外で抜けた後で、
 /// dispatch が作った ULID を持って来られないため（応答ヘッダにも付いていない）。例外の行は同じスレッドの直前の行と時刻で突き合わせる。
 ///
 def logServed(sink: Log.Sink, served: HttpServer.Served): Unit \ IO =
     if (Option.isEmpty(served#failure) and served#method != "-") ()
-    else Log.runWith(sink, () -> emitServed(served))
+    else Log.runWith(sink, () -> emitServed(served));
+    Option.forEach(error -> if (JvmErrors.isFatal(error)) Shutdown.crash(sink, "request thread died", error) else (), served#failure)
 
 /// HttpServer の結果の行。413 / 431 はヘッダまで読めているので method / path と、あれば X-Request-Id が付く。
 def emitServed(served: HttpServer.Served): Unit \ {IO, Log} =
@@ -470,8 +472,8 @@ def tokenHeaderOf(auth: AuthConfig.AuthConfig): String =
 ///
 /// ログインのトークンの検証（発行元の JWKS、dev、閉じている）。Credential の読み取りは Credentials.wrap（PAT → トークン → X-Api-Key → X-Preview-Token の順）。
 ///
-def verifierOf(auth: AuthConfig.AuthConfig, jwks: TokenVerifier.JwksCache, token: String): Result[String, Principal] \ IO = match auth#mode {
-    case AuthConfig.Mode.Jwks(config) => Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> TokenVerifier.runWithJwks(config, jwks, () -> TokenVerifier.verify(token))))
+def verifierOf(deps: Deps, jwks: TokenVerifier.JwksCache, token: String): Result[String, Principal] \ IO = match deps#auth#mode {
+    case AuthConfig.Mode.Jwks(config) => OutboundHttp.runWith(deps#http, () -> Time.Clock.runWithIO(() -> TokenVerifier.runWithJwks(config, jwks, () -> TokenVerifier.verify(token))))
     case AuthConfig.Mode.Dev          => TokenVerifier.runDev(() -> TokenVerifier.verify(token))
     case AuthConfig.Mode.Closed       => Err("管理 API は閉じています（CMS_AUTH=none）")
 }
