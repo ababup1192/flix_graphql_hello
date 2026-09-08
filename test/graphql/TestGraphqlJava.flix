@@ -6,6 +6,8 @@
 ///
 mod TestGraphqlJava {
 
+    import java.lang.Thread
+
     use Schema.{arg, field0, field1, objectType}
     use GraphqlTestKit.{appSchema, executeOnce, executeQuery, executeRequest, queryOnly, queryOnlySchema}
 
@@ -242,4 +244,32 @@ mod TestGraphqlJava {
         Assert.assertEq(expected = (Ok(true), Ok(false)),
             (tooDeep |> Result.map(match (_, message) -> message |> Option.exists(String.contains(substr = "depth"))),
              fine |> Result.map(match (_, message) -> message |> Option.exists(String.contains(substr = "depth")))))
+
+    // ---- 実行のスレッド ----
+
+    /// 今のスレッドの id を cell に積む。
+    def noteThread(cell: Ref[List[Int64], Static]): Unit \ IO =
+        Ref.put(Thread.currentThread().getId() :: Ref.get(cell), cell)
+
+    /// 今のスレッドの id を積んで n を返す（リゾルバの本体。effect を使う式はラムダに直に書かない）。
+    def threadField(cell: Ref[List[Int64], Static], n: Int32): Result[FieldError, Int32] \ IO =
+        noteThread(cell);
+        Ok(n)
+
+    ///
+    /// リゾルバは全部、executeWith を呼んだスレッドで同期に走る（ルート 2 つとその子）。
+    /// リクエストの Tx の接続を Context の値で持ち回れるのは、この前提があるため（DataFetcher が値を返す形なので graphql-java は別スレッドに逃がさない）。
+    ///
+    @Test
+    def testGraphqlJavaResolversRunOnCallerThread(): Unit \ {Assert, IO} =
+        let cell = Ref.fresh(Static, Nil);
+        let itemType = objectType("Item", () -> field0("n", Out.int32(), (_context, n) -> threadField(cell, n)) :: Nil);
+        let schema = queryOnlySchema(
+            field0("a", Out.obj(itemType), (_context, _root) -> threadField(cell, 1)) ::
+            field0("b", Out.obj(itemType), (_context, _root) -> threadField(cell, 2)) :: Nil);
+        let caller = Thread.currentThread().getId();
+        let response = executeQuery(schema, "{ a { n } b { n } }");
+        Assert.assertEq(
+            expected = (Ok((Value.Obj(Map#{ "a" => Value.Obj(Map#{ "n" => Value.Int(1) }), "b" => Value.Obj(Map#{ "n" => Value.Int(2) }) }), None)), List.repeat(4, caller)),
+            (response, Ref.get(cell)))
 }
