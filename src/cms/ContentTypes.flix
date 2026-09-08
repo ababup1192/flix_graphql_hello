@@ -72,9 +72,9 @@ mod ContentTypes {
         // 既存の全型と突き合わせて名前の規則を検査する。導いた名前の違反は apiId の物にする
         let others = listAll();
         CmsErr.raiseIfAny(typeNameViolations(others, names, Nil) |> List.map(violation -> if (derived) blameApiId(violation) else violation));
-        // 行を作り、Webhook に積む
+        // 行を作り、型の変更を知らせる
         let inserted = ContentTypesQueries.insertContentType({ +projectId = Tenant.currentId() | ContentTypeRows.typeInsert(names, draft) }) |> Rows.expectId;
-        notifySchema(names#apiId);
+        Publishing.notify(PublishingEvent.SchemaChanged(names#apiId));
         load(TypeId.TypeId(inserted))
 
     ///
@@ -86,11 +86,6 @@ mod ContentTypes {
             singular = draft#singular |> Option.getWithDefault(Naming.deriveSingular(draft#apiId)),
             plural   = draft#plural |> Option.getWithDefault(Naming.derivePlural(draft#apiId))
         }
-
-    /// 型の変更を Webhook に積み、プロジェクトの版を進める（同じ Tx）。
-    def notifySchema(apiId: ApiId): Unit \ Db + IdGen + Tenant =
-        Projects.bumpContentVersion();
-        Webhooks.emitSchema(apiId)
 
     ///
     /// singular / plural を導いた時の違反は apiId のせいなので、そこへ付け替える（渡していない項目を怒られても直せない）。
@@ -114,9 +109,9 @@ mod ContentTypes {
         // 自分を除いた全型と突き合わせて名前の規則を検査する（生える型名は自分のフィールドまで見る）
         let others = listAll() |> List.filter(other -> other#id != id);
         CmsErr.raiseIfAny(typeNameViolations(others, names, existing#fields));
-        // 触った項目だけ UPDATE し、Webhook に積む
+        // 触った項目だけ UPDATE し、型の変更を知らせる
         discard ContentTypesQueries.updateContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() }, ContentTypeRows.typeChanges(changes));
-        notifySchema(existing#apiId);
+        Publishing.notify(PublishingEvent.SchemaChanged(existing#apiId));
         load(id)
 
     ///
@@ -132,7 +127,7 @@ mod ContentTypes {
             ::: (if (referrers == 0i64) Nil else Violation.Violation("id", "他の型の REFERENCE のフィールド ${referrers} 本が参照先にしています。先にそのフィールドを消してください") :: Nil));
         discard EntriesQueries.purgeDeletedEntries({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() });
         discard ContentTypesQueries.deleteContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() });
-        notifySchema(existing#apiId)
+        Publishing.notify(PublishingEvent.SchemaChanged(existing#apiId))
 
     // ---- フィールド ----
 
@@ -249,6 +244,6 @@ mod ContentTypes {
     ///
     def touch(typeId: TypeId): Unit \ Db + CmsErr + IdGen + Tenant =
         discard ContentTypesQueries.touchContentType({ id = TypeId.toInt64(typeId), projectId = Tenant.currentId() });
-        notifySchema(load(typeId)#apiId)
+        Publishing.notify(PublishingEvent.SchemaChanged(load(typeId)#apiId))
 
 }

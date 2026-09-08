@@ -53,12 +53,10 @@ mod Projects {
         ProjectsQueries.findContentVersion(Tenant.currentId()) |> Option.map(row -> row#contentVersion) |> Option.getWithDefault(0i64)
 
     ///
-    /// 今のプロジェクトの版を +1 する。公開・取り下げ・削除・型の変更のユースケースが同じ Tx で呼ぶ。
+    /// 今のプロジェクトの版を +1 する。呼ぶのは `Publishing.notify` だけ（公開・取り下げ・削除・型の変更のユースケースと同じ Tx）。
+    /// どの出来事で進めるか（下書きの保存では進めない）は `Publishing.effectsOf` の表。
     ///
     /// WhyNot: 権限の証明を取らないのは、outbox（Webhooks.emitEntry）と同じで、進めるのは操作の結果で誰ができるかは公開などの入口が決めているため。
-    ///
-    /// WhyNot: 下書きの保存で進めないのは、コンテンツ API の匿名の GET は公開中しか読めず、下書きが変わってもキャッシュの中身は変わらないため。
-    /// 進めると下書きの保存のたびに CDN のキャッシュが全部外れる。
     ///
     pub def bumpContentVersion(): Unit \ DbWrite + Tenant =
         discard ProjectsQueries.bumpContentVersion(Tenant.currentId())

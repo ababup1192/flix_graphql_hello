@@ -1,6 +1,6 @@
 ///
 /// Webhook の登録と配信の積み込み。pub の入口は manageProject の証明（`Granted[ManageProject]`）を最初の引数で受け、自分では判定しない。
-/// 積み込み（emit）は公開などのユースケースが同じ Tx で呼ぶ outbox で、送るのは app の WebhookDispatcher。
+/// 積み込み（emit）は `Publishing.notify` が公開などのユースケースと同じ Tx で呼ぶ outbox で、送るのは app の WebhookDispatcher。
 ///
 mod Webhooks {
 
@@ -61,7 +61,7 @@ mod Webhooks {
         WebhooksQueries.findDelivery({ id = deliveryId, projectId = Tenant.currentId() }) |> Option.map(WebhookRows.toDelivery) |> CmsErr.orNotFound(Entity.WebhookDelivery, deliveryId)
 
     ///
-    /// entry の出来事を配信に積む。公開・取り下げ・削除のユースケースが同じ Tx で呼ぶ。
+    /// entry の出来事を配信に積む。呼ぶのは `Publishing.notify` だけ（公開・取り下げ・削除のユースケースと同じ Tx）。
     ///
     /// WhyNot: 証明を取らないのは、outbox に積むのは操作の結果で、誰ができるかは公開などの入口（publishEntries / writeEntries の証明）が決めているため。
     /// ここで別の証明を要求すると、同じ操作に 2 つの権限が要る事になる。
@@ -70,7 +70,7 @@ mod Webhooks {
         emit(event, entryPayload(event, entryId, typeApiId))
 
     ///
-    /// 型の変更を配信に積む。型を触るユースケースが同じ Tx で呼ぶ。
+    /// 型の変更を配信に積む。呼ぶのは `Publishing.notify` だけ（型を触るユースケースと同じ Tx）。
     ///
     /// WhyNot: 証明を取らないのは emitEntry と同じ（型の変更の入口が manageTypes の証明を受けている）。
     ///

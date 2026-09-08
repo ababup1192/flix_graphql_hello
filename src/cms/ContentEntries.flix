@@ -139,12 +139,11 @@ mod ContentEntries {
         if (existing#stage == Stage.Published) discard unpublish(unpublishing |> CmsErr.orForbidden(Permission.PublishEntries), id) else ();
         discard EntriesQueries.deleteLinks({ fromEntryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft), projectId = Tenant.currentId() });
         discard EntriesQueries.softDeleteEntry({ id = EntryId.text(id), projectId = Tenant.currentId() });
-        notify(Session.readDraftOfWriter(proof), WebhookEvent.EntryDeleted, id, existing#typeId)
+        Publishing.notify(PublishingEvent.EntryDeleted(id, apiIdOf(Session.readDraftOfWriter(proof), existing#typeId)))
 
-    /// entry の出来事を Webhook に積み、プロジェクトの版を進める（同じ Tx）。
-    def notify(reader: Granted[ReadDraft], event: WebhookEvent, id: EntryId, typeId: TypeId): Unit \ Db + CmsErr + IdGen + Tenant =
-        Projects.bumpContentVersion();
-        Webhooks.emitEntry(event, id, ContentTypes.get(reader, typeId)#apiId)
+    /// 出来事に載せる型の apiId。
+    def apiIdOf(reader: Granted[ReadDraft], typeId: TypeId): ApiId \ DbRead + CmsErr + Tenant =
+        ContentTypes.get(reader, typeId)#apiId
 
     // ---- 公開 ----
 
@@ -169,7 +168,7 @@ mod ContentEntries {
         publishDependencies(proof, visited, id, author, withDependencies, pending);
         // published の行を書き、版を積み、entry を公開中にする
         commitPublished(owner, existing, data, author);
-        notify(Session.readDraftOfPublisher(proof), WebhookEvent.EntryPublished, id, existing#typeId);
+        Publishing.notify(PublishingEvent.EntryPublished(id, apiIdOf(Session.readDraftOfPublisher(proof), existing#typeId)));
         load(id)
 
     ///
@@ -301,8 +300,8 @@ mod ContentEntries {
         CmsErr.raiseIfAny(publishedReferrerViolations(id));
         // published の行（参照・中身・印）を消す
         deletePublished(id);
-        // 公開中だった時だけ Webhook に積む
-        if (existing#stage == Stage.Published) notify(Session.readDraftOfPublisher(proof), WebhookEvent.EntryUnpublished, id, existing#typeId) else ();
+        // 公開中だった時だけ出来事になる
+        if (existing#stage == Stage.Published) Publishing.notify(PublishingEvent.EntryUnpublished(id, apiIdOf(Session.readDraftOfPublisher(proof), existing#typeId))) else ();
         load(id)
 
     ///

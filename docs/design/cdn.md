@@ -6,10 +6,16 @@
 
 ### プロジェクト単位の版（`projects.content_version`）
 
-- 公開・取り下げ・削除・content type とフィールドの変更で +1。進めるのは Webhook の outbox を積む所（`ContentEntries.notify` / `ContentTypes.notifySchema`）と同じ Tx
+- 公開・取り下げ・削除・content type とフィールドの変更で +1。進めるのは Webhook の outbox を積むのと同じ `Publishing.notify(event)`（ユースケースと同じ Tx）。出来事 → 副作用の対応は純粋な表 `Publishing.effectsOf`（`test/cms/TestPublishing`）
 - 下書きの保存では進めない。匿名の GET は公開中しか読めず、下書きが変わってもキャッシュの中身は変わらない。進めると下書きの保存のたびに全キャッシュが外れる
 - entry 単位・型単位の版にしない。GraphQL の 1 文書が何を読むか（参照の展開、一覧の絞り込み）を追って鍵にするより、プロジェクト全体で 1 つ進める方が確実で安い（microCMS も同じ方式）。1 回の公開で全部外れる代わりに、s-maxage が短いので温め直しは軽い
 - 読むのは `Projects.contentVersion()`（Tenant の今のプロジェクト）。`Main.runRoute` が認証と同じ Tx で、コンテンツ API の GET で鍵もトークンも無い時だけ 1 本読む（`Server.wantsContentVersion`）
+
+### 副作用の入口は Facade（`Publishing.notify`）
+
+- 公開・取り下げ・削除・型の変更の副作用（Webhook の outbox、`content_version`）はユースケースが出来事を 1 つ作って `Publishing.notify` に渡し、中が表の順に同じ Tx で積む。今の消費者は Webhook と版の 2 つで、どちらも業務の Tx の中で終わる
+- 出来事の表（events）+ consumer の形にはしていない。4 つ目の消費者（監査ログ #18 / 検索索引）が来た時に、events の 1 表に積んで consumer が拾う形へ作り直す
+- それまでは Facade。ユースケースから `Webhooks.emit*` / `Projects.bumpContentVersion` を直に呼ばない
 
 ### weak な ETag
 
