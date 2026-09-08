@@ -14,6 +14,13 @@ mod TenantTx {
         Pool.withLazyTxAfterBegin(pool, () -> stampTx(projectId), thunk)
 
     ///
+    /// `withLazyTx` の Result 版。thunk が Err を返したら ROLLBACK して、その Err をそのまま返す。
+    /// 業務エラーを Tx の中で受ける Runner（DbRunner.transact）が使う。
+    ///
+    pub def withLazyTxResult(pool: Pool, projectId: ProjectId, thunk: Unit -> Result[e, a] \ ef): Result[e, a] \ (ef - {SqlRead, SqlWrite}) + {IO, TransientDbErr, DbErr} =
+        Pool.withLazyTxResultAfterBegin(pool, () -> stampTx(projectId), thunk)
+
+    ///
     /// 今の Tx にだけ効く印。
     ///
     pub def stampTx(projectId: ProjectId): Unit \ DbRead =

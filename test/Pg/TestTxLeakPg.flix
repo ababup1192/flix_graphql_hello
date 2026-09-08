@@ -41,7 +41,7 @@ mod TestTxLeakPg {
     /// Runner と同じ入れ子（IdGen / Tenant / Clock の handler が transact の外、Session が中、f を DbRunner.guarded で直に包む）で、
     /// effect を使った後に JVM の例外（リゾルバの VerifyError と同じ経路）が飛んでも、DB の失敗として返り、接続が返る。
     ///
-    /// WhyNot: transact の外側の catch に任せないのは、catch の内側に handler（Session.runWith）が入ると例外が catch を素通りするため（2026-09-08 に実測）。
+    /// WhyNot: sqlfx の withLazyTx の catch に任せないのは、catch の内側に handler（Session.runWith）が入ると例外が catch を素通りするため（2026-09-08 に 0.4.0 でも実測）。
     @Test
     def testPgExceptionAfterEffectsInsideRunnerNestingReturnsConnection(): Unit \ {IO, Assert} =
         let pool = singlePool();
@@ -54,7 +54,7 @@ mod TestTxLeakPg {
                 Session.require(Permission.ReadDraft);
                 Integer.parseInt("boom")
             })))))))
-            |> Result.mapErr(failure -> String.contains(substr = "NumberFormatException", "${failure}"));
+            |> Result.mapErr(failure -> String.contains(substr = "boom", "${failure}"));
         let second = borrowAgain(pool);
         Pool.close(pool);
         Assert.assertEq(expected = (Err(true), Ok(1)), (first, second))
@@ -66,7 +66,7 @@ mod TestTxLeakPg {
         let first = RawSql.runWithAllow(() -> DbRunner.transact(pool, None, () -> {
             discard Sql.fetch("SELECT 1", Nil);
             Integer.parseInt("boom")
-        })) |> Result.mapErr(failure -> String.contains(substr = "NumberFormatException", "${failure}"));
+        })) |> Result.mapErr(failure -> String.contains(substr = "boom", "${failure}"));
         let second = borrowAgain(pool);
         Pool.close(pool);
         Assert.assertEq(expected = (Err(true), Ok(1)), (first, second))

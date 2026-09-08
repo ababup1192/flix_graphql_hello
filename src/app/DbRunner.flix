@@ -6,8 +6,7 @@
 ///
 /// WhyNot: 業務エラー（CmsErr）を withLazyTx の**中**で受けるのは、Flix の effect は再開しない時に間の frame を捨てるだけで
 /// finally が無く、外で受けると withLazyTx の COMMIT / ROLLBACK と接続の返却が飛んで「idle in transaction」の接続が漏れるため
-/// （test/Pg/TestTxLeakPg が見張る）。中で受けると Err が普通の戻り値になって COMMIT されるので、Err の時は DbErr に
-/// 変換して ROLLBACK させ、外で元の失敗に戻す。
+/// （test/Pg/TestTxLeakPg が見張る）。中で受けた Err は `Pool.withLazyTxResult` が ROLLBACK した上でそのまま返す。
 ///
 mod DbRunner {
 
@@ -16,24 +15,30 @@ mod DbRunner {
     use DbError.DbFailure
     use CmsErr.CmsFailure
 
-    /// 業務エラーで ROLLBACK させる時の印。外で元の CmsFailure に戻す。
-    def rollbackMarker(): String = "cms-failure"
-
     ///
     /// JVM の例外（リゾルバの VerifyError、Java interop の例外）を DbErr に変えて、withLazyTx に ROLLBACK と接続の返却をさせる。
+    /// JVM 自体が壊れている物（OutOfMemoryError）はそのまま再送出する。
     ///
-    /// WhyNot: 例外をそのまま上へ通さないのは、withLazyTx に finally が無く、例外が通り抜けると Tx が開いたまま接続が漏れるため
-    /// （test/Pg/TestTxLeakPg が見張る）。
+    /// WhyNot: sqlfx 0.4.0 の withLazyTx が最内側で catch する事に任せないのは、その catch の内側に `run … with handler`
+    /// （CmsErr.runWithResult / Session.runWith）が入ると、その中で飛んだ例外が catch を素通りするため（2026-09-08 に 0.3.1 と
+    /// 0.4.0 の両方で実測。effect の操作を外の handler へ投げるだけなら catch は効く）。handler より内側に置く必要があるので、
+    /// transact は CmsErr の内側で、Runner は Session の内側で f を直に包む（`Session.runWith(actor, () -> DbRunner.guarded(f))`）。
     ///
-    /// WhyNot: transact の中で 1 度包むだけで済ませないのは、この catch の内側で `run … with handler`（Session.runWith など）を
-    /// 入れると、その中で飛んだ例外は catch を素通りするため（2026-09-08 に実測。effect の操作を外の handler へ投げるだけなら catch は効く）。
-    /// Runner は主体を決めた後、f を直に包む（`Session.runWith(actor, () -> DbRunner.guarded(f))`）。
+    /// WhyNot: catch の腕で `DbErr.other` を直に呼ばないのは、effect の操作を catch の腕に書くと JVM の VerifyError になるため。
+    /// 腕は値だけ返し、raise は catch を抜けてから。
     ///
     pub def guarded(thunk: Unit -> a \ ef): a \ ef + IO + DbErr =
+        match attempt(thunk) {
+            case Ok(value)  => value
+            case Err(error) => if (JvmErrors.isFatal(error)) throw error else DbErr.other("exception: ${JvmErrors.describe(error)}")
+        }
+
+    /// thunk を走らせ、Throwable を値にする。
+    def attempt(thunk: Unit -> a \ ef): Result[Throwable, a] \ ef =
         try {
-            thunk()
+            Ok(thunk())
         } catch {
-            case e: Throwable => DbErr.other("exception: ${e.toString()}")
+            case error: Throwable => Err(error)
         }
 
     ///
@@ -95,25 +100,17 @@ mod DbRunner {
     /// Runner は Context の observe を渡す（graphql-java のコールバックの中なので Observe effect は届かない）。
     ///
     pub def transactObserved(pool: Pool, projectId: Option[ProjectId], observe: Log.Fields -> Unit \ IO, thunk: Unit -> a \ ef): Result[DbFailure, Result[CmsFailure, a]] \ (ef - {Db, CmsErr}) + IO =
-        let stash = Ref.fresh(Static, None);
         let counter = Ref.fresh(Static, 0);
         notePool(observe, pool);
         let outcome = retryWith(counter, () -> {
-            let inTx = () -> match CmsErr.runWithResult(() -> guarded(thunk)) {
-                case Ok(value)    => value
-                case Err(failure) => { Ref.put(Some(failure), stash); DbErr.other(rollbackMarker()) }
-            };
+            let inTx = () -> CmsErr.runWithResult(() -> guarded(thunk));
             match projectId {
-                case Some(found) => TenantTx.withLazyTx(pool, found, inTx)
-                case None        => Pool.withLazyTx(pool, inTx)
+                case Some(found) => TenantTx.withLazyTxResult(pool, found, inTx)
+                case None        => Pool.withLazyTxResult(pool, inTx)
             }
         });
         noteRetries(observe, Ref.get(counter));
-        match (outcome, Ref.get(stash)) {
-            case (Err(_), Some(failure)) => Ok(Err(failure))
-            case (Err(failure), None)    => Err(failure)
-            case (Ok(value), _)          => Ok(Ok(value))
-        }
+        outcome
 
     ///
     /// transact の結果を GraphQL のフィールドの結果に。DB の失敗と業務エラーは GraphqlErrors が写し、成功はリゾルバの戻りをそのまま。
