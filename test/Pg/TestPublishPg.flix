@@ -83,10 +83,10 @@ mod TestPublishPg {
         }));
         Assert.assertEq(expected = Ok(Ok((VersionReason.Save, Some(Json.JString("New")), Some(Json.JString("Old")), 3, Err(CmsFailure.NotFound(Entity.Version, "1"))))), result)
 
-    /// 差分: CHANGED の entry で PUBLISHED → DRAFT を取ると、変えたフィールド 1 件だけ出る。未公開の entry の PUBLISHED は notFound。
+    /// 差分: CHANGED の entry で PUBLISHED → DRAFT を取ると、変えたフィールド 1 件だけ出る。未公開の entry の PUBLISHED は空なので、初回公開の差分は全部 Added。
     ///
     ///   create(Old/old) → publish → update(title: New) → diff(PUBLISHED, DRAFT) = [title: Changed(Old, New)]
-    ///   create(Alone/alone) だけ                        → diff(PUBLISHED, DRAFT) = NotFound(Entry, "d2 (published)")
+    ///   create(Alone/alone) だけ                        → diff(PUBLISHED, DRAFT) = [title: Added(Alone), slug: Added(alone)]
     @Test
     def testPgDiffPublishedToDraft(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"d1", "d2"}, () -> {
@@ -96,12 +96,12 @@ mod TestPublishPg {
             let published = ContentEntries.publish(created#id, "tester", false);
             discard ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("New"))}), published#version);
             let changed = ContentEntries.diff(created#id, VersionRef.Published, VersionRef.Draft);
-            let missing = CmsErr.runWithResult(() -> ContentEntries.diff(unpublished#id, VersionRef.Published, VersionRef.Draft));
-            (changed, missing)
+            let firstPublish = ContentEntries.diff(unpublished#id, VersionRef.Published, VersionRef.Draft);
+            (changed, firstPublish)
         }));
         Assert.assertEq(expected = Ok(Ok((
             FieldChange.FieldChange("title", Change.Changed(Json.JString("Old"), Json.JString("New"))) :: Nil,
-            Err(CmsFailure.NotFound(Entity.Entry, "d2 (published)"))))), result)
+            FieldChange.FieldChange("title", Change.Added(Json.JString("Alone"))) :: FieldChange.FieldChange("slug", Change.Added(Json.JString("alone"))) :: Nil))), result)
 
     /// 差分: versionId 同士で restore 前後の差が読める。restore した後の下書きは元のバージョンと同じ（差分無し）。他の entry のバージョンは notFound。
     ///

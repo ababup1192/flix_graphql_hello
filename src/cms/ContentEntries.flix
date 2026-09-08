@@ -273,7 +273,7 @@ mod ContentEntries {
         EntryDiff.diff(owner#fields, versionData(existing, fromRef), versionData(existing, toRef))
 
     ///
-    /// バージョンの参照が指す中身。DRAFT は今の下書き、PUBLISHED は公開中の中身（未公開なら notFound）、
+    /// バージョンの参照が指す中身。DRAFT は今の下書き、PUBLISHED は公開中の中身（未公開なら空。初回公開の差分は全部 Added になる）、
     /// versionId はそのバージョンの中身（他の entry の物なら notFound）。
     ///
     def versionData(existing: Entry, versionRef: VersionRef): EntryData \ DbRead + CmsErr + Tenant = match versionRef {
@@ -281,7 +281,7 @@ mod ContentEntries {
         case VersionRef.Published =>
             EntriesQueries.findEntryByStage({ id = EntryId.text(existing#id), stage = EntryRows.stageToDb(Stage.Published), projectId = Tenant.currentId() })
                 |> Option.map(EntryRows.toEntry(Stage.Published)) |> Option.map(published -> published#data)
-                |> CmsErr.orNotFound(Entity.Entry, "${existing#id} (published)")
+                |> Option.getWithDefault(Map.empty())
         case VersionRef.Version(versionId) =>
             EntriesQueries.findVersion({ id = VersionId.toInt64(versionId), projectId = Tenant.currentId() }) |> Option.map(EntryRows.toVersion)
                 |> Option.filter(version -> version#entryId == existing#id) |> Option.map(version -> version#data)

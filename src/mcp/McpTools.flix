@@ -171,8 +171,25 @@ mod McpTools {
 
     def versionRefArg(name: String, description: String): ArgDef =
         ArgDef.ArgDef(name, description, true, ArgType.Obj(
-            ArgDef.ArgDef("stage", "DRAFT（今の下書き）か PUBLISHED（公開中の中身。未公開なら NOT_FOUND）", false, ArgType.Enum(readStages() |> List.map(fst))) ::
+            ArgDef.ArgDef("stage", "DRAFT（今の下書き）か PUBLISHED（公開中の中身。未公開なら空で、差分は全部 ADDED）", false, ArgType.Enum(readStages() |> List.map(fst))) ::
             ArgDef.ArgDef("versionId", "バージョンの id（get_entry の versions か diff の応答）", false, ArgType.Str) :: Nil))
+
+    ///
+    /// RICH_TEXT に渡す Markdown の方言（Markdown.flix の冒頭の要約）。create_entry / update_entry の description に載せる。
+    /// 説明は仕様として扱うので、書ける物は全部書き、無い物（文字色・寄せ）も書く。
+    ///
+    pub def markdownGuide(): String =
+        "RICH_TEXT の Markdown は GFM + 次の方言だけ（文字色・文字の寄せ・生の HTML は無い）: "
+        ++ "見出しの id は `## 見出し {#id}`。"
+        ++ "callout は `> [!NOTE]` / `> [!TIP]` / `> [!WARNING]`（`> **ポイント:**` は callout にならない）。"
+        ++ "折りたたみは `<details><summary>要約</summary>` から `</details>` の行まで。"
+        ++ "数式は `$…$`（行内）と `$$` の行で囲む（ブロック）。TeX のまま。"
+        ++ "コードは ```` ```lang:path/file {1,3-5} ````（`:` の後がファイル名、`{}` が強調する行。どちらも省ける。lang が mermaid なら図）。"
+        ++ "画像は `![alt](asset:ID \"caption\")`、動画は `@[video](asset:ID)`。1 行に画像を空白区切りで 2 つ以上並べると gallery。"
+        ++ "他の entry へのリンクは `[text](entry:ID)`。"
+        ++ "タスクは `- [ ]` / `- [x]`。"
+        ++ "URL だけの行は YouTube / Vimeo / X なら embed、他は linkCard。"
+        ++ "下線は `<u>…</u>`。入れ子は 2 空白"
 
     ///
     /// 全ツールの定義。tools/list の inputSchema も引数の復号もこの表から出す（二重管理しない）。
@@ -189,7 +206,7 @@ mod McpTools {
                  ArgDef.ArgDef("skip", "読み飛ばす件数（既定 0）", false, ArgType.Int) ::
                  ArgDef.ArgDef("stage", "entry の状態で絞る", false, ArgType.Enum(entryStages())) :: Nil,
           readOnlyHint = true, destructiveHint = false, idempotentHint = true } ::
-        { tool = Tool.GetEntry, description = "entry 1 つ。stage は DRAFT（既定。今の下書き）か PUBLISHED（公開中の中身）。format は RICH_TEXT の値の返し方（markdown が既定。text / html / doc）",
+        { tool = Tool.GetEntry, description = "entry 1 つ。stage は DRAFT（既定。今の下書き）か PUBLISHED（公開中の中身）。format は RICH_TEXT の値の返し方（markdown が既定。text / html / doc）。version は下書きの楽観ロック用で、publish しても進まない（update_entry で進む）",
           args = entryIdArg() ::
                  ArgDef.ArgDef("stage", "どちらの中身を読むか（既定 DRAFT）", false, ArgType.Enum(readStages() |> List.map(fst))) ::
                  ArgDef.ArgDef("format", "RICH_TEXT の値の返し方（既定 markdown）", false, ArgType.Enum(formats() |> List.map(fst))) :: Nil,
@@ -197,10 +214,10 @@ mod McpTools {
         { tool = Tool.DiffEntry, description = "entry の 2 つのバージョンの差分（from → to）。RICH_TEXT は Markdown の行差分。publish の前に from: { stage: PUBLISHED }, to: { stage: DRAFT } で何が変わるかを見る",
           args = entryIdArg() :: versionRefArg("from", "比べる元。{ stage } か { versionId } のどちらか 1 つ") :: versionRefArg("to", "比べる先。{ stage } か { versionId } のどちらか 1 つ") :: Nil,
           readOnlyHint = true, destructiveHint = false, idempotentHint = true } ::
-        { tool = Tool.CreateEntry, description = "下書きを作る。fields は apiId → 値。RICH_TEXT のフィールドは Markdown の文字列で渡せる（doc に変換する）。公開はしない（publish を別に呼ぶ）",
+        { tool = Tool.CreateEntry, description = "下書きを作る。fields は apiId → 値。RICH_TEXT のフィールドは Markdown の文字列で渡せる（doc に変換する）。公開はしない（publish を別に呼ぶ）。${markdownGuide()}",
           args = typeArg() :: ArgDef.ArgDef("fields", "apiId → 値のオブジェクト", true, ArgType.Json) :: Nil,
           readOnlyHint = false, destructiveHint = false, idempotentHint = false } ::
-        { tool = Tool.UpdateEntry, description = "下書きを直す。fields のキーだけ上書きし、null で消す。RICH_TEXT は Markdown の文字列で渡せる。expectedVersion は get_entry の version（違えば CONFLICT で actualVersion が返るので、読み直してから）",
+        { tool = Tool.UpdateEntry, description = "下書きを直す。fields のキーだけ上書きし、null で消す。RICH_TEXT は Markdown の文字列で渡せる。expectedVersion は get_entry の version（違えば CONFLICT で actualVersion が返るので、読み直してから）。${markdownGuide()}",
           args = entryIdArg() :: ArgDef.ArgDef("fields", "apiId → 値のオブジェクト（上書きするキーだけ）", true, ArgType.Json) :: ArgDef.ArgDef("expectedVersion", "get_entry で読んだ version", true, ArgType.Int) :: Nil,
           readOnlyHint = false, destructiveHint = false, idempotentHint = false } ::
         { tool = Tool.PublishCheck, description = "公開できるか（書き込まない）。violations が空なら publish は通る。publish の前に必ず呼ぶ",
@@ -412,14 +429,15 @@ mod McpTools {
         }
 
     ///
-    /// GraphQL のエラー 1 つを Failure に。extensions（code など）に message を足す。extensions が無い物（graphql-java の検証など）は INTERNAL。
+    /// GraphQL のエラー 1 つを Failure に。extensions（code など）に message を足す。code が無い物（graphql-java の検証など）は INTERNAL。
+    ///
+    /// WhyNot: graphql-java が足す classification を残さないのは、error-codes.md の extensions に無い名前で、AI が code と取り違えるため。
     ///
     def failureOf(error: Value): Failure =
         let message = Value.field("message", error);
-        let extensions = match Value.field("extensions", error) {
-            case Value.Obj(fields) => fields
-            case _                 => Map#{ "code" => Value.Str("INTERNAL") }
-        };
+        let extensions = objectFields(Value.field("extensions", error))
+            |> Map.remove("classification")
+            |> Map.insertWith((_, existing) -> existing, "code", Value.Str("INTERNAL"));
         match Map.get("code", extensions) {
             case Some(Value.Str("UNAUTHENTICATED")) => Failure.Unauthenticated(message |> Value.asStr |> Option.getWithDefault("認証に失敗しました"))
             case _                                  => Failure.Business(Value.Obj(Map.insert("message", message, extensions)))

@@ -216,6 +216,16 @@ mod TestMcpTools {
              McpTools.call(Tool.ListTypes, Map.empty(), failing(Map#{ "code" => Value.Str("UNAUTHENTICATED") })),
              McpTools.call(Tool.ListTypes, Map.empty(), plain)))
 
+    /// graphql-java が extensions に足す classification は isError の中身に出さない（code など他の extensions は残る）。code が無ければ INTERNAL。
+    @Test
+    def testFailureDropsClassification(): Unit \ Assert =
+        Assert.assertEq(
+            expected = (
+                Err(McpTools.Failure.Business(obj(List#{ ("code", Value.Str("NOT_FOUND")), ("entity", Value.Str("Entry")), ("message", Value.Str("だめ")) }))),
+                Err(McpTools.Failure.Business(obj(List#{ ("code", Value.Str("INTERNAL")), ("message", Value.Str("だめ")) })))),
+            (McpTools.call(Tool.ListTypes, Map.empty(), failing(Map#{ "code" => Value.Str("NOT_FOUND"), "entity" => Value.Str("Entry"), "classification" => Value.Str("DataFetchingException") })),
+             McpTools.call(Tool.ListTypes, Map.empty(), failing(Map#{ "classification" => Value.Str("ValidationError") }))))
+
     /// 256 KB を超える text は本文だけ切って truncated を structuredContent に出す。切っても JSON は壊れない（parse できる）。収まる text は触らない。
     @Test
     def testTruncate(): Unit \ Assert =

@@ -45,7 +45,7 @@ mod TestAdminScenarioPg {
                     ("gone", (Value.Obj(Map#{ "entry" => Value.Null, "entries" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }) }), None)),
                     ("typeDeleted", (Value.Obj(Map#{ "deleteContentType" => Value.Str(typeId) }), None)),
                     ("noTypes", (Value.Obj(Map#{ "contentTypes" => Value.List(Nil) }), None)) },
-                Some("entry 'e1' は他で更新されています（今の version は ${versionAfterPublish + 1}）。読み直してから保存してください")),
+                Some("entry 'e1' の version が一致しません（渡した ${versionAfterPublish}、今の ${versionAfterPublish + 1}）。読み直してから保存してください")),
             (responses, stale))
 
 }

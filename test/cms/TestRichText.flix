@@ -115,6 +115,18 @@ mod TestRichText {
     def testToText(): Unit \ Assert =
         Assert.assertEq(expected = "見出し\na<b>\nx\ny", RichText.toText(sample()))
 
+    /// 平文の空行: 箇条書きの項目の間は空行 1 つ、リストの後の段落との間も空行 1 つ、末尾に改行は無い。
+    ///
+    ///   bulletList ─ listItem ─ paragraph "x"
+    ///              └ listItem ─ paragraph "y"
+    ///   paragraph "後"
+    @Test
+    def testToTextCollapsesBlankLines(): Unit \ Assert =
+        Assert.assertEq(expected = "x\n\ny\n\n後",
+            RichText.toText(node("doc", List#{
+                node("bulletList", List#{ node("listItem", List#{ node("paragraph", List#{ text("x") }) }), node("listItem", List#{ node("paragraph", List#{ text("y") }) }) }),
+                node("paragraph", List#{ text("後") }) })))
+
     // ---- HTML ----
 
     /// マークはタグに、文字はエスケープ、image は渡した URL で、無い asset の image は出ない。

@@ -87,6 +87,7 @@ curl -s -X POST http://127.0.0.1:8080/mcp -H 'Content-Type: application/json' -H
 ツール（12）: `list_types` / `get_type(apiId)` / `search_entries(type, search, first, skip, stage)` / `get_entry(id, stage, format)` / `diff_entry(id, from, to)` /
 `create_entry(type, fields)` / `update_entry(id, fields, expectedVersion)` / `publish_check(id)` / `impact(id, action)` / `publish(id, withDependencies)` / `unpublish(id)` / `preview_url(id)`。
 RICH_TEXT のフィールドは Markdown の文字列で書け、`get_entry` の `format`（markdown / text / html / doc）で読み方を選ぶ。
+本文の書き方（GFM + callout / details / 数式 / `asset:` / `entry:` の方言の要約）は `create_entry` / `update_entry` の description に載っている（エージェントはそれを読んで書く）。
 説明（description）は仕様として扱う: `publish` の前に `publish_check` と `impact(id, PUBLISH)` と `diff_entry` を、`unpublish` の前に `impact(id, UNPUBLISH)` を呼ぶ。
 `tools/list` は主体が呼べる物に絞らない（全部出す。呼べなければ `FORBIDDEN` が返る）。
 

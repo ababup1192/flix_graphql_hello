@@ -49,7 +49,7 @@ pub eff CmsErr {
     def invalid(violations: List[Violation]): Void
 
     ///
-    /// 楽観ロックに負けた。expectedVersion は呼び出しが読んでいた版、currentVersion は今の版。
+    /// 楽観ロックに負けた。expectedVersion は呼び出しが読んでいたバージョン、currentVersion は今のバージョン。
     ///
     def conflict(entity: Entity, id: String, expectedVersion: Int32, currentVersion: Int32): Void
 
@@ -98,7 +98,7 @@ mod CmsErr {
         case CmsFailure.NotFound(entity, id) => "${describe(entity)} '${id}' が見つかりません"
         case CmsFailure.Invalid(violations) =>
             violations |> List.map(violation -> { let Violation.Violation(path, message) = violation; "${path}: ${message}" }) |> List.join("; ")
-        case CmsFailure.Conflict(entity, id, _, currentVersion) => "${describe(entity)} '${id}' は他で更新されています（今の version は ${currentVersion}）。読み直してから保存してください"
+        case CmsFailure.Conflict(entity, id, expectedVersion, currentVersion) => "${describe(entity)} '${id}' の version が一致しません（渡した ${expectedVersion}、今の ${currentVersion}）。読み直してから保存してください"
         case CmsFailure.Forbidden(permission) => "この操作（${Permission.text(permission)}）の権限がありません"
         case CmsFailure.RequiresLogin(LoginRequirement.WritingPerson) => "この操作は read の PAT ではできません。write の PAT かログインした本人で行ってください"
         case CmsFailure.RequiresLogin(LoginRequirement.Interactive)   => "この操作はログインした本人だけができます（PAT や API キーではできません）"

@@ -450,7 +450,7 @@ type Entry {
   diff(from: VersionRef!, to: VersionRef!): [FieldChange!]!
 }
 
-"""どのバージョンか。versionId か stage のどちらか 1 つ（両方・両方無しは INVALID）。DRAFT は今の下書き、PUBLISHED は公開中の中身（未公開なら NOT_FOUND）"""
+"""どのバージョンか。versionId か stage のどちらか 1 つ（両方・両方無しは INVALID）。DRAFT は今の下書き、PUBLISHED は公開中の中身（未公開なら空。初回公開の diff は全部 ADDED）"""
 input VersionRef {
   versionId: ID
   stage: ContentStage

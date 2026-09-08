@@ -341,9 +341,9 @@ mod RichText {
     }
 
     ///
-    /// 平文。text を繋ぎ、ブロックの終わりと hardBreak で改行する。検索と一覧の抜粋用。
+    /// 平文。text を繋ぎ、ブロックの終わりと hardBreak で改行する。続く改行は 2 つまで（空行 1 つ）に畳み、先頭と末尾の改行は無い。検索と一覧の抜粋用。
     ///
-    pub def toText(doc: Json): String = textOf(doc) |> String.trim
+    pub def toText(doc: Json): String = textOf(doc) |> String.replaceMatches(regex = "\n{3,}", to = "\n\n") |> String.trim
 
     def textOf(node: Json): String = match node {
         case Json.JObject(fields) => match typeOf(fields) {
