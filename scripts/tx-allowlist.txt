@@ -1,5 +1,5 @@
 # withLazyTx（Pool / TenantTx）を呼んで良いファイル（Tx を張る入口）。scripts/check-tx.sh が突き合わせる
-# DbRunner.transact / withTx: 再試行と Db.guard と RLS の印を 1 か所で決める入口
+# DbRunner.transact / withTx / withRequestTx: 再試行と Db.guard と RLS の印を 1 か所で決める入口（withRequestTx は Pool.borrow / Tx.begin / Jdbc.* で Tx を手で組む）
 src/app/DbRunner.flix
 # TenantTx: Pool.withLazyTxAfterBegin を包んで印を置く
 src/app/TenantTx.flix

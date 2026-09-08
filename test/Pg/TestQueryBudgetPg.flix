@@ -5,6 +5,7 @@
 ///
 /// 上限は実測（2026-09-08）+ 少しの余裕。一覧の行ごとに版・型・参照先を引く形（N+1）に戻れば (a) (c) (d) が落ち、
 /// 認証の SQL（JWT で 7 本）がフィールドごとに繰り返されると (b) が 2 倍を超えて落ちる。
+/// 読むだけの文書がフィールドごとの Tx に戻れば、Tx の数（上限 2）で全部落ちる。
 ///
 mod TestQueryBudgetPg {
 
@@ -62,19 +63,19 @@ mod TestQueryBudgetPg {
         match auth {
             case Err(rejection) => (notModified, (Ref.get(observed), Some(Rejection.message(rejection))))
             case Ok(found)      =>
-                let response = Graphql.executeWith(engine, GraphqlTestKit.queryOnly(queryText), { observe = observe | PgTestSupport.contextFor(found#actor, queryText) });
+                let response = PgTestSupport.executeAs(pool, Some(ProjectId.default()), engine, found#actor, observe, GraphqlTestKit.queryOnly(queryText));
                 (notModified, (Ref.get(observed), GraphqlTestKit.firstMessage(response)))
         }
 
-    /// この Credential で認証してから問い合わせ、認証の Tx と Runner が observe に戻した属性（合算）と先頭の errors[].message を返す。
-    /// Context は Main と同じ形（読むだけの文書には先読みの写し）。
+    /// この Credential で認証してから問い合わせ、認証の Tx と Runner とリクエストの Tx が observe に戻した属性（合算）と先頭の errors[].message を返す。
+    /// 実行は Main と同じ形（読むだけの文書は 1 リクエスト 1 Tx と先読みの写し）。
     def measure(pool: Pool, kind: Engine, engine: Graphql.Engine, credential: Credential, queryText: String): (Log.Fields, Option[String]) \ IO =
         let observed = Ref.fresh(Static, Log.Fields.empty());
         let observe = fields -> Ref.put(LogFields.mergeCounts(fields, Ref.get(observed)), observed);
         match PgTestSupport.authenticateObserved(pool, kind, Some(ProjectId.default()), observe, credential) {
             case Err(rejection) => (Ref.get(observed), Some(Rejection.message(rejection)))
             case Ok(found)      =>
-                let response = Graphql.executeWith(engine, GraphqlTestKit.queryOnly(queryText), { observe = observe | PgTestSupport.contextFor(found#actor, queryText) });
+                let response = PgTestSupport.executeAs(pool, Some(ProjectId.default()), engine, found#actor, observe, GraphqlTestKit.queryOnly(queryText));
                 (Ref.get(observed), GraphqlTestKit.firstMessage(response))
         }
 
@@ -85,13 +86,13 @@ mod TestQueryBudgetPg {
         (name, count("db.statements"), count("db.transactions"), message)
 
     ///
-    /// 6 つの query の SQL の数と Tx の数が上限の中に収まり、エラーは無い。
-    ///   (a) JWT で entries 50 件 × 10 フィールド            実測 12 / 504（認証 7 + 一覧 2 + 版 1 + 型 2。Tx は認証 1 + フィールド 503）
-    ///   (b) JWT で contentTypes { name }                     実測 9 / 4（認証 7 本 + 印 + 一覧 1 本。Tx は認証 1 + 一覧 1 + name 2）
-    ///   (c) API キー（EDITOR の WRITE）で (a) の一覧          実測 7 / 504
-    ///   (d) API キーでコンテンツ API の blogs 50 件と参照先   実測 5 / 254（認証 2 + 一覧 2 + 参照先 1。参照先は Linked から）
+    /// 6 つの query の SQL の数と Tx の数が上限の中に収まり、エラーは無い。読むだけの文書は 1 リクエスト 1 Tx なので、Tx は認証 1 + リクエスト 1。
+    ///   (a) JWT で entries 50 件 × 10 フィールド            実測 12 / 2（認証 7 + 一覧 2 + 版 1 + 型 2。1 リクエスト 1 Tx の前は 504）
+    ///   (b) JWT で contentTypes { name }                     実測 9 / 2（認証 7 本 + 印 + 一覧 1 本。前は 4）
+    ///   (c) API キー（EDITOR の WRITE）で (a) の一覧          実測 7 / 2（前は 504）
+    ///   (d) API キーでコンテンツ API の blogs 50 件と参照先   実測 5 / 2（認証 2 + 一覧 2 + 参照先 1。参照先は Linked から。前は 254）
     ///   (e) 匿名のコンテンツ API の GET が 304 で終わる道      認証（印 + 公開範囲 1）+ 版 1 の Tx 1 つ。GraphQL は実行しない
-    ///   (f) 匿名のコンテンツ API の GET が 200（blogs 50 件）  (e) + 一覧と参照先
+    ///   (f) 匿名のコンテンツ API の GET が 200（blogs 50 件）  (e) + 一覧と参照先の Tx 1 つ（前は 254）
     ///
     @Test
     def testPgQueryBudget(): Unit \ {IO, Assert} =
@@ -111,12 +112,12 @@ mod TestQueryBudgetPg {
             publishAll(ask, typeId);
             let (notModified, executed) = measureAnonymous(api#pool, content, publishedListQuery());
             List#{
-                (budget("jwt entries 50x10", jwtEntries), (16, 510)),
-                (budget("jwt contentTypes name", jwtTypes), (12, 5)),
-                (budget("api-key entries 50x10", keyEntries), (12, 510)),
-                (budget("api-key content blogs 50 + profile", keyContent), (8, 260)),
+                (budget("jwt entries 50x10", jwtEntries), (16, 2)),
+                (budget("jwt contentTypes name", jwtTypes), (12, 2)),
+                (budget("api-key entries 50x10", keyEntries), (12, 2)),
+                (budget("api-key content blogs 50 + profile", keyContent), (8, 2)),
                 (budget("anonymous content GET 304", notModified), (4, 1)),
-                (budget("anonymous content GET 200 blogs 50 + profile", executed), (8, 260))
+                (budget("anonymous content GET 200 blogs 50 + profile", executed), (8, 2))
             }
         });
         List.forEach(match ((name, statements, transactions, _), _) -> println("query budget: ${name}: db.statements=${statements} db.transactions=${transactions}"), budgets);

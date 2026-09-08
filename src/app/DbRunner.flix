@@ -11,6 +11,10 @@
 ///
 mod DbRunner {
 
+    import java.lang.System
+    import java.lang.Throwable
+    import java.sql.Connection
+
     use DbError.DbFailure
 
     ///
@@ -173,5 +177,184 @@ mod DbRunner {
     /// DbFailure を人が読む文言に。
     ///
     pub def failureMessage(failure: DbFailure): String = "database error: ${DbError.describeFailure(failure)}"
+
+    // ---- 読むだけの文書の 1 リクエスト 1 Tx（RequestTx） ----
+
+    ///
+    /// リクエストの Tx の持ち物を作る。接続はまだ借りない（最初の SQL で `openConnection` が借りる）。
+    /// lastClosedAt はプロセスで 1 つの Ref（SelfHeal が読む）。
+    ///
+    pub def openRequestTx(pool: Pool, scope: Option[ProjectId], actor: Actor, lastClosedAt: Ref[Option[Int64], Static]): RequestTx.Handle \ IO =
+        { openConnection = () -> openConnection(pool, scope, actor),
+          state = Ref.fresh(Static, RequestTx.State.Idle),
+          openedAt = Ref.fresh(Static, None),
+          lastClosedAt = lastClosedAt }
+
+    ///
+    /// 接続を借りて Tx を開く。borrow → BEGIN → SET TRANSACTION（READ ONLY, REPEATABLE READ。最初の文なので snapshot はここ）→ RLS の印。
+    /// 一時的な失敗の再試行はここ（最初の SQL の前）だけ。借りた後に失敗したら ROLLBACK して返してから投げる。
+    ///
+    /// WhyNot: `Pool.withLazyTxResultAfterBegin` の onBegin を使わないのは、SET TRANSACTION を印より前（Tx の最初の文）に流す必要があり、
+    /// onBegin は SqlRead の handler 越しなので文の順を握れないため。Tx.begin は setAutoCommit(false) だけで文は出ない。
+    ///
+    /// WhyNot: 印（set_config）を READ ONLY の後に置くのは、set_config は READ ONLY でも通り、印の前に snapshot を取っても RLS は
+    /// 文ごとに評価されるので結果が変わらないため。
+    ///
+    def openConnection(pool: Pool, scope: Option[ProjectId], actor: Actor): Connection \ {IO, TransientDbErr, DbErr} =
+        match retrying(() -> beginReadOnly(pool, scope, actor)) {
+            case Ok(conn)     => conn
+            case Err(failure) => raiseFailure(failure)
+        }
+
+    /// borrow から印まで 1 回分。借りた後の失敗は ROLLBACK と close をしてから上へ。
+    def beginReadOnly(pool: Pool, scope: Option[ProjectId], actor: Actor): Connection \ {IO, TransientDbErr, DbErr} =
+        let conn = Pool.borrow(pool);
+        match DbError.runWithFailure(() -> {
+            Tx.begin(conn);
+            discard Jdbc.executeStatement(conn, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY", Nil);
+            Jdbc.runWithConnection(conn, () -> TenantTx.stampTx(scope, actor))
+        }) {
+            case Ok(())       => conn
+            case Err(failure) => { Tx.rollback(conn); Jdbc.close(conn); raiseFailure(failure) }
+        }
+
+    /// 値にした失敗を元の effect に戻す。
+    def raiseFailure(failure: DbFailure): a \ {TransientDbErr, DbErr} = match failure {
+        case DbError.Failure.Transient(transient) => TransientDbErr.raiseTransient(transient)
+        case DbError.Failure.Permanent(kind)      => DbError.raise(kind)
+    }
+
+    ///
+    /// 今の接続。Idle なら借りて開き、Open に進める。Broken からは呼ばれない（canRun が止める）。
+    ///
+    /// WhyNot: Broken(Some) の接続を返さないのは、失敗した Tx（aborted）で SQL を出しても 25P02 で失敗するだけで、
+    /// リクエストの行の失敗の種類が最初の物から書き換わるため。
+    ///
+    def currentConnection(handle: RequestTx.Handle): Connection \ {IO, TransientDbErr, DbErr} = match Ref.get(handle#state) {
+        case RequestTx.State.Open(conn)            => conn
+        case RequestTx.State.Broken(_, failure)    => raiseFailure(failure)
+        case RequestTx.State.Idle                  => {
+            let conn = (handle#openConnection)();
+            Ref.put(RequestTx.State.Open(conn), handle#state);
+            Ref.put(Some(System.currentTimeMillis()), handle#openedAt);
+            conn
+        }
+    }
+
+    ///
+    /// 最初の SQL で借りる SqlRead / SqlWrite の handler。リクエストの Tx の接続で流す。
+    ///
+    /// WhyNot: `Jdbc.runWithConnection` を使わないのは、接続を先に受ける形で、SQL を出さないフィールドまで借りてしまうため。
+    /// op の中で `currentConnection` を呼ぶ同じ形を手で書く。
+    ///
+    def onRequestTx(handle: RequestTx.Handle, thunk: Unit -> a \ ef): a \ (ef - {SqlRead, SqlWrite}) + IO =
+        run thunk() with handler SqlRead {
+            def fetch(sql, params, resume) = resume(DbError.runWithKind(() -> Jdbc.fetchRows(currentConnection(handle), sql, params)))
+        } with handler SqlWrite {
+            def execute(sql, params, resume)          = resume(DbError.runWithKind(() -> Jdbc.executeStatement(currentConnection(handle), sql, params)))
+            def executeReturning(sql, params, resume) = resume(DbError.runWithKind(() -> Jdbc.fetchRows(currentConnection(handle), sql, params)))
+        }
+
+    ///
+    /// 1 フィールドぶんをリクエストの Tx で走らせる。Broken なら走らせず Skipped。
+    /// handler の順は transact と同じ（遅延 SQL → CmsErr → Session → SQL の数え → Db.guard → 本体）で、再試行はしない（借りる時だけ）。
+    /// 結果で状態を進め（DB の失敗なら Broken）、SQL の数を observe でリクエストの行に戻す（Tx の数は閉じる時に 1 回）。
+    ///
+    /// WhyNot: 一時的な失敗をフィールド単位で再試行しないのは、同じ Tx の中で呼び直しても aborted のままで、
+    /// 別の接続で呼び直すと前のフィールドと snapshot が変わるため。
+    ///
+    pub def transactShared(handle: RequestTx.Handle, observe: Log.Fields -> Unit \ IO, actor: Actor, thunk: Unit -> a \ ef): RequestTx.Attempt[a] \ (ef - {Db, CmsErr, Session}) + IO =
+        match RequestTx.brokenBy(Ref.get(handle#state)) {
+            case Some(failure) => RequestTx.Attempt.Skipped(failure)
+            case None          => {
+                let statements = Ref.fresh(Static, 0);
+                let outcome = DbError.runWithFailure(() ->
+                    onRequestTx(handle, () ->
+                        CmsErr.runWithResult(() -> Session.runWith(actor, () -> counting(statements, () -> Db.guard(thunk))))));
+                Ref.put(RequestTx.afterField(Ref.get(handle#state), outcome), handle#state);
+                observe(Log.Fields.empty() |> Log.Fields.int("db.statements", Int32.toInt64(Ref.get(statements))));
+                RequestTx.Attempt.Ran(toApplicationResult(outcome))
+            }
+        }
+
+    ///
+    /// transactShared の結果を GraphQL のフィールドの結果に。走った物は `toFieldResult`（DB の失敗は Error の行）、
+    /// Broken の後に飛ばした物は Error の行を出さず INTERNAL の値だけ（最初の失敗が行になっている）。
+    ///
+    pub def toSharedFieldResult(requestId: Option[String], attempt: RequestTx.Attempt[Result[FieldError, a]]): Result[FieldError, a] \ Log = match attempt {
+        case RequestTx.Attempt.Ran(outcome)     => toFieldResult(requestId, outcome)
+        case RequestTx.Attempt.Skipped(failure) => Err(GraphqlErrors.fromApplicationFailure(requestId, ApplicationFailure.Infrastructure(failure)))
+    }
+
+    ///
+    /// リクエストの Tx を閉じる。Open は COMMIT、接続を持つ Broken は ROLLBACK、どちらも接続を返す。閉じた時刻を lastClosedAt に置く。
+    /// COMMIT の失敗は値で返す（読んだ値は有効なので応答は変えない。Tx.commit は失敗時に ROLLBACK 済み）。
+    ///
+    /// WhyNot: ROLLBACK と close を別の try にしないのは、Tx.rollback が失敗を握り潰して close まで届くため。
+    ///
+    pub def closeRequestTx(handle: RequestTx.Handle): RequestTx.Closed \ IO =
+        let state = Ref.get(handle#state);
+        let commitFailure = match state {
+            case RequestTx.State.Open(conn)            => { let committed = DbError.runWithFailure(() -> Tx.commit(conn)); Jdbc.close(conn); failureOf(committed) }
+            case RequestTx.State.Broken(Some(conn), _) => { Tx.rollback(conn); Jdbc.close(conn); None }
+            case _                                     => None
+        };
+        let now = System.currentTimeMillis();
+        if (RequestTx.transactionsOf(state) > 0i64) Ref.put(Some(now), handle#lastClosedAt) else ();
+        { outcome = RequestTx.outcomeOf(state),
+          transactions = RequestTx.transactionsOf(state),
+          brokenBy = RequestTx.brokenBy(state),
+          commitFailure = commitFailure,
+          heldMs = Ref.get(handle#openedAt) |> Option.map(openedAt -> now - openedAt) }
+
+    ///
+    /// リクエストの Tx を開いて body を走らせ、body が JVM の例外で抜けても必ず閉じてから再送出する。
+    /// 閉じた結果（db.transactions / db.tx.outcome / db.tx.held_ms、Broken の error.kind）を observe でリクエストの行に戻し、COMMIT の失敗は Error の行にする。
+    ///
+    /// WhyNot: 例外の腕で閉じないのは、catch の腕に effect の op を書けないため。例外を値にして閉じてから投げ直す。
+    ///
+    pub def withRequestTx(pool: Pool, scope: Option[ProjectId], actor: Actor, observe: Log.Fields -> Unit \ IO, lastClosedAt: Ref[Option[Int64], Static], body: RequestTx.Handle -> a \ IO): a \ {IO, Log} =
+        withRequestTxHandle(openRequestTx(pool, scope, actor, lastClosedAt), observe, body)
+
+    ///
+    /// `withRequestTx` の Handle を受ける形（DB 無しのテストがフェイクの Handle で閉じる道を見る）。
+    ///
+    pub def withRequestTxHandle(handle: RequestTx.Handle, observe: Log.Fields -> Unit \ IO, body: RequestTx.Handle -> a \ IO): a \ {IO, Log} =
+        let outcome = attemptBody(handle, body);
+        let closed = closeRequestTx(handle);
+        observe(closedFields(closed));
+        match closed#commitFailure {
+            case Some(failure) => Log.Fields.empty() |> LogFields.applicationFailure(ApplicationFailure.Infrastructure(failure)) |> Log.error("request transaction commit failed")
+            case None          => ()
+        };
+        match outcome {
+            case Ok(value)  => value
+            case Err(error) => throw error
+        }
+
+    /// COMMIT の結果の失敗だけ。
+    def failureOf(committed: Result[DbFailure, Unit]): Option[DbFailure] = match committed {
+        case Ok(())       => None
+        case Err(failure) => Some(failure)
+    }
+
+    /// body を走らせ、Throwable を値にする。
+    def attemptBody(handle: RequestTx.Handle, body: RequestTx.Handle -> a \ IO): Result[Throwable, a] \ IO =
+        try {
+            Ok(body(handle))
+        } catch {
+            case error: Throwable => Err(error)
+        }
+
+    /// 閉じた結果のリクエストの行の属性。error.kind は Broken にした最初の失敗の種類（あれば）。
+    def closedFields(closed: RequestTx.Closed): Log.Fields =
+        Log.Fields.empty()
+            |> Log.Fields.int("db.transactions", closed#transactions)
+            |> Log.Fields.str("db.tx.outcome", RequestTx.outcomeText(closed#outcome))
+            |> Log.Fields.opt("error.kind", closed#brokenBy |> Option.flatMap(LogFields.dbErrorKind))
+            |> fields -> match closed#heldMs {
+                case Some(ms) => fields |> Log.Fields.int("db.tx.held_ms", ms)
+                case None     => fields
+            }
 
 }

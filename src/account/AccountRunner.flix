@@ -17,8 +17,15 @@ mod AccountRunner {
         (context, f) -> runOne(pool, deps, context, f)
 
     def runOne(pool: Pool, deps: Deps, context: Context, f: Unit -> Result[FieldError, JavaValue.Boxed] \ AccountEff + IO): Result[FieldError, JavaValue.Boxed] \ IO =
-        AppEnv.runWithoutProject(deps, context#log, () ->
-            DbRunner.transactObserved(pool, None, context#observe, context#actor, f)
-                |> DbRunner.toFieldResult(LogFields.requestIdOf(context#log)))
+        AppEnv.runWithoutProject(deps, context#log, () -> transactField(pool, context, f))
+
+    ///
+    /// リクエストの Tx（読むだけの文書）があればそれで、無ければフィールドごとの Tx で f を走らせ、失敗を GraphQL のエラーに写す。
+    ///
+    def transactField(pool: Pool, context: Context, f: Unit -> Result[FieldError, JavaValue.Boxed] \ AccountEff + IO): Result[FieldError, JavaValue.Boxed] \ {IO, Log, IdGen, Time.Clock.Clock} =
+        match context#tx {
+            case Some(handle) => DbRunner.transactShared(handle, context#observe, context#actor, f) |> DbRunner.toSharedFieldResult(LogFields.requestIdOf(context#log))
+            case None         => DbRunner.transactObserved(pool, None, context#observe, context#actor, f) |> DbRunner.toFieldResult(LogFields.requestIdOf(context#log))
+        }
 
 }

@@ -119,7 +119,7 @@ mod GraphqlTestKit {
     ///
     /// (data, 先頭の errors[].message)。
     ///
-    def summarize(response: GraphqlResponse): (Value, Option[String]) =
+    pub def summarize(response: GraphqlResponse): (Value, Option[String]) =
         (response#data, firstMessage(response))
 
     ///

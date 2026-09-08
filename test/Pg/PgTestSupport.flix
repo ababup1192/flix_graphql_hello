@@ -257,14 +257,20 @@ mod PgTestSupport {
     def askScopedAs(pool: Pool, engine: Engine, scope: Option[ProjectId], built: Graphql.Engine, credential: Credential): String -> (Value, Option[String]) \ IO =
         queryText -> match authenticateObserved(pool, engine, scope, _ -> (), credential) {
             case Err(rejection) => (Value.Null, Some(Rejection.message(rejection)))
-            case Ok(found)      => GraphqlTestKit.askEngineWith(built, contextFor(found#actor, queryText), queryText)
+            case Ok(found)      => executeAs(pool, scope, built, found#actor, _ -> (), GraphqlTestKit.queryOnly(queryText)) |> GraphqlTestKit.summarize
         }
 
     ///
-    /// リクエストの Context（Main.runObserved と同じ形）。読むだけの文書なら先読みの写し付き。
+    /// 認証済みユーザーで文書を実行する（Main.executeDocument と同じ形）。読むだけの文書は 1 リクエスト 1 Tx（DbRunner.withRequestTx）の中で
+    /// 先読みの写し付き、mutation を含む文書はフィールドごとの Tx。Runner と Tx が observe に戻す属性（SQL と Tx の数）は observe に。Log の行は捨てる。
     ///
-    pub def contextFor(actor: Actor, queryText: String): Context \ IO =
-        if (Server.isReadOnly(queryText)) Context.withActor(actor) |> Context.withPreload else Context.withActor(actor)
+    pub def executeAs(pool: Pool, scope: Option[ProjectId], engine: Graphql.Engine, actor: Actor, observe: Log.Fields -> Unit \ IO, request: GraphqlRequest): GraphqlResponse \ IO =
+        let context = { observe = observe | Context.withActor(actor) };
+        if (Server.isReadOnly(request#queryText))
+            fst(Log.runWithList(() -> DbRunner.withRequestTx(pool, scope, actor, observe, Ref.fresh(Static, None), handle ->
+                Graphql.executeWith(engine, request, Context.withRequestTx(handle, Context.withPreload(context))))))
+        else
+            Graphql.executeWith(engine, request, context)
 
     ///
     /// この Credential で API（管理 API / Account API）に問い合わせる ask。

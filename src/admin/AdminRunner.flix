@@ -23,8 +23,15 @@ mod AdminRunner {
     ///
     def runOne(pool: Pool, deps: Deps, projectId: ProjectId, context: Context, f: Unit -> Result[FieldError, JavaValue.Boxed] \ AdminEff + IO): Result[FieldError, JavaValue.Boxed] \ IO =
         AppEnv.runWith(deps, context#log, projectId, () ->
-            Preloaded.runWith(context#preload, () ->
-                DbRunner.transactObserved(pool, Some(projectId), context#observe, context#actor, f))
-                |> DbRunner.toFieldResult(LogFields.requestIdOf(context#log)))
+            Preloaded.runWith(context#preload, () -> transactField(pool, projectId, context, f)))
+
+    ///
+    /// リクエストの Tx（読むだけの文書）があればそれで、無ければフィールドごとの Tx で f を走らせ、失敗を GraphQL のエラーに写す。
+    ///
+    def transactField(pool: Pool, projectId: ProjectId, context: Context, f: Unit -> Result[FieldError, JavaValue.Boxed] \ AdminEff + IO): Result[FieldError, JavaValue.Boxed] \ {IO, Log, IdGen, Tenant, ObjectStore, Time.Clock.Clock, Preloaded} =
+        match context#tx {
+            case Some(handle) => DbRunner.transactShared(handle, context#observe, context#actor, f) |> DbRunner.toSharedFieldResult(LogFields.requestIdOf(context#log))
+            case None         => DbRunner.transactObserved(pool, Some(projectId), context#observe, context#actor, f) |> DbRunner.toFieldResult(LogFields.requestIdOf(context#log))
+        }
 
 }
