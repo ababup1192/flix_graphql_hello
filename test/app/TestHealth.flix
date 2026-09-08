@@ -53,6 +53,19 @@ mod TestHealth {
             expected = cases |> List.map(snd),
             cases |> List.map(match (interval, _) -> Health.stallLimitMs(interval)))
 
+    /// /health を 503 にする理由（リクエストの行の reason）。DB に届かなければその文言が先、届いていれば止まった tick、どちらも無ければ無し。
+    @Test
+    def testHealthReasonTable(): Unit \ Assert =
+        let cases = List#{
+            ((Err("timeout"), None),                              Some("timeout")),
+            ((Err("timeout"), Some(Health.Stall.Jobs(1i64))),     Some("timeout")),
+            ((Ok(()), Some(Health.Stall.Watch(1i64))),            Some("watch stalled")),
+            ((Ok(()), None),                                      None)
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd),
+            cases |> List.map(match ((db, stall), _) -> Server.healthReason(db, stall)))
+
     /// 止まった tick は /health の reason とリクエストの行のキーになる。
     @Test
     def testStallNamesTable(): Unit \ Assert =

@@ -146,6 +146,8 @@ mod Server {
         // 仕事の tick と watch が止まっていないか（stall）。止まっていればリクエストの行に経過を積む
         let stall = (health#stall)();
         Option.forEach(found -> Observe.note(Log.Fields.empty() |> Log.Fields.int(Health.stallKey(found), Health.stallMs(found))), stall);
+        // 503 にする理由（DB に届かない・止まった tick）をリクエストの行にも
+        Option.forEach(reason -> Observe.note(Log.Fields.empty() |> Log.Fields.str("reason", reason)), healthReason(db, stall));
         // 本文に出す値（ワーカーのまとめ・HTTP の接続数・DB のプール）を読む
         let summary = (health#jobsSummary)();
         let connected = (health#connections)();
@@ -169,6 +171,16 @@ mod Server {
             "pendingDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#pendingDeliveries)),
             "failedDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedDeliveries)) });
         Map#{ "version" => Value.Str(version), "jobs" => jobs, "connections" => connections, "pool" => pool }
+
+    ///
+    /// /health を 503 にする理由。DB に届かなければその文言、届いていて tick が止まっていれば `jobs stalled` / `watch stalled`。200 なら None。
+    ///
+    pub def healthReason(db: Result[String, Unit], stall: Option[Health.Stall]): Option[String] =
+        match (db, stall) {
+            case (Err(message), _)     => Some(message)
+            case (Ok(()), Some(found)) => Some(Health.stallReason(found))
+            case (Ok(()), None)        => None
+        }
 
     ///
     /// /health の応答。DB に届いて stall が無ければ 200 と status ok、stall があれば 503 と reason、DB に届かなければ 503 と db の理由。

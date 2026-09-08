@@ -76,7 +76,7 @@ mod Shutdown {
     /// WhyNot: 2 つのスレッドから同時に来ても印で守らないのは、System.exit は 2 回目の呼び出しが 1 回目の終了を待つだけで、二重に走らないため。
     ///
     pub def crash(sink: Log.Sink, message: String, error: Throwable): Unit \ IO =
-        Log.runWith(sink, () -> Log.fatal(message, Log.exception(error, Log.Fields.empty())));
+        Log.runWith(sink, () -> Log.fatal(message, LogFields.exception(error, Log.Fields.empty())));
         System.exit(exitCode(Outcome.Crashed))
 
     ///

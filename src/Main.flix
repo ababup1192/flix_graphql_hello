@@ -238,7 +238,7 @@ def listenGuarded(listener: HttpServer.Listener, sink: Log.Sink, runtime: Runtim
 /// `-XX:+ExitOnOutOfMemoryError` を付けた JVM が使う番号（実測で 3）に寄せる。
 ///
 def died(error: Throwable): Unit \ {IO, Sys.Exit, Log} =
-    let fields = Log.exception(error, Log.Fields.empty());
+    let fields = LogFields.exception(error, Log.Fields.empty());
     if (JvmErrors.isFatal(error)) Log.fatal("main thread died", fields) else Log.error("main thread died", fields);
     Sys.Exit.exit(Shutdown.exitCode(Shutdown.Outcome.Crashed))
 
@@ -258,15 +258,42 @@ type alias Runtime = {
 
 ///
 /// 1 リクエスト（接続のスレッド）の入口。request id を決め、Log を入れ直して span（request.id / cf.ray / method / path）を張り、
-/// 処理の後にリクエストの行を 1 つ出す。
+/// 処理の後にリクエストの行を 1 つ出す。処理が JVM の例外で抜けたら、それまでに積んだ属性（credential.kind / project など）と
+/// 包みを剥がした例外を同じ行に出して 500 を返す。fatal（OutOfMemoryError）なら `request thread died` を出して終了コード 3 で終わる。
+///
+/// WhyNot: 例外を HttpServer の catch（onServed）に任せないのは、そこには request id も身元も無く、graphql-java が包んだ
+/// `CompletionException` の型しか残らないため（2026-09-08 の実機 E2E）。Log の handler を try の内側に入れる形で、ここで受ける。
+///
+/// WhyNot: catch の腕で行を出さないのは、腕の中の effect の op が JVM の VerifyError になるため。値で受けて外で出す。
 ///
 def dispatch(runtime: Runtime, request: HttpRequest): HttpResponse \ IO =
     let requestId = RequestId.resolve(request#headers);
     let span = LogFields.request(requestId, request);
-    run {
-        serveRequest(runtime, requestId, span, request)
-    } with Log.withFields(span)
-      with Log.runWith(runtime#sink)
+    let extra = Ref.fresh(Static, Log.Fields.empty());
+    let startedAt = System.currentTimeMillis();
+    let outcome = try {
+        Ok(run {
+            serveRequest(runtime, requestId, span, extra, startedAt, request)
+        } with Log.withFields(span)
+          with Log.runWith(runtime#sink))
+    } catch {
+        case error: Throwable => Err(error)
+    };
+    match outcome {
+        case Ok(response) => response
+        case Err(error)   => {
+            Log.runWith(runtime#sink, () -> Log.withFields(span, () -> emitCrashed(extra, startedAt, request, error)));
+            if (JvmErrors.isFatal(error)) Shutdown.crash(runtime#sink, "request thread died", error) else ();
+            { status = 500, headers = Nil, body = "" }
+        }
+    }
+
+/// 例外で抜けたリクエストの行。積んであった属性に 500 と所要時間と、包みを剥がした例外を足す。
+def emitCrashed(extra: Ref[Log.Fields, Static], startedAt: Int64, request: HttpRequest, error: Throwable): Unit \ {IO, Log} =
+    let fields = Ref.get(extra)
+        |> LogFields.response(500, System.currentTimeMillis() - startedAt, Int32.toInt64(Http.utf8Length(request#body)), 0i64)
+        |> LogFields.exception(error);
+    Log.emit({ severity = LogFields.responseSeverity(request#path, 500, true, fields), message = "request", fields = fields })
 
 ///
 /// middleware（request id → CORS → Host のプロジェクト → Credential）を通してルート表で振り分け、行の engine に合わせてエンジンを入れて実行する。
@@ -274,12 +301,10 @@ def dispatch(runtime: Runtime, request: HttpRequest): HttpResponse \ IO =
 /// extra に積み、リクエストの行に乗せる。
 ///
 /// WhyNot: リクエストの行を HttpServer の onServed でなくここで出すのは、onServed には request id も身元も GraphQL の結果も無く、
-/// スレッドを跨がずに届ける口が無いため。onServed は handle が投げた・読めなかった・書けなかった物だけを出す（logServed）。
+/// スレッドを跨がずに届ける口が無いため。onServed は読めなかった・書けなかった物だけを出す（logServed）。
 /// 所要時間はソケットの読み書きを含まない。
 ///
-def serveRequest(runtime: Runtime, requestId: String, span: Log.Fields, request: HttpRequest): HttpResponse \ {IO, Log} =
-    let extra = Ref.fresh(Static, Log.Fields.empty());
-    let startedAt = System.currentTimeMillis();
+def serveRequest(runtime: Runtime, requestId: String, span: Log.Fields, extra: Ref[Log.Fields, Static], startedAt: Int64, request: HttpRequest): HttpResponse \ {IO, Log} =
     // middleware の連鎖。内側（ルート表）から外側へ積む。リクエストは下から上の順に通る:
     // request id → CORS → Host のプロジェクト → Credential → ルート表
     let pipeline =
@@ -297,12 +322,12 @@ def serveRequest(runtime: Runtime, requestId: String, span: Log.Fields, request:
     response
 
 ///
-/// HttpServer が見た結果のうち、serveRequest が行を出せなかった物（handle が投げた・読めなかった 400 / 413 / 431・503 の reject・書けなかった）を出す。
-/// 正常に処理して書けた物は serveRequest が出しているので出さない。handle が投げた物が fatal（OutOfMemoryError。CompletionException の包みの中でも）なら
+/// HttpServer が見た結果のうち、serveRequest が行を出せなかった物（読めなかった 400 / 413 / 431・503 の reject・書けなかった・dispatch の外で投げた）を出す。
+/// 正常に処理して書けた物と handle の中の例外は dispatch が出しているので出さない。投げた物が fatal（OutOfMemoryError。CompletionException の包みの中でも）なら
 /// `request thread died` を出して終了コード 3 で終わる（Shutdown.crash）。
 ///
-/// WhyNot: request.id を X-Request-Id があった時にしか付けないのは、この経路は dispatch に入る前か例外で抜けた後で、
-/// dispatch が作った ULID を持って来られないため（応答ヘッダにも付いていない）。例外の行は同じスレッドの直前の行と時刻で突き合わせる。
+/// WhyNot: request.id を X-Request-Id があった時にしか付けないのは、この経路は dispatch に入る前か後で、
+/// dispatch が作った ULID を持って来られないため（応答ヘッダにも付いていない）。
 ///
 def logServed(sink: Log.Sink, served: HttpServer.Served): Unit \ IO =
     if (Option.isEmpty(served#failure) and served#method != "-") ()
@@ -317,7 +342,7 @@ def emitServed(served: HttpServer.Served): Unit \ {IO, Log} =
         |> Log.Fields.str("url.path", served#path)
         |> LogFields.response(served#status, served#elapsedMs, served#requestBytes, served#responseBytes);
     let fields = match served#failure {
-        case Some(error) => Log.exception(error, base)
+        case Some(error) => LogFields.exception(error, base)
         case None        => base
     };
     Log.emit({ severity = LogFields.responseSeverity(served#path, served#status, Option.nonEmpty(served#failure), base), message = "request", fields = fields })
@@ -348,7 +373,7 @@ def runRoute(runtime: Runtime, span: Log.Fields, extra: Ref[Log.Fields, Static],
         case Some(engine) =>
             // プロジェクトを決めて、同じ Tx で認証する（コンテンツ API の匿名の GET なら ETag 用の版も同じ Tx で読む）
             match locate(runtime, engine, projectSlug, routeRequest#credential, Server.wantsContentVersion(engine, routeRequest), observeInto(extra)) {
-                case Err(message)              => unavailable(message)
+                case Err(failure)              => unavailableDb(failure)
                 case Ok(None)                  => { let message = "プロジェクト '${projectSlug |> Option.getWithDefault("")}' がありません"; Observe.note(Log.Fields.empty() |> LogFields.rejection("no_project", message)); Server.notFound(message) }
                 case Ok(Some(located))         => {
                     // 認証の属性をリクエストの行と、リゾルバに渡す span に足す
@@ -383,7 +408,7 @@ type alias Located = { scope = Option[ProjectId], auth = Result[Rejection, Authe
 ///
 /// WhyNot: IdGen / Clock の handler を withTx の内側に入れないのは、handler の内側で飛んだ JVM の例外が Db.guard を素通りするため（docs/flix-conventions.md）。
 ///
-def locate(runtime: Runtime, engine: Engine, projectSlug: Option[String], credential: Credential, wantsVersion: Bool, observe: Log.Fields -> Unit \ IO): Result[String, Option[Located]] \ IO =
+def locate(runtime: Runtime, engine: Engine, projectSlug: Option[String], credential: Credential, wantsVersion: Bool, observe: Log.Fields -> Unit \ IO): Result[DbError.DbFailure, Option[Located]] \ IO =
     IdGen.runWithRandom(() -> Time.Clock.runWithIO(() ->
         DbRunner.withTxObserved(runtime#pool, None, observe, () ->
             match scopeOf(engine, runtime#defaultProject, projectSlug) {
@@ -394,7 +419,6 @@ def locate(runtime: Runtime, engine: Engine, projectSlug: Option[String], creden
                     Some({ scope = scope, auth = auth, contentVersion = contentVersionOf(scope, wantsVersion and Result.isOk(auth)) })
                 }
             })))
-        |> Result.mapErr(DbRunner.failureMessage)
 
 ///
 /// プロジェクトの版。要る時（コンテンツ API の匿名の GET で認証が通った）だけ 1 本読む。
@@ -421,6 +445,11 @@ def observeInto(extra: Ref[Log.Fields, Static], fields: Log.Fields): Unit \ IO =
 def unavailable(message: String): HttpResponse \ Observe =
     Observe.note(Log.Fields.empty() |> LogFields.rejection("unavailable", message));
     Server.unavailable(message)
+
+/// DB に届かなかった 503。理由に加えて失敗の種類（error.kind）をリクエストの行に積む（再試行の回数は withTxObserved が積む）。
+def unavailableDb(failure: DbError.DbFailure): HttpResponse \ Observe =
+    Observe.note(Log.Fields.empty() |> Log.Fields.str("error.code", "unavailable") |> LogFields.dbFailure(failure));
+    Server.unavailable(DbRunner.failureMessage(failure))
 
 ///
 /// エンジンで Graphql effect を本物の実行にし、時計を入れる。実行ごとに Context に span を入れ（Runner がリゾルバの中の行に付ける）、

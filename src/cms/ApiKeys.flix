@@ -70,14 +70,20 @@ mod ApiKeys {
 
     ///
     /// 生の鍵からこのプロジェクトの範囲を引く。hash で引いた後にプロジェクトが一致するかを確かめる（鍵がプロジェクトを決めない）。
-    /// 失効した物、期限の切れた物、他のプロジェクトの物、知らない物は None。
+    /// 失効した物は Revoked、期限の切れた物は Expired、他のプロジェクトの物と知らない物は Unknown。
     ///
     /// WhyNot: 証明を取らないのは、認証（Authentication.resolve）が認証済みユーザーを決める前に呼ぶ物で、まだ判定する主体が無いため。
     ///
-    pub def resolve(pepper: SecretHash.Pepper, key: String, projectId: ProjectId, nowMillis: Int64): Option[ResolvedApiKey] \ DbRead =
-        AuthQueries.findApiKeyByHash(SecretHash.hash(pepper, key))
-            |> Option.filter(row -> row#projectId == ProjectId.toInt64(projectId) and SecretHash.isAlive({ expiresAt = row#expiresAt, revokedAt = row#revokedAt }, nowMillis))
-            |> Option.flatMap(row -> ApiKeyScope.parse(row#scope, row#role) |> Option.map(scope -> { id = row#id, name = row#name, scope = scope }))
+    /// WhyNot: 他のプロジェクトの鍵を Unknown と分けないのは、応答は匿名で同じで、ログで分けても鍵の持ち主にしか意味が無く、
+    /// 総当たりと区別が要るのは「期限切れ・失効（正規の鍵が古い）」と「知らない」の 2 つだけのため。
+    ///
+    pub def resolve(pepper: SecretHash.Pepper, key: String, projectId: ProjectId, nowMillis: Int64): Result[ApiKeyRejection, ResolvedApiKey] \ DbRead =
+        match AuthQueries.findApiKeyByHash(SecretHash.hash(pepper, key)) |> Option.filter(row -> row#projectId == ProjectId.toInt64(projectId)) {
+            case None                                                               => Err(ApiKeyRejection.Unknown)
+            case Some(row) if Option.nonEmpty(row#revokedAt)                        => Err(ApiKeyRejection.Revoked)
+            case Some(row) if not SecretHash.isAlive({ expiresAt = row#expiresAt, revokedAt = None }, nowMillis) => Err(ApiKeyRejection.Expired)
+            case Some(row) => ApiKeyScope.parse(row#scope, row#role) |> Option.map(scope -> { id = row#id, name = row#name, scope = scope }) |> Option.toOk(ApiKeyRejection.Unknown)
+        }
 
     ///
     /// 最終使用時刻を書く。1 分に 1 回だけ（それより新しければ何もしない）。書いた行数を返す。

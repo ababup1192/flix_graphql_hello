@@ -34,31 +34,31 @@
 | `http.request.body.size` | int | リクエストの行 | UTF-8 のバイト数 |
 | `http.response.body.size` | int | リクエストの行 | UTF-8 のバイト数 |
 | `project` | string | リクエストの行、リゾルバの中の行、ワーカーの行 | プロジェクト slug（パス・Host・既定。ワーカーは拾った行の project_id から） |
-| `credential.kind` | string | リクエストの行、リゾルバの中の行 | `jwt` / `api-key` / `pat` / `preview` / `anonymous` / `invalid`。ヘッダから読んだ種類。認証（`Main.runRoute`）が知らない鍵・合わないプレビュートークン・死んだ PAT・壊れたログインの JWT を `invalid` に上書きする |
+| `credential.kind` | string | リクエストの行、リゾルバの中の行 | `jwt` / `api-key` / `pat` / `preview` / `anonymous` / `invalid`。ヘッダから読んだ種類。認証（`Main.runRoute`）が知らない鍵・合わないプレビュートークン・死んだ PAT・壊れたログインの JWT を `invalid` に上書きする。鍵の時は理由が `error.code`（`api_key_unknown` / `api_key_expired` / `api_key_revoked`）に付く（HTTP は 200 のまま） |
 | `user.id` | string | リクエストの行、リゾルバの中の行 | 本人の public_id（email は出さない）。認証（リクエストに 1 回）が決め、リゾルバの span にも写す |
 | `api_key.name` | string | リクエストの行、リゾルバの中の行 | 鍵の名前（鍵は出さない） |
 | `graphql.operation.type` | string | リクエストの行 | `query` / `mutation` / `subscription` |
 | `graphql.operation.name` | string | リクエストの行 | operationName か文書の操作の名前。無ければ付かない |
 | `graphql.error_codes` | string[] | リクエストの行 | `errors[].extensions.code` の一覧（重複無し）。graphql-java の検証エラーは `classification`。認証に落ちたリクエスト（path 無しの 1 件）もここ。業務エラーの率がこれで見える |
-| `exception.type` | string | Error の行 | `Log.exception` |
+| `exception.type` | string | Error の行 | `LogFields.exception`。graphql-java が包む `CompletionException` は剥がして中の例外の型 |
 | `exception.message` | string | Error の行 | 200 字。`Detail:` 以降は落とす（PG が行の値を入れるため） |
 | `exception.stacktrace` | string | Error の行 | Flix の frame だけ 8 つ |
-| `error.code` | string | 業務エラーの行、リゾルバの失敗の行、4xx のリクエストの行、MCP の error の行 | 業務エラーと認証の断り（MCP の 401）は GraphQL の `extensions.code` と同じ綴り（`UNAUTHENTICATED` / `REQUIRES_LOGIN` / `FORBIDDEN`）。4xx は短い固定の語（`no_route` / `method_not_allowed` / `unsupported_media_type` / `bad_json` / `bad_request` / `jobs_token` / `no_project` / `unavailable`、MCP の `origin` / `protocol_version` / `preview_token`）。MCP の tools/call が isError なら content の `code` |
+| `error.code` | string | 業務エラーの行、リゾルバの失敗の行、4xx / 503 のリクエストの行、MCP の error の行、鍵が検証に落ちた行 | 業務エラーと認証の断り（MCP の 401）は GraphQL の `extensions.code` と同じ綴り（`UNAUTHENTICATED` / `REQUIRES_LOGIN` / `FORBIDDEN`）。4xx / 503 は短い固定の語（`no_route` / `method_not_allowed` / `unsupported_media_type` / `bad_json` / `bad_request` / `jobs_token` / `no_project` / `unavailable`、MCP の `origin` / `protocol_version` / `preview_token`）。鍵が検証に落ちた 200 の行は `api_key_unknown` / `api_key_expired` / `api_key_revoked`。MCP の tools/call が isError なら content の `code` |
 | `error.message` | string | 起動の失敗、ワーカーの失敗、リゾルバの失敗、4xx のリクエストの行、繋がらなかった Webhook の行 | 人が読む文。4xx は応答本文と同じ文、Webhook は「接続できませんでした: java.net.ConnectException」のような文 |
-| `error.kind` | string | リゾルバの失敗の行 | DB の失敗の種類（sqlfx の TransientDbErr の名前 `deadlock` / `timeout` / `connectionLost` と、失敗した SQL の後の COMMIT が弾かれた `rollback`）。再試行で枯渇した物は最後の失敗の種類。「DB が落ちた」と「DB が遅い」を読み分ける。制約違反などには付かない |
-| `db.retries` | int | リクエストの行 | 一時的な失敗で呼び直した回数。1 以上の時だけ。リクエストの中の Tx 全部の和 |
+| `error.kind` | string | リゾルバの失敗の行、DB に届かなかった 503 のリクエストの行 | DB の失敗の種類（sqlfx の TransientDbErr の名前 `deadlock` / `timeout` / `connectionLost` と、失敗した SQL の後の COMMIT が弾かれた `rollback`）。再試行で枯渇した物は最後の失敗の種類。「DB が落ちた」と「DB が遅い」を読み分ける。制約違反などには付かない |
+| `db.retries` | int | リクエストの行 | 一時的な失敗で呼び直した回数。1 以上の時だけ。リクエストの中の Tx 全部（認証と版を読む Tx を含む）の和。DB が落ちている時の 503 の行にも付く |
 | `db.statements` | int | リクエストの行 | そのリクエストで出した SQL の数（fetch / execute / executeReturning を 1 と数える。RLS の印と認証の SQL を含む）。Tx ごとに DbRunner が observe で戻し（認証の Tx も Runner の Tx も）、受ける側（`LogFields.mergeCounts`）が足す。上限は `test/Pg/TestQueryBudgetPg` |
 | `db.transactions` | int | リクエストの行 | そのリクエストで張った Tx の数。読むだけの文書は認証の 1 つ + リクエストの Tx 1 つ（接続を借りた時だけ）。mutation を含む文書は認証の 1 つ + ルートフィールドと入れ子のフィールドの数（`DbRunner.transact` を呼んだ回数。SQL を出さなかった物も数える） |
 | `db.tx.outcome` | string | リクエストの行（読むだけの文書） | リクエストの Tx の結末。`committed` / `rolled_back`（DB の失敗で Broken。残りのフィールドは INTERNAL）/ `none`（SQL を出さなかった。接続を借りていない） |
 | `db.tx.held_ms` | int | リクエストの行（読むだけの文書で接続を借りた物） | 接続を借りてから COMMIT / ROLLBACK して返すまでのミリ秒。応答の書き出しは含まない。プールの本数の目安に使う（`deploy/README.md`） |
-| `db.pool.waiting` | int | リクエストの行 | DB の接続プールを借りるのを待っているスレッドの数。Runner の入口で 1 回読み、1 以上の時だけ |
+| `db.pool.waiting` | int | リクエストの行 | DB の接続プールを借りるのを待っているスレッドの数。Tx を張る前（認証と版を読む Tx、Runner の Tx）に読み、1 以上の時だけ。同じリクエストの中では一番大きい値（304 の道のように Runner を通らない物にも付く） |
 | `db.pool.active` | int | リクエストの行、`self-heal: exiting` の行 | 借りられている接続の数。リクエストの行には `db.pool.waiting` が付く時だけ |
 | `db.pool.idle` | int | `self-heal: exiting` の行 | 空いている接続の数 |
 | `db.pool.total` | int | `self-heal: exiting` の行 | 開いている接続の数（active + idle） |
 | `db.pool.max` | int | `self-heal: exiting` の行 | プールの上限 |
 | `jobs.stalled_ms` | int | `/health` のリクエストの行 | 仕事の周が最後に回ってからの経過。上限（30 秒）を超えて 503 にした時だけ |
 | `watch.stalled_ms` | int | `/health` のリクエストの行 | 自己回復の見張りの周が最後に回ってからの経過。上限（30 秒）を超えて 503 にした時だけ |
-| `reason` | string | `self-heal: exiting` の行 | 自分で終わると決めた理由（何 ms 届かなかったか） |
+| `reason` | string | `self-heal: exiting` の行、`/health` の 503 のリクエストの行 | 自分で終わると決めた理由（何 ms 届かなかったか）。`/health` は応答の `db`（DB に届かない理由）か `reason`（`jobs stalled` / `watch stalled`）と同じ文 |
 | `origin` | string | 403 のリクエストの行（MCP） | 断った `Origin` の scheme + host（パスやクエリは無い） |
 | `entity` | string | 業務エラーの行 | `extensions.entity` と同じ |
 | `id` | string | 業務エラーの行、予約公開の行、MCP のリクエストの行、プレビューの span | entry の id など。連番は出さない。MCP は引数の id、無ければ結果の id（create_entry で作った物） |
@@ -92,7 +92,7 @@
 ## 出る場所と span
 
 - リクエスト: 接続のスレッドの入口（`Main.dispatch`）で `Log.runWith(sink)` を入れ直し、`request.id` / `cf.ray` / method / path の span を張る。
-  リクエストの行は処理の後に `Main.serveRequest` が出す。Route の handler と 404 / 405 の分岐は `Observe` effect（`Observe.note`）で属性（`mcp.*`、4xx の `error.code` / `error.message`）を積み、`serveRequest` が `extra` に受ける。HttpServer が見た失敗（handle の例外、読めない 400 / 413 / 431、混雑の 503、書けなかった）は `onServed` から別に出る（413 / 431 はヘッダまで読めているので method / path と、`X-Request-Id` があれば `request.id` が付く。ULID は作らない）
+  リクエストの行は処理の後に `Main.serveRequest` が出す。Route の handler と 404 / 405 の分岐は `Observe` effect（`Observe.note`）で属性（`mcp.*`、4xx の `error.code` / `error.message`）を積み、`serveRequest` が `extra` に受ける。処理が JVM の例外で抜けた物も `Main.dispatch` が同じ span と `extra` で出す（500、`exception.*` は包みを剥がした例外）。HttpServer が見た失敗（読めない 400 / 413 / 431、混雑の 503、書けなかった）は `onServed` から別に出る（413 / 431 はヘッダまで読めているので method / path と、`X-Request-Id` があれば `request.id` が付く。ULID は作らない）
 - リゾルバの中: Runner が `deps#log` で入れ直す（graphql-java の Java コールバックの中なので dispatch の handler は届かない）。span は `Main.runRoute` が request の span に `credential.kind` / `project` と認証の属性（`user.id` / `api_key.name` / 検証に落ちた印）を merge した物。今出るのは DB の失敗（`field failed`）だけ。
   Runner が数えた SQL と Tx の数は Context の `observe` でリクエストの行に戻す（Ref を閉じ込めた関数の値。Java のコールバックの中から effect は届かない）
 - ワーカー: `BackgroundJobs.runForever` が周ごとに入れ直す。外部トリガー `POST /jobs/tick` はリクエストの span の中で出る

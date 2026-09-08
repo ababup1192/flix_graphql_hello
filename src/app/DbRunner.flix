@@ -62,6 +62,7 @@ mod DbRunner {
 
     ///
     /// 待ちが出ている時だけ、プールの数字をリクエストの行に。枯渇（待ち行列）を後から数えられるようにする。
+    /// Runner の Tx と、認証と版を読む Tx（withTxObserved）の両方が呼び、受ける側（LogFields.mergeCounts）は大きい方を残す。
     ///
     /// WhyNot: 待ちが 0 の時も出さないのは、全リクエストに 2 つキーが増えて、平常時のログが太るため。
     ///
@@ -174,13 +175,19 @@ mod DbRunner {
         withTxObserved(pool, scope, _ -> (), thunk)
 
     ///
-    /// `withTx` に加えて、出した SQL の数と Tx の数（db.statements / db.transactions）を observe でリクエストの行に戻す。
+    /// `withTx` に加えて、借り待ち（db.pool.*。待ちがある時だけ）、再試行した回数（db.retries。1 以上の時だけ）、
+    /// 出した SQL の数と Tx の数（db.statements / db.transactions）を observe でリクエストの行に戻す。
+    /// Runner を通らない道（304 の道、DB が落ちている時の 503）でも、リクエストの行に同じキーが揃う。
     ///
     pub def withTxObserved(pool: Pool, scope: Option[ProjectId], observe: Log.Fields -> Unit \ IO, thunk: Unit -> a \ ef): Result[DbFailure, a] \ (ef - Db) + IO =
+        let counter = Ref.fresh(Static, 0);
         let statements = Ref.fresh(Static, 0);
+        // 借りる前に、待ちが出ていればプールの数字をリクエストの行に
+        notePool(observe, pool);
         // retry → RLS の印付き Tx → SQL の数え → JVM の例外の catch（Db.guard）→ 本体、の順に包む（業務エラーと Session は無し）
-        let outcome = retrying(() -> TenantTx.withLazyTx(pool, scope, () -> counting(statements, () -> Db.guard(thunk))));
-        // SQL の数をリクエストの行に
+        let outcome = retryWith(counter, () -> TenantTx.withLazyTx(pool, scope, () -> counting(statements, () -> Db.guard(thunk))));
+        // 再試行の回数と SQL の数をリクエストの行に
+        noteRetries(observe, Ref.get(counter));
         noteStatements(observe, Ref.get(statements));
         outcome
 

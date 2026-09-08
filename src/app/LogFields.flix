@@ -14,6 +14,8 @@ mod LogFields {
     use DbError.Failure
     use DbError.TransientKind
 
+    import java.lang.Throwable
+
     // ---- リクエスト ----
 
     ///
@@ -57,10 +59,30 @@ mod LogFields {
         fields |> Fields.str("credential.kind", "invalid")
 
     ///
+    /// API キーが検証に落ちた印と理由。credential.kind = invalid に加えて error.code（`api_key_unknown` / `api_key_expired` / `api_key_revoked`）と文言。
+    /// 鍵は匿名に落として HTTP は 200 のままなので、総当たりと期限切れを行で読み分けるのはここだけ。
+    ///
+    pub def rejectedApiKey(why: ApiKeyRejection, fields: Fields): Fields =
+        fields |> rejectedCredential |> rejection(apiKeyRejectionCode(why), ApiKeyRejection.describe(why))
+
+    /// API キーの断りの error.code。
+    def apiKeyRejectionCode(why: ApiKeyRejection): String = match why {
+        case ApiKeyRejection.Unknown => "api_key_unknown"
+        case ApiKeyRejection.Expired => "api_key_expired"
+        case ApiKeyRejection.Revoked => "api_key_revoked"
+    }
+
+    ///
     /// 認証に落ちた理由（Rejection）を 401 の行に。error.code は GraphQL の extensions.code と同じ綴り（UNAUTHENTICATED など）、error.message は応答の文。
     ///
     pub def rejectedAuth(found: Rejection, fields: Fields): Fields =
         fields |> rejection(ErrorCode.text(Rejection.code(found)), Rejection.message(found))
+
+    ///
+    /// JVM の例外を exception.* に。CompletionException のような包みは剥がして中の例外を写す（JvmErrors.unwrap）。
+    ///
+    pub def exception(error: Throwable, fields: Fields): Fields \ IO =
+        Log.exception(JvmErrors.unwrap(error), fields)
 
     ///
     /// 応答の行。ステータス・所要時間・ボディの大きさ。
@@ -166,13 +188,17 @@ mod LogFields {
     /// Tx の失敗の属性。DB の失敗は error.code = INTERNAL と種類（error.kind）と文言、業務エラーは `failure` と同じ。
     ///
     pub def applicationFailure(found: ApplicationFailure, fields: Fields): Fields = match found {
-        case ApplicationFailure.Infrastructure(dbFailure) =>
-            fields
-                |> Fields.str("error.code", ErrorCode.text(ErrorCode.Internal))
-                |> Fields.opt("error.kind", dbErrorKind(dbFailure))
-                |> Fields.str("error.message", DbRunner.failureMessage(dbFailure))
-        case ApplicationFailure.Domain(cmsFailure) => failure(cmsFailure, fields)
+        case ApplicationFailure.Infrastructure(failure) => fields |> Fields.str("error.code", ErrorCode.text(ErrorCode.Internal)) |> dbFailure(failure)
+        case ApplicationFailure.Domain(cmsFailure)        => failure(cmsFailure, fields)
     }
+
+    ///
+    /// DB の失敗の種類（error.kind。分類できない物は付かない）と文言。Runner を通らない Tx（認証と版を読む withTx）の 503 の行と、リゾルバの失敗の行が使う。
+    ///
+    pub def dbFailure(failure: Failure, fields: Fields): Fields =
+        fields
+            |> Fields.opt("error.kind", dbErrorKind(failure))
+            |> Fields.str("error.message", DbRunner.failureMessage(failure))
 
     // ---- DB の数 ----
 
@@ -182,17 +208,26 @@ mod LogFields {
     def countedKeys(): Set[String] = Set#{ "db.statements", "db.transactions", "db.retries" }
 
     ///
-    /// observe で戻った属性を今の属性に合わせる。数えるキー（db.statements / db.transactions / db.retries）は両方の int の和、それ以外は incoming が勝つ。
+    /// プールの数字のキー。Tx を張るたびに読むので、足さずに最大を残す（借り待ちが一番混んでいた時の数）。
+    ///
+    def peakKeys(): Set[String] = Set#{ "db.pool.waiting", "db.pool.active" }
+
+    ///
+    /// observe で戻った属性を今の属性に合わせる。数えるキー（db.statements / db.transactions / db.retries）は両方の int の和、
+    /// プールの数字（db.pool.waiting / db.pool.active）は大きい方、それ以外は incoming が勝つ。
     ///
     /// WhyNot: Fields.merge（後勝ち）をそのまま使わないのは、フィールドごとに Tx を張る Runner の値が最後の 1 フィールドの数に上書きされ、
     /// リクエスト全体の SQL の数が読めなくなるため。
     ///
+    /// WhyNot: プールの数字まで足さないのは、待ちの数は Tx ごとの瞬間の値で、足すと居ないスレッドを数えるため。
+    ///
     pub def mergeCounts(incoming: Fields, existing: Fields): Fields =
         Map.foldLeftWithKey((acc, key, value) -> Map.insert(key, summed(key, value, Map.get(key, existing)), acc), existing, incoming)
 
-    /// 数えるキーで両方 int なら和。それ以外は incoming の値。
+    /// 数えるキーで両方 int なら和、プールのキーなら最大。それ以外は incoming の値。
     def summed(key: String, incoming: Value, existing: Option[Value]): Value = match (existing, incoming) {
         case (Some(Value.Int(before)), Value.Int(added)) if Set.memberOf(key, countedKeys()) => Value.Int(before + added)
+        case (Some(Value.Int(before)), Value.Int(seen))  if Set.memberOf(key, peakKeys())    => Value.Int(Int32.max(before, seen))
         case _ => incoming
     }
 

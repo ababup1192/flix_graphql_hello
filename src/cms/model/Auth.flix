@@ -391,3 +391,24 @@ mod PatRejection {
         case PatRejection.Revoked => "PAT は失効しています"
     }
 }
+
+///
+/// API キーで来たが主体になれなかった理由。認証は匿名に落とす（公開プロジェクトは鍵無しでも読める）ので、応答には出ずログの行にだけ残る。
+///
+pub enum ApiKeyRejection with Eq, Order, ToString {
+    /// hash に合う行が無い（知らない鍵、pepper が違う、他のプロジェクトの鍵）
+    case Unknown
+    /// expires_at を過ぎた
+    case Expired
+    /// 失効済み
+    case Revoked
+}
+
+mod ApiKeyRejection {
+    /// 人が読む理由。
+    pub def describe(rejection: ApiKeyRejection): String = match rejection {
+        case ApiKeyRejection.Unknown => "API キーが見つかりません"
+        case ApiKeyRejection.Expired => "API キーが期限切れです"
+        case ApiKeyRejection.Revoked => "API キーは失効しています"
+    }
+}

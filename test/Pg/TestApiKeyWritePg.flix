@@ -126,12 +126,12 @@ mod TestApiKeyWritePg {
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1", "k2"}, () -> PgTestSupport.asOwner(() -> {
             let forever = ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, { name = "ci", scope = ApiKeyScope.Write(Role.Owner), expiresAt = None }, now);
             let untilFarFuture = ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, { name = "short", scope = ApiKeyScope.Read, expiresAt = Some(Timestamp.fromEpochMillis(farFuture)) }, now);
-            let summary = found -> found |> Option.map(key -> (key#name, key#scope));
+            let summary = found -> found |> Result.map(key -> (key#name, key#scope));
             (ApiKeys.resolve(pepper, forever#key, ProjectId.default(), farFuture) |> summary,
              ApiKeys.resolve(pepper, untilFarFuture#key, ProjectId.default(), farFuture - 1i64) |> summary,
              ApiKeys.resolve(pepper, untilFarFuture#key, ProjectId.default(), farFuture) |> summary)
         })));
-        Assert.assertEq(expected = Ok(Ok((Some(("ci", ApiKeyScope.Write(Role.Owner))), Some(("short", ApiKeyScope.Read)), None))), result)
+        Assert.assertEq(expected = Ok(Ok((Ok(("ci", ApiKeyScope.Write(Role.Owner))), Ok(("short", ApiKeyScope.Read)), Err(ApiKeyRejection.Expired)))), result)
 
     ///
     /// 使用時刻は 60 秒の粒度。続けて 2 回 touch すると 1 回目は 1 行、2 回目は 0 行。

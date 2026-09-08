@@ -10,6 +10,10 @@ mod TestLogFields {
     use DbError.Failure
     use DbError.TransientKind
 
+    import java.lang.RuntimeException
+    import java.lang.Throwable
+    import java.util.concurrent.CompletionException
+
     /// ヘッダ付きの GET。
     def get(path: String, headers: List[(String, String)]): HttpRequest =
         { version = "HTTP/1.1", method = "GET", path = path, headers = headers, body = "" }
@@ -98,6 +102,18 @@ mod TestLogFields {
         Assert.assertEq(
             expected = List#{("credential.kind", Value.Str("invalid"))},
             Fields.empty() |> Fields.str("credential.kind", "api-key") |> LogFields.rejectedCredential |> Map.toList)
+
+    /// API キーが検証に落ちた印は credential.kind = invalid に加えて、失効・期限切れ・未知の error.code と文言。
+    @Test
+    def testRejectedApiKeyTable(): Unit \ Assert =
+        let cases = List#{
+            (ApiKeyRejection.Unknown, List#{("credential.kind", Value.Str("invalid")), ("error.code", Value.Str("api_key_unknown")), ("error.message", Value.Str("API キーが見つかりません"))}),
+            (ApiKeyRejection.Expired, List#{("credential.kind", Value.Str("invalid")), ("error.code", Value.Str("api_key_expired")), ("error.message", Value.Str("API キーが期限切れです"))}),
+            (ApiKeyRejection.Revoked, List#{("credential.kind", Value.Str("invalid")), ("error.code", Value.Str("api_key_revoked")), ("error.message", Value.Str("API キーは失効しています"))})
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd),
+            cases |> List.map(match (rejection, _) -> Fields.empty() |> LogFields.rejectedApiKey(rejection) |> Map.toList))
 
     /// 認証に落ちた 401 の行の error.code は GraphQL の extensions.code と同じ綴り（小文字の unauthenticated ではない）。
     @Test
@@ -221,5 +237,46 @@ mod TestLogFields {
         Assert.assertEq(
             expected = Fields.empty() |> Fields.int("db.statements", 10i64) |> Fields.int("db.transactions", 2i64) |> Fields.int("db.retries", 1i64) |> Fields.str("credential.kind", "invalid"),
             LogFields.mergeCounts(incoming, existing))
+
+    /// プールの数字（db.pool.waiting / db.pool.active）は Tx ごとの瞬間の値なので、足さずに大きい方を残す（認証の Tx で 5、Runner の Tx で 2 なら 5）。
+    @Test
+    def testMergeCountsKeepsPeakOfPool(): Unit \ Assert =
+        let existing = Fields.empty() |> Fields.int("db.pool.waiting", 5i64) |> Fields.int("db.pool.active", 10i64);
+        let incoming = Fields.empty() |> Fields.int("db.pool.waiting", 2i64) |> Fields.int("db.pool.active", 10i64);
+        Assert.assertEq(
+            expected = (Fields.empty() |> Fields.int("db.pool.waiting", 5i64) |> Fields.int("db.pool.active", 10i64),
+                        Fields.empty() |> Fields.int("db.pool.waiting", 5i64) |> Fields.int("db.pool.active", 10i64)),
+            (LogFields.mergeCounts(incoming, existing), LogFields.mergeCounts(existing, incoming)))
+
+    // ---- DB に届かなかった 503 と JVM の例外 ----
+
+    /// DB の失敗の写し: 種類が分かる物は error.kind、分からない物（制約違反）は付かない。文言は failureMessage。
+    @Test
+    def testDbFailureTable(): Unit \ Assert =
+        let cases = List#{
+            (Failure.Permanent(DbErrorKind.RetryExhausted(TransientKind.ConnectionLost("refused"), 3)), Some(Value.Str("connectionLost"))),
+            (Failure.Transient(TransientKind.Timeout(2001)),                                       Some(Value.Str("timeout"))),
+            (Failure.Permanent(DbErrorKind.Rollback),                                                  Some(Value.Str("rollback"))),
+            (Failure.Permanent(DbErrorKind.UniqueViolation("k")),                                      None)
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(match (_, kind) -> (kind, true)),
+            cases |> List.map(match (failure, _) -> {
+                let fields = Fields.empty() |> LogFields.dbFailure(failure);
+                (Map.get("error.kind", fields), Map.get("error.message", fields) |> Option.flatMap(Value.asStr) |> Option.exists(String.startsWith(prefix = "database error: ")))
+            }))
+
+    /// 例外の写しは包み（CompletionException）を剥がした中の例外の型と文言。包みが無ければそのまま。
+    @Test
+    def testExceptionUnwrapsTable(): Unit \ {Assert, IO} =
+        let plain: Throwable = checked_cast(new RuntimeException("boom"));
+        let wrapped: Throwable = checked_cast(new CompletionException(plain));
+        let cases = List#{ (plain, "java.lang.RuntimeException"), (wrapped, "java.lang.RuntimeException") };
+        Assert.assertEq(
+            expected = cases |> List.map(match (_, kind) -> (Some(Value.Str(kind)), Some(Value.Str("boom")))),
+            cases |> List.map(match (error, _) -> {
+                let fields = Fields.empty() |> LogFields.exception(error);
+                (Map.get("exception.type", fields), Map.get("exception.message", fields))
+            }))
 
 }

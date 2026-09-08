@@ -7,6 +7,8 @@ mod JvmErrors {
     import java.lang.StackOverflowError
     import java.lang.Throwable
     import java.lang.VirtualMachineError
+    import java.util.concurrent.CompletionException
+    import java.util.concurrent.ExecutionException
 
     ///
     /// 飲み込んではいけない物か。VirtualMachineError（OutOfMemoryError / InternalError）は true。cause の連鎖のどこかにあれば true。
@@ -47,10 +49,36 @@ mod JvmErrors {
         }
 
     ///
-    /// ログに出す文言。message があればそれ、null ならクラス名（VerifyError は message が null の事がある）。
+    /// 包みを剥がした本当の例外。CompletionException / ExecutionException（graphql-java と Future が投げ返す時の包み）は cause を辿る。
+    /// cause が無ければそのまま。
+    ///
+    /// WhyNot: 包みのままログに出さないのは、exception.type が全部 `CompletionException` になり、message も
+    /// `java.lang.OutOfMemoryError: …` のように cause の文言を前置きで抱えた形になって、種類で集計できないため。
+    ///
+    pub def unwrap(error: Throwable): Throwable \ IO =
+        unwrapWithin(error, 0)
+
+    def unwrapWithin(error: Throwable, depth: Int32): Throwable \ IO =
+        let cause = error.getCause();
+        if (not isWrapper(error) or Object.isNull(cause) or depth >= maxCauseDepth()) error
+        else unwrapWithin(cause, depth + 1)
+
+    /// 中の例外を包んで投げ返すだけの物か。
+    def isWrapper(error: Throwable): Bool \ IO =
+        try {
+            throw error
+        } catch {
+            case _: CompletionException => true
+            case _: ExecutionException  => true
+            case _: Throwable           => false
+        }
+
+    ///
+    /// ログに出す文言。包みを剥がした例外の message があればそれ、null ならクラス名（VerifyError は message が null の事がある）。
     ///
     pub def describe(error: Throwable): String \ IO =
-        let message: String = error.getMessage();
-        if (Object.isNull(message)) error.getClass().getName() else message
+        let actual = unwrap(error);
+        let message: String = actual.getMessage();
+        if (Object.isNull(message)) actual.getClass().getName() else message
 
 }

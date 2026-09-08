@@ -3,7 +3,7 @@
 /// （初回ログインの users の作成と招待の受け入れが同じ Tx に入る。API キーの解決と membership の検索はプロジェクトの RLS の印の下で行う）。
 ///
 /// - Bearer: 検証済みの本人（ログインの JWT）。初回なら users を作る
-/// - ApiKey: pepper があれば hash で引き、このプロジェクトの生きた鍵なら scope の認証済みユーザー。それ以外は Anonymous（log に credential.kind = invalid の印）
+/// - ApiKey: pepper があれば hash で引き、このプロジェクトの生きた鍵なら scope の認証済みユーザー。それ以外は Anonymous（log に credential.kind = invalid の印と、失効・期限切れ・未知の理由）
 /// - PersonalToken: hash で引き、生きていれば本人（read なら読むだけ）。期限切れ・失効・知らない物は Rejection（黙って匿名にしない）
 /// - Preview: pepper があれば署名と期限とプロジェクトを確かめ、合えばその entry のプレビュー。それ以外は Anonymous（同じ印）
 /// - Missing: Anonymous
@@ -127,9 +127,10 @@ mod Authentication {
             let user = resolveUser(deps, issuer, subject, email, name);
             Ok(resolved(Accounts.actorFor(user, projectId, Login.Interactive), Usage.NotRecorded, Log.Fields.empty() |> LogFields.user(user)))
         case Credential.ApiKey(raw) =>
-            Ok(deps#auth#pepper |> Option.flatMap(pepper -> ApiKeys.resolve(pepper, raw, projectId, Time.Clock.now()))
-                |> Option.map(found -> resolved(Actor.ApiKey(found#name, found#scope), Usage.ApiKeyRow(found#id, projectId), Log.Fields.empty() |> LogFields.apiKey(found#name)))
-                |> Option.getWithDefault(rejected()))
+            Ok(match deps#auth#pepper |> Option.toOk(ApiKeyRejection.Unknown) |> Result.flatMap(pepper -> ApiKeys.resolve(pepper, raw, projectId, Time.Clock.now())) {
+                case Ok(found)      => resolved(Actor.ApiKey(found#name, found#scope), Usage.ApiKeyRow(found#id, projectId), Log.Fields.empty() |> LogFields.apiKey(found#name))
+                case Err(rejection) => rejectedApiKey(rejection)
+            })
         case Credential.PersonalToken(raw) =>
             resolvePersonalToken(deps, raw, (user, login) -> Accounts.actorFor(user, projectId, login))
         case Credential.Preview(raw) =>
@@ -201,5 +202,8 @@ mod Authentication {
 
     /// 付いていた鍵やトークンが知らない物・死んだ物だった時の匿名。ログに印を残す。
     def rejected(): Resolved = resolved(Actor.Anonymous, Usage.NotRecorded, LogFields.rejectedCredential(Log.Fields.empty()))
+
+    /// API キーが失効・期限切れ・知らない物だった時の匿名。印に加えて理由を残す。
+    def rejectedApiKey(rejection: ApiKeyRejection): Resolved = resolved(Actor.Anonymous, Usage.NotRecorded, LogFields.rejectedApiKey(rejection, Log.Fields.empty()))
 
 }

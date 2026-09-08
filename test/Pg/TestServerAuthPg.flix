@@ -75,7 +75,7 @@ mod TestServerAuthPg {
 
     ///
     /// 認証がリクエストの行に積む属性と、それで決まる行の重さ:
-    ///   知らない鍵                → credential.kind = invalid、200 でも Warn
+    ///   知らない鍵                → credential.kind = invalid と理由（error.code = api_key_unknown）、200 でも Warn
     ///   editor の鍵              → api_key.name = ci、Info
     ///   死んだ PAT（失効）        → credential.kind = invalid、UNAUTHENTICATED、Warn
     ///   owner（ログインの JWT） → user.id、Info
@@ -105,7 +105,7 @@ mod TestServerAuthPg {
         let (ownerPublicId, found) = outcome;
         Assert.assertEq(
             expected = List#{
-                (List#{("credential.kind", Value.Str("invalid"))}, Log.Severity.Warn),
+                (List#{("credential.kind", Value.Str("invalid")), ("error.code", Value.Str("api_key_unknown")), ("error.message", Value.Str("API キーが見つかりません"))}, Log.Severity.Warn),
                 (List#{("api_key.name", Value.Str("ci"))},         Log.Severity.Info),
                 (List#{("credential.kind", Value.Str("invalid"))}, Log.Severity.Warn),
                 (List#{("user.id", Value.Str(ownerPublicId))},     Log.Severity.Info)

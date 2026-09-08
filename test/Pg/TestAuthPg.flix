@@ -69,7 +69,7 @@ mod TestAuthPg {
             result)
 
     ///
-    /// API キー。発行した鍵はこのプロジェクトでだけ解決でき、失効すれば解決できず、他の鍵の文字列は解決できない。
+    /// API キー。発行した鍵はこのプロジェクトでだけ解決でき（他のプロジェクトでは Unknown）、失効すれば Revoked、他の鍵の文字列は Unknown。
     ///
     @Test
     def testPgApiKeys(): Unit \ {IO, Assert} =
@@ -77,7 +77,7 @@ mod TestAuthPg {
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1", "k2"}, () -> {
             let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
             let issued = PgTestSupport.asOwner(() -> ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, readKey("site"), 0i64));
-            let scopeOf = found -> found |> Option.map(key -> key#scope);
+            let scopeOf = found -> found |> Result.map(key -> key#scope);
             let resolved = ApiKeys.resolve(pepper, issued#key, ProjectId.default(), 0i64) |> scopeOf;
             let otherProject = ApiKeys.resolve(pepper, issued#key, shop, 0i64) |> scopeOf;
             let wrongKey = ApiKeys.resolve(pepper, "cms_nope", ProjectId.default(), 0i64) |> scopeOf;
@@ -87,7 +87,7 @@ mod TestAuthPg {
             (String.startsWith(prefix = "cms_", issued#key), resolved, otherProject, wrongKey, afterRevoke, listed)
         }));
         Assert.assertEq(
-            expected = Ok(Ok((true, Some(ApiKeyScope.Read), None, None, None, List#{ ("site", true) }))),
+            expected = Ok(Ok((true, Ok(ApiKeyScope.Read), Err(ApiKeyRejection.Unknown), Err(ApiKeyRejection.Unknown), Err(ApiKeyRejection.Revoked), List#{ ("site", true) }))),
             result)
 
     /// 期限無しの read の鍵の入力。
