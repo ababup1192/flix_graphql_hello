@@ -109,24 +109,26 @@ mod Organizations {
     ///
     /// 組織での役割。属していなければ None。
     ///
-    pub def roleOf(userId: UserId, orgId: OrgId): Option[OrgRole] \ DbRead =
+    def roleOf(userId: UserId, orgId: OrgId): Option[OrgRole] \ DbRead =
         AuthQueries.findOrgRole({ userId = UserId.toInt64(userId), orgId = OrgId.toInt64(orgId) }) |> Option.flatMap(row -> OrgRole.parse(row#role))
 
     ///
-    /// 組織の owner か。プロジェクトの作成とメンバーの追加に使う。
+    /// 組織の owner か。
     ///
-    pub def isOwner(userId: UserId, orgId: OrgId): Bool \ DbRead =
+    def isOwner(userId: UserId, orgId: OrgId): Bool \ DbRead =
         roleOf(userId, orgId) == Some(OrgRole.Owner)
 
     ///
-    /// 組織の owner だけができる操作の入口。member でもなければ notFound（存在を教えない）。
+    /// 組織の owner だけができる操作の入口。member でもなければ notFound（存在を教えない）。サーバ自身（System）は通る。
     ///
-    pub def requireOwner(orgId: OrgId): Unit \ DbRead + CmsErr + Session =
-        match roleOf(Session.currentUser(), orgId) {
+    pub def requireOwner(orgId: OrgId): Unit \ DbRead + CmsErr + Session = match Session.current() {
+        case Actor.System => ()
+        case _ => match roleOf(Session.currentUser(), orgId) {
             case Some(OrgRole.Owner) => ()
             case Some(_)             => CmsErr.forbidden(Permission.ManageProject)
             case None                => CmsErr.notFound(Entity.Organization, "${orgId}")
         }
+    }
 
     ///
     /// 組織のメンバー。owner だけが見られる（member と人でない主体には空）。read の PAT でも読める。
@@ -170,10 +172,9 @@ mod Organizations {
         AuthQueries.countOrgOwners(OrgId.toInt64(orgId)) |> Rows.total |> Members.requireAnotherOwner
 
     ///
-    /// 組織の下にプロジェクトを作る。owner だけ。
+    /// 組織の下にプロジェクトを作る。owner だけ（Projects.create が見る）。
     ///
     pub def createProject(orgId: OrgId, slug: ProjectSlug, name: String): Project \ Db + CmsErr + IdGen + Session =
-        requireOwner(orgId);
         let id = Projects.create(orgId, slug, name);
         Projects.find(id) |> CmsErr.orNotFound(Entity.Organization, "${id}")
 

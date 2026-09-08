@@ -23,7 +23,8 @@ mod TestAuthPg {
             (Accounts.actorFor(owner, ProjectId.default(), Login.Interactive) == Actor.User(owner#id, "owner@test", Role.Owner :: Nil, Login.Interactive),
              Accounts.actorFor(stranger, ProjectId.default(), Login.Interactive) == Actor.User(stranger#id, "someone@test", Nil, Login.Interactive),
              again#id == owner#id,
-             Accounts.projectsOf(owner#id) |> List.map(membership -> (ProjectSlug.text(membership#target#slug), membership#role)))
+             PgTestSupport.runAs(owner, Accounts.me) |> Option.map(me -> me#projects) |> Option.getWithDefault(Nil)
+                 |> List.map(membership -> (ProjectSlug.text(membership#target#slug), membership#role)))
         });
         Assert.assertEq(expected = Ok(Ok((true, true, true, List#{ ("default", Role.Owner) }))), result)
 

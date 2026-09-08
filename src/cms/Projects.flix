@@ -48,9 +48,10 @@ mod Projects {
         ProjectSlug.parse(text) |> CmsErr.orInvalid("slug", "'${text}' は ${ProjectSlug.rule()} にしてください")
 
     ///
-    /// 組織の下に作る。予約したプロジェクト slug と既にある物は使えない。
+    /// 組織の下に作る。組織の owner だけ。予約したプロジェクト slug と既にある物は使えない。
     ///
-    pub def create(orgId: OrgId, slug: ProjectSlug, name: String): ProjectId \ Db + CmsErr + IdGen =
+    pub def create(orgId: OrgId, slug: ProjectSlug, name: String): ProjectId \ Db + CmsErr + IdGen + Session =
+        Organizations.requireOwner(orgId);
         CmsErr.raiseIfAny(if (List.memberOf(ProjectSlug.text(slug), reservedSlugs())) Violation.Violation("slug", "'${slug}' は予約されています") :: Nil else Nil);
         CmsErr.raiseIfAny(if (Option.isEmpty(findBySlug(slug))) Nil else Violation.Violation("slug", "'${slug}' は既にあります") :: Nil);
         CmsErr.raiseIfAny(Naming.validateName("name", name));

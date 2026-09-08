@@ -98,7 +98,7 @@ Runner がリクエストごとに handler を入れ、テストは `PgTestSuppo
 身元は `Credential`（Bearer / ApiKey / PersonalToken / Preview / Missing / Invalid）として graphql 層の Context に入り、Runner が Tx の中で `Actor` に解決して `Session` に入れる。
 API キーは `scope: WRITE` + `role` で管理 API の mutation を役割の範囲で叩ける（メンバー・鍵・プロジェクトの管理は鍵では不可。`expiresAt` で期限、`lastUsedAt` は管理 API の使用だけ 1 分粒度で記録）。
 Personal Access Token（PAT。`Authorization: Bearer cmspat_...`、Account API の `createPersonalAccessToken`）は本人の役割で動く。人の主体は `Actor.User(id, email, roles, Login)` で、`Login` がログインの JWT（Interactive）か PAT（scope 付き）かを持つ。READ の PAT は `Authz` が viewer に落とし、書く入口 `Session.currentUser()` は拒む（自分を読む物は `currentUserForRead()`）。API キーと PAT の発行は `Session.requireInteractive()`（ログインの JWT だけ。PAT や鍵からは作れない）。死んだ PAT は `PatRejection` で Runner が「認証に失敗しました」と断る。表 personal_access_tokens の RLS は本人の印と `app.token_hash` の印（解決の時だけその 1 行）。
-ユースケースは `Session.require(Permission)` で守り、判定は `Authz.can`（Datalog）。役割は owner ⊃ editor ⊃ writer ⊃ viewer、組織 owner はプロジェクト owner。
+ユースケースは `Session.require(Permission)` で守り、判定は `Authz.can`（Datalog）。src/cms の pub で DB に触る物は Session を持つ。持たない物（写し・outbox・Runner が主体を決める前の認証の解決）は `scripts/session-allowlist.txt` に列挙し、`make check` の `scripts/check-session.sh` が増減を見張る。役割は owner ⊃ editor ⊃ writer ⊃ viewer、組織 owner はプロジェクト owner。
 公開 API は public なら鍵無しで公開中を読め、`stage: DRAFT` は readDraft、private は API キー（`X-Api-Key`）か役割が要る。
 プレビュートークン（`X-Preview-Token`。`Actor.Preview(entryId)`）はその entry と参照先の下書きだけ読める。判定は `Authz.can` の resource（entryId）。
 最初の owner は `CMS_BOOTSTRAP_OWNER` の初回ログイン。dev 認証（`X-Dev-User`）は `CMS_VERSION=dev` の時だけで、その時は 127.0.0.1 にしか bind しない。

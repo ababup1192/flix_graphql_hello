@@ -28,7 +28,12 @@ mod ContentEntries {
     ///
     /// id で 1 つ。無ければ notFound。
     ///
-    pub def get(id: EntryId): Entry \ DbRead + CmsErr + Tenant =
+    pub def get(id: EntryId): Entry \ DbRead + CmsErr + Tenant + Session =
+        Session.require(Permission.ReadDraft);
+        load(id)
+
+    /// id で 1 つ。無ければ notFound。権限は見ない（ユースケースの内部で使う）。
+    def load(id: EntryId): Entry \ DbRead + CmsErr + Tenant =
         lookup(id) |> CmsErr.orNotFound(Entity.Entry, EntryId.text(id))
 
     // ---- コンテンツ API（stage の行を読む）----
@@ -99,14 +104,14 @@ mod ContentEntries {
         CmsErr.raiseIfAny(if (taken) Violation.Violation("id", "'${id}' は既にあります（ゴミ箱の物を含む）") :: Nil else Nil);
         discard EntriesQueries.insertEntry({ id = EntryId.text(id), typeId = TypeId.toInt64(typeId), projectId = Tenant.currentId() });
         writeContent(id, Stage.Draft, owner, data);
-        get(id)
+        load(id)
 
     ///
     /// 下書きを直す。patch のキーだけ上書きし、null で消す。expectedVersion が今の版と違えば conflict。
     ///
     pub def update(id: EntryId, patch: EntryData, expectedVersion: Int32): Entry \ Db + CmsErr + Tenant + Session =
         Session.require(Permission.WriteEntries);
-        let existing = get(id);
+        let existing = load(id);
         let owner = ContentTypes.get(existing#typeId);
         writeDraft(owner, existing, EntryValidation.merge(EntryValidation.prune(owner#fields, existing#data), patch), expectedVersion)
 
@@ -115,16 +120,15 @@ mod ContentEntries {
     ///
     pub def delete(id: EntryId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.WriteEntries);
-        let existing = get(id);
+        let existing = load(id);
         if (existing#stage == Stage.Published) discard unpublish(id) else ();
         discard EntriesQueries.deleteLinks({ fromEntryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft), projectId = Tenant.currentId() });
         discard EntriesQueries.softDeleteEntry({ id = EntryId.text(id), projectId = Tenant.currentId() });
         notify(WebhookEvent.EntryDeleted, id, existing#typeId)
 
     /// entry の出来事を Webhook に積む（同じ Tx）。
-    def notify(event: WebhookEvent, id: EntryId, typeId: TypeId): Unit \ Db + CmsErr + IdGen + Tenant =
-        let owner = ContentTypes.get(typeId);
-        Webhooks.emit(event, Webhooks.entryPayload(event, id, owner#apiId))
+    def notify(event: WebhookEvent, id: EntryId, typeId: TypeId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
+        Webhooks.emitEntry(event, id, ContentTypes.get(typeId)#apiId)
 
     // ---- 公開 ----
 
@@ -138,8 +142,8 @@ mod ContentEntries {
         publishWithin(Nil, id, author, withDependencies)
 
     /// 公開の本体。visited は withDependencies で辿った entry（循環を 1 度で止める）。権限は publish が見る。
-    def publishWithin(visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant =
-        let existing = get(id);
+    def publishWithin(visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant + Session =
+        let existing = load(id);
         let owner = ContentTypes.get(existing#typeId);
         let data = EntryValidation.prune(owner#fields, existing#data);
         let report = reportOf(true, owner, existing, data);
@@ -153,7 +157,7 @@ mod ContentEntries {
         discard EntriesQueries.insertVersion(EntryRows.versionInsert(existing, author, VersionReason.Publish));
         discard EntriesQueries.markPublished({ id = EntryId.text(id), projectId = Tenant.currentId() });
         notify(WebhookEvent.EntryPublished, id, existing#typeId);
-        get(id)
+        load(id)
 
     ///
     /// 公開できるかを書き込まずに答える（dry-run）。違反を全部集め、未公開の参照先も返す。
@@ -161,7 +165,7 @@ mod ContentEntries {
     ///
     pub def publishReport(id: EntryId): PublishReport \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ReadDraft);
-        let existing = get(id);
+        let existing = load(id);
         let owner = ContentTypes.get(existing#typeId);
         reportOf(false, owner, existing, EntryValidation.prune(owner#fields, existing#data))
 
@@ -184,7 +188,7 @@ mod ContentEntries {
     ///
     pub def impact(id: EntryId, action: ImpactAction): Impact \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ReadDraft);
-        discard get(id);
+        discard load(id);
         match action {
             case ImpactAction.Publish   => { breaks = Nil, cascades = dependenciesOf(id :: Nil, id) |> List.filterMap(lookup) }
             case ImpactAction.Unpublish => { breaks = referrers(id, Stage.Published), cascades = Nil }
@@ -192,7 +196,7 @@ mod ContentEntries {
         }
 
     /// stage の中身でこの entry を参照している物。参照元は下書きの中身で返す。
-    def referrers(id: EntryId, stage: Stage): List[Referrer] \ DbRead + CmsErr + Tenant =
+    def referrers(id: EntryId, stage: Stage): List[Referrer] \ DbRead + CmsErr + Tenant + Session =
         EntriesQueries.referrerLinks({ toEntryId = EntryId.text(id), stage = EntryRows.stageToDb(stage), projectId = Tenant.currentId() })
             |> List.filterMap(row -> EntryId.parse(row#fromEntryId) |> Option.flatMap(lookup) |> Option.map(entry ->
                 { entry = entry, via = ContentTypes.getField(FieldId.FieldId(row#fieldId))#apiId, stage = stage }))
@@ -220,14 +224,14 @@ mod ContentEntries {
         Session.require(Permission.PublishEntries);
         let key = EntryId.text(id);
         let published = EntryRows.stageToDb(Stage.Published);
-        let existing = get(id);
+        let existing = load(id);
         let referrers = EntriesQueries.publishedReferrers({ toEntryId = key, projectId = Tenant.currentId() }) |> List.map(EntryRows.referrerText) |> List.filter(referrer -> referrer != key);
         CmsErr.raiseIfAny(referrers |> List.map(referrer -> Violation.Violation("references", "公開中の entry '${referrer}' が参照しています。先にそちらを取り下げるか、参照を外してください")));
         discard EntriesQueries.deleteLinks({ fromEntryId = key, stage = published, projectId = Tenant.currentId() });
         discard EntriesQueries.deleteContent({ entryId = key, stage = published });
         discard EntriesQueries.markUnpublished({ id = key, projectId = Tenant.currentId() });
         if (existing#stage == Stage.Published) notify(WebhookEvent.EntryUnpublished, id, existing#typeId) else ();
-        get(id)
+        load(id)
 
     // ---- バージョン ----
 
@@ -243,7 +247,7 @@ mod ContentEntries {
     ///
     pub def saveVersion(id: EntryId, author: String): EntryVersion \ Db + CmsErr + Tenant + Session =
         Session.require(Permission.WriteEntries);
-        let existing = get(id);
+        let existing = load(id);
         let inserted = EntriesQueries.insertVersion(EntryRows.versionInsert(existing, author, VersionReason.Save)) |> Rows.expectId;
         EntriesQueries.findVersion({ id = inserted, projectId = Tenant.currentId() }) |> Option.map(EntryRows.toVersion) |> CmsErr.orNotFound(Entity.Version, "${inserted}")
 
@@ -255,7 +259,7 @@ mod ContentEntries {
         let found = EntriesQueries.findVersion({ id = VersionId.toInt64(versionId), projectId = Tenant.currentId() }) |> Option.map(EntryRows.toVersion)
             |> Option.filter(version -> version#entryId == id)
             |> CmsErr.orNotFound(Entity.Version, "${versionId}");
-        let existing = get(id);
+        let existing = load(id);
         let owner = ContentTypes.get(existing#typeId);
         writeDraft(owner, existing, EntryValidation.prune(owner#fields, found#data), expectedVersion)
 
@@ -264,7 +268,7 @@ mod ContentEntries {
     ///
     pub def diff(id: EntryId, fromRef: VersionRef, toRef: VersionRef): List[FieldChange] \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ReadDraft);
-        let existing = get(id);
+        let existing = load(id);
         let owner = ContentTypes.get(existing#typeId);
         EntryDiff.diff(owner#fields, versionData(existing, fromRef), versionData(existing, toRef))
 
@@ -272,7 +276,7 @@ mod ContentEntries {
     /// バージョンの参照が指す中身。DRAFT は今の下書き、PUBLISHED は公開中の中身（未公開なら notFound）、
     /// versionId はそのバージョンの中身（他の entry の物なら notFound）。
     ///
-    pub def versionData(existing: Entry, versionRef: VersionRef): EntryData \ DbRead + CmsErr + Tenant = match versionRef {
+    def versionData(existing: Entry, versionRef: VersionRef): EntryData \ DbRead + CmsErr + Tenant = match versionRef {
         case VersionRef.Draft     => existing#data
         case VersionRef.Published =>
             EntriesQueries.findEntryByStage({ id = EntryId.text(existing#id), stage = EntryRows.stageToDb(Stage.Published), projectId = Tenant.currentId() })
@@ -297,8 +301,8 @@ mod ContentEntries {
         writeContent(id, Stage.Draft, owner, data);
         let advanced = EntriesQueries.bumpEntryVersion({ id = EntryId.text(id), expected = expectedVersion, projectId = Tenant.currentId() });
         // 0 行なら読んでから書くまでに誰かが進めた（またはゴミ箱に入った）。今の版は読み直して報告する
-        if (advanced == 0) CmsErr.conflict(Entity.Entry, EntryId.text(id), expectedVersion, get(id)#version) else ();
-        get(id)
+        if (advanced == 0) CmsErr.conflict(Entity.Entry, EntryId.text(id), expectedVersion, load(id)#version) else ();
+        load(id)
 
     ///
     /// singleton には entry を 1 件しか作れない（コンテンツ API が 1 件しか返さないので、2 件目は見えない物になる）。

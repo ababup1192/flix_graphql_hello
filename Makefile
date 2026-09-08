@@ -17,6 +17,7 @@ import-microcms:
 check:
 	bin/flix check
 	cd schemagen && ../bin/flix check
+	scripts/check-session.sh
 
 # 既定は DB 無しのテスト
 test: test-unit

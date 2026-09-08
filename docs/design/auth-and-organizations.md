@@ -55,6 +55,7 @@ api_keys         (id, project_id, key_hash, scope, created_at, revoked_at)  -- �
 
 - **`Actor` effect** を `Tenant` の隣に置く。`Actor.current(): Actor`（ユーザー id と今のプロジェクトでの役割）と `Actor.require(role)`。Runner が JWT を検証して membership を引き、`Tenant.runWith` と一緒に handler を入れる
 - ユースケースは `Actor.require(Editor)` のように書く。権限チェックの抜けは「Actor effect を使っていない」でコンパイル時に見つかる（テナントと同じ守り方）
+- **ユースケース（src/cms）の pub は Session を持つ。持たない物は写しか内部**（外向きの id の写し、同じ Tx に積む outbox、Runner が主体を決める前に呼ぶ認証の解決）。一覧は `scripts/session-allowlist.txt` で、`make check` の `scripts/check-session.sh` が増減を見張る。仕組みが呼ぶ物（Scheduler / Import / ContentEngine）は `Session.runWith(Actor.System)` で入る
 - 公開 API の鍵は `api_keys` を hash で引く。`ContentRunner` に入れるのは `Tenant` だけで、鍵はプロジェクトへの読み取り許可の判定にしか使わない
 - `Server.splitProject` の前に Host の先頭ラベルを slug として拾う。パスの `/p/` があればそちらを優先。予約 slug（`www` / `api` / `admin` / `app` など）は `Projects.create` で弾く。slug は作った後は変えない（URL が変わるため。microCMS も同じ）
 - JWT は Flix で発行しない。**OIDC の JWKS で検証し `sub` と `email` を取るだけ**に閉じ、発行元は環境変数（issuer URL / JWKS URL / audience）で差し替える。最初は Cloudflare Access（50 人まで無料、社内利用向き。ヘッダ `Cf-Access-Jwt-Assertion`）。顧客が自分で登録する段になったら Clerk / Auth0（1 万 MAU まで無料）、セルフホストは Keycloak か自前のマジックリンクへ。どれも同じ検証コードで通る

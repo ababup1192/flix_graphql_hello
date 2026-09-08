@@ -149,7 +149,7 @@ mod ContentSchemaBuilder {
     /// 一覧で重くなったら Linked と同じ形に寄せる。
     ///
     def readyAsset(id: AssetId): Option[Asset] \ ContentEff =
-        Assets.find(id) |> Option.filter(asset -> asset#status == AssetStatus.Ready)
+        Assets.findMany(id :: Nil) |> List.find(asset -> asset#status == AssetStatus.Ready)
 
     ///
     /// `Asset { id url fileName mime size width height alt }`。全型で共通の 1 つ。

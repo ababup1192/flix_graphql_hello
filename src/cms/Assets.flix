@@ -64,13 +64,19 @@ mod Assets {
         AssetsQueries.assetHolders({ projectId = Tenant.currentId(), assetId = AssetId.text(id) }) |> List.filterMap(row -> EntryId.parse(row#id))
 
     ///
-    /// id で 1 つ。無ければ None。他のプロジェクトの物も None。
+    /// id で 1 つ（管理 API）。無ければ None。他のプロジェクトの物も None。
     ///
-    pub def find(id: AssetId): Option[Asset] \ DbRead + Tenant =
+    pub def find(id: AssetId): Option[Asset] \ DbRead + Tenant + CmsErr + Session =
+        Session.require(Permission.ReadDraft);
+        lookup(id)
+
+    /// id で 1 つ。権限は見ない（ユースケースの内部で使う）。
+    def lookup(id: AssetId): Option[Asset] \ DbRead + Tenant =
         AssetsQueries.findAsset({ id = AssetId.text(id), projectId = Tenant.currentId() }) |> Option.map(AssetRows.toAsset)
 
     ///
-    /// id の並びで引く。無い物は落ちる。順は問わない。
+    /// id の並びで引く。無い物は落ちる。順は問わない。権限は見ない（コンテンツ API の配信と公開の検査が使う。
+    /// asset は stage を持たず、配信 URL は誰でも開けるので、読める entry の asset は誰でも読める）。
     ///
     pub def findMany(ids: List[AssetId]): List[Asset] \ DbRead + Tenant = match ids {
         case Nil => Nil
@@ -89,7 +95,7 @@ mod Assets {
 
     /// 1 つ。無ければ notFound。
     def get(id: AssetId): Asset \ DbRead + CmsErr + Tenant =
-        find(id) |> CmsErr.orNotFound(Entity.Asset, AssetId.text(id))
+        lookup(id) |> CmsErr.orNotFound(Entity.Asset, AssetId.text(id))
 
     /// ストレージの失敗は業務エラーとして返す（DB の失敗ではないので DbErr にしない）。
     def orStorageErr(result: Result[String, a]): a \ CmsErr = match result {

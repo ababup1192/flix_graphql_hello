@@ -44,13 +44,23 @@ mod ContentTypes {
     ///
     /// id で 1 つ。無ければ notFound。
     ///
-    pub def get(id: TypeId): ContentType \ DbRead + CmsErr + Tenant =
+    pub def get(id: TypeId): ContentType \ DbRead + CmsErr + Tenant + Session =
+        Session.require(Permission.ReadDraft);
+        load(id)
+
+    /// id で 1 つ。無ければ notFound。権限は見ない（ユースケースの内部で使う）。
+    def load(id: TypeId): ContentType \ DbRead + CmsErr + Tenant =
         lookup(id) |> CmsErr.orNotFound(Entity.ContentType, "${id}")
 
     ///
     /// フィールド 1 つ（children 付き）。無ければ notFound。
     ///
-    pub def getField(id: FieldId): FieldDef \ DbRead + CmsErr + Tenant =
+    pub def getField(id: FieldId): FieldDef \ DbRead + CmsErr + Tenant + Session =
+        Session.require(Permission.ReadDraft);
+        loadField(id)
+
+    /// フィールド 1 つ。無ければ notFound。権限は見ない（ユースケースの内部で使う）。
+    def loadField(id: FieldId): FieldDef \ DbRead + CmsErr + Tenant =
         let flat = ContentFieldsQueries.findField({ id = FieldId.toInt64(id), projectId = Tenant.currentId() }) |> Option.map(ContentTypeRows.toFieldDef) |> CmsErr.orNotFound(Entity.Field, "${id}");
         FieldTree.find(id, fieldsOf(flat#typeId)) |> CmsErr.orNotFound(Entity.Field, "${id}")
 
@@ -71,11 +81,11 @@ mod ContentTypes {
         CmsErr.raiseIfAny(typeNameViolations(others, names, Nil) |> List.map(violation -> if (derived) blameApiId(violation) else violation));
         let inserted = ContentTypesQueries.insertContentType({ +projectId = Tenant.currentId() | ContentTypeRows.typeInsert(names, draft) }) |> Rows.expectId;
         notifySchema(names#apiId);
-        get(TypeId.TypeId(inserted))
+        load(TypeId.TypeId(inserted))
 
     /// 型の変更を Webhook に積む（同じ Tx）。
     def notifySchema(apiId: ApiId): Unit \ Db + IdGen + Tenant =
-        Webhooks.emit(WebhookEvent.SchemaChanged, Webhooks.schemaPayload(apiId))
+        Webhooks.emitSchema(apiId)
 
     ///
     /// singular / plural を導いた時の違反は apiId のせいなので、そこへ付け替える（渡していない項目を怒られても直せない）。
@@ -90,7 +100,7 @@ mod ContentTypes {
     ///
     pub def update(id: TypeId, changes: ContentTypeChanges): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
-        let existing = get(id);
+        let existing = load(id);
         let names = {
             apiId    = existing#apiId,
             singular = changes#singular |> Option.getWithDefault(existing#singular),
@@ -100,7 +110,7 @@ mod ContentTypes {
         CmsErr.raiseIfAny(typeNameViolations(others, names, existing#fields));
         discard ContentTypesQueries.updateContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() }, ContentTypeRows.typeChanges(changes));
         notifySchema(existing#apiId);
-        get(id)
+        load(id)
 
     ///
     /// content type をフィールドごと消す。無ければ notFound。entry が残っていれば、他の型から参照されていれば invalid。
@@ -108,7 +118,7 @@ mod ContentTypes {
     ///
     pub def delete(id: TypeId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
-        let existing = get(id);
+        let existing = load(id);
         let remaining = EntriesQueries.countEntriesOfType({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() }) |> Rows.total;
         let referrers = ContentFieldsQueries.countFieldsTargeting({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() }) |> Rows.total;
         CmsErr.raiseIfAny(
@@ -125,7 +135,7 @@ mod ContentTypes {
     ///
     pub def addField(typeId: TypeId, draft: FieldDraft): FieldDef \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
-        let owner = get(typeId);
+        let owner = load(typeId);
         let parent = draft#parent |> Option.map(parentId -> FieldTree.find(parentId, owner#fields) |> CmsErr.orNotFound(Entity.Field, "${parentId}"));
         CmsErr.raiseIfAny(validateDraft(takenApiIds(owner#fields, None), parent, draft) ::: targetTypeExists(draft#target) ::: fieldTypeNameViolations(owner, draft));
         let position = match draft#parent {
@@ -136,14 +146,14 @@ mod ContentTypes {
         Option.forEach(target -> discard ContentFieldsQueries.setFieldTarget({ id = inserted, targetTypeId = TypeId.toInt64(target), projectId = Tenant.currentId() }), draft#target);
         Option.forEach(parentId -> discard ContentFieldsQueries.setFieldParent({ id = inserted, parentFieldId = FieldId.toInt64(parentId), projectId = Tenant.currentId() }), draft#parent);
         touch(typeId);
-        getField(FieldId.FieldId(inserted))
+        loadField(FieldId.FieldId(inserted))
 
     ///
     /// フィールドを直す。触った項目だけ UPDATE に出る。config は丸ごと置き換える。
     ///
     pub def updateField(id: FieldId, changes: FieldChanges): FieldDef \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
-        let existing = getField(id);
+        let existing = loadField(id);
         let taken = takenApiIds(fieldsOf(existing#typeId), Some(id));
         let config = changes#config |> Option.getWithDefault(existing#config);
         let unique = changes#unique |> Option.getWithDefault(existing#unique);
@@ -151,14 +161,14 @@ mod ContentTypes {
         CmsErr.raiseIfAny(Naming.validateFlags({ unique = unique | existing }) ::: Naming.validateChildFlags({ hasParent = Option.nonEmpty(existing#parent), required = required, unique = unique }) ::: Naming.validateConfig(taken, existing#kind, config));
         discard ContentFieldsQueries.updateField({ id = FieldId.toInt64(id), projectId = Tenant.currentId() }, ContentTypeRows.fieldChanges(changes));
         touch(existing#typeId);
-        getField(id)
+        loadField(id)
 
     ///
     /// フィールドを消す。無ければ notFound。
     ///
     pub def removeField(id: FieldId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
-        let existing = getField(id);
+        let existing = loadField(id);
         discard ContentFieldsQueries.deleteField({ id = FieldId.toInt64(id), projectId = Tenant.currentId() });
         touch(existing#typeId)
 
@@ -167,13 +177,13 @@ mod ContentTypes {
     ///
     pub def reorderFields(typeId: TypeId, ids: List[FieldId]): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
         Session.require(Permission.ManageTypes);
-        let owner = get(typeId);
+        let owner = load(typeId);
         let current = owner#fields |> List.map(field -> field#id) |> List.toSet;
         let sameSet = List.length(ids) == Set.size(current) and List.toSet(ids) == current;
         CmsErr.raiseIfAny(if (sameSet) Nil else Violation.Violation("ids", "最上位のフィールドの id を過不足なく、重複なく渡してください") :: Nil);
         List.forEachWithIndex((index, id) -> discard ContentFieldsQueries.setFieldPosition({ id = FieldId.toInt64(id), position = index, projectId = Tenant.currentId() }), ids);
         touch(typeId);
-        get(typeId)
+        load(typeId)
 
     // ---- 部品 ----
 
@@ -237,6 +247,6 @@ mod ContentTypes {
     ///
     def touch(typeId: TypeId): Unit \ Db + CmsErr + IdGen + Tenant =
         discard ContentTypesQueries.touchContentType({ id = TypeId.toInt64(typeId), projectId = Tenant.currentId() });
-        notifySchema(get(typeId)#apiId)
+        notifySchema(load(typeId)#apiId)
 
 }

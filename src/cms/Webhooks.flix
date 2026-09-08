@@ -67,9 +67,21 @@ mod Webhooks {
         WebhooksQueries.findDelivery({ id = deliveryId, projectId = Tenant.currentId() }) |> Option.map(WebhookRows.toDelivery) |> CmsErr.orNotFound(Entity.WebhookDelivery, deliveryId)
 
     ///
-    /// 出来事を受ける有効な Webhook すべてに配信を積む。ユースケースが同じ Tx で呼ぶ。Webhook が無ければ何もしない。
+    /// entry の出来事を配信に積む。公開・取り下げ・削除のユースケースが同じ Tx で呼ぶ（権限はそちらが見る）。
     ///
-    pub def emit(event: WebhookEvent, payload: Json): Unit \ Db + IdGen + Tenant =
+    pub def emitEntry(event: WebhookEvent, entryId: EntryId, typeApiId: ApiId): Unit \ Db + IdGen + Tenant =
+        emit(event, entryPayload(event, entryId, typeApiId))
+
+    ///
+    /// 型の変更を配信に積む。型を触るユースケースが同じ Tx で呼ぶ（権限はそちらが見る）。
+    ///
+    pub def emitSchema(typeApiId: ApiId): Unit \ Db + IdGen + Tenant =
+        emit(WebhookEvent.SchemaChanged, schemaPayload(typeApiId))
+
+    ///
+    /// 出来事を受ける有効な Webhook すべてに配信を積む。Webhook が無ければ何もしない。
+    ///
+    def emit(event: WebhookEvent, payload: Json): Unit \ Db + IdGen + Tenant =
         WebhooksQueries.listActiveWebhooksForEvent({ projectId = Tenant.currentId(), event = WebhookEvent.text(event) })
             |> List.forEach(row -> discard WebhooksQueries.insertDelivery({
                 id = IdGen.freshUlid(), projectId = Tenant.currentId(), webhookId = row#id, event = WebhookEvent.text(event), payload = payload }))
@@ -77,7 +89,7 @@ mod Webhooks {
     ///
     /// entry の出来事の payload。中身は持たず、id と型だけ（受け手はコンテンツ API で読む）。
     ///
-    pub def entryPayload(event: WebhookEvent, entryId: EntryId, typeApiId: ApiId): Json \ DbRead + Tenant =
+    def entryPayload(event: WebhookEvent, entryId: EntryId, typeApiId: ApiId): Json \ DbRead + Tenant =
         Json.JObject(Map#{
             "event"   => Json.JString(WebhookEvent.text(event)),
             "project" => Json.JString(projectSlug()),
@@ -87,7 +99,7 @@ mod Webhooks {
     ///
     /// 型の変更の payload。
     ///
-    pub def schemaPayload(typeApiId: ApiId): Json \ DbRead + Tenant =
+    def schemaPayload(typeApiId: ApiId): Json \ DbRead + Tenant =
         Json.JObject(Map#{
             "event"   => Json.JString(WebhookEvent.text(WebhookEvent.SchemaChanged)),
             "project" => Json.JString(projectSlug()),

@@ -1,0 +1,30 @@
+# src/cms のユースケースで、DB に触るのに Session を持ってよい pub def（scripts/check-session.sh が突き合わせる）。
+# 足すのは次のどれかだけ: 外向きの id の写し、同じ Tx に積む outbox、Runner が主体を決める前（認証の解決・起動）に呼ぶ物、
+# 公開の読み（asset は stage を持たない）。人の操作の入口は Session.require を持たせ、ここには足さない。
+
+# Runner が主体（Actor）を決める前に呼ぶ（認証の解決・起動）
+Accounts.actorFor
+Accounts.resolveUser
+Accounts.resolveUserById
+ApiKeys.resolve
+ApiKeys.touch
+PersonalTokens.resolve
+PersonalTokens.touch
+Projects.findBySlug
+Projects.visibilityOf
+
+# 外向きの id の写し（AdminMapping / AccountMapping）
+Accounts.requireByPublicId
+Organizations.idOfPublic
+
+# Session 付きのユースケースからだけ呼ぶ部品（プロジェクトの読み・email での検索）
+Accounts.findByEmail
+Projects.find
+Projects.listOfOrg
+
+# outbox。公開や型の変更のユースケースが同じ Tx で積む（権限はそちらが見る）
+Webhooks.emitEntry
+Webhooks.emitSchema
+
+# 公開の読み。asset は stage を持たず、配信 URL は誰でも開ける
+Assets.findMany
