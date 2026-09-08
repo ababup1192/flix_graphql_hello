@@ -64,6 +64,20 @@ mod TestSelfHeal {
         };
         Assert.assertEq(
             expected = cases |> List.map(snd),
-            cases |> List.map(match ((mode, seconds), _) -> SelfHeal.settingsFrom(mode, seconds, 0i64) |> Option.map(found -> found#minUnhealthyMs)))
+            cases |> List.map(match ((mode, seconds), _) -> SelfHeal.settingsFrom(mode, seconds, None, 0i64) |> Option.map(found -> found#minUnhealthyMs)))
+
+    /// warmup は CMS_SELF_HEAL_WARMUP_SECONDS（無い・数字でない・0 以下なら既定の 300 秒）。
+    @Test
+    def testWarmupFromTable(): Unit \ Assert =
+        let cases = List#{
+            (None,          Some(300000i64)),
+            (Some("30"),    Some(30000i64)),
+            (Some("abc"),   Some(300000i64)),
+            (Some("0"),     Some(300000i64)),
+            (Some("-3"),    Some(300000i64))
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd),
+            cases |> List.map(match (warmup, _) -> SelfHeal.settingsFrom(None, None, warmup, 0i64) |> Option.map(found -> found#warmupMs)))
 
 }

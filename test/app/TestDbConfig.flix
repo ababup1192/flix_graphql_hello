@@ -37,4 +37,20 @@ mod TestDbConfig {
             expected = table |> List.map(snd),
             table |> List.map(match (raw, _) -> DbConfig.leakDetectionSeconds(raw)))
 
+    /// 無い・数字でない・1 未満なら sqlfx の既定（ここでは 10）。
+    @Test
+    def testMaxConnectionsTable(): Unit \ Assert =
+        let table = List#{ (None, 10), (Some("40"), 40), (Some("1"), 1), (Some("abc"), 10), (Some("0"), 10), (Some("-3"), 10) };
+        Assert.assertEq(
+            expected = table |> List.map(snd),
+            table |> List.map(match (raw, _) -> DbConfig.maxConnections(10, raw)))
+
+    /// 無い・数字でない・1 未満なら既定の 2 秒。
+    @Test
+    def testBorrowTimeoutSecondsTable(): Unit \ Assert =
+        let table = List#{ (None, 2), (Some("5"), 5), (Some("1"), 1), (Some("abc"), 2), (Some("0"), 2), (Some("-3"), 2) };
+        Assert.assertEq(
+            expected = table |> List.map(snd),
+            table |> List.map(match (raw, _) -> DbConfig.borrowTimeoutSeconds(raw)))
+
 }

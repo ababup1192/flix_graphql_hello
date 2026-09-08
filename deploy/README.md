@@ -224,7 +224,7 @@ DB の失敗の行（`message: "field failed"`）には `error.kind` が付く�
 OOM のような事故の後、プロセスは生きているのに接続プールだけが壊れ、PostgreSQL が健在でも `/health` が 503 を返し続ける事がある（実験 1 回目の S5。2 分観測して戻らなかった）。
 プールを作り直す口が無いので、cms は**自分で終わって、コンテナに起こし直させる**。2 秒ごとの周で次の 4 つがそろった時だけ終わる。
 
-1. 起動から 5 分経っている（起動直後の DB 待ちで落ちない）
+1. 起動から `CMS_SELF_HEAL_WARMUP_SECONDS`（既定 300 秒）経っている（起動直後の DB 待ちで落ちない）
 2. プール経由の ping が `CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS`（既定 90 秒）以上続けて失敗している
 3. その間に、**プールを通さない新しい接続**では DB に届いた（DB 自体が落ちている時は終わらない。終わっても直らないため）
 4. プロセスごとの jitter（0〜30 秒）も過ぎている（複数台が同じ時刻に落ちない）
@@ -235,9 +235,8 @@ compose の `restart: unless-stopped` が起こし直す。`CMS_SELF_HEAL=off` �
 OOM で JVM 自身が落ちる時（`-XX:+ExitOnOutOfMemoryError`）の最後の行 `Terminating due to java.lang.OutOfMemoryError` は **JSON ではない**（JVM が出す物で、アプリ側では塞げない）。
 収集器は終了コード 3 と、その直前の行で判断する（LogQL なら `__error__ != ""` で拾う）。
 
-**`/health` は DB が落ちている時に 15〜20 秒返らない**（Dockerfile の `HEALTHCHECK --timeout=3s` は毎回 timeout 扱いになる）。
-今の sqlfx の API には `Pool.withConnection` に待ちの上限を渡す口が無く、ping の前に `SET LOCAL statement_timeout` を置いても接続を借りる所で待つので効かない。
-短くするには sqlfx 側に borrow の上限を渡す口が要る（次の回し）。それまでは「`/health` が返らない = DB に届いていない」として扱う。
+**`/health` は DB が落ちている時に `CMS_DB_BORROW_TIMEOUT_SECONDS` × 3 + backoff だけ返らない**（既定で 7〜8 秒。Dockerfile の `HEALTHCHECK --timeout=3s` は毎回 timeout 扱いになる）。
+接続を借りる所で待つので、ping の前に `SET LOCAL statement_timeout` を置いても効かない。もっと短くしたいなら `CMS_DB_BORROW_TIMEOUT_SECONDS=1` にする。
 
 予約公開と再起動: プロセスが落ちた時に実行中だった仕事は失われないが、`claimed_at` の回復で拾い直すのは 10 分後になる（その分だけ公開が遅れる）。
 
@@ -267,6 +266,8 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_DB_APP_USER` / `CMS_DB_APP_PASSWORD` | リクエストに使うロール。起動時に所有者が作り、表の読み書きだけ許す（RLS が効く）。PASSWORD が無ければ所有者で繋ぐ | cms_app / 無し |
 | `CMS_DB_TIMEOUT_SECONDS` | 接続ごとに DB 側で効かせる時間の上限（秒）。`idle_in_transaction_session_timeout` / `statement_timeout` / `lock_timeout` を同じ値にする（pgjdbc の `options` で接続時に付ける）。アプリの不具合で Tx が開いたままでも DB 側が切る。0 で無効。`CMS_DSN` に `options=` を書いた時はそちらが優先 | 30 |
 | `CMS_DB_LEAK_DETECTION_SECONDS` | 借りたまま返らない接続を HikariCP が見張るまでの秒数。0 で無効。警告の行は出ない（`slf4j-nop`。上の「DB の接続プール」） | 0 |
+| `CMS_DB_MAX_CONNECTIONS` | 接続プールが同時に開く接続の上限。PostgreSQL の `max_connections` を台数で割った数より小さくする | 10 |
+| `CMS_DB_BORROW_TIMEOUT_SECONDS` | 接続を借りるのを待つ上限。DbRunner が 3 回まで再試行するので、1 リクエストの最悪はこの 3 倍 + backoff（0〜0.6 秒） | 2 |
 | `CMS_MIGRATE` | `apply`（起動時に当てる）か `check`（未適用なら起動しない） | イメージは apply、手元は check |
 | `CMS_CORS_ORIGINS` | 許すオリジン（カンマ区切り） | 無し |
 | `CMS_VERSION` | `/health` に出す版 | イメージのビルド時に git の sha |
@@ -281,7 +282,8 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_JOBS_TOKEN` | `POST /jobs/tick`（外部トリガー）を許す `X-Jobs-Token` の値。無ければその口は閉じる | 無し |
 | `CMS_JOBS_DRAIN_SECONDS` | 停止時に実行中の仕事を待つ秒数 | 15 |
 | `CMS_SELF_HEAL` | `on` / `off`。接続プールが壊れたまま戻らない時に自分で終わって再起動させる（下の「自己回復」） | on |
-| `CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS` | プール経由で DB に届かない状態がこれだけ続いたら終わる。起動から 5 分は見送る | 90 |
+| `CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS` | プール経由で DB に届かない状態がこれだけ続いたら終わる | 90 |
+| `CMS_SELF_HEAL_WARMUP_SECONDS` | 起動からこれだけは自己回復を見送る（起動直後の DB 待ちで落ちないため） | 300 |
 | `CMS_CACHE_MAX_AGE` | コンテンツ API の GET で、鍵もトークンも無い応答に付ける `Cache-Control` の秒数（CDN 用）。0 で no-store | 60 |
 | `CMS_MAX_CONNECTIONS` | HTTP の同時接続の上限。超えた接続は `503` と `Retry-After: 1` で断る（待ち行列は無い）。今の数は `/health` の `connections` | 256 |
 | `CMS_LOG_LEVEL` | ログの最低 severity（`debug` / `info` / `warn` / `error`）。`debug` で `/health` の行も出る | info |

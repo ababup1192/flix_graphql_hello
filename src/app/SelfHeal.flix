@@ -46,24 +46,30 @@ mod SelfHeal {
     /// minUnhealthyMs の既定（秒）。
     pub def defaultMinUnhealthySeconds(): Int64 = 90i64
 
-    /// warmupMs の既定（ミリ秒）。
-    pub def defaultWarmupMs(): Int64 = 300000i64
+    /// warmupMs の既定（秒）。
+    pub def defaultWarmupSeconds(): Int64 = 300i64
 
     ///
-    /// CMS_SELF_HEAL（on / off。既定 on）と CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（既定 90）から設定を組む。
-    /// off なら None（見張らない）。数字でない・0 以下は既定の秒数。
+    /// CMS_SELF_HEAL（on / off。既定 on）・CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（既定 90）・
+    /// CMS_SELF_HEAL_WARMUP_SECONDS（既定 300）から設定を組む。off なら None（見張らない）。数字でない・0 以下は既定の秒数。
     ///
-    pub def settingsFrom(mode: Option[String], seconds: Option[String], jitterMs: Int64): Option[Settings] =
+    pub def settingsFrom(mode: Option[String], seconds: Option[String], warmupSeconds: Option[String], jitterMs: Int64): Option[Settings] =
         if (mode == Some("off")) None
         else
-            let configured = seconds |> Option.flatMap(Int64.fromString) |> Option.filter(value -> value > 0i64) |> Option.getWithDefault(defaultMinUnhealthySeconds());
-            Some({ minUnhealthyMs = configured * 1000i64, warmupMs = defaultWarmupMs(), jitterMs = jitterMs })
+            Some({ minUnhealthyMs = positiveSeconds(defaultMinUnhealthySeconds(), seconds) * 1000i64,
+                   warmupMs = positiveSeconds(defaultWarmupSeconds(), warmupSeconds) * 1000i64,
+                   jitterMs = jitterMs })
+
+    /// 秒を読む。無い・数字でない・0 以下なら fallback。
+    def positiveSeconds(fallback: Int64, raw: Option[String]): Int64 =
+        raw |> Option.flatMap(Int64.fromString) |> Option.filter(value -> value > 0i64) |> Option.getWithDefault(fallback)
 
     ///
     /// 環境変数から設定を組む。jitter は呼ぶ側が決めた上乗せ（プロセスごとに 1 回）。
     ///
     pub def fromEnv(jitterMs: Int64): Option[Settings] \ Sys.Env =
-        settingsFrom(Sys.Env.getVar("CMS_SELF_HEAL"), Sys.Env.getVar("CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS"), jitterMs)
+        settingsFrom(Sys.Env.getVar("CMS_SELF_HEAL"), Sys.Env.getVar("CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS"),
+            Sys.Env.getVar("CMS_SELF_HEAL_WARMUP_SECONDS"), jitterMs)
 
     ///
     /// 観測の列（古い順）から決める。次の 4 つが全部そろった時だけ Exit。

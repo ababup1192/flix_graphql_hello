@@ -37,8 +37,19 @@ mod DbRunner {
         }
 
     ///
-    /// 一時的な失敗を待ってから呼び直す。待ちは sqlfx の既定（3 回、100 ms から 2 倍、2 秒で頭打ち、full jitter）で、
-    /// 待った回数（= 再試行の回数）を counter に積む。
+    /// 再試行の待ち方。3 回、200 ms から 2 倍、2 秒で頭打ち、full jitter。
+    ///
+    /// WhyNot: sqlfx の `Retry.defaultPolicy()`（baseMs 100）を使わないのは、CMS 側で borrowTimeoutMs を 2 秒に下げたので
+    /// 待ちの合計が全体の所要時間に効くようになり、200 ms 始まりの方が「DB が数秒止まった」を跨ぎやすいため。
+    ///
+    /// WhyNot: attempts を 3 より増やさないのは、DB が完全に落ちている時の 1 リクエストを 7〜8 秒以内に
+    /// INTERNAL で返し切るため（borrow 2 秒 × 3 + 待ち 0〜0.6 秒）。
+    ///
+    pub def retryPolicy(): Retry.Policy =
+        { attempts = 3, baseMs = 200, maxMs = 2000 }
+
+    ///
+    /// 一時的な失敗を待ってから呼び直す。待ちは `retryPolicy()` で、待った回数（= 再試行の回数）を counter に積む。
     ///
     /// WhyNot: 待たずに呼び直さない（withRetry）のは、DB の再起動を跨ぐのに 3 回の即時再試行では届かず、
     /// 落ちている間は全スレッドが borrowTimeout ぶん揃って張り付くため。jitter を掛けるのは、同時に失敗した
@@ -48,7 +59,7 @@ mod DbRunner {
     ///
     pub def retryWith(counter: Ref[Int32, Static], thunk: Unit -> a \ ef): Result[DbFailure, a] \ (ef - {TransientDbErr, DbErr}) + IO =
         DbError.runWithFailure(() -> Math.Random.runWithIO(() ->
-            Retry.withRetryWith(Retry.defaultPolicy(), ms -> countedSleep(counter, ms), () -> Math.Random.randomFloat64(), thunk)))
+            Retry.withRetryWith(retryPolicy(), ms -> countedSleep(counter, ms), () -> Math.Random.randomFloat64(), thunk)))
 
     /// 1 回数えてから待つ。最後の失敗の後は呼ばれないので、呼ばれた回数がそのまま再試行の回数。
     def countedSleep(counter: Ref[Int32, Static], ms: Int32): Unit \ IO =

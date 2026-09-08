@@ -6,6 +6,8 @@
 /// - CMS_DB_APP_USER / CMS_DB_APP_PASSWORD: リクエストに使うアプリ用のロール（RLS が効く）。PASSWORD が無ければ所有者で繋ぐ
 /// - CMS_DB_TIMEOUT_SECONDS: 接続ごとに DB 側で効かせる時間の上限（idle_in_transaction_session_timeout / statement_timeout / lock_timeout）。既定 30。0 で無効
 /// - CMS_DB_LEAK_DETECTION_SECONDS: 借りたまま返さない接続を HikariCP が警告するまでの秒数。既定 0（無効）
+/// - CMS_DB_MAX_CONNECTIONS: 同時に使う接続の上限。既定は sqlfx の Pool.defaultConfig の値
+/// - CMS_DB_BORROW_TIMEOUT_SECONDS: 接続を借りるのを待つ上限。既定 2
 ///
 mod DbConfig {
 
@@ -13,17 +15,41 @@ mod DbConfig {
     pub def defaultTimeoutSeconds(): Int32 = 30
 
     ///
-    /// プールの設定。接続数と待ちは sqlfx の既定のまま、漏れの検出だけ CMS_DB_LEAK_DETECTION_SECONDS で足す。
+    /// CMS_DB_BORROW_TIMEOUT_SECONDS の既定（秒）。
+    ///
+    /// WhyNot: sqlfx の既定の 5 秒を使わないのは、DbRunner が 3 回まで再試行するので 5 秒だと全部で 15 秒張り付き、
+    /// DB が完全に落ちている間のリクエストが前段（Caddy）のタイムアウトより長くなるため。2 秒なら backoff 込みで 7〜8 秒に収まり、
+    /// DB が数秒止まっただけの時は再試行で跨げる。
+    ///
+    pub def defaultBorrowTimeoutSeconds(): Int32 = 2
+
+    ///
+    /// プールの設定。接続数・借りる待ち・漏れの検出を環境変数で上書きする。
     ///
     pub def poolFromEnv(connection: Jdbc.ConnectionConfig): Pool.PoolConfig \ Sys.Env =
-        { leakDetectionThresholdMs = leakDetectionSeconds(Sys.Env.getVar("CMS_DB_LEAK_DETECTION_SECONDS")) * 1000
-        | Pool.defaultConfig(connection) }
+        let base = Pool.defaultConfig(connection);
+        { maxConnections           = maxConnections(base#maxConnections, Sys.Env.getVar("CMS_DB_MAX_CONNECTIONS")),
+          borrowTimeoutMs          = borrowTimeoutSeconds(Sys.Env.getVar("CMS_DB_BORROW_TIMEOUT_SECONDS")) * 1000,
+          leakDetectionThresholdMs = leakDetectionSeconds(Sys.Env.getVar("CMS_DB_LEAK_DETECTION_SECONDS")) * 1000
+        | base }
 
     ///
     /// CMS_DB_LEAK_DETECTION_SECONDS の値を秒にする。無い・数字でない・負なら 0（無効）。
     ///
     pub def leakDetectionSeconds(raw: Option[String]): Int32 =
         raw |> Option.flatMap(Int32.fromString) |> Option.filter(seconds -> seconds >= 0) |> Option.getWithDefault(0)
+
+    ///
+    /// CMS_DB_MAX_CONNECTIONS の値。無い・数字でない・1 未満なら fallback（sqlfx の既定）。
+    ///
+    pub def maxConnections(fallback: Int32, raw: Option[String]): Int32 =
+        raw |> Option.flatMap(Int32.fromString) |> Option.filter(count -> count >= 1) |> Option.getWithDefault(fallback)
+
+    ///
+    /// CMS_DB_BORROW_TIMEOUT_SECONDS の値を秒にする。無い・数字でない・1 未満なら既定の 2。
+    ///
+    pub def borrowTimeoutSeconds(raw: Option[String]): Int32 =
+        raw |> Option.flatMap(Int32.fromString) |> Option.filter(seconds -> seconds >= 1) |> Option.getWithDefault(defaultBorrowTimeoutSeconds())
 
     ///
     /// アプリ用のロールの接続設定。CMS_DB_APP_PASSWORD が無ければ None（所有者で繋ぐ。FORCE ROW LEVEL SECURITY なので policy 自体は効く）。
