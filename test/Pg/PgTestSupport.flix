@@ -238,12 +238,19 @@ mod PgTestSupport {
 
     ///
     /// 問い合わせごとに認証し、断られたら Runner の手前で断られた形（data は Null、errors[].message）にする。
+    /// 読むだけの文書には先読みの写しを付ける（Main.runObserved と同じ）。
     ///
     def askScopedAs(pool: Pool, engine: Engine, scope: Option[ProjectId], built: Graphql.Engine, credential: Credential): String -> (Value, Option[String]) \ IO =
         queryText -> match authenticateObserved(pool, engine, scope, _ -> (), credential) {
             case Err(rejection) => (Value.Null, Some(Rejection.message(rejection)))
-            case Ok(found)      => GraphqlTestKit.askEngineWith(built, Context.withActor(found#actor), queryText)
+            case Ok(found)      => GraphqlTestKit.askEngineWith(built, contextFor(found#actor, queryText), queryText)
         }
+
+    ///
+    /// リクエストの Context（Main.runObserved と同じ形）。読むだけの文書なら先読みの写し付き。
+    ///
+    pub def contextFor(actor: Actor, queryText: String): Context \ IO =
+        if (Server.isReadOnly(queryText)) Context.withActor(actor) |> Context.withPreload else Context.withActor(actor)
 
     ///
     /// この Credential で API（管理 API / Account API）に問い合わせる ask。

@@ -3,11 +3,13 @@
 /// actor は認証済みユーザー。認証はリクエストに 1 回、Graphql の handler を持つ側（Main.runRoute）が Tx の外で済ませてここに入れる。
 /// log はリクエストの span（request.id、user.id など）。Runner がリゾルバの中の行に付ける。
 /// observe は Runner が決めた事（SQL の数、再試行の回数）をリクエストの行に戻す口。
+/// preload はリクエストの間だけ持つ先読みの写し（Preloaded）。一覧の行のフィールドがページの分をまとめて引くための物で、
+/// None なら写し無し（1 件ずつ引く）。読むだけのリクエストにだけ Main が入れる。
 ///
 /// WhyNot: 戻す口が関数の値なのは、リゾルバは graphql-java の Java コールバックの中で呼ばれて effect が外の handler に届かず、
-/// 戻り値は graphql-java がフィールドの値として使うため。値として持ち込んだ物にしか書けない。
+/// 戻り値は graphql-java がフィールドの値として使うため。値として持ち込んだ物にしか書けない。写しの Ref も同じ理由で値として持ち込む。
 ///
-pub type alias Context = { actor = Actor, log = Log.Fields, observe = Log.Fields -> Unit \ IO }
+pub type alias Context = { actor = Actor, log = Log.Fields, observe = Log.Fields -> Unit \ IO, preload = Option[Ref[Preloaded.Store, Static]] }
 
 mod Context {
 
@@ -17,9 +19,18 @@ mod Context {
     pub def anonymous(): Context = withActor(Actor.Anonymous)
 
     ///
-    /// 認証済みユーザー付きの context。
+    /// 認証済みユーザー付きの context。写しは無し。
     ///
-    pub def withActor(actor: Actor): Context = { actor = actor, log = Map.empty(), observe = _ -> () }
+    pub def withActor(actor: Actor): Context = { actor = actor, log = Map.empty(), observe = _ -> (), preload = None }
+
+    ///
+    /// 空の先読みの写しを付ける。1 リクエストに 1 つ。
+    ///
+    /// WhyNot: mutation のあるリクエストに付けないのは、前のルートフィールドが書いた物（版、型のフィールド）を後のフィールドが写しから古いまま返すため。
+    /// 付けるかどうかは呼ぶ側（Main）が文書を見て決める。
+    ///
+    pub def withPreload(context: Context): Context \ IO =
+        { preload = Some(Ref.fresh(Static, Preloaded.empty())) | context }
 
 }
 

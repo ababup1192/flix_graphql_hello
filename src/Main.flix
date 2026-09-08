@@ -308,8 +308,8 @@ def unavailable(message: String): HttpResponse \ Observe =
 
 ///
 /// エンジンで Graphql effect を本物の実行にし、時計を入れる。実行ごとに Context に span を入れ（Runner がリゾルバの中の行に付ける）、
-/// 操作の名前と種類、errors[] の code を extra に積む（リクエストの行に乗る）。Runner が戻す SQL と Tx の数（db.statements / db.transactions）は
-/// フィールドごとに戻るので、Context の observe（observeInto）が足し合わせる。
+/// 読むだけの文書なら先読みの写しを付け、操作の名前と種類、errors[] の code を extra に積む（リクエストの行に乗る）。
+/// Runner が戻す SQL と Tx の数（db.statements / db.transactions）はフィールドごとに戻るので、Context の observe（observeInto）が足し合わせる。
 ///
 /// WhyNot: observe を effect にしないのは、Runner は graphql-java の Java コールバックの中で動き、effect はそこを越えられないため。
 /// Ref を閉じ込めたラムダは値なので越えられる。
@@ -319,11 +319,17 @@ def runObserved(engine: Graphql.Engine, contextFields: Log.Fields, extra: Ref[Lo
         thunk()
     } with handler Graphql {
         def execute(request, context, resume) = {
-            let response = Graphql.executeWith(engine, request, { log = contextFields, observe = observeInto(extra) | context });
+            let response = Graphql.executeWith(engine, request, withPreloadIfReadOnly(request, { log = contextFields, observe = observeInto(extra) | context }));
             Ref.put(Ref.get(extra) |> LogFields.graphql(request, response), extra);
             resume(response)
         }
     }
+
+///
+/// 読むだけの文書（mutation の無い物）にだけ先読みの写しを付ける。mutation を含む文書は写し無し（Context.withPreload の WhyNot）。
+///
+def withPreloadIfReadOnly(request: GraphqlRequest, context: Context): Context \ IO =
+    if (Server.isReadOnly(request#queryText)) Context.withPreload(context) else context
 
 ///
 /// 行の engine に合う、このプロジェクトのエンジン。コンテンツ API は型の定義から組み（目印で組み直す）、管理 API はプロジェクトごとに 1 つ、

@@ -1,7 +1,7 @@
 ///
-/// 管理 API のリゾルバが使う効果の和。DB の読み書き、CMS の業務エラー、id の採番、今のプロジェクト、認証済みユーザー、asset の保存先。
+/// 管理 API のリゾルバが使う効果の和。DB の読み書き、CMS の業務エラー、id の採番、今のプロジェクト、認証済みユーザー、asset の保存先、先読みの写し。
 ///
-pub type alias AdminEff = Db + CmsErr + IdGen + Tenant + Session + ObjectStore + Time.Clock.Clock + Log
+pub type alias AdminEff = Db + CmsErr + IdGen + Tenant + Session + ObjectStore + Time.Clock.Clock + Log + Preloaded
 
 ///
 /// 管理 API の Runner。リゾルバ 1 つの実行を「最初の SQL で借りる接続 1 本・Tx 1 つ」に包み、失敗を GraphQL のエラーに写す。
@@ -17,12 +17,14 @@ mod AdminRunner {
         (context, f) -> runOne(pool, deps, projectId, context, f)
 
     ///
-    /// 1 フィールドぶん。環境の handler（AppEnv）を入れ、認証済みユーザーの Tx（DbRunner.transact）で f を走らせる。
+    /// 1 フィールドぶん。環境の handler（AppEnv）と先読みの写し（context の preload。フィールドを跨いで同じ Ref）を入れ、
+    /// 認証済みユーザーの Tx（DbRunner.transact）で f を走らせる。
     /// Log は deps の出力先で入れ直し、リクエストの span（context の log。認証の属性込み）を行に付ける。
     ///
     def runOne(pool: Pool, deps: Deps, projectId: ProjectId, context: Context, f: Unit -> Result[FieldError, JavaValue.Boxed] \ AdminEff + IO): Result[FieldError, JavaValue.Boxed] \ IO =
         AppEnv.runWith(deps, context#log, projectId, () ->
-            DbRunner.transactObserved(pool, Some(projectId), context#observe, context#actor, f)
+            Preloaded.runWith(context#preload, () ->
+                DbRunner.transactObserved(pool, Some(projectId), context#observe, context#actor, f))
                 |> DbRunner.toFieldResult(LogFields.requestIdOf(context#log)))
 
 }
