@@ -240,7 +240,7 @@ SIGTERM / SIGINT を受けると、この順で止まる。
 | 0 | 綺麗に停止した（接続も仕事も片付いた） |
 | 1 | 起動に失敗した（`startup failed`） |
 | 2 | 停止の drain が間に合わなかった（`shutdown timed out`） |
-| 3 | 自己回復（`self-heal: exiting`。下） |
+| 3 | 壊れて落ちた。自己回復（`self-heal: exiting`。下）、main スレッドが致命的な例外で死んだ（`main thread died`）、`-XX:+ExitOnOutOfMemoryError` の JVM が OutOfMemoryError で落ちた（`Terminating due to java.lang.OutOfMemoryError`）の 3 通り |
 
 DB が止まっている最中の停止は、tick が DB 待ちで詰まって期限に間に合わず **2 になり得る**（`shutdown.in_tick: true`）。
 「綺麗に止まれなかった」事実なのでこれで正しい。0 で止めたいなら `stop_grace_period` を `CMS_DB_TIMEOUT_SECONDS` より長くする。
@@ -265,7 +265,11 @@ OOM のような事故の後、プロセスは生きているのに接続プー�
 compose の `restart: unless-stopped` が起こし直す。`CMS_SELF_HEAL=off` で止められる。
 
 OOM で JVM 自身が落ちる時（`-XX:+ExitOnOutOfMemoryError`）の最後の行 `Terminating due to java.lang.OutOfMemoryError` は **JSON ではない**（JVM が出す物で、アプリ側では塞げない）。
+その時の終了コードは **3**（OpenJDK 23.0.1 で実測。この旗を付けないと `Exception in thread "main"` で 1 になる）。
 収集器は終了コード 3 と、その直前の行で判断する（LogQL なら `__error__ != ""` で拾う）。
+
+旗を付けない環境（手元で jar を直に起動する時など）でも main スレッドが死んだ時に 1 にならないよう、cms は `listen` を Throwable で受け、
+`{"severity":"fatal","message":"main thread died","exception.type":...}` を出して 3 で終わる。drain はしない（JVM が壊れている時で、DB の呼び出しも同じ理由で詰まるため）。
 
 見張りのスレッド自体が止まった時は、`/health` が 503 と `"reason": "watch stalled"` を返す（最後に回ってから 30 秒より古い時）。
 リクエストの行には `jobs.stalled_ms` / `watch.stalled_ms` が付く。

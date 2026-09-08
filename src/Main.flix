@@ -1,4 +1,5 @@
 import java.lang.System
+import java.lang.Throwable
 
 ///
 /// 起動。SDL と生成物の一致、PostgreSQL の接続、migrations の適用済みを確かめ、管理 API（/admin/graphql）と
@@ -86,7 +87,7 @@ def importMicrocms(started: Started): Unit \ {IO, Fs.FileRead, Sys.Exit, Sys.Env
 ///
 /// サーバを立てて待つ。戻らない。
 ///
-def serve(version: String, sink: Log.Sink, started: Started): Unit \ {IO, Sys.Env, Log} =
+def serve(version: String, sink: Log.Sink, started: Started): Unit \ {IO, Sys.Env, Sys.Exit, Log} =
     let deps = started#deps;
     let jwks = TokenVerifier.createCache();
     let cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins };
@@ -118,8 +119,36 @@ def serve(version: String, sink: Log.Sink, started: Started): Unit \ {IO, Sys.En
         |> Log.Fields.str("server.address", bind |> Option.getWithDefault("0.0.0.0"))
         |> Log.Fields.int("server.port", Int32.toInt64(listener#port))
         |> Log.info("listening");
-    HttpServer.listen(listener, served -> logServed(sink, served), request -> dispatch(runtime, request))
+    Option.forEach(died, listenGuarded(listener, sink, runtime))
     }
+
+///
+/// listen を回し、Throwable で抜けたらそれを返す（正常に閉じたら None）。
+///
+/// WhyNot: catch の中でログを出さないのは、Log は effect で、try / catch を跨ぐと CPS の frame に落ちるため。
+/// 受けた物を値で返して外で出す。
+///
+def listenGuarded(listener: HttpServer.Listener, sink: Log.Sink, runtime: Runtime): Option[Throwable] \ IO =
+    try {
+        HttpServer.listen(listener, served -> logServed(sink, served), request -> dispatch(runtime, request));
+        None
+    } catch {
+        case error: Throwable => Some(error)
+    }
+
+///
+/// main スレッドが落ちた。行を出して、自己回復と同じ終了コード 3 で終わる。
+///
+/// WhyNot: drain してから終わらないのは、ここに来るのは OOM のように JVM 自体が壊れている時で、
+/// drain の中の DB の呼び出しも同じ理由で詰まり、停止が終わらなくなるため。
+///
+/// WhyNot: そのまま JVM に投げ返さないのは、投げ返すと終了コードが 1 になり、起動の失敗（1）と区別が付かないため。
+/// `-XX:+ExitOnOutOfMemoryError` を付けた JVM が使う番号（実測で 3）に寄せる。
+///
+def died(error: Throwable): Unit \ {IO, Sys.Exit, Log} =
+    let fields = Log.exception(error, Log.Fields.empty());
+    if (JvmErrors.isFatal(error)) Log.fatal("main thread died", fields) else Log.error("main thread died", fields);
+    Sys.Exit.exit(Shutdown.exitCode(Shutdown.Outcome.Crashed))
 
 ///
 /// プールが壊れたまま戻らないかを見張る物。CMS_SELF_HEAL=off なら None（見張らない）。

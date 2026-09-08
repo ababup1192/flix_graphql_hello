@@ -33,11 +33,12 @@ mod Shutdown {
     pub type alias Remaining = { connections = Int32, inTick = Bool }
 
     ///
-    /// 停止の結末。
+    /// 停止の結末。Crashed は SIGTERM ではなく、main スレッドが致命的な例外で落ちた時に使う。
     ///
     pub enum Outcome with Eq, ToString {
         case Clean
         case TimedOut
+        case Crashed
     }
 
     ///
@@ -47,14 +48,18 @@ mod Shutdown {
         if (remaining#connections <= 0 and not remaining#inTick) Outcome.Clean else Outcome.TimedOut
 
     ///
-    /// 結末の終了コード。0 は綺麗に停止、2 は待ち切れなかった。
+    /// 結末の終了コード。0 は綺麗に停止、2 は待ち切れなかった、3 は壊れて落ちた。
     ///
     /// WhyNot: 待ち切れない時も 0 にしないのは、処理中のリクエストを切った事と Webhook の二重配信の可能性が
     /// 呼び出し側（compose / orchestrator の記録）に残らないため。3 は自己回復が使っているので 2 にする。
     ///
+    /// WhyNot: Crashed に別の番号を与えないのは、自己回復（3）も `-XX:+ExitOnOutOfMemoryError` の JVM（3）も同じ
+    /// 「壊れたので落ちた」で、収集器から見て分ける意味が無いため。何が壊れたかは直前の行で分かる。
+    ///
     pub def exitCode(outcome: Outcome): Int32 = match outcome {
         case Outcome.Clean    => 0
         case Outcome.TimedOut => 2
+        case Outcome.Crashed  => 3
     }
 
     ///
@@ -95,6 +100,7 @@ mod Shutdown {
         let outcome = decide(remaining);
         match outcome {
             case Outcome.Clean    => ()
+            case Outcome.Crashed  => ()
             case Outcome.TimedOut =>
                 Log.Fields.empty()
                     |> Log.Fields.int("shutdown.connections", Int32.toInt64(remaining#connections))

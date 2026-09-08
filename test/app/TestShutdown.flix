@@ -18,10 +18,10 @@ mod TestShutdown {
             expected = table |> List.map(snd),
             table |> List.map(match (remaining, _) -> Shutdown.decide(remaining)))
 
-    /// 綺麗に停止したら 0、待ち切れなかったら 2（3 は自己回復が使う）。
+    /// 綺麗に停止したら 0、待ち切れなかったら 2、main スレッドが落ちたら自己回復と同じ 3。
     @Test
     def testExitCodeTable(): Unit \ Assert =
-        let table = List#{ (Outcome.Clean, 0), (Outcome.TimedOut, 2) };
+        let table = List#{ (Outcome.Clean, 0), (Outcome.TimedOut, 2), (Outcome.Crashed, 3) };
         Assert.assertEq(
             expected = table |> List.map(snd),
             table |> List.map(match (outcome, _) -> Shutdown.exitCode(outcome)))
