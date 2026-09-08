@@ -12,10 +12,10 @@ mod HealthFake {
         { active = 1, max = 256 }
 
     ///
-    /// checkDb が常に Ok を返す。ワーカーは 1 度も回っていない事にし、runJobs は何もせず空を返す。
+    /// checkDb が常に Ok を返す。ワーカーは 1 度も回っていない事にし、runJobs は何もせず空を返す。ログは捨て、時計は 0。
     ///
     pub def ok(): Health[{}] =
-        { checkDb = _ -> Ok(()), jobsSummary = _ -> idle(), runJobs = _ -> Nil, connections = _ -> busy() }
+        { checkDb = _ -> Ok(()), jobsSummary = _ -> idle(), runJobs = _ -> Nil, connections = _ -> busy(), logLine = _ -> (), nowMillis = _ -> 0i64 }
 
     ///
     /// checkDb が常に message の Err を返す。

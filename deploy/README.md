@@ -64,6 +64,39 @@ curl -s -X POST https://cms.example.com/p/blog/admin/graphql -H "Authorization: 
 
 `CMS_API_KEY_PEPPER` を回すと、API キーと PAT は全部再発行になる（行の pepper_id は解決に使っていない）。
 
+## MCP サーバ（AI エージェントから読み書き）
+
+`POST /mcp`（プロジェクトを選ぶなら `/p/{プロジェクト slug}/mcp`）が MCP サーバ。管理 API のエンジンへの GraphQL クライアントとして動くので、
+身元・権限・業務エラーの分類は管理 API と同じ（`X-Api-Key` の WRITE の鍵か、`Authorization: Bearer cmspat_...` の PAT。無ければ匿名で、公開中の読み取りだけ）。
+喋るのは legacy（MCP 2025-06-18 の形。`initialize` の握手、セッション無し、`tools` だけ。resources / prompts は無い）。modern（server/discover）は v2。
+
+```bash
+# Claude Code に繋ぐ（鍵は createApiKey の scope: WRITE、PAT なら --header "Authorization: Bearer cmspat_..."）
+claude mcp add --transport http cms http://127.0.0.1:8080/mcp --header "X-Api-Key: $CMS_API_KEY"
+
+# 繋がったか（tools/list が 12 件返る）
+claude mcp list
+
+# 手で叩く
+curl -s -X POST http://127.0.0.1:8080/mcp -H 'Content-Type: application/json' -H "X-Api-Key: $CMS_API_KEY" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+curl -s -X POST http://127.0.0.1:8080/mcp -H 'Content-Type: application/json' -H "X-Api-Key: $CMS_API_KEY" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_entry","arguments":{"type":"blogs","fields":{"title":"Hello","body":"# 見出し\n\n本文"}}}}'
+```
+
+ツール（12）: `list_types` / `get_type(apiId)` / `search_entries(type, search, first, skip, stage)` / `get_entry(id, stage, format)` / `diff_entry(id, from, to)` /
+`create_entry(type, fields)` / `update_entry(id, fields, expectedVersion)` / `publish_check(id)` / `impact(id, action)` / `publish(id, withDependencies)` / `unpublish(id)` / `preview_url(id)`。
+RICH_TEXT のフィールドは Markdown の文字列で書け、`get_entry` の `format`（markdown / text / html / doc）で読み方を選ぶ。
+説明（description）は仕様として扱う: `publish` の前に `publish_check` と `impact(id, PUBLISH)` と `diff_entry` を、`unpublish` の前に `impact(id, UNPUBLISH)` を呼ぶ。
+`tools/list` は主体が呼べる物に絞らない（全部出す。呼べなければ `FORBIDDEN` が返る）。
+
+業務エラー（FORBIDDEN / NOT_FOUND / CONFLICT / INVALID …）は全部 `tools/call` の result に `isError: true` で、`content[0].text` に
+[error-codes.md](../docs/design/error-codes.md) の `extensions`（code / message / violations / entity / id / expectedVersion / actualVersion）がそのまま JSON で入る。
+protocol error は JSON-RPC の -32700 / -32600 / -32601 / -32602 だけ。壊れたログインの JWT と死んだ PAT は HTTP 401（`WWW-Authenticate: Bearer error="invalid_token"`）、
+Origin ヘッダが付いていて `CMS_CORS_ORIGINS` に無ければ 403（無ければ通す。CLI は Origin を付けない）、プレビュートークンは 400。
+`content[0].text` が 256 KB を超えたら本文だけ切って `structuredContent.truncated: true` が付く。
+`tools/call` は 1 行 JSON（`{"mcp":"tools/call","tool":…,"entryId":…,"credential":"api-key","ms":…,"status":"ok"}`）でログに出る。引数は残さない。
+
 ## CDN に乗せる（GET）
 
 コンテンツ API は `GET /graphql?query=...&variables=...` でも読める（mutation は 405）。鍵もプレビュートークンも無い問い合わせで errors が無ければ

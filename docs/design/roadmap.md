@@ -63,7 +63,7 @@ HTTP サーバの同時接続の上限（`CMS_MAX_CONNECTIONS`。超えたら 50
 | 22a | レビュー・承認ワークフロー | 1 日 | 役割が入ってから |
 | 22b | 属性ベースの権限（記事のグルーピング: 「このタグの記事だけこのユーザー / キーに」） | 1 日 | `access_rules(project_id, subject, field, allowed_values)` を足し、Datalog の事実と `Authz.readFilter` の SQL 条件で。参照展開と impact にも通す |
 | 23 | 読み取り REST + OpenAPI | 半日 + 1 時間 | [read-only-rest.md](read-only-rest.md) |
-| 24 | MCP サーバ（AI エージェントから読み書き） | 半日 | 管理 API を tool に写す |
+| 24 | MCP サーバ（AI エージェントから読み書き。2026-09-08 に v1 を実装済み） | 済み | `POST /mcp`。legacy（MCP 2025-06-18 の形。initialize の握手、セッション無し、tools だけ）を喋る。12 のツール（list_types / get_type / search_entries / get_entry / diff_entry / create_entry / update_entry / publish_check / impact / publish / unpublish / preview_url）を admin.graphql に写す GraphQL クライアント。業務エラーは全部 `isError` の content に `extensions` をそのまま。modern（2026-07-28。server/discover、ヘッダ照合）と、主体が呼べるツールだけを出す tools/list は v2。手順は `deploy/README.md` |
 | 25 | 画像変換（srcset） | 半日 | Cloudflare Images に委ねる。セルフホストは imgproxy |
 | 26 | entry id をプロジェクトごとに、RLS、読み取りレプリカ | 2〜3 日 | 段階 3 |
 | 27 | persisted query、`QUERY` メソッド | 半日 | 普及を待つ |

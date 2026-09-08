@@ -48,6 +48,8 @@ make import-microcms  # import/microcms/schema/*.json（microCMS の API スキ�
 make image     # Docker イメージ（手元用。CI は ghcr.io に amd64 / arm64）
 ```
 
+MCP サーバ（`POST /mcp`）は `claude mcp add --transport http cms http://127.0.0.1:8080/mcp --header "X-Api-Key: …"` で繋ぐ（手順は `deploy/README.md`）。
+
 本番と セルフホストは `deploy/`（docker compose + Caddy / Alloy の例、README）。イメージは起動時に migrations/ を当てる（`CMS_MIGRATE=apply`）。
 ログは 1 行 1 JSON、`/health` に `version`（git の sha）が出る。
 
@@ -74,6 +76,7 @@ src/admin/             管理 API。AdminMapping（GraphQL の型 ↔ ドメイ�
 src/content/           コンテンツ API。ContentSchemaBuilder（定義 → Schema）、ContentEngine（目印で組み直す置き場）、ContentRunner（読むだけ）
 src/app/               Server（ルート表 `Server.routes`。1 行 = メソッド・パス・engine・handler。`/p/{projectSlug}/` は `Router.withProjectPrefix` が複製。行を足したら TestServer の describe の一覧にも 1 行。/health・Host のプロジェクト slug の middleware `wrapProjectFromHost`。Main は表の engine を見てエンジンを入れる）、Credentials（ヘッダ → Credential。PAT / JWT / X-Api-Key / X-Preview-Token の順。`Credentials.wrap` が middleware）、DbConfig（所有者とアプリ用ロール）、TenantTx（RLS の印付き Tx）、AppRole（cms_app の作成）、BackgroundJobs（プロセス内のバックグラウンドワーカー。2 秒ごとに回復・掃除 → Scheduler.tick → WebhookDispatcher.tick。外部トリガー POST /jobs/tick も同じ tick）、Scheduler（予約公開の実行）、WebhookDispatcher（配信行を拾って POST）、JobLog（仕事 1 件の 1 行ログ）、DbRunner（Tx と業務エラー。transact / toFieldResult）、GraphqlErrors（業務エラー → errors[].extensions の code / violations / entity / id / 版。分類を決めるのはここだけ。[docs/design/error-codes.md](docs/design/error-codes.md)）、RequestIdentity（Credential → Actor。API キーと PAT の hash 解決、死んだ PAT は理由付きで断る、last_used_at）、StorageConfig（ASSET_*。無ければ asset 無し）、AuthConfig（CMS_AUTH=jwks|dev|none）、Deps、Health（/health と /jobs/tick が読む関数のレコード `Health[ef]`。本番は `ofPool`、テストは `HealthFake.ok()` / `failing`）
 src/import/            microCMS からの取り込み。MicrocmsSchema（API スキーマの export を読む。純粋）、MicrocmsImport（型に写し、ダミーの entry を積む）、MicrocmsCli（CMS_MODE=import-microcms の一発処理）
+src/mcp/               MCP サーバ v1（POST /mcp。legacy = MCP 2025-06-18 の形。initialize / ping / tools/list / tools/call だけ。modern は v2）。McpServer（JSON-RPC の parse / dispatch / initialize / error の形。純粋）、McpTools（ツール定義の表 `tools()`。tools/list の inputSchema と引数の復号を同じ定義から出す。引数 → admin.graphql の query + variables、data → content の写し、richText の Markdown / text / html の写し）。管理 API のエンジンへの GraphQL クライアントで、ユースケースは直に呼ばない。HTTP との繋ぎ（Origin の 403、401、202）は Server.flix の mcpRoute
 src/crypto/            Sha256（sha256 / HMAC / 16 進）と Base64Url。署名と鍵のハッシュが共通で使う。ドメインは storage や auth に依存しない
 src/auth/              JWT の検証（RS256 固定。kid / iss / aud / exp / nbf）と TokenVerifier effect（JWKS の取得とキャッシュ）
 src/storage/           asset の置き先。SigV4（純粋な署名）、ObjectStore effect（署名付き URL / HEAD / DELETE。MinIO と R2 は同じ handler）

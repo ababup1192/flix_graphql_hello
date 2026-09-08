@@ -27,6 +27,7 @@ mod Server {
     /// - GET /graphql, /admin/graphql ?query=...&variables=...&operationName=...: query だけ（mutation は 405）。コンテンツ API は身元無しなら Cache-Control で CDN に乗せられる
     /// - GET /health: DB に届けば 200、届かなければ 503。jobs にワーカーの最終実行時刻と待ち・失敗の件数（数えられなければ -1）
     /// - POST /jobs/tick: 外部トリガー。X-Jobs-Token が設定と一致すればワーカーを 1 周回す（無ければ 404）
+    /// - POST /mcp: MCP サーバ（JSON-RPC。tools だけ）。管理 API のエンジンへの GraphQL クライアントとして動く
     ///
     pub def routes(config: ServerConfig, health: Health[ef]): List[Route[{Graphql, ef}]] =
         Router.route(Method.Post, "/graphql",         Some(Engine.Content), widen(executeBody)) ::
@@ -35,7 +36,8 @@ mod Server {
         Router.route(Method.Get,  "/admin/graphql",   Some(Engine.Admin),   widen(executeQueryString(None))) ::
         Router.route(Method.Post, "/account/graphql", Some(Engine.Account), widen(executeBody)) ::
         Router.route(Method.Get,  "/health",          None,                 widen(healthRoute(config#version, health))) ::
-        Router.route(Method.Post, "/jobs/tick",       None,                 widen(jobsTick(config#jobsToken, health))) :: Nil
+        Router.route(Method.Post, "/jobs/tick",       None,                 widen(jobsTick(config#jobsToken, health))) ::
+        Router.route(Method.Post, "/mcp",             Some(Engine.Admin),   mcpRoute(config, health)) :: Nil
 
     ///
     /// 行の handler を表全体の effect に広げる。行ごとの handler は自分の effect（Graphql だけ、Health の ef だけ）を宣言したままにする。
@@ -143,6 +145,75 @@ mod Server {
                       body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str(if (List.isEmpty(failures)) "ok" else "error"), "failures" => Value.List(failures |> List.map(Value.Str)) })) }
                 }
         }
+
+    ///
+    /// POST /mcp。Content-Type が JSON でなければ 415、Origin が許可外なら 403、知らない MCP-Protocol-Version は 400、
+    /// プレビュートークンは 400（この経路では受けない）、壊れたログインの JWT と死んだ PAT は 401 + WWW-Authenticate。
+    /// parse に落ちた本文は 400、通知は 202、それ以外は 200 で JSON-RPC の応答。tools/call は 1 行 JSON のログを出す。
+    ///
+    def mcpRoute(config: ServerConfig, health: Health[ef], routeRequest: RouteRequest): HttpResponse \ {Graphql, ef} =
+        match mcpPrecheck(config, routeRequest) {
+            case Err(response) => response
+            case Ok(())        => match McpServer.parse(routeRequest#request#body) {
+                case Err(errorBody) => jsonResponse(400, Nil, errorBody)
+                case Ok(message)    =>
+                    let startedAt = (health#nowMillis)();
+                    let reply = McpServer.dispatch(config#version, message, executeAs(routeRequest#credential));
+                    logMcpCall(health, routeRequest#credential, message, reply, (health#nowMillis)() - startedAt);
+                    toMcpResponse(reply)
+            }
+        }
+
+    ///
+    /// 身元付きで Graphql effect を呼ぶ。McpServer.dispatch の execute。
+    ///
+    /// WhyNot: mcpRoute の中のラムダにしないのは、effect を使う式をラムダに直に書くと JVM の VerifyError が出る事があるため。
+    ///
+    def executeAs(credential: Credential, request: GraphqlRequest): GraphqlResponse \ Graphql =
+        Graphql.execute(request, Context.withCredential(credential))
+
+    ///
+    /// MCP の本文を読む前の検査。Err はそのまま返す応答。
+    ///
+    def mcpPrecheck(config: ServerConfig, routeRequest: RouteRequest): Result[HttpResponse, Unit] =
+        let request = routeRequest#request;
+        if (not isJson(request)) Err(errorResponse(415, Nil, "Content-Type: application/json で送ってください"))
+        else if (not McpServer.isOriginAllowed(config#cors, request#headers)) Err(jsonResponse(403, Nil, McpServer.errorBody(Value.Null, McpServer.invalidRequestCode(), "この Origin からは受け付けません")))
+        else match (McpServer.protocolVersionOf(request#headers), routeRequest#credential) {
+            case (Err(version), _)                => Err(jsonResponse(400, Nil, McpServer.errorBody(Value.Null, McpServer.invalidRequestCode(), "MCP-Protocol-Version '${version}' には対応していません（${List.join(" / ", McpServer.supportedProtocolVersions())}）")))
+            case (Ok(_), Credential.Preview(_))   => Err(jsonResponse(400, Nil, McpServer.errorBody(Value.Null, McpServer.invalidRequestCode(), "プレビュートークンはこの経路では受け付けません（API キーか PAT で）")))
+            case (Ok(_), Credential.Invalid(reason)) => Err(jsonResponse(401, ("WWW-Authenticate", "Bearer error=\"invalid_token\"") :: Nil, McpServer.errorBody(Value.Null, McpServer.invalidRequestCode(), "認証に失敗しました: ${reason}")))
+            case (Ok(_), _)                       => Ok(())
+        }
+
+    ///
+    /// dispatch の答えを HTTP に。
+    ///
+    def toMcpResponse(reply: McpServer.Reply): HttpResponse = match reply {
+        case McpServer.Reply.Body(body)            => jsonResponse(200, Nil, body)
+        case McpServer.Reply.Accepted              => { status = 202, headers = Nil, body = "" }
+        case McpServer.Reply.Unauthenticated(body) => jsonResponse(401, ("WWW-Authenticate", "Bearer error=\"invalid_token\"") :: Nil, body)
+    }
+
+    ///
+    /// tools/call を 1 行 JSON で出す（JobLog と同じ形）。主体は鍵の種類だけ、引数は残さない。
+    ///
+    def logMcpCall(health: Health[ef], credential: Credential, message: McpServer.Message, reply: McpServer.Reply, elapsedMillis: Int64): Unit \ ef =
+        match McpServer.callSummary(message, reply) {
+            case None => ()
+            case Some((tool, entryId, isError)) =>
+                (health#logLine)(JsonValue.toJsonString(Value.Obj(Map#{
+                    "mcp" => Value.Str("tools/call"), "tool" => Value.Str(tool), "entryId" => Value.Str(entryId),
+                    "credential" => Value.Str(McpServer.credentialKind(credential)), "ms" => Value.Int(Int64.clampToInt32(min = 0, max = 2147483647, elapsedMillis)),
+                    "status" => Value.Str(if (isError) "error" else "ok"),
+                    "time" => Value.Str(Timestamp.toIso8601(Timestamp.fromEpochMillis((health#nowMillis)()))) })))
+        }
+
+    ///
+    /// JSON の応答。
+    ///
+    def jsonResponse(status: Int32, headers: List[(String, String)], body: Value): HttpResponse =
+        { status = status, headers = headers, body = JsonValue.toJsonString(body) }
 
     ///
     /// POST の JSON ボディを GraphqlRequest に読んで実行する。Content-Type が JSON でなければ 415、壊れた JSON・形の違うボディは 400。
