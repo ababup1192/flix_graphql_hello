@@ -136,8 +136,9 @@ mod ContentEntries {
         discard EntriesQueries.softDeleteEntry({ id = EntryId.text(id), projectId = Tenant.currentId() });
         notify(WebhookEvent.EntryDeleted, id, existing#typeId)
 
-    /// entry の出来事を Webhook に積む（同じ Tx）。
+    /// entry の出来事を Webhook に積み、プロジェクトの版を進める（同じ Tx）。
     def notify(event: WebhookEvent, id: EntryId, typeId: TypeId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
+        Projects.bumpContentVersion();
         Webhooks.emitEntry(event, id, ContentTypes.get(typeId)#apiId)
 
     // ---- 公開 ----

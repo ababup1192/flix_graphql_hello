@@ -92,8 +92,9 @@ mod ContentTypes {
             plural   = draft#plural |> Option.getWithDefault(Naming.derivePlural(draft#apiId))
         }
 
-    /// 型の変更を Webhook に積む（同じ Tx）。
+    /// 型の変更を Webhook に積み、プロジェクトの版を進める（同じ Tx）。
     def notifySchema(apiId: ApiId): Unit \ Db + IdGen + Tenant =
+        Projects.bumpContentVersion();
         Webhooks.emitSchema(apiId)
 
     ///

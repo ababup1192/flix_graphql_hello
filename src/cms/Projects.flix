@@ -36,6 +36,22 @@ mod Projects {
         find(Tenant.current()) |> CmsErr.orNotFound(Entity.Organization, "${Tenant.current()}")
 
     ///
+    /// 今のプロジェクトの版（content_version）。コンテンツ API の GET の ETag に入れる。公開・取り下げ・削除・型の変更で進む。
+    /// 行が無ければ 0（RLS の印の無い Tx で projects は見えるので、通常は無い）。
+    ///
+    pub def contentVersion(): Int64 \ DbRead + Tenant =
+        ProjectsQueries.findContentVersion(Tenant.currentId()) |> Option.map(row -> row#contentVersion) |> Option.getWithDefault(0i64)
+
+    ///
+    /// 今のプロジェクトの版を +1 する。公開・取り下げ・削除・型の変更のユースケースが同じ Tx で呼ぶ（権限はそちらが見る）。
+    ///
+    /// WhyNot: 下書きの保存で進めないのは、コンテンツ API の匿名の GET は公開中しか読めず、下書きが変わってもキャッシュの中身は変わらないため。
+    /// 進めると下書きの保存のたびに CDN のキャッシュが全部外れる。
+    ///
+    pub def bumpContentVersion(): Unit \ DbWrite + Tenant =
+        discard ProjectsQueries.bumpContentVersion(Tenant.currentId())
+
+    ///
     /// subdomain と /p/ で使えないプロジェクト slug。DNS のラベルとしては有効だが、入口や他のホストと衝突する。
     ///
     pub def reservedSlugs(): List[String] =

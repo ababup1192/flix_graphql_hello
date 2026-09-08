@@ -800,6 +800,7 @@ mod ProjectsTable {
     pub def orgId(): Fragment.Col[ProjectsTable, Int64, Fragment.NotNull] = Fragment.Col.Col("org_id", SqlValue.Int64)
     pub def visibility(): Fragment.Col[ProjectsTable, String, Fragment.NotNull] = Fragment.Col.Col("visibility", SqlValue.Str)
     pub def publicId(): Fragment.Col[ProjectsTable, String, Fragment.NotNull] = Fragment.Col.Col("public_id", SqlValue.Str)
+    pub def contentVersion(): Fragment.Col[ProjectsTable, Int64, Fragment.NotNull] = Fragment.Col.Col("content_version", SqlValue.Int64)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。

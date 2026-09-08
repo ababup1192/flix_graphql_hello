@@ -26,5 +26,9 @@ Projects.listOfOrg
 Webhooks.emitEntry
 Webhooks.emitSchema
 
+# プロジェクトの版（content_version）。進めるのは公開や型の変更のユースケース（同じ Tx）、読むのは Main.runRoute（コンテンツ API の GET の ETag）
+Projects.bumpContentVersion
+Projects.contentVersion
+
 # 公開の読み。asset は stage を持たず、配信 URL は誰でも開ける
 Assets.findMany

@@ -7,7 +7,7 @@ mod ProjectsQueries {
     ///
     /// 生成元 projects.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 1742884277
+    pub def sourceHash(): Int32 = -891895404
 
     ///
     /// findProjectBySlug の 1 行。
@@ -95,5 +95,31 @@ mod ProjectsQueries {
         let sql = "INSERT INTO projects (public_id, org_id, slug, name) VALUES ($1, $2, $3, $4) RETURNING id";
         let params = List#{SqlValue.Str(args#publicId), SqlValue.Int64(args#orgId), SqlValue.Str(args#slug), SqlValue.Str(args#name)};
         RawSql.runWithAllow(() -> Sql.executeReturningOneAs(insertProjectDecoder(), sql, params))
+
+    ///
+    /// findContentVersion の 1 行。
+    ///
+    pub type alias FindContentVersionRow = { contentVersion = Int64 }
+
+    def findContentVersionDecoder(): Decoder[FindContentVersionRow] =
+        forA (
+            contentVersion <- Decoder.int64("content_version")
+        ) yield { contentVersion = contentVersion }
+
+    ///
+    /// findContentVersion: SELECT content_version FROM projects WHERE id = $1
+    ///
+    pub def findContentVersion(id: Int64): Option[FindContentVersionRow] \ DbRead =
+        let sql = "SELECT content_version FROM projects WHERE id = $1";
+        let params = List#{SqlValue.Int64(id)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(findContentVersionDecoder(), sql, params))
+
+    ///
+    /// bumpContentVersion: UPDATE projects SET content_version = content_version + 1 WHERE id = $1
+    ///
+    pub def bumpContentVersion(id: Int64): Int32 \ DbWrite =
+        let sql = "UPDATE projects SET content_version = content_version + 1 WHERE id = $1";
+        let params = List#{SqlValue.Int64(id)};
+        RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
 }
