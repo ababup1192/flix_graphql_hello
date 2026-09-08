@@ -23,11 +23,12 @@ mod ContentEntries {
     // ---- 読む ----
 
     ///
-    /// 型の entry の一覧（管理 API）。更新が新しい順。search が空なら全件、あればどれかの値に含む物。SQL は 2 本（一覧と件数）。
+    /// 型の entry の一覧（管理 API）。既定は更新が新しい順。search が空なら全件、あればどれかの値に含む物。SQL は 2 本（一覧と件数）。
+    /// fields は並び順のキーがフィールドの時に式を決める物（型の定義。フィールドで並べないなら空でよい）。
     ///
-    pub def list(_proof: Granted[ReadDraft], typeId: TypeId, entryQuery: EntryQuery): EntryPage \ DbRead + Tenant =
-        let filter = if (entryQuery#search == "") Nil else Condition.AnyValueContains(entryQuery#search) :: Nil;
-        page(typeId, Nil, Stage.Draft, { filter = filter, orderBy = Nil, first = entryQuery#first, skip = entryQuery#skip })
+    pub def list(_proof: Granted[ReadDraft], typeId: TypeId, fields: List[FieldDef], entryQuery: EntryQuery): EntryPage \ DbRead + Tenant =
+        let search = if (entryQuery#search == "") Nil else Condition.AnyValueContains(entryQuery#search) :: Nil;
+        page(typeId, fields, Stage.Draft, { filter = search ::: entryQuery#filter, orderBy = entryQuery#orderBy, first = entryQuery#first, start = entryQuery#start })
 
     ///
     /// id で 1 つ（下書きの中身）。無ければ（ゴミ箱の物も）None。
@@ -73,22 +74,29 @@ mod ContentEntries {
     ///
     pub def firstByStage(owner: ContentType, access: StageAccess): Option[Entry] \ DbRead + Tenant =
         let stage = stageOf(access);
-        rows(owner#id, owner#fields, stage, { filter = Nil, orderBy = Nil, first = 1, skip = 0 }) |> attachLinked(owner, stage) |> List.head
+        rows(owner#id, owner#fields, stage, { filter = Nil, orderBy = Nil, first = 1, start = PageStart.Offset(0) }) |> attachLinked(owner, stage) |> List.head
 
     ///
-    /// stage の行の 1 ページと件数。参照の先読みはしない。
+    /// stage の行の 1 ページと件数。参照の先読みはしない。first + 1 件引いて「次があるか」を決め、各 entry の位置（cursor）を付ける。
     ///
     def page(typeId: TypeId, fields: List[FieldDef], stage: Stage, listQuery: ListQuery): EntryPage \ DbRead + Tenant =
-        { entries = rows(typeId, fields, stage, listQuery),
-          totalCount = EntriesQueries.countEntriesByStage({ typeId = TypeId.toInt64(typeId), stage = EntryRows.stageToDb(stage), projectId = Tenant.currentId() }, EntryFilterSql.predAllowingRaw(listQuery#filter)) |> Rows.total }
+        let (entries, hasNextPage) = EntryPage.trimPage(listQuery#first, rows(typeId, fields, stage, listQuery));
+        { entries = entries,
+          cursors = entries |> List.map(entry -> Cursor.encode(Cursor.ofEntry(fields, listQuery#orderBy, entry))),
+          totalCount = EntriesQueries.countEntriesByStage({ typeId = TypeId.toInt64(typeId), stage = EntryRows.stageToDb(stage), projectId = Tenant.currentId() }, EntryFilterSql.predAllowingRaw(listQuery#filter)) |> Rows.total,
+          hasNextPage = hasNextPage }
 
     ///
-    /// stage の行。絞り込みと並び順は EntryFilterSql が SQL にする。
+    /// stage の行を first + 1 件まで。絞り込み・並び順・cursor の続きは EntryFilterSql が SQL にする。after なら offset は 0。
     ///
     def rows(typeId: TypeId, fields: List[FieldDef], stage: Stage, listQuery: ListQuery): List[Entry] \ DbRead + Tenant =
+        let offset = match listQuery#start {
+            case PageStart.Offset(skip) => skip
+            case PageStart.After(_)     => 0
+        };
         EntriesQueries.listEntriesByStage(
-            { typeId = TypeId.toInt64(typeId), stage = EntryRows.stageToDb(stage), limit = Int32.toInt64(listQuery#first), offset = Int32.toInt64(listQuery#skip), projectId = Tenant.currentId() },
-            EntryFilterSql.predAllowingRaw(listQuery#filter), EntryFilterSql.order(fields, listQuery#orderBy)) |> List.map(EntryRows.toEntry(stage))
+            { typeId = TypeId.toInt64(typeId), stage = EntryRows.stageToDb(stage), limit = Int32.toInt64(listQuery#first + 1), offset = Int32.toInt64(offset), projectId = Tenant.currentId() },
+            EntryFilterSql.predWithStart(fields, listQuery), EntryFilterSql.order(fields, listQuery#orderBy)) |> List.map(EntryRows.toEntry(stage))
 
     // ---- 書く ----
 

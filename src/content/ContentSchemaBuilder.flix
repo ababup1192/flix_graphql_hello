@@ -100,7 +100,7 @@ mod ContentSchemaBuilder {
                     filter  = filter |> Option.getWithDefault(Nil),
                     orderBy = orderBy |> Option.getWithDefault(Nil),
                     first   = limit,
-                    skip    = offset
+                    start   = PageStart.Offset(offset)
                 })
             })
             |> Field.withDescription("${TypeName.text(owner#singular)} の一覧")
@@ -313,17 +313,7 @@ mod ContentSchemaBuilder {
 
     def orderByName(term: (SortKey, Direction)): String =
         let (key, direction) = term;
-        let keyName = match key {
-            case SortKey.ById           => "id"
-            case SortKey.ByPublishedAt  => "publishedAt"
-            case SortKey.ByUpdatedAt    => "updatedAt"
-            case SortKey.ByCreatedAt    => "createdAt"
-            case SortKey.ByField(apiId) => ApiId.text(apiId)
-        };
-        match direction {
-            case Direction.Asc  => "${keyName}_ASC"
-            case Direction.Desc => "${keyName}_DESC"
-        }
+        "${SortKey.toText(key)}_${Direction.toText(direction)}"
 
     ///
     /// `<Singular>Where`。葉の条件と、OR / AND（それぞれ WhereLeaf のリスト）。

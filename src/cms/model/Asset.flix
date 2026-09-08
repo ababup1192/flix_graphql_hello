@@ -74,6 +74,14 @@ pub type alias AssetConfirm = { width = Option[Int32], height = Option[Int32], a
 pub type alias Upload = { asset = Asset, uploadUrl = String, expiresInSeconds = Int32 }
 
 ///
-/// asset の一覧の 1 ページ。
+/// asset の一覧の 1 ページ。cursors は assets と同じ順の各 asset の位置（末尾が endCursor）。
 ///
-pub type alias AssetPage = { assets = List[Asset], totalCount = Int64 }
+pub type alias AssetPage = { assets = List[Asset], cursors = List[String], totalCount = Int64, hasNextPage = Bool }
+
+mod AssetPage {
+
+    pub def endCursor(page: AssetPage): Option[String] = List.last(page#cursors)
+
+    pub def edges(page: AssetPage): List[(String, Asset)] = List.zip(page#cursors, page#assets)
+
+}

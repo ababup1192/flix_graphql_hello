@@ -27,12 +27,12 @@ mod AdminQueryResolvers {
     pub def entries(): GeneratedAdmin.QueryEntriesResolver[AdminEff] =
         (_context, typeId, search, first, skip) -> {
             let (limit, offset) = EntryPage.clamp(50, first, skip);
-            Ok(listKeepingIds(AdminMapping.typeId("typeId", typeId), { search = search |> Option.getWithDefault(""), first = limit, skip = offset }))
+            Ok(listKeepingIds(AdminMapping.typeId("typeId", typeId), EntryQuery.of(search |> Option.getWithDefault(""), limit, offset)))
         }
 
     /// 一覧を引き、ページの entry id を先読みの写しに覚える（行の versions / diff がまとめて引くため。SQL は増えない）。
     def listKeepingIds(typeId: TypeId, entryQuery: EntryQuery): EntryPage \ DbRead + CmsErr + Tenant + Session + Preloaded =
-        let page = ContentEntries.list(Session.grant(), typeId, entryQuery);
+        let page = ContentEntries.list(Session.grant(), typeId, Nil, entryQuery);
         Preloaded.keepEntryIds(page#entries |> List.map(entry -> entry#id));
         page
 

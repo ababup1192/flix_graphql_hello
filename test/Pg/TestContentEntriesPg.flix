@@ -75,9 +75,9 @@ mod TestContentEntriesPg {
             discard ContentEntries.create(Session.grant(), blogs, Some(CmsTestKit.entryId("first")), CmsTestKit.entryData(List#{("title", Json.JString("apple"))}));
             discard ContentEntries.create(Session.grant(), blogs, Some(CmsTestKit.entryId("second")), CmsTestKit.entryData(List#{("title", Json.JString("banana"))}));
             discard ContentEntries.create(Session.grant(), blogs, Some(CmsTestKit.entryId("third")), CmsTestKit.entryData(List#{("title", Json.JString("apricot"))}));
-            let all = ContentEntries.list(Session.grant(), blogs, { search = "", first = 10, skip = 0 });
-            let searched = ContentEntries.list(Session.grant(), blogs, { search = "ap", first = 10, skip = 0 });
-            let paged = ContentEntries.list(Session.grant(), blogs, { search = "", first = 1, skip = 1 });
+            let all = ContentEntries.list(Session.grant(), blogs, Nil, EntryQuery.of("", 10, 0));
+            let searched = ContentEntries.list(Session.grant(), blogs, Nil, EntryQuery.of("ap", 10, 0));
+            let paged = ContentEntries.list(Session.grant(), blogs, Nil, EntryQuery.of("", 1, 1));
             (all#totalCount, searched#entries |> List.map(entry -> EntryId.text(entry#id)) |> List.sort, searched#totalCount, paged#entries |> List.length)
         });
         Assert.assertEq(expected = Ok(Ok((3i64, List#{"first", "third"}, 2i64, 1))), result)
@@ -89,9 +89,9 @@ mod TestContentEntriesPg {
             let blogs = blogsWithFields();
             discard ContentEntries.create(Session.grant(), blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("100% flix"))}));
             discard ContentEntries.create(Session.grant(), blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("plain"))}));
-            let byKey = ContentEntries.list(Session.grant(), blogs, { search = "title", first = 10, skip = 0 });
-            let byPercent = ContentEntries.list(Session.grant(), blogs, { search = "100%", first = 10, skip = 0 });
-            let byBarePercent = ContentEntries.list(Session.grant(), blogs, { search = "%", first = 10, skip = 0 });
+            let byKey = ContentEntries.list(Session.grant(), blogs, Nil, EntryQuery.of("title", 10, 0));
+            let byPercent = ContentEntries.list(Session.grant(), blogs, Nil, EntryQuery.of("100%", 10, 0));
+            let byBarePercent = ContentEntries.list(Session.grant(), blogs, Nil, EntryQuery.of("%", 10, 0));
             (byKey#totalCount, byPercent#totalCount, byBarePercent#totalCount)
         }));
         Assert.assertEq(expected = Ok(Ok((0i64, 1i64, 1i64))), result)

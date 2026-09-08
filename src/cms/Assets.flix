@@ -80,12 +80,16 @@ mod Assets {
     }
 
     ///
-    /// 一覧。新しい順。
+    /// 一覧。新しい順。first + 1 件引いて「次があるか」を決め、各 asset の位置（cursor）を付ける。
     ///
     pub def list(_proof: Granted[ReadDraft], first: Int32, skip: Int32): AssetPage \ DbRead + Tenant =
+        let (assets, hasNextPage) = AssetsQueries.listAssets({ projectId = Tenant.currentId(), limit = Int32.toInt64(first + 1), offset = Int32.toInt64(skip) })
+            |> List.map(AssetRows.toAsset) |> EntryPage.trimPage(first);
         {
-            assets = AssetsQueries.listAssets({ projectId = Tenant.currentId(), limit = Int32.toInt64(first), offset = Int32.toInt64(skip) }) |> List.map(AssetRows.toAsset),
-            totalCount = AssetsQueries.countAssets(Tenant.currentId()) |> Rows.total
+            assets = assets,
+            cursors = assets |> List.map(asset -> Cursor.encode(Cursor.ofAsset(asset))),
+            totalCount = AssetsQueries.countAssets(Tenant.currentId()) |> Rows.total,
+            hasNextPage = hasNextPage
         }
 
     /// 1 つ。無ければ notFound。

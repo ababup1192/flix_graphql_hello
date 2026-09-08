@@ -161,9 +161,11 @@ pub type alias EntryVersion = {
 /// 一覧の 1 ページ。
 ///
 /// - entries: 指定した並び順（既定は更新が新しい順）
+/// - cursors: entries と同じ順の、各 entry の位置（不透明な文字列）。末尾が endCursor
 /// - totalCount: 条件に合う全件数
+/// - hasNextPage: この後にまだ entry があるか
 ///
-pub type alias EntryPage = { entries = List[Entry], totalCount = Int64 }
+pub type alias EntryPage = { entries = List[Entry], cursors = List[String], totalCount = Int64, hasNextPage = Bool }
 
 mod EntryPage {
 
@@ -171,6 +173,22 @@ mod EntryPage {
     /// 1 ページの上限。どちらの API も同じ。
     ///
     def maxFirst(): Int32 = 200
+
+    ///
+    /// first + 1 件引いた行から、ページの中身と「次があるか」を決める。first 件を超えた分（末尾）は落とす。
+    ///
+    pub def trimPage(first: Int32, rows: List[a]): (List[a], Bool) =
+        (List.take(first, rows), List.length(rows) > first)
+
+    ///
+    /// 最後の entry の位置。空のページなら None。
+    ///
+    pub def endCursor(page: EntryPage): Option[String] = List.last(page#cursors)
+
+    ///
+    /// (cursor, entry) の並び。GraphQL の edges。
+    ///
+    pub def edges(page: EntryPage): List[(String, Entry)] = List.zip(page#cursors, page#entries)
 
     ///
     /// first（省けば default）を 0 〜 maxFirst に、skip（省けば 0）を 0 以上に丸める。0 は「件数だけ欲しい」用。
@@ -192,13 +210,25 @@ mod EntryPage {
 }
 
 ///
-/// 一覧の条件。
+/// 管理 API の一覧の条件。
 ///
 /// - search: 下書きの中身に含む文字列。空なら全件
+/// - filter: 絞り込み（コンテンツ API と同じ Condition）
+/// - orderBy: 並び順。空なら更新が新しい順
 /// - first: 最大件数
-/// - skip: 読み飛ばす件数
+/// - start: ページの始まり（skip か after）
 ///
-pub type alias EntryQuery = { search = String, first = Int32, skip = Int32 }
+pub type alias EntryQuery = { search = String, filter = Where, orderBy = OrderBy, first = Int32, start = PageStart }
+
+mod EntryQuery {
+
+    ///
+    /// 検索と offset だけの条件（絞り込み無し、更新が新しい順）。
+    ///
+    pub def of(search: String, first: Int32, skip: Int32): EntryQuery =
+        { search = search, filter = Nil, orderBy = Nil, first = first, start = PageStart.Offset(skip) }
+
+}
 
 ///
 /// entry の id を振る。本番はランダム、テストは決めた値。

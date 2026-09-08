@@ -30,7 +30,7 @@ mod TestMicrocmsPg {
             let summary = PgTestSupport.mutateOrBug(pool, () -> List.length(ContentTypes.list(Session.grant())));
             let blocks = PgTestSupport.mutateOrBug(pool, () ->
                 ContentTypes.findByApiId(Session.grant(), CmsTestKit.apiId("insidesaleServices"))
-                    |> Option.flatMap(owner -> ContentEntries.list(Session.grant(), owner#id, { search = "", first = 1, skip = 0 })#entries |> List.head)
+                    |> Option.flatMap(owner -> ContentEntries.list(Session.grant(), owner#id, Nil, EntryQuery.of("", 1, 0))#entries |> List.head)
                     |> Option.flatMap(entry -> Map.get(CmsTestKit.apiId("implementationCases"), entry#data))
                     |> Option.map(Util.Json.toCompactString));
             (ask("{ blogs(where: { title_eq: \"タイトル 1\" }) { totalCount nodes { title memberOnly thumbnail { alt } profile { name } tags { tag } theFirstPart { title } content { headings { level text } } } } }"),

@@ -114,6 +114,14 @@ mod CmsErr {
     }
 
     ///
+    /// Err なら invalid（誤り 1 つ）。純粋な検査（Cursor.pageStart など）の結果をそのまま渡す。
+    ///
+    pub def okOrInvalid(result: Result[Violation, a]): a \ CmsErr = match result {
+        case Ok(found)      => found
+        case Err(violation) => CmsErr.invalid(violation :: Nil)
+    }
+
+    ///
     /// 条件付きで要る証明が無ければ forbidden（呼ぶ側が `Session.tryGrant()` で持てるだけ渡した物を、要る所で開く）。
     ///
     pub def orForbidden(permission: Permission, proof: Option[Granted[p]]): Granted[p] \ CmsErr = match proof {

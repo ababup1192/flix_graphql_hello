@@ -22,10 +22,79 @@ pub enum SortKey with Eq, Order, ToString {
     case ByField(ApiId)
 }
 
+mod SortKey {
+
+    ///
+    /// GraphQL に出す名前。組み込みは id / publishedAt / updatedAt / createdAt、フィールドは apiId。
+    /// コンテンツ API の `<Singular>OrderBy`（`title_ASC`）と管理 API の `orderBy: [{ field: "title" }]` と cursor の中身が同じ物を使う。
+    ///
+    pub def toText(key: SortKey): String = match key {
+        case SortKey.ById           => "id"
+        case SortKey.ByPublishedAt  => "publishedAt"
+        case SortKey.ByUpdatedAt    => "updatedAt"
+        case SortKey.ByCreatedAt    => "createdAt"
+        case SortKey.ByField(apiId) => ApiId.text(apiId)
+    }
+
+    ///
+    /// 名前から。組み込みの名前はフィールドの apiId に使えない（Naming の予約名）ので、先に組み込みを見る。規則外なら None。
+    ///
+    pub def fromText(text: String): Option[SortKey] = match text {
+        case "id"          => Some(SortKey.ById)
+        case "publishedAt" => Some(SortKey.ByPublishedAt)
+        case "updatedAt"   => Some(SortKey.ByUpdatedAt)
+        case "createdAt"   => Some(SortKey.ByCreatedAt)
+        case other         => ApiId.parse(other) |> Option.map(SortKey.ByField)
+    }
+
+}
+
+mod Direction {
+
+    pub def toText(direction: Direction): String = match direction {
+        case Direction.Asc  => "ASC"
+        case Direction.Desc => "DESC"
+    }
+
+    pub def fromText(text: String): Option[Direction] = match text {
+        case "ASC"  => Some(Direction.Asc)
+        case "DESC" => Some(Direction.Desc)
+        case _      => None
+    }
+
+}
+
 ///
 /// 並び順。先頭が優先。空なら更新が新しい順。
 ///
 pub type alias OrderBy = List[(SortKey, Direction)]
+
+mod OrderBy {
+
+    ///
+    /// 実際に SQL に出す並び順。空なら更新が新しい順。末尾の id（順序を安定させる物）は含めない。
+    /// cursor はこの並びと対で意味を持つ。
+    ///
+    pub def effective(orderBy: OrderBy): OrderBy =
+        if (List.isEmpty(orderBy)) (SortKey.ByUpdatedAt, Direction.Desc) :: Nil else orderBy
+
+    ///
+    /// フィールドの値で並べるキーがあるか。あれば式を決めるのに型の定義（kind）が要る。
+    ///
+    pub def hasField(orderBy: OrderBy): Bool =
+        List.exists(match (key, _) -> match key { case SortKey.ByField(_) => true case _ => false }, orderBy)
+
+}
+
+///
+/// ページの始まり。offset（skip）か cursor（after）のどちらか 1 つ。
+///
+pub enum PageStart with Eq, ToString {
+    /// 先頭から skip 件読み飛ばす。0 なら先頭
+    case Offset(Int32)
+    /// この cursor の位置の次から
+    case After(Cursor)
+}
 
 ///
 /// 絞り込みの 1 条件。コンテンツ API の <Singular>Where の 1 項目に対応する。
@@ -61,6 +130,8 @@ pub enum Condition with Eq, Order, ToString {
     case AnyValueContains(String)
     /// 何にも合わない。規則外の id で絞り込んだ時に、条件を落として全件返さないための物
     case Never
+    /// entry の状態（entries.stage）。管理 API の一覧で公開中の物だけを見る
+    case StageEq(Stage)
 }
 
 ///
@@ -73,6 +144,7 @@ pub type alias Where = List[Condition]
 ///
 /// - filter: 絞り込み
 /// - orderBy: 並び順
-/// - first / skip: ページ
+/// - first: 最大件数
+/// - start: ページの始まり（skip か after）
 ///
-pub type alias ListQuery = { filter = Where, orderBy = OrderBy, first = Int32, skip = Int32 }
+pub type alias ListQuery = { filter = Where, orderBy = OrderBy, first = Int32, start = PageStart }
