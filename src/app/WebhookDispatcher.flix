@@ -29,7 +29,7 @@ mod WebhookDispatcher {
     def rounds(pool: Pool, remaining: Int32, sent: Int32): Result[String, Int32] \ {IO, Http, Log} =
         if (remaining <= 0) Ok(sent)
         else
-            DbRunner.retrying(() -> Pool.withLazyTx(pool, () -> WebhooksQueries.claimDueDeliveries(batchSize())))
+            DbRunner.withTx(pool, None, () -> WebhooksQueries.claimDueDeliveries(batchSize()))
                 |> Result.mapErr(failure -> "配信を拾えません: ${failure}")
                 |> Result.flatMap(claimed ->
                     if (List.isEmpty(claimed)) Ok(sent)
@@ -41,7 +41,7 @@ mod WebhookDispatcher {
     def deliverOne(pool: Pool, claimed: { id = String, projectId = Int64, projectSlug = String, webhookId = Int64, event = String, payload = Util.Json.Json, attempts = Int32, createdAt = Timestamp.Timestamp }): Result[String, Unit] \ {IO, Http, Log} =
         let projectId = ProjectId.ProjectId(claimed#projectId);
         let projectLabel = Log.Fields.empty() |> Log.Fields.str("project", claimed#projectSlug);
-        let target = DbRunner.retrying(() -> TenantTx.withLazyTx(pool, projectId, () -> WebhooksQueries.findWebhookForDelivery({ id = claimed#webhookId, projectId = claimed#projectId })))
+        let target = DbRunner.withTx(pool, Some(projectId), () -> WebhooksQueries.findWebhookForDelivery({ id = claimed#webhookId, projectId = claimed#projectId }))
             |> Result.mapErr(failure -> "Webhook を引けません: ${failure}");
         Result.flatMap(found -> match found {
             case None => record(pool, claimed, projectId, projectLabel, Err((0, "Webhook が消えています")))
@@ -106,7 +106,7 @@ mod WebhookDispatcher {
             case Ok(status)       => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = JobLog.JobOutcome.Delivered, detail = "HTTP ${status}" }, labels |> outcomeFields(outcome))
             case Err((_, reason)) => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = if (Option.isEmpty(retryDelaySeconds(claimed#attempts))) JobLog.JobOutcome.Failed else JobLog.JobOutcome.RetryLater, detail = reason }, labels |> outcomeFields(outcome))
         };
-        DbRunner.retrying(() -> TenantTx.withLazyTx(pool, projectId, write)) |> Result.mapErr(failure -> "配信の結果を書けません: ${failure}")
+        DbRunner.withTx(pool, Some(projectId), write) |> Result.mapErr(failure -> "配信の結果を書けません: ${failure}")
 
     ///
     /// 何回目の失敗の後に何秒待つか。1 分 → 5 分 → 30 分 → 2 時間、5 回目で諦める。

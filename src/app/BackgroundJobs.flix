@@ -207,12 +207,12 @@ mod BackgroundJobs {
         if (Ref.get(state#stopping)) Nil
         else {
             Ref.put(true, state#inTick);
-            let recovered = DbRunner.retrying(() -> Pool.withLazyTx(pool, () -> {
+            let recovered = DbRunner.withTx(pool, None, () -> {
                     discard SchedulesQueries.recoverStuckSchedules(staleMinutes());
                     discard WebhooksQueries.recoverStuckDeliveries(staleMinutes());
                     discard SchedulesQueries.purgeOldSchedules(keepDays());
                     discard WebhooksQueries.purgeOldDeliveries(keepDays())
-                })) |> Result.mapErr(failure -> "回復と掃除ができません: ${failure}");
+                }) |> Result.mapErr(failure -> "回復と掃除ができません: ${failure}");
             let scheduled = guardedPart("予約公開", () -> Scheduler.tick(pool));
             let delivered = Net.Http.runWithIO(() -> guardedPart("Webhook", () -> WebhookDispatcher.tick(pool)));
             Ref.put(Some(System.currentTimeMillis()), state#lastTick);
@@ -227,7 +227,7 @@ mod BackgroundJobs {
     pub type alias Summary = { lastTickAt = Option[String], pendingSchedules = Int64, failedSchedules = Int64, pendingDeliveries = Int64, failedDeliveries = Int64 }
 
     pub def summary(pool: Pool, state: State): Summary \ IO =
-        let counts = DbRunner.retrying(() -> Pool.withLazyTx(pool, () -> (SchedulesQueries.countSchedules(), WebhooksQueries.countDeliveries())));
+        let counts = DbRunner.withTx(pool, None, () -> (SchedulesQueries.countSchedules(), WebhooksQueries.countDeliveries()));
         let lastTickAt = Ref.get(state#lastTick) |> Option.map(millis -> Timestamp.toIso8601(Timestamp.fromEpochMillis(millis)));
         match counts {
             case Ok((Some(schedules), Some(deliveries))) =>

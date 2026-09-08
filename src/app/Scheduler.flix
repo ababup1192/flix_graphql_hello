@@ -10,7 +10,7 @@ mod Scheduler {
     /// 時刻の来た予約を拾って実行する。実行した数を返す。業務エラーは failed に理由を書き、次へ進む。
     ///
     pub def tick(pool: Pool): Result[String, Int32] \ {IO, Log} =
-        DbRunner.retrying(() -> Pool.withLazyTx(pool, () -> SchedulesQueries.claimDueSchedules(batchSize())))
+        DbRunner.withTx(pool, None, () -> SchedulesQueries.claimDueSchedules(batchSize()))
             |> Result.mapErr(failure -> "予約を拾えません: ${failure}")
             |> Result.flatMap(claimed -> Result.traverse(runOne(pool), claimed) |> Result.map(List.length))
 
@@ -38,6 +38,6 @@ mod Scheduler {
         }
 
     def record(pool: Pool, projectId: ProjectId, write: Unit -> Unit \ DbWrite): Result[String, Unit] \ IO =
-        DbRunner.retrying(() -> TenantTx.withLazyTx(pool, projectId, write)) |> Result.mapErr(failure -> "予約の結果を書けません: ${failure}")
+        DbRunner.withTx(pool, Some(projectId), write) |> Result.mapErr(failure -> "予約の結果を書けません: ${failure}")
 
 }

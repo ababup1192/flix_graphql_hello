@@ -110,7 +110,19 @@ mod DbRunner {
     }
 
     ///
-    /// 一時的な失敗は 3 回まで再試行し、DbFailure を Result にする。業務エラーを Tx の中で使わない所（プロジェクトの解決など）用。
+    /// CmsErr を使わない Tx。scope があれば RLS の印付き。一時的な失敗は 3 回まで再試行し、JVM の例外は Db.guard で DbErr にする。
+    /// 仕事の tick、プロジェクト slug の解決、content type の目印のような、ユースケースを通さず SQL を出す所用。
+    /// Tx を張る入口は `transact`（業務エラー込み）と `withTx` の 2 つ。src/ で withLazyTx を直に呼べるのは
+    /// このファイルと TenantTx だけ（`scripts/check-tx.sh` が見張る）。
+    ///
+    pub def withTx(pool: Pool, scope: Option[ProjectId], thunk: Unit -> a \ ef): Result[DbFailure, a] \ (ef - Db) + IO =
+        retrying(() -> match scope {
+            case Some(found) => TenantTx.withLazyTx(pool, found, () -> Db.guard(thunk))
+            case None        => Pool.withLazyTx(pool, () -> Db.guard(thunk))
+        })
+
+    ///
+    /// 一時的な失敗は 3 回まで再試行し、DbFailure を Result にする。Tx を張らない物（`withTx` と、Tx の外の DB 操作）用。
     ///
     pub def retrying(thunk: Unit -> a \ ef): Result[DbFailure, a] \ (ef - {TransientDbErr, DbErr}) + IO =
         retryWith(Ref.fresh(Static, 0), thunk)

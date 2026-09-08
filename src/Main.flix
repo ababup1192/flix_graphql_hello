@@ -319,7 +319,7 @@ def resolveProject(pool: Pool, defaultProject: Option[ProjectId], projectSlug: O
     case None       => Ok(defaultProject)
     case Some(text) => match ProjectSlug.parse(text) {
         case None       => Ok(None)
-        case Some(slug) => DbRunner.retrying(() -> Pool.withLazyTx(pool, () -> Projects.findBySlug(slug))) |> Result.mapErr(DbRunner.failureMessage)
+        case Some(slug) => DbRunner.withTx(pool, None, () -> Projects.findBySlug(slug)) |> Result.mapErr(DbRunner.failureMessage)
     }
 }
 
@@ -333,7 +333,7 @@ def resolveDefaultProject(pool: Pool, configured: Option[String]): Result[String
     case Some(text) => match ProjectSlug.parse(text) {
         case None       => Err("CMS_DEFAULT_PROJECT '${text}' はプロジェクト slug の形ではありません（${ProjectSlug.rule()}）")
         case Some(slug) =>
-            DbRunner.retrying(() -> Pool.withLazyTx(pool, () -> Projects.findBySlug(slug)))
+            DbRunner.withTx(pool, None, () -> Projects.findBySlug(slug))
                 |> Result.mapErr(DbRunner.failureMessage)
                 |> Result.flatMap(found -> match found {
                     case Some(id) => Ok(Some(id))
