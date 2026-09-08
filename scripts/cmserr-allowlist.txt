@@ -1,0 +1,5 @@
+# CmsErr.runWithResult を呼んで良いファイル（Tx の境界）。scripts/check-cmserr.sh が突き合わせる
+# DbRunner.transact: Runner とテストの mutate が通る Tx の入口
+src/app/DbRunner.flix
+# ContentEngine.rebuild: 定義を読むだけの遅延 Tx を自分で張る（Runner を通らない）
+src/content/ContentEngine.flix

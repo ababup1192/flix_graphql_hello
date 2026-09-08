@@ -106,6 +106,7 @@ Personal Access Token（PAT。`Authorization: Bearer cmspat_...`、Account API �
 テナント分離は三重: 型（Tenant effect）、生成器（`make gen` の `--scope project_id`。project_id 列の表を触る query に条件が無ければ止まる。跨ぐ物は `// unscoped: 理由`）、DB（RLS。Runner が `TenantTx.withLazyTx` で Tx の先頭に印を置く。印の無い Tx は中身の表が 0 行）。
 仕事の表（webhook_deliveries / scheduled_actions）は outbox: 業務の Tx で積み、tick が `FOR UPDATE SKIP LOCKED` で拾う（複数台でも二重にならない）。実行中に落ちた行は claimed_at で回復する。
 DB の Tx は `DbRunner.transact`（Runner とテストの mutate）を通す。業務エラー（CmsErr）のような再開しない effect を `withLazyTx` の外で受けると COMMIT / ROLLBACK と接続の返却が飛び、接続が漏れる（TestTxLeakPg が見張る）。
+業務エラーを値に潰す `CmsErr.runWithResult` は Tx の境界（DbRunner / ContentEngine）だけで呼ぶ。ユースケースの途中で呼ぶと失敗が Tx の中で握り潰される。呼んで良いファイルは `scripts/cmserr-allowlist.txt` に列挙し、`make check` の `scripts/check-cmserr.sh` が増減を見張る（test/ は対象外）。
 GraphQL の `ID` は連番でなく乱数の public_id。内部の id に戻すのは AdminMapping / AccountMapping だけ。
 設計と決めた事は [docs/design/auth-and-organizations.md](docs/design/auth-and-organizations.md)。環境変数の一覧は `deploy/README.md`。
 
