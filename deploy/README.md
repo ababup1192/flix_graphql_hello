@@ -170,15 +170,43 @@ gunzip -c backups/cms-20260907-0300.sql.gz | docker compose exec -T postgres psq
 
 ## ログと監視
 
-cms のログは 1 行 1 JSON。`docker compose logs -f cms` で見られる。
+cms のログは 1 行 1 JSON。`docker compose logs -f cms` で見られる。`time` / `severity` / `message` の 3 つに、OpenTelemetry の名前の属性が付く（キーの一覧は [docs/logging.md](../docs/logging.md)）。
 
 ```json
-{"time":"2026-09-07T12:00:00.123Z","method":"POST","path":"/graphql","status":200,"ms":12}
+{"time":"2026-09-07T12:00:00.123Z","severity":"info","message":"request","service":"cms","version":"a1b2c3d","request.id":"01J7X0Q3M5N8R9S1T2V4W6Y8Z0","http.request.method":"POST","url.path":"/admin/graphql","http.response.status_code":200,"duration_ms":12,"project":"blog","credential.kind":"api-key"}
 ```
 
-Grafana Cloud（無料枠）へ送るなら `.env` に `GRAFANA_*` を入れて `docker compose --profile alloy up -d`。外形監視は Better Stack や UptimeRobot で `/health` を叩く。
+`CMS_LOG_LEVEL`（既定 `info`）を `debug` にすると `/health` の行も出る（外形監視の分で溢れるので普段は出さない）。
+compose の `logging` は `json-file` の `non-blocking`。docker daemon が詰まってもリクエストは止まらない（代わりにバッファ 4m を超えた行は落ちる）。
+
+### request id
+
+- リクエストの `X-Request-Id` をそのまま使う（無ければ cms が ULID で作る）
+- 応答ヘッダ `X-Request-Id` で返る
+- 500 系の GraphQL のエラーは `errors[].extensions.requestId` に同じ値が入る
+- 問い合わせにはこの値を添える。`{service="cms"} | json | request_id="01J..."` で 1 リクエストの行が全部引ける
+
+Grafana Cloud（無料枠）へ送るなら `.env` に `GRAFANA_*` を入れて `docker compose --profile alloy up -d`。ラベルは `service` だけ（`| json` で属性を引く。属性をラベルにするとストリームが増えて無料枠の上限に当たる）。外形監視は Better Stack や UptimeRobot で `/health` を叩く。
+
+### アラートの例（LogQL）
+
+```logql
+# 5 分で severity=error が 3 行を超えた
+sum(count_over_time({service="cms"} | json | severity="error" [5m])) > 3
+
+# 5xx の率が 1 % を超えた
+sum(rate({service="cms"} | json | message="request" | http_response_status_code >= 500 [5m]))
+  / sum(rate({service="cms"} | json | message="request" [5m])) > 0.01
+
+# JSON でない行（OOM のスタックトレースや JVM の平文はこれで拾う）
+sum(count_over_time({service="cms"} | json | __error__ != "" [5m])) > 0
+```
+
+4 本目は Loki でなく外形監視: `/health` の `jobs.lastTickAt` が 60 秒より古ければワーカーが止まっている（Better Stack の JSON の条件か、cron の `curl | jq` で見る）。
 
 `/health` の `connections` は `{"active": 今つないでいる数, "max": CMS_MAX_CONNECTIONS}`。active が max に張り付いていれば 503 が出ている。
+
+予約公開と再起動: プロセスが落ちた時に実行中だった仕事は失われないが、`claimed_at` の回復で拾い直すのは 10 分後になる（その分だけ公開が遅れる）。
 
 ## keep-alive と同時接続
 
@@ -220,6 +248,7 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_JOBS_DRAIN_SECONDS` | 停止時に実行中の仕事を待つ秒数 | 15 |
 | `CMS_CACHE_MAX_AGE` | コンテンツ API の GET で、鍵もトークンも無い応答に付ける `Cache-Control` の秒数（CDN 用）。0 で no-store | 60 |
 | `CMS_MAX_CONNECTIONS` | HTTP の同時接続の上限。超えた接続は `503` と `Retry-After: 1` で断る（待ち行列は無い）。今の数は `/health` の `connections` | 256 |
+| `CMS_LOG_LEVEL` | ログの最低 severity（`debug` / `info` / `warn` / `error`）。`debug` で `/health` の行も出る | info |
 | `CMS_BASE_DOMAIN` | `{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。無ければ `/p/{プロジェクト slug}/` だけ | 無し |
 | `CMS_API_KEY_PEPPER` / `CMS_API_KEY_PEPPER_ID` | API キーと PAT のハッシュ、プレビュートークンの署名に混ぜる秘密と版。無ければ鍵と PAT を発行できない | 無し / v1 |
 | `JAVA_OPTS` | JVM の引数。`ExitOnOutOfMemoryError` は OutOfMemoryError で（スレッド 1 本でなく）プロセスごと落として docker に再起動させる | `-Xss32m -XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError` |

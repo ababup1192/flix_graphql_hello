@@ -36,6 +36,7 @@ services:
       CMS_JOBS_DRAIN_SECONDS: ${CMS_JOBS_DRAIN_SECONDS:-15}
       CMS_CACHE_MAX_AGE: ${CMS_CACHE_MAX_AGE:-60}
       CMS_MAX_CONNECTIONS: ${CMS_MAX_CONNECTIONS:-256}
+      CMS_LOG_LEVEL: ${CMS_LOG_LEVEL:-info}
       ASSET_ENDPOINT: http://minio:9000
       ASSET_BUCKET: ${ASSET_BUCKET:-cms}
       ASSET_ACCESS_KEY: ${MINIO_ROOT_USER:-cms}
@@ -46,10 +47,14 @@ services:
     stop_grace_period: 20s
     ports:
       - "127.0.0.1:8080:8080"
+    # blocking（既定）にしない: cms は各スレッドが直に stdout へ書くので、docker daemon が詰まると
+    # 全リクエストがログの書き込みで止まる。non-blocking はバッファが溢れたら行を落とすがリクエストは落とさない
     logging:
       driver: json-file
       options:
-        max-size: "20m"
+        mode: "non-blocking"
+        max-buffer-size: "4m"
+        max-size: "50m"
         max-file: "5"
 
   postgres:

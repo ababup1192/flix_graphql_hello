@@ -1,5 +1,11 @@
 // Grafana Alloy。この compose の全コンテナのログ（stdout）を Grafana Cloud の Loki へ送る。
-// cms のログは 1 行 1 JSON（{"time","method","path","status","ms"}）なので、Loki 側で `| json` でそのまま引ける。
+// cms の行は 1 行 1 JSON。time / severity / message と OpenTelemetry の名前の属性
+// （request.id / http.request.method / url.path / http.response.status_code / duration_ms / project / credential.kind …。
+// 一覧は docs/logging.md）を持つので、Loki 側で `| json` でそのまま引ける。
+//
+// ラベルは service だけにする。request / path / project をラベルにするとストリームが値の数だけ増え、
+// 無料枠のアクティブストリームの上限に当たる。severity は Loki が JSON の行から自動で拾うのでラベルにしない。
+// 2 台にしたらホスト名のラベルを足す（1 台の間は要らない）。
 
 discovery.docker "compose" {
   host = "unix:///var/run/docker.sock"
@@ -26,5 +32,9 @@ loki.write "cloud" {
       username = env("GRAFANA_LOKI_USER")
       password = env("GRAFANA_API_KEY")
     }
+  }
+  // Alloy 自身の再起動で、まだ送っていない行（メモリの送信キュー）が消えるのを塞ぐ。置き場は --storage.path
+  wal {
+    enabled = true
   }
 }
