@@ -128,6 +128,27 @@ mod TestMcpTools {
             expected = Ok(List#{ Value.Str("t1"), Value.Int(100), Value.Int(0), Value.Null }),
             seen |> Result.map(GraphqlTestKit.pick(List#{ List#{"totalCount", "variables", "typeId"}, List#{"totalCount", "variables", "first"}, List#{"totalCount", "variables", "skip"}, List#{"totalCount", "variables", "search"} })))
 
+    /// 型（contentType(）には null、mutation には extensions 付きのエラーを返す execute。
+    def typeMissingThenFailing(extensions: Map[String, Value], request: GraphqlRequest): GraphqlResponse =
+        if (String.contains(substr = "contentType(", request#queryText)) { data = obj(List#{ ("contentType", Value.Null) }), errors = Nil }
+        else failing(extensions)(request)
+
+    ///
+    /// create_entry で型が無い時: 書けない人（FORBIDDEN）には型の有無より先に FORBIDDEN、書ける人（typeId 無しの mutation は INVALID）には型の NOT_FOUND。
+    /// 型があれば mutation は 1 回だけ（型の問い合わせの後に createEntry）。
+    ///
+    @Test
+    def testCreateEntryForbiddenBeforeNotFound(): Unit \ Assert =
+        let args = Map#{ "type" => Value.Str("nope"), "fields" => obj(Nil) };
+        let codeOf = outcome -> match outcome {
+            case Err(McpTools.Failure.Business(found)) => (Value.field("code", found), Value.field("entity", found))
+            case other                                 => bug!("業務エラーではありません: ${other}")
+        };
+        Assert.assertEq(
+            expected = ((Value.Str("FORBIDDEN"), Value.Null), (Value.Str("NOT_FOUND"), Value.Str("ContentType"))),
+            (codeOf(McpTools.call(Tool.CreateEntry, args, typeMissingThenFailing(Map#{ "code" => Value.Str("FORBIDDEN") }))),
+             codeOf(McpTools.call(Tool.CreateEntry, args, typeMissingThenFailing(Map#{ "code" => Value.Str("INVALID") })))))
+
     /// 書く 3 つの mutation の variables: create_entry は typeId と fields、update_entry は id と fields と expectedVersion、publish は id と withDependencies。
     @Test
     def testMutationVariables(): Unit \ Assert =

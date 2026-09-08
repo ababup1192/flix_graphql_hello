@@ -625,11 +625,37 @@ mod McpTools {
                     |> Option.toOk(notFound("Version", "公開中の中身", id))
     }
 
-    /// create_entry。型を引いて RICH_TEXT の Markdown を doc にしてから createEntry。
+    /// create_entry。型を引いて RICH_TEXT の Markdown を doc にしてから createEntry。型が無ければ、書く権限が無い人には型の有無より先に FORBIDDEN。
     def createEntry(args: Map[String, Value], execute: GraphqlRequest -> GraphqlResponse \ ef): Result[Failure, Value] \ ef =
-        getType(strArg("type", args), execute) |> Result.flatMap(typeDef ->
-            ask(execute, createEntryRequest(Value.field("id", typeDef) |> Value.asStr |> Option.getWithDefault(""), mapRichText(fieldsOf(typeDef), toDocValue, valueArg("fields", args))))
-                |> Result.map(Value.field("createEntry")))
+        match getType(strArg("type", args), execute) {
+            case Ok(typeDef) =>
+                ask(execute, createEntryRequest(Value.field("id", typeDef) |> Value.asStr |> Option.getWithDefault(""), mapRichText(fieldsOf(typeDef), toDocValue, valueArg("fields", args))))
+                    |> Result.map(Value.field("createEntry"))
+            case Err(missing) => Err(forbiddenBefore(missing, execute))
+        }
+
+    ///
+    /// 型が引けなかった時の失敗。NOT_FOUND なら createEntry を typeId 無しで 1 回投げ、FORBIDDEN が返ればそれ（権限の断りが型の有無より先）、
+    /// それ以外（書ける人には typeId の INVALID）なら元の NOT_FOUND。
+    ///
+    /// WhyNot: mutation を先に投げて型の解決を後にしないのは、createEntry が typeId（ID）を取るのに対しツールの引数は apiId で、
+    /// RICH_TEXT の Markdown を doc にするにも型の定義が先に要るため。型の無い時だけ 1 回余分に投げる。
+    ///
+    /// WhyNot: 型が無い時に NOT_FOUND をそのまま返さないのは、読むだけの PAT や鍵から「型が無い」と「書けない」が読み分けられ、
+    /// 管理 API の createEntry（権限 → 型の順に断る）と答えが揃わないため（2026-09-08 の実機 E2E）。
+    ///
+    def forbiddenBefore(missing: Failure, execute: GraphqlRequest -> GraphqlResponse \ ef): Failure \ ef =
+        if (not isNotFound(missing)) missing
+        else match ask(execute, createEntryRequest("", Value.Obj(Map.empty()))) {
+            case Err(Failure.Business(found)) if Value.field("code", found) == Value.Str("FORBIDDEN") => Failure.Business(found)
+            case _ => missing
+        }
+
+    /// NOT_FOUND の業務エラーか。
+    def isNotFound(failure: Failure): Bool = match failure {
+        case Failure.Business(found) => Value.field("code", found) == Value.Str("NOT_FOUND")
+        case Failure.Unauthenticated(_) => false
+    }
 
     /// update_entry。entry の型を引いて RICH_TEXT の Markdown を doc にしてから updateEntry。
     def updateEntry(args: Map[String, Value], execute: GraphqlRequest -> GraphqlResponse \ ef): Result[Failure, Value] \ ef =

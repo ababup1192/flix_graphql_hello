@@ -157,7 +157,7 @@ mod TestMcpPg {
 
     ///
     /// 業務エラーは isError: true の content に code が入る。
-    ///   read の鍵で create_entry            → FORBIDDEN
+    ///   read の鍵で create_entry            → FORBIDDEN（型が無くても FORBIDDEN。型の有無より権限が先）
     ///   他のプロジェクト（shop）の entry id → NOT_FOUND（entity: Entry）
     ///   古い expectedVersion で update_entry → CONFLICT で actualVersion
     ///
@@ -171,14 +171,15 @@ mod TestMcpPg {
             let created = call(api, engine, owner, "create_entry", obj(List#{ ("type", Value.Str("posts")), ("fields", obj(List#{ ("title", Value.Str("a")) })) }));
             let entryId = Value.field("id", snd(created)) |> Value.asStr |> Option.getWithDefault("");
             let forbidden = call(api, engine, Credential.ApiKey(readKey), "create_entry", obj(List#{ ("type", Value.Str("posts")), ("fields", obj(Nil)) }));
+            let forbiddenNoType = call(api, engine, Credential.ApiKey(readKey), "create_entry", obj(List#{ ("type", Value.Str("nope")), ("fields", obj(Nil)) }));
             let notFound = call(api, engine, owner, "get_entry", obj(List#{ ("id", Value.Str(shopEntryId)) }));
             let conflict = call(api, engine, owner, "update_entry", obj(List#{ ("id", Value.Str(entryId)), ("fields", obj(Nil)), ("expectedVersion", Value.Int(99)) }));
-            (fst(forbidden), Value.field("code", snd(forbidden)),
+            (fst(forbidden), Value.field("code", snd(forbidden)), Value.field("code", snd(forbiddenNoType)),
              fst(notFound), Value.field("code", snd(notFound)), Value.field("entity", snd(notFound)),
              fst(conflict), Value.field("code", snd(conflict)), Value.field("actualVersion", snd(conflict)))
         });
         Assert.assertEq(
-            expected = (Value.Bool(true), Value.Str("FORBIDDEN"), Value.Bool(true), Value.Str("NOT_FOUND"), Value.Str("Entry"), Value.Bool(true), Value.Str("CONFLICT"), Value.Int(1)),
+            expected = (Value.Bool(true), Value.Str("FORBIDDEN"), Value.Str("FORBIDDEN"), Value.Bool(true), Value.Str("NOT_FOUND"), Value.Str("Entry"), Value.Bool(true), Value.Str("CONFLICT"), Value.Int(1)),
             outcome)
 
     ///
