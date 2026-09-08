@@ -29,17 +29,17 @@ mod EntryResolvers {
             case None        =>
                 let page = Preloaded.entryIds();
                 if (Set.memberOf(id, page)) {
-                    let fetched = ContentEntries.versionsOf(Set.toList(page));
+                    let fetched = ContentEntries.versionsOf(Session.grant(), Set.toList(page));
                     Preloaded.keepVersions(fetched);
                     Map.getWithDefault(id, Nil, fetched)
-                } else ContentEntries.versions(id)
+                } else ContentEntries.versions(Session.grant(), id)
         }
 
     ///
     /// Entry.diff。参照を読んでドメインの差分を取る。entry は source（読み込み済み）、型は写し（無ければ引いて写しに入れる）。
     ///
     def diffOf(source: Entry, fromRef: GeneratedAdmin.VersionRef, toRef: GeneratedAdmin.VersionRef): List[FieldChange] \ DbRead + CmsErr + Tenant + Session + Preloaded =
-        ContentEntries.diffOf(contentTypeOf(source#typeId), source, AdminMapping.versionRefOf("from", fromRef), AdminMapping.versionRefOf("to", toRef))
+        ContentEntries.diffOf(Session.grant(), contentTypeOf(source#typeId), source, AdminMapping.versionRefOf("from", fromRef), AdminMapping.versionRefOf("to", toRef))
 
     /// 型の定義。写しにあればそれ、無ければ引いて写しに入れる（同じ型の行が続く一覧で 1 回だけ引く）。
     def contentTypeOf(id: TypeId): ContentType \ DbRead + CmsErr + Tenant + Session + Preloaded =

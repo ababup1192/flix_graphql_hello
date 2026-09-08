@@ -28,7 +28,7 @@ mod TestReferencesPg {
             let noTarget = CmsTestKit.failureMessage(() -> ContentTypes.addField(Session.grant(), blogs, CmsTestKit.fieldDraft("author", FieldKind.Reference, FieldConfig.empty())));
             let missingType = CmsTestKit.failureMessage(() -> ContentTypes.addField(Session.grant(), blogs, { target = Some(TypeId.TypeId(999i64)) | CmsTestKit.fieldDraft("author", FieldKind.Reference, FieldConfig.empty()) }));
             let badOptions = CmsTestKit.failureMessage(() -> ContentTypes.addField(Session.grant(), blogs, CmsTestKit.fieldDraft("kind", FieldKind.Select, { options = List#{"bad-value"} | FieldConfig.empty() })));
-            let badValue = CmsTestKit.failureMessage(() -> ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("x")), ("category", Json.JString("OTHER")), ("profile", Json.JString("not valid!"))})));
+            let badValue = CmsTestKit.failureMessage(() -> ContentEntries.create(Session.grant(), blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("x")), ("category", Json.JString("OTHER")), ("profile", Json.JString("not valid!"))})));
             (noTarget, missingType, badOptions, badValue)
         }));
         Assert.assertEq(expected = Ok(Ok((
@@ -43,7 +43,7 @@ mod TestReferencesPg {
         let result = PgTestSupport.withDb(() -> {
             let (profiles, blogs, _) = typesWithReferences();
             let blocked = CmsTestKit.failureMessage(() -> ContentTypes.delete(Session.grant(), profiles));
-            let profileField = ContentTypes.get(blogs) |> (owner -> owner#fields |> List.find(field -> ApiId.text(field#apiId) == "profile"));
+            let profileField = ContentTypes.fetch(Session.grant(), blogs) |> (owner -> owner#fields |> List.find(field -> ApiId.text(field#apiId) == "profile"));
             Option.forEach(field -> ContentTypes.removeField(Session.grant(), field#id), profileField);
             ContentTypes.delete(Session.grant(), profiles);
             (blocked, ContentTypes.find(Session.grant(), profiles) |> Option.isEmpty)
@@ -58,16 +58,16 @@ mod TestReferencesPg {
     def testPgPublishDependencies(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"p1", "t1", "t2", "b1"}, () -> {
             let (profiles, blogs, tags) = typesWithReferences();
-            let profile = ContentEntries.create(profiles, None, CmsTestKit.entryData(List#{("name", Json.JString("abab"))}));
-            let tagA = ContentEntries.create(tags, None, CmsTestKit.entryData(List#{("label", Json.JString("flix"))}));
-            let tagB = ContentEntries.create(tags, None, CmsTestKit.entryData(List#{("label", Json.JString("graphql"))}));
-            let blog = ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("Hello")), ("profile", Json.JString("p1")), ("tags", Json.JArray(Vector#{Json.JString("t1"), Json.JString("t2")}))}));
-            let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(blog#id, "tester", false));
-            let published = ContentEntries.publish(blog#id, "tester", true);
-            let deps = List#{profile#id, tagA#id, tagB#id} |> List.map(id -> ContentEntries.get(id) |> (entry -> entry#stage));
-            let stuck = CmsTestKit.failureMessage(() -> ContentEntries.unpublish(profile#id));
-            discard ContentEntries.unpublish(blog#id);
-            let freed = ContentEntries.unpublish(profile#id);
+            let profile = ContentEntries.create(Session.grant(), profiles, None, CmsTestKit.entryData(List#{("name", Json.JString("abab"))}));
+            let tagA = ContentEntries.create(Session.grant(), tags, None, CmsTestKit.entryData(List#{("label", Json.JString("flix"))}));
+            let tagB = ContentEntries.create(Session.grant(), tags, None, CmsTestKit.entryData(List#{("label", Json.JString("graphql"))}));
+            let blog = ContentEntries.create(Session.grant(), blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("Hello")), ("profile", Json.JString("p1")), ("tags", Json.JArray(Vector#{Json.JString("t1"), Json.JString("t2")}))}));
+            let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), blog#id, "tester", false));
+            let published = ContentEntries.publish(Session.grant(), blog#id, "tester", true);
+            let deps = List#{profile#id, tagA#id, tagB#id} |> List.map(id -> ContentEntries.get(Session.grant(), id) |> (entry -> entry#stage));
+            let stuck = CmsTestKit.failureMessage(() -> ContentEntries.unpublish(Session.grant(), profile#id));
+            discard ContentEntries.unpublish(Session.grant(), blog#id);
+            let freed = ContentEntries.unpublish(Session.grant(), profile#id);
             (blocked, published#stage, deps, stuck, freed#stage)
         }));
         Assert.assertEq(expected = Ok(Ok((
@@ -82,12 +82,12 @@ mod TestReferencesPg {
     def testPgContentApiReferences(): Unit \ {IO, Assert} =
         let seed = () -> CmsTestKit.withIds(List#{"p1", "t1", "t2", "b1", "b2"}, () -> {
             let (profiles, blogs, tags) = typesWithReferences();
-            discard ContentEntries.create(profiles, None, CmsTestKit.entryData(List#{("name", Json.JString("abab"))}));
-            discard ContentEntries.create(tags, None, CmsTestKit.entryData(List#{("label", Json.JString("flix"))}));
-            discard ContentEntries.create(tags, None, CmsTestKit.entryData(List#{("label", Json.JString("graphql"))}));
-            discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("One")), ("category", Json.JString("KNOWLEDGE")), ("profile", Json.JString("p1")), ("tags", Json.JArray(Vector#{Json.JString("t1"), Json.JString("t2")}))}));
-            discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("Two")), ("category", Json.JString("NEWS")), ("tags", Json.JArray(Vector#{Json.JString("t2")}))}));
-            discard ContentEntries.publish(CmsTestKit.entryId("b1"), "tester", true)
+            discard ContentEntries.create(Session.grant(), profiles, None, CmsTestKit.entryData(List#{("name", Json.JString("abab"))}));
+            discard ContentEntries.create(Session.grant(), tags, None, CmsTestKit.entryData(List#{("label", Json.JString("flix"))}));
+            discard ContentEntries.create(Session.grant(), tags, None, CmsTestKit.entryData(List#{("label", Json.JString("graphql"))}));
+            discard ContentEntries.create(Session.grant(), blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("One")), ("category", Json.JString("KNOWLEDGE")), ("profile", Json.JString("p1")), ("tags", Json.JArray(Vector#{Json.JString("t1"), Json.JString("t2")}))}));
+            discard ContentEntries.create(Session.grant(), blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("Two")), ("category", Json.JString("NEWS")), ("tags", Json.JArray(Vector#{Json.JString("t2")}))}));
+            discard ContentEntries.publish(Session.grant(), CmsTestKit.entryId("b1"), "tester", true)
         });
         let (expanded, byTag, byCategory, sdl, byBadRef) = PgTestSupport.withContentApi(seed, ask ->
             (ask("{ blog(id: \"b1\") { title category profile { name } tags { label } } }"),
@@ -109,8 +109,8 @@ mod TestReferencesPg {
     def testPgReferenceWrongTypeIsNull(): Unit \ {IO, Assert} =
         let seed = () -> CmsTestKit.withIds(List#{"t1", "b1"}, () -> {
             let (_, blogs, tags) = typesWithReferences();
-            discard ContentEntries.create(tags, None, CmsTestKit.entryData(List#{("label", Json.JString("flix"))}));
-            discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("wrong type")), ("profile", Json.JString("t1"))}))
+            discard ContentEntries.create(Session.grant(), tags, None, CmsTestKit.entryData(List#{("label", Json.JString("flix"))}));
+            discard ContentEntries.create(Session.grant(), blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("wrong type")), ("profile", Json.JString("t1"))}))
         });
         let answer = PgTestSupport.withContentApi(seed, ask -> ask("{ blog(id: \"b1\", stage: DRAFT) { title profile { name } } }"));
         Assert.assertEq(expected = (Value.Obj(Map#{ "blog" => Value.Obj(Map#{ "title" => Value.Str("wrong type"), "profile" => Value.Null }) }), None), answer)
@@ -120,11 +120,11 @@ mod TestReferencesPg {
     def testPgPublishWithDeletedTarget(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"p1", "b1"}, () -> {
             let (profiles, blogs, _) = typesWithReferences();
-            discard ContentEntries.create(profiles, None, CmsTestKit.entryData(List#{("name", Json.JString("abab"))}));
-            discard ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("gone")), ("profile", Json.JString("p1"))}));
-            ContentEntries.delete(CmsTestKit.entryId("p1"));
-            (CmsTestKit.failureMessage(() -> ContentEntries.publish(CmsTestKit.entryId("b1"), "tester", false)),
-             CmsTestKit.failureMessage(() -> ContentEntries.publish(CmsTestKit.entryId("b1"), "tester", true)))
+            discard ContentEntries.create(Session.grant(), profiles, None, CmsTestKit.entryData(List#{("name", Json.JString("abab"))}));
+            discard ContentEntries.create(Session.grant(), blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("gone")), ("profile", Json.JString("p1"))}));
+            ContentEntries.delete(Session.grant(), Session.tryGrant(), CmsTestKit.entryId("p1"));
+            (CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), CmsTestKit.entryId("b1"), "tester", false)),
+             CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), CmsTestKit.entryId("b1"), "tester", true)))
         }));
         let message = "references: 参照先 'p1' はありません（消されています）。参照を外してください";
         Assert.assertEq(expected = Ok(Ok((Err(message), Err(message)))), result)

@@ -62,11 +62,11 @@ mod TestAssetsPg {
             discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("cover", FieldKind.Asset, FieldConfig.empty()));
             discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("body", FieldKind.RichText, FieldConfig.empty()));
             let upload = Assets.createUpload(Session.grant(), { fileName = "cover.png", mime = "image/png", size = 5i64 });
-            let entry = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("cover", Json.JString("asset010")), ("body", sampleDoc())}));
-            let beforeReady = CmsTestKit.failureMessage(() -> ContentEntries.publish(entry#id, "tester", false));
+            let entry = ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("cover", Json.JString("asset010")), ("body", sampleDoc())}));
+            let beforeReady = CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), entry#id, "tester", false));
             let putStatus = PgTestSupport.putTo(upload#uploadUrl, "image/png", "hello");
             discard Assets.confirm(Session.grant(), upload#asset#id, { width = Some(640), height = Some(480), alt = None });
-            discard ContentEntries.publish(entry#id, "tester", false);
+            discard ContentEntries.publish(Session.grant(), entry#id, "tester", false);
             (beforeReady, putStatus, CmsTestKit.failureMessage(() -> Assets.delete(Session.grant(), upload#asset#id)))
         })
 

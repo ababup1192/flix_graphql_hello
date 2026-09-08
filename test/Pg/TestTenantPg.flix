@@ -15,15 +15,15 @@ mod TestTenantPg {
             let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
             let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
             discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-            let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hello"))}));
+            let entry = ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hello"))}));
             PgTestSupport.asProject(shop, () -> {
                 let own = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "商品記事"));
                 (List.length(ContentTypes.list(Session.grant())),
                  ContentTypes.findByApiId(Session.grant(), CmsTestKit.apiId("blogs")) |> Option.map(found -> found#id == own#id),
                  ContentTypes.find(Session.grant(), blogs#id) |> Option.isEmpty,
-                 ContentEntries.find(entry#id) |> Option.isEmpty,
+                 ContentEntries.find(Session.grant(), entry#id) |> Option.isEmpty,
                  CmsTestKit.failureMessage(() -> ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("body", FieldKind.Text, FieldConfig.empty()))),
-                 CmsTestKit.failureMessage(() -> ContentEntries.create(blogs#id, None, CmsTestKit.entryData(Nil))))
+                 CmsTestKit.failureMessage(() -> ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(Nil))))
             })
         }));
         Assert.assertEq(expected = Ok(Ok((1, Some(true), true, true, Err("content type '1' が見つかりません"), Err("content type '1' が見つかりません")))), result)

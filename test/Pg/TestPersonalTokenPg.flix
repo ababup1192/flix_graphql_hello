@@ -165,7 +165,7 @@ mod TestPersonalTokenPg {
             let revokedTwice = alice("mutation { revokePersonalAccessToken(id: \"${tokenId}\") }") |> snd |> withoutId;
             let expired = PgTestSupport.mutateOrBug(pool, () -> {
                 let user = Accounts.resolveUser({ ownerEmail = None }, { issuer = "test", subject = "alice", email = "alice@example.com", name = "alice" });
-                Session.runWith(Accounts.actorWithoutProject(user, Login.Interactive), () -> PersonalTokens.issue(PgTestSupport.pepper(), { name = "old", scope = PatScope.Write, ttlDays = Some(1) }, twoDaysAgo))
+                Session.runWith(Accounts.actorWithoutProject(user, Login.Interactive), () -> PersonalTokens.issue(Session.grantInteractive(), PgTestSupport.pepper(), { name = "old", scope = PatScope.Write, ttlDays = Some(1) }, twoDaysAgo))
             });
             let viaExpired = PgTestSupport.askAs(admin, Credential.PersonalToken(expired#token))("{ me { email } }") |> snd;
             let viaUnknown = PgTestSupport.askAs(admin, Credential.PersonalToken("cmspat_nope"))("{ me { email } }") |> snd;

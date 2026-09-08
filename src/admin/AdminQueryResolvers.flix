@@ -32,13 +32,15 @@ mod AdminQueryResolvers {
 
     /// 一覧を引き、ページの entry id を先読みの写しに覚える（行の versions / diff がまとめて引くため。SQL は増えない）。
     def listKeepingIds(typeId: TypeId, entryQuery: EntryQuery): EntryPage \ DbRead + CmsErr + Tenant + Session + Preloaded =
-        let page = ContentEntries.list(typeId, entryQuery);
+        let page = ContentEntries.list(Session.grant(), typeId, entryQuery);
         Preloaded.keepEntryIds(page#entries |> List.map(entry -> entry#id));
         page
 
     /// Query.entry
     pub def entry(): GeneratedAdmin.QueryEntryResolver[AdminEff] =
-        (_context, id) -> Ok(ContentEntries.find(AdminMapping.entryId("id", id)))
+        (_context, id) -> Ok(findEntry(id))
+
+    def findEntry(id: Id): Option[Entry] \ DbRead + CmsErr + Tenant + Session = ContentEntries.find(Session.grant(), AdminMapping.entryId("id", id))
 
     /// Query.assets。first は 0 〜 200 に丸める
     pub def assets(): GeneratedAdmin.QueryAssetsResolver[AdminEff] =
@@ -57,11 +59,16 @@ mod AdminQueryResolvers {
 
     /// Query.publishCheck（dry-run）
     pub def publishCheck(): GeneratedAdmin.QueryPublishCheckResolver[AdminEff] =
-        (_context, id) -> Ok(ContentEntries.publishReport(AdminMapping.entryId("id", id)))
+        (_context, id) -> Ok(publishReportOf(id))
+
+    def publishReportOf(id: Id): PublishReport \ DbRead + CmsErr + Tenant + Session = ContentEntries.publishReport(Session.grant(), AdminMapping.entryId("id", id))
 
     /// Query.impact
     pub def impact(): GeneratedAdmin.QueryImpactResolver[AdminEff] =
-        (_context, id, action) -> Ok(ContentEntries.impact(AdminMapping.entryId("id", id), AdminMapping.impactActionOf(action)))
+        (_context, id, action) -> Ok(impactOf(id, action))
+
+    def impactOf(id: Id, action: GeneratedAdmin.ImpactAction): Impact \ DbRead + CmsErr + Tenant + Session =
+        ContentEntries.impact(Session.grant(), AdminMapping.entryId("id", id), AdminMapping.impactActionOf(action))
 
     /// Query.publishPlan（まとめて dry-run）。withDependencies の既定は true
     pub def publishPlan(): GeneratedAdmin.QueryPublishPlanResolver[AdminEff] =
@@ -69,7 +76,7 @@ mod AdminQueryResolvers {
 
     /// ids を読んで計画を作る。ラムダの中で effect を使わないための切り出し（VerifyError）。
     def planFor(ids: List[Id], withDependencies: Option[Bool]): PublishPlan \ DbRead + CmsErr + Tenant + Session =
-        ContentEntries.publishPlan(ids |> List.map(AdminMapping.entryId("ids")), withDependencies |> Option.getWithDefault(true))
+        ContentEntries.publishPlan(Session.grant(), ids |> List.map(AdminMapping.entryId("ids")), withDependencies |> Option.getWithDefault(true))
 
     /// Query.viewer。今の主体をそのまま見せる（DB は引かない）
     pub def viewer(): GeneratedAdmin.QueryViewerResolver[AdminEff] =
@@ -84,27 +91,41 @@ mod AdminQueryResolvers {
 
     /// Query.members
     pub def members(): GeneratedAdmin.QueryMembersResolver[AdminEff] =
-        _context -> Ok(Members.list())
+        _context -> Ok(listMembers())
+
+    def listMembers(): List[Member] \ DbRead + CmsErr + Tenant + Session = Members.list(Session.grant())
 
     /// Query.invitations
     pub def invitations(): GeneratedAdmin.QueryInvitationsResolver[AdminEff] =
-        _context -> Ok(Members.invitations())
+        _context -> Ok(listInvitations())
+
+    def listInvitations(): List[Invitation] \ DbRead + CmsErr + Tenant + Session = Members.invitations(Session.grant())
 
     /// Query.webhooks
     pub def webhooks(): GeneratedAdmin.QueryWebhooksResolver[AdminEff] =
-        _context -> Ok(Webhooks.list())
+        _context -> Ok(listWebhooks())
+
+    def listWebhooks(): List[Webhook] \ DbRead + CmsErr + Tenant + Session = Webhooks.list(Session.grant())
 
     /// Query.webhookDeliveries
     pub def webhookDeliveries(): GeneratedAdmin.QueryWebhookDeliveriesResolver[AdminEff] =
-        (_context, webhookId, first) -> Ok(Webhooks.deliveries(AdminMapping.publicIdOf(webhookId), EntryPage.clamp(20, first, None) |> fst))
+        (_context, webhookId, first) -> Ok(listDeliveries(webhookId, first))
+
+    def listDeliveries(webhookId: Id, first: Option[Int32]): List[WebhookDelivery] \ DbRead + CmsErr + Tenant + Session =
+        Webhooks.deliveries(Session.grant(), AdminMapping.publicIdOf(webhookId), EntryPage.clamp(20, first, None) |> fst)
 
     /// Query.schedules
     pub def schedules(): GeneratedAdmin.QuerySchedulesResolver[AdminEff] =
-        (_context, entryId, first) -> Ok(Schedules.list(entryId |> Option.map(AdminMapping.entryId("entryId")), EntryPage.clamp(50, first, None) |> fst))
+        (_context, entryId, first) -> Ok(listSchedules(entryId, first))
+
+    def listSchedules(entryId: Option[Id], first: Option[Int32]): List[Schedule] \ DbRead + CmsErr + Tenant + Session =
+        Schedules.list(Session.grant(), entryId |> Option.map(AdminMapping.entryId("entryId")), EntryPage.clamp(50, first, None) |> fst)
 
     /// Query.apiKeys
     pub def apiKeys(): GeneratedAdmin.QueryApiKeysResolver[AdminEff] =
-        _context -> Ok(ApiKeys.list())
+        _context -> Ok(listApiKeys())
+
+    def listApiKeys(): List[ApiKey] \ DbRead + CmsErr + Tenant + Session = ApiKeys.list(Session.grant())
 
     /// type Query のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.QueryResolvers[AdminEff] =

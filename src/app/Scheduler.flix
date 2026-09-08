@@ -47,8 +47,8 @@ mod Scheduler {
     def runAction(pool: Pool, projectId: ProjectId, entryId: EntryId, action: ScheduleAction, withDependencies: Bool): ActionOutcome \ {IO, Log} =
         match Tenant.runWith(projectId, () -> IdGen.runWithRandom(() ->
             DbRunner.transact(pool, Some(projectId), Actor.System, () -> match action {
-                case ScheduleAction.Publish   => discard ContentEntries.publish(entryId, "scheduler", withDependencies)
-                case ScheduleAction.Unpublish => discard ContentEntries.unpublish(entryId)
+                case ScheduleAction.Publish   => discard ContentEntries.publish(Session.grant(), entryId, "scheduler", withDependencies)
+                case ScheduleAction.Unpublish => discard ContentEntries.unpublish(Session.grant(), entryId)
             }))) {
             case Ok(())                                          => Ok(Ok(()))
             case Err(ApplicationFailure.Domain(failure))         => Ok(Err((CmsErr.toMessage(failure), Log.Fields.empty() |> LogFields.failure(failure))))

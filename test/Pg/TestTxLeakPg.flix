@@ -52,7 +52,7 @@ mod TestTxLeakPg {
                 discard IdGen.freshEntryId();
                 discard Tenant.current();
                 discard Time.Clock.now();
-                Session.require(Permission.ReadDraft);
+                discard (Session.grant() : Granted[ReadDraft]);
                 Integer.parseInt("boom")
             })))))
             |> Result.mapErr(failure -> String.contains(substr = "boom", "${failure}"));
@@ -130,7 +130,7 @@ mod TestTxLeakPg {
         let first = IdGen.runWithRandom(() -> Tenant.runWith(ProjectId.default(), () -> fieldOn(handle, () -> {
             discard Sql.fetch("SELECT 1", Nil);
             discard IdGen.freshEntryId();
-            Session.require(Permission.ReadDraft);
+            discard (Session.grant() : Granted[ReadDraft]);
             Integer.parseInt("boom")
         })));
         let closed = DbRunner.closeRequestTx(handle);

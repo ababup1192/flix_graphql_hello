@@ -88,14 +88,14 @@ mod MicrocmsImport {
         let asset = placeDummyImage();
         let created = apis |> List.map(api -> {
             let typeId = Map.get(api#endpoint, types) |> Option.getWithDefault(TypeId.TypeId(0i64));
-            (api#endpoint, List.range(1, count + 1) |> List.map(n -> ContentEntries.create(typeId, None, valuesOf(api, asset, Map.empty(), n, false))#id))
+            (api#endpoint, List.range(1, count + 1) |> List.map(n -> ContentEntries.create(Session.grant(), typeId, None, valuesOf(api, asset, Map.empty(), n, false))#id))
         }) |> List.toMap;
         // 参照は全部の entry ができてから張る（相互参照・自己参照のため）
         List.forEach(api -> Map.get(api#endpoint, created) |> Option.getWithDefault(Nil) |> List.forEachWithIndex((index, id) -> {
-            let entry = ContentEntries.get(id);
-            discard ContentEntries.update(id, valuesOf(api, asset, created, index + 1, true), entry#version)
+            let entry = ContentEntries.get(Session.grant(), id);
+            discard ContentEntries.update(Session.grant(), id, valuesOf(api, asset, created, index + 1, true), entry#version)
         }), apis);
-        List.forEach(api -> Map.get(api#endpoint, created) |> Option.getWithDefault(Nil) |> List.forEach(id -> discard ContentEntries.publish(id, "microcms-import", true)), apis);
+        List.forEach(api -> Map.get(api#endpoint, created) |> Option.getWithDefault(Nil) |> List.forEach(id -> discard ContentEntries.publish(Session.grant(), id, "microcms-import", true)), apis);
         created
 
     /// フィールドの値。withReferences が false なら参照のフィールドを入れない（1 回目の作成用）。

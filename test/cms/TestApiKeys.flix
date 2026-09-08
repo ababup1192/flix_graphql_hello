@@ -79,7 +79,7 @@ mod TestApiKeys {
     def testSessionEntrances(): Unit \ Assert =
         let entrances = actor -> Session.runWith(actor, () ->
             (CmsTestKit.failureMessage(() -> discard Session.currentUser()),
-             CmsTestKit.failureMessage(Session.requireInteractive),
+             CmsTestKit.failureMessage(() -> discard Session.grantInteractive()),
              Session.currentUserForRead()));
         let me = Some(UserId.UserId(7i64));
         let notWriting = Err("この操作は read の PAT ではできません。write の PAT かログインした本人で行ってください");

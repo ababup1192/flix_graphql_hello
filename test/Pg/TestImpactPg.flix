@@ -28,10 +28,10 @@ mod TestImpactPg {
         discard ContentTypes.addField(Session.grant(), blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
         discard ContentTypes.addField(Session.grant(), blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
         discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("body", FieldKind.RichText, FieldConfig.empty()));
-        let p1 = ContentEntries.create(profiles#id, Some(CmsTestKit.entryId("p1")), CmsTestKit.entryData(List#{("name", Json.JString("山田"))}));
-        let b3 = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b3")), CmsTestKit.entryData(List#{("title", Json.JString("three"))}));
-        let b2 = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b2")), CmsTestKit.entryData(List#{("title", Json.JString("two")), ("body", docLinkingTo("b3"))}));
-        let b1 = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString("")), ("profile", Json.JString("p1")), ("body", docLinkingTo("b2"))}));
+        let p1 = ContentEntries.create(Session.grant(), profiles#id, Some(CmsTestKit.entryId("p1")), CmsTestKit.entryData(List#{("name", Json.JString("山田"))}));
+        let b3 = ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b3")), CmsTestKit.entryData(List#{("title", Json.JString("three"))}));
+        let b2 = ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b2")), CmsTestKit.entryData(List#{("title", Json.JString("two")), ("body", docLinkingTo("b3"))}));
+        let b1 = ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString("")), ("profile", Json.JString("p1")), ("body", docLinkingTo("b2"))}));
         (p1#id, b1#id, b2#id, b3#id)
 
     /// publishReport は required の違反と、未公開の参照先（フィールドの参照と本文のリンク）を全部一度に返し、何も書かない。
@@ -40,12 +40,12 @@ mod TestImpactPg {
     def testPgPublishReportAndPublishImpact(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
             let (_, b1, _, _) = seedGraph();
-            let report = ContentEntries.publishReport(b1);
-            let cascades = ContentEntries.impact(b1, ImpactAction.Publish);
+            let report = ContentEntries.publishReport(Session.grant(), b1);
+            let cascades = ContentEntries.impact(Session.grant(), b1, ImpactAction.Publish);
             (report#violations,
              report#unpublishedDependencies |> List.map(entry -> EntryId.text(entry#id)) |> List.sort,
              cascades#cascades |> List.map(entry -> EntryId.text(entry#id)) |> List.sort,
-             ContentEntries.find(b1) |> Option.map(entry -> entry#stage))
+             ContentEntries.find(Session.grant(), b1) |> Option.map(entry -> entry#stage))
         });
         Assert.assertEq(
             expected = Ok(Ok((
@@ -61,11 +61,11 @@ mod TestImpactPg {
     def testPgUnpublishAndDeleteImpact(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
             let (p1, b1, b2, _) = seedGraph();
-            discard ContentEntries.update(b1, CmsTestKit.entryData(List#{("title", Json.JString("one"))}), 1);
-            let blockedByLink = CmsTestKit.failureMessage(() -> ContentEntries.publish(b2, "tester", false));
-            discard ContentEntries.publish(b1, "tester", true);
-            let unpublishB2 = ContentEntries.impact(b2, ImpactAction.Unpublish);
-            let deleteP1 = ContentEntries.impact(p1, ImpactAction.Delete);
+            discard ContentEntries.update(Session.grant(), b1, CmsTestKit.entryData(List#{("title", Json.JString("one"))}), 1);
+            let blockedByLink = CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), b2, "tester", false));
+            discard ContentEntries.publish(Session.grant(), b1, "tester", true);
+            let unpublishB2 = ContentEntries.impact(Session.grant(), b2, ImpactAction.Unpublish);
+            let deleteP1 = ContentEntries.impact(Session.grant(), p1, ImpactAction.Delete);
             let describe = referrer -> (EntryId.text(referrer#entry#id), ApiId.text(referrer#via), referrer#stage);
             (blockedByLink,
              unpublishB2#breaks |> List.map(describe),
@@ -85,17 +85,17 @@ mod TestImpactPg {
     def testPgImpactCyclesAndReportCollectsAll(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
             let (p1, b1, b2, b3) = seedGraph();
-            let blogs = ContentEntries.get(b1)#typeId;
+            let blogs = ContentEntries.get(Session.grant(), b1)#typeId;
             discard ContentTypes.addField(Session.grant(), blogs, { unique = true | CmsTestKit.fieldDraft("slug", FieldKind.Text, FieldConfig.empty()) });
-            discard ContentEntries.update(b3, CmsTestKit.entryData(List#{("body", docLinkingTo("b2")), ("slug", Json.JString("same"))}), 1);
-            discard ContentEntries.publish(b3, "tester", true);
-            discard ContentEntries.update(b1, CmsTestKit.entryData(List#{("slug", Json.JString("same"))}), 1);
-            ContentEntries.delete(p1);
-            let cycle = ContentEntries.impact(b2, ImpactAction.Publish);
-            let report = ContentEntries.publishReport(b1);
+            discard ContentEntries.update(Session.grant(), b3, CmsTestKit.entryData(List#{("body", docLinkingTo("b2")), ("slug", Json.JString("same"))}), 1);
+            discard ContentEntries.publish(Session.grant(), b3, "tester", true);
+            discard ContentEntries.update(Session.grant(), b1, CmsTestKit.entryData(List#{("slug", Json.JString("same"))}), 1);
+            ContentEntries.delete(Session.grant(), Session.tryGrant(), p1);
+            let cycle = ContentEntries.impact(Session.grant(), b2, ImpactAction.Publish);
+            let report = ContentEntries.publishReport(Session.grant(), b1);
             (cycle#cascades |> List.map(entry -> EntryId.text(entry#id)),
              report#violations |> List.map(violation -> { let Violation.Violation(path, _) = violation; path }),
-             CmsTestKit.failureMessage(() -> ContentEntries.impact(CmsTestKit.entryId("nope"), ImpactAction.Delete)))
+             CmsTestKit.failureMessage(() -> ContentEntries.impact(Session.grant(), CmsTestKit.entryId("nope"), ImpactAction.Delete)))
         });
         Assert.assertEq(
             expected = Ok(Ok((
@@ -109,10 +109,10 @@ mod TestImpactPg {
     def testPgPublishCascadesMatchImpact(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
             let (p1, b1, b2, b3) = seedGraph();
-            discard ContentEntries.update(b1, CmsTestKit.entryData(List#{("title", Json.JString("one"))}), 1);
-            let cascades = ContentEntries.impact(b1, ImpactAction.Publish)#cascades |> List.map(entry -> EntryId.text(entry#id)) |> List.sort;
-            discard ContentEntries.publish(b1, "tester", true);
-            let publishedOthers = List#{p1, b2, b3} |> List.filter(id -> ContentEntries.get(id)#stage == Stage.Published) |> List.map(EntryId.text) |> List.sort;
+            discard ContentEntries.update(Session.grant(), b1, CmsTestKit.entryData(List#{("title", Json.JString("one"))}), 1);
+            let cascades = ContentEntries.impact(Session.grant(), b1, ImpactAction.Publish)#cascades |> List.map(entry -> EntryId.text(entry#id)) |> List.sort;
+            discard ContentEntries.publish(Session.grant(), b1, "tester", true);
+            let publishedOthers = List#{p1, b2, b3} |> List.filter(id -> ContentEntries.get(Session.grant(), id)#stage == Stage.Published) |> List.map(EntryId.text) |> List.sort;
             (cascades, publishedOthers)
         });
         Assert.assertEq(expected = Ok(Ok((List#{ "b2", "b3", "p1" }, List#{ "b2", "b3", "p1" }))), result)

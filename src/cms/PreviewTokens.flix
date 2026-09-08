@@ -20,12 +20,11 @@ mod PreviewTokens {
     pub def maxTtlSeconds(): Int64 = 86400i64
 
     ///
-    /// 発行する。readDraft を持つ人（writer 以上・readDraft の鍵）だけ。entry が無ければ notFound。
+    /// 発行する。readDraft の証明（writer 以上・readDraft の鍵）を受ける。entry が無ければ notFound。
     ///
-    pub def issue(pepper: SecretHash.Pepper, entryId: EntryId, window: { ttlSeconds = Int64, nowMillis = Int64 }): PreviewToken \ DbRead + CmsErr + Tenant + Session =
-        Session.require(Permission.ReadDraft);
-        let entry = ContentEntries.get(entryId);
-        let owner = ContentTypes.get(entry#typeId);
+    pub def issue(proof: Granted[ReadDraft], pepper: SecretHash.Pepper, entryId: EntryId, window: { ttlSeconds = Int64, nowMillis = Int64 }): PreviewToken \ DbRead + CmsErr + Tenant =
+        let entry = ContentEntries.get(proof, entryId);
+        let owner = ContentTypes.fetch(proof, entry#typeId);
         let ttl = Int64.max(60i64, Int64.min(maxTtlSeconds(), window#ttlSeconds));
         let exp = window#nowMillis / 1000i64 + ttl;
         let payload = "${Tenant.currentId()}.${EntryId.text(entryId)}.${exp}";

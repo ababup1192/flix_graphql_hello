@@ -15,10 +15,9 @@ mod PersonalTokens {
     pub def maxTtlDays(): Int32 = 365
 
     ///
-    /// 発行する。ログインの JWT で来た本人だけ（PAT から PAT は作れない。漏れた PAT を失効すれば、それで作った物が無い）。ttlDays は 1 〜 365。
+    /// 発行する。ログインの JWT で来た本人の証明（`Granted[Interactive]`）を受ける（PAT から PAT は作れない。漏れた PAT を失効すれば、それで作った物が無い）。ttlDays は 1 〜 365。
     ///
-    pub def issue(pepper: SecretHash.Pepper, draft: PersonalTokenDraft, nowMillis: Int64): IssuedPersonalAccessToken \ DbWrite + CmsErr + IdGen + Session =
-        Session.requireInteractive();
+    pub def issue(_login: Granted[Interactive], pepper: SecretHash.Pepper, draft: PersonalTokenDraft, nowMillis: Int64): IssuedPersonalAccessToken \ DbWrite + CmsErr + IdGen + Session =
         let user = Session.currentUser();
         CmsErr.raiseIfAny(Naming.validateName("name", draft#name));
         let ttlDays = draft#ttlDays |> Option.getWithDefault(defaultTtlDays());
@@ -51,6 +50,8 @@ mod PersonalTokens {
     /// 生のトークンから本人と範囲。hash を Tx の印にしてから引く（RLS はその 1 行だけ見せる）。
     /// 失効・期限切れ・知らない物は理由付きで Err（Runner が「認証に失敗しました」にする）。
     ///
+    /// WhyNot: 証明を取らないのは、認証（Authentication.resolve）が認証済みユーザーを決める前に呼ぶ物で、まだ判定する主体が無いため。
+    ///
     pub def resolve(pepper: SecretHash.Pepper, raw: String, nowMillis: Int64): Result[PatRejection, ResolvedPersonalToken] \ DbRead =
         if (not String.startsWith(prefix = prefix(), raw)) Err(PatRejection.Unknown)
         else {
@@ -69,6 +70,8 @@ mod PersonalTokens {
 
     ///
     /// 最終使用時刻を書く。1 分に 1 回だけ。本人の印（Accounts.resolveUserById）を置いた後に呼ぶ。書いた行数を返す。
+    ///
+    /// WhyNot: 証明を取らないのは resolve と同じ（認証の Tx で、トークンが使われた事実を書くだけ）。
     ///
     pub def touch(id: Int64): Int32 \ DbWrite =
         AuthQueries.touchPersonalToken(id)

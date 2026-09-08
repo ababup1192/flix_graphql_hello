@@ -21,7 +21,7 @@ mod TestContentTypesPg {
             discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, { maxLength = Some(120) | FieldConfig.empty() }));
             discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("body", FieldKind.TextArea, FieldConfig.empty()));
             discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = Some(CmsTestKit.apiId("title")) | FieldConfig.empty() }));
-            let loaded = ContentTypes.get(blogs#id);
+            let loaded = ContentTypes.fetch(Session.grant(), blogs#id);
             (TypeName.text(loaded#singular), ApiId.text(loaded#plural), loaded#kind, loaded#previewUrl,
              loaded#fields |> List.map(field -> (ApiId.text(field#apiId), field#position, field#config#maxLength, field#config#sourceField |> Option.map(ApiId.text))))
         });
@@ -95,8 +95,8 @@ mod TestContentTypesPg {
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"s1", "s2"}, () -> {
             let settings = ContentTypes.create(Session.grant(), { kind = TypeKind.Singleton | CmsTestKit.typeDraft("settings", "サイト設定") });
             discard ContentTypes.addField(Session.grant(), settings#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-            discard ContentEntries.create(settings#id, None, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("a"))}));
-            CmsTestKit.failureMessage(() -> ContentEntries.create(settings#id, None, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("b"))})))
+            discard ContentEntries.create(Session.grant(), settings#id, None, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("a"))}));
+            CmsTestKit.failureMessage(() -> ContentEntries.create(Session.grant(), settings#id, None, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("b"))})))
         }));
         Assert.assertEq(expected = Ok(Ok(Err("typeId: SINGLETON の型には entry を 1 件しか作れません"))), result)
 
@@ -130,10 +130,10 @@ mod TestContentTypesPg {
             let blogs = ContentTypes.create(Session.grant(), blogsDraft());
             discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             let body = ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("body", FieldKind.TextArea, FieldConfig.empty()));
-            let created = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("a")), ("body", Util.Json.Json.JString("b"))}));
+            let created = ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("a")), ("body", Util.Json.Json.JString("b"))}));
             ContentTypes.removeField(Session.grant(), body#id);
-            let updated = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("c"))}), created#version);
-            let published = ContentEntries.publish(updated#id, "tester", false);
+            let updated = ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("c"))}), created#version);
+            let published = ContentEntries.publish(Session.grant(), updated#id, "tester", false);
             (Map.keysOf(updated#data) |> Set.toList |> List.map(ApiId.text), published#stage)
         }));
         Assert.assertEq(expected = Ok(Ok((List#{"title"}, Stage.Published))), result)

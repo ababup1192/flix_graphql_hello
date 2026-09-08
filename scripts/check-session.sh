@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 
 found=$(awk '
     /^mod [A-Za-z]+/ { mod = $2 }
-    /^[[:space:]]*pub def / && /\\/ && /(^|[^A-Za-z])Db(Read|Write)?([^A-Za-z]|$)/ && !/(^|[^A-Za-z])Session([^A-Za-z]|$)/ && !/: Granted\[/ {
+    /^[[:space:]]*pub def / && /\\/ && /(^|[^A-Za-z])Db(Read|Write)?([^A-Za-z]|$)/ && !/(^|[^A-Za-z])Session([^A-Za-z]|$)/ && !/: Granted\[/ && !/: StageAccess/ {
         name = $0
         sub(/^[[:space:]]*pub def /, "", name)
         sub(/[(\[:].*/, "", name)

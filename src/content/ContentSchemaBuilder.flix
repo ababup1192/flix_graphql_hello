@@ -48,16 +48,32 @@ mod ContentSchemaBuilder {
     def oneField(all: List[ContentType], owner: ContentType): Field[Unit, ContentEff] =
         Schema.field2(queryName(owner), Schema.arg("id", GqlCodec.id()), stageArg(), Out.option(Out.obj(entryType(all, owner))), (_context, _root, id, stage) -> {
             let Id.Id(text) = id;
-            Ok(EntryId.parse(text) |> Option.flatMap(entryId -> ContentEntries.findByStage(owner, entryId, stageOrDefault(stage))) |> Option.filter(entry -> entry#typeId == owner#id))
+            Ok(EntryId.parse(text) |> Option.flatMap(entryId -> findOne(owner, entryId, stageOrDefault(stage))) |> Option.filter(entry -> entry#typeId == owner#id))
         }) |> Field.withDescription("${TypeName.text(owner#singular)} を id で 1 つ。無ければ null")
+
+    /// stage の行を 1 つ。下書きはその entry を対象にした readDraft の証明（プレビュートークンはその entry だけ通る）。
+    def findOne(owner: ContentType, entryId: EntryId, stage: Stage): Option[Entry] \ DbRead + CmsErr + Tenant + Session =
+        ContentEntries.findByStage(owner, entryId, accessTo(Some(entryId), stage))
+
+    ///
+    /// stage の読み方。公開中は証明が要らず、下書きは readDraft の証明を作る（対象の entry があればそれに対する物。一覧は対象無しなのでプレビュートークンでは読めない）。
+    ///
+    def accessTo(target: Option[EntryId], stage: Stage): ContentEntries.StageAccess \ Session + CmsErr = match stage {
+        case Stage.Published => ContentEntries.StageAccess.Published
+        case Stage.Draft     => ContentEntries.StageAccess.Draft(Session.grantOn(target |> Option.map(Authz.entryResource) |> Option.getWithDefault(Authz.anyResource())))
+    }
 
     ///
     /// `<singular>(stage: Stage = PUBLISHED): <Singular>`（singleton）
     ///
     def singletonField(all: List[ContentType], owner: ContentType): Field[Unit, ContentEff] =
         Schema.field1(queryName(owner), stageArg(), Out.option(Out.obj(entryType(all, owner))), (_context, _root, stage) ->
-            Ok(ContentEntries.firstByStage(owner, stageOrDefault(stage))))
+            Ok(firstOne(owner, stageOrDefault(stage))))
             |> Field.withDescription("${TypeName.text(owner#singular)}（1 件だけ）")
+
+    /// singleton の 1 件。
+    def firstOne(owner: ContentType, stage: Stage): Option[Entry] \ DbRead + CmsErr + Tenant + Session =
+        ContentEntries.firstByStage(owner, accessTo(None, stage))
 
     ///
     /// `<plural>(where, orderBy, first, skip, stage): <Singular>Connection!`
@@ -80,7 +96,7 @@ mod ContentSchemaBuilder {
                 atStage <- Arg.decode(stage, args)
             ) yield {
                 let (limit, offset) = EntryPage.clamp(20, first, skip);
-                ContentEntries.listByStage(owner, stageOrDefault(atStage), {
+                ContentEntries.listByStage(owner, accessTo(None, stageOrDefault(atStage)), {
                     filter  = filter |> Option.getWithDefault(Nil),
                     orderBy = orderBy |> Option.getWithDefault(Nil),
                     first   = limit,
@@ -223,7 +239,7 @@ mod ContentSchemaBuilder {
     def resolveLink(target: ContentType, entry: Entry, id: EntryId): Option[Entry] \ ContentEff =
         (match Linked.get(id, entry#linked) {
             case Some(found) => Some(found)
-            case None        => ContentEntries.findByStage(target, id, entry#contentStage)
+            case None        => findOne(target, id, entry#contentStage)
         }) |> Option.filter(found -> found#typeId == target#id)
 
     ///

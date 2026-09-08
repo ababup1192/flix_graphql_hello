@@ -27,9 +27,13 @@ mod AccountMutationResolvers {
     /// Mutation.createPersonalAccessToken。pepper が無ければ発行できない
     def createPersonalAccessToken(deps: Deps): GeneratedAccount.MutationCreatePersonalAccessTokenResolver[AccountEff] =
         (_context, name, scope, ttlDays) -> match deps#auth#pepper {
-            case Some(pepper) => Ok(PersonalTokens.issue(pepper, { name = name, scope = AccountMapping.patScopeOf(scope), ttlDays = ttlDays }, Time.Clock.now()))
+            case Some(pepper) => Ok(issuePersonalToken(pepper, name, scope, ttlDays))
             case None         => Err(FieldError.internal("Personal Access Token を発行できません（CMS_API_KEY_PEPPER が設定されていません）"))
         }
+
+    /// PAT を発行する。ログインの JWT で来た本人の証明を作って渡す。
+    def issuePersonalToken(pepper: SecretHash.Pepper, name: String, scope: GeneratedAccount.PatScope, ttlDays: Option[Int32]): IssuedPersonalAccessToken \ DbWrite + CmsErr + IdGen + Session + Time.Clock.Clock =
+        PersonalTokens.issue(Session.grantInteractive(), pepper, { name = name, scope = AccountMapping.patScopeOf(scope), ttlDays = ttlDays }, Time.Clock.now())
 
 }
 

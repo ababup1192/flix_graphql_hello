@@ -54,22 +54,36 @@ mod AdminMutationResolvers {
 
     /// Mutation.createEntry
     pub def createEntry(): GeneratedAdmin.MutationCreateEntryResolver[AdminEff] =
-        (_context, typeId, fields, id) -> Ok(ContentEntries.create(
+        (_context, typeId, fields, id) -> Ok(createEntryOf(typeId, fields, id))
+
+    def createEntryOf(typeId: Id, fields: Value, id: Option[Id]): Entry \ Db + CmsErr + IdGen + Tenant + Session =
+        ContentEntries.create(Session.grant(),
             AdminMapping.typeId("typeId", typeId),
             id |> Option.map(AdminMapping.entryId("id")),
-            AdminMapping.entryData("fields", fields)))
+            AdminMapping.entryData("fields", fields))
 
     /// Mutation.updateEntry
     pub def updateEntry(): GeneratedAdmin.MutationUpdateEntryResolver[AdminEff] =
-        (_context, id, fields, expectedVersion) -> Ok(ContentEntries.update(AdminMapping.entryId("id", id), AdminMapping.entryData("fields", fields), expectedVersion))
+        (_context, id, fields, expectedVersion) -> Ok(updateEntryOf(id, fields, expectedVersion))
+
+    def updateEntryOf(id: Id, fields: Value, expectedVersion: Int32): Entry \ Db + CmsErr + Tenant + Session =
+        ContentEntries.update(Session.grant(), AdminMapping.entryId("id", id), AdminMapping.entryData("fields", fields), expectedVersion)
 
     /// Mutation.deleteEntry。消した id を返す
     pub def deleteEntry(): GeneratedAdmin.MutationDeleteEntryResolver[AdminEff] =
-        (_context, id) -> { ContentEntries.delete(AdminMapping.entryId("id", id)); Ok(id) }
+        (_context, id) -> { deleteEntryOf(id); Ok(id) }
+
+    /// 消す。公開中の物には取り下げの証明も要るので、持てるだけ渡す（writer は公開中の物を消せない）。
+    def deleteEntryOf(id: Id): Unit \ Db + CmsErr + IdGen + Tenant + Session =
+        ContentEntries.delete(Session.grant(), Session.tryGrant(), AdminMapping.entryId("id", id))
 
     /// Mutation.publishEntry
     pub def publishEntry(): GeneratedAdmin.MutationPublishEntryResolver[AdminEff] =
-        (_context, id, withDependencies) -> Ok(ContentEntries.publish(AdminMapping.entryId("id", id), Session.displayName(), withDependencies |> Option.getWithDefault(false)))
+        (_context, id, withDependencies) -> Ok(publishAs(id, withDependencies |> Option.getWithDefault(false)))
+
+    /// 今の主体の名前で公開する。
+    def publishAs(id: Id, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant + Session =
+        ContentEntries.publish(Session.grant(), AdminMapping.entryId("id", id), Session.displayName(), withDependencies)
 
     /// Mutation.publishMany。withDependencies の既定は true
     pub def publishMany(): GeneratedAdmin.MutationPublishManyResolver[AdminEff] =
@@ -77,19 +91,29 @@ mod AdminMutationResolvers {
 
     /// 今の主体の名前で一括公開する。ラムダの中で effect を使わないための切り出し（VerifyError）。
     def publishManyAs(ids: List[EntryId], withDependencies: Bool): List[Entry] \ Db + CmsErr + IdGen + Tenant + Session =
-        ContentEntries.publishMany(ids, Session.displayName(), withDependencies)
+        ContentEntries.publishMany(Session.grant(), ids, Session.displayName(), withDependencies)
 
     /// Mutation.unpublishEntry
     pub def unpublishEntry(): GeneratedAdmin.MutationUnpublishEntryResolver[AdminEff] =
-        (_context, id) -> Ok(ContentEntries.unpublish(AdminMapping.entryId("id", id)))
+        (_context, id) -> Ok(unpublishOf(id))
+
+    def unpublishOf(id: Id): Entry \ Db + CmsErr + IdGen + Tenant + Session =
+        ContentEntries.unpublish(Session.grant(), AdminMapping.entryId("id", id))
 
     /// Mutation.saveVersion
     pub def saveVersion(): GeneratedAdmin.MutationSaveVersionResolver[AdminEff] =
-        (_context, id) -> Ok(ContentEntries.saveVersion(AdminMapping.entryId("id", id), Session.displayName()))
+        (_context, id) -> Ok(saveVersionAs(id))
+
+    /// 今の主体の名前で版を積む。
+    def saveVersionAs(id: Id): EntryVersion \ Db + CmsErr + Tenant + Session =
+        ContentEntries.saveVersion(Session.grant(), AdminMapping.entryId("id", id), Session.displayName())
 
     /// Mutation.restoreVersion
     pub def restoreVersion(): GeneratedAdmin.MutationRestoreVersionResolver[AdminEff] =
-        (_context, id, versionId, expectedVersion) -> Ok(ContentEntries.restoreVersion(AdminMapping.entryId("id", id), AdminMapping.versionId("versionId", versionId), expectedVersion))
+        (_context, id, versionId, expectedVersion) -> Ok(restoreVersionOf(id, versionId, expectedVersion))
+
+    def restoreVersionOf(id: Id, versionId: Id, expectedVersion: Int32): Entry \ Db + CmsErr + Tenant + Session =
+        ContentEntries.restoreVersion(Session.grant(), AdminMapping.entryId("id", id), AdminMapping.versionId("versionId", versionId), expectedVersion)
 
     /// Mutation.createUploadUrl
     pub def createUploadUrl(): GeneratedAdmin.MutationCreateUploadUrlResolver[AdminEff] =
@@ -128,68 +152,107 @@ mod AdminMutationResolvers {
 
     /// Mutation.inviteMember
     pub def inviteMember(): GeneratedAdmin.MutationInviteMemberResolver[AdminEff] =
-        (_context, email, role) -> Ok(Members.invite(email, AdminMapping.roleOf(role)))
+        (_context, email, role) -> Ok(inviteOf(email, role))
+
+    def inviteOf(email: String, role: GeneratedAdmin.Role): Invitation \ Db + CmsErr + IdGen + Tenant + Session =
+        Members.invite(Session.grant(), email, AdminMapping.roleOf(role))
 
     /// Mutation.cancelInvitation。消した id を返す
     pub def cancelInvitation(): GeneratedAdmin.MutationCancelInvitationResolver[AdminEff] =
-        (_context, id) -> { Members.cancelInvitation(AdminMapping.publicIdOf(id)); Ok(id) }
+        (_context, id) -> { cancelInvitationOf(id); Ok(id) }
+
+    def cancelInvitationOf(id: Id): Unit \ DbWrite + CmsErr + Tenant + Session =
+        Members.cancelInvitation(Session.grant(), AdminMapping.publicIdOf(id))
 
     /// Mutation.changeMemberRole
     pub def changeMemberRole(): GeneratedAdmin.MutationChangeMemberRoleResolver[AdminEff] =
-        (_context, userId, role) -> Ok(Members.changeRole(AdminMapping.userId("userId", userId), AdminMapping.roleOf(role)))
+        (_context, userId, role) -> Ok(changeRoleOf(userId, role))
+
+    def changeRoleOf(userId: Id, role: GeneratedAdmin.Role): Member \ Db + CmsErr + Tenant + Session =
+        Members.changeRole(Session.grant(), AdminMapping.userId("userId", userId), AdminMapping.roleOf(role))
 
     /// Mutation.removeMember。外した id を返す
     pub def removeMember(): GeneratedAdmin.MutationRemoveMemberResolver[AdminEff] =
-        (_context, userId) -> { Members.remove(AdminMapping.userId("userId", userId)); Ok(userId) }
+        (_context, userId) -> { removeMemberOf(userId); Ok(userId) }
+
+    def removeMemberOf(userId: Id): Unit \ Db + CmsErr + Tenant + Session =
+        Members.remove(Session.grant(), AdminMapping.userId("userId", userId))
 
     /// Mutation.createApiKey。pepper が無ければ発行できない
     pub def createApiKey(deps: Deps): GeneratedAdmin.MutationCreateApiKeyResolver[AdminEff] =
         (_context, name, scope, role, expiresAt) -> match deps#auth#pepper {
-            case Some(pepper) => Ok(ApiKeys.create(pepper, {
-                name = name, scope = AdminMapping.apiKeyScopeOf(scope, role),
-                expiresAt = expiresAt |> Option.map(text -> AdminMapping.timestampOf("expiresAt", text)) }, Time.Clock.now()))
+            case Some(pepper) => Ok(createApiKeyWith(pepper, name, scope, role, expiresAt))
             case None         => Err(FieldError.internal("API キーを発行できません（CMS_API_KEY_PEPPER が設定されていません）"))
         }
 
+    /// 鍵を発行する。manageApiKeys の証明と、ログインの JWT で来た本人の証明の 2 つを作って渡す。
+    def createApiKeyWith(pepper: SecretHash.Pepper, name: String, scope: GeneratedAdmin.ApiKeyScope, role: Option[GeneratedAdmin.Role], expiresAt: Option[String]): IssuedApiKey \ DbWrite + CmsErr + IdGen + Tenant + Session + Time.Clock.Clock =
+        ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, {
+            name = name, scope = AdminMapping.apiKeyScopeOf(scope, role),
+            expiresAt = expiresAt |> Option.map(text -> AdminMapping.timestampOf("expiresAt", text)) }, Time.Clock.now())
+
     /// Mutation.revokeApiKey。失効した id を返す
     pub def revokeApiKey(): GeneratedAdmin.MutationRevokeApiKeyResolver[AdminEff] =
-        (_context, id) -> { ApiKeys.revoke(AdminMapping.publicIdOf(id)); Ok(id) }
+        (_context, id) -> { revokeApiKeyOf(id); Ok(id) }
+
+    def revokeApiKeyOf(id: Id): Unit \ DbWrite + CmsErr + Tenant + Session =
+        ApiKeys.revoke(Session.grant(), AdminMapping.publicIdOf(id))
 
     /// Mutation.createPreviewToken。pepper が無ければ発行できない
     pub def createPreviewToken(deps: Deps): GeneratedAdmin.MutationCreatePreviewTokenResolver[AdminEff] =
         (_context, entryId, expiresInSeconds) -> match deps#auth#pepper {
-            case Some(pepper) => Ok(PreviewTokens.issue(pepper, AdminMapping.entryId("entryId", entryId), { ttlSeconds = expiresInSeconds |> Option.map(Int32.toInt64) |> Option.getWithDefault(PreviewTokens.defaultTtlSeconds()), nowMillis = Time.Clock.now() }))
+            case Some(pepper) => Ok(issuePreviewToken(pepper, entryId, expiresInSeconds))
             case None         => Err(FieldError.internal("プレビュートークンを発行できません（CMS_API_KEY_PEPPER が設定されていません）"))
         }
 
+    def issuePreviewToken(pepper: SecretHash.Pepper, entryId: Id, expiresInSeconds: Option[Int32]): PreviewToken \ DbRead + CmsErr + Tenant + Session + Time.Clock.Clock =
+        PreviewTokens.issue(Session.grant(), pepper, AdminMapping.entryId("entryId", entryId), { ttlSeconds = expiresInSeconds |> Option.map(Int32.toInt64) |> Option.getWithDefault(PreviewTokens.defaultTtlSeconds()), nowMillis = Time.Clock.now() })
+
     /// Mutation.schedulePublish
     pub def schedulePublish(): GeneratedAdmin.MutationSchedulePublishResolver[AdminEff] =
-        (_context, entryId, at, withDependencies) ->
-            Ok(Schedules.schedule(AdminMapping.entryId("entryId", entryId), ScheduleAction.Publish, AdminMapping.timestampOf("at", at), withDependencies |> Option.getWithDefault(false)))
+        (_context, entryId, at, withDependencies) -> Ok(scheduleOf(entryId, ScheduleAction.Publish, at, withDependencies |> Option.getWithDefault(false)))
 
     /// Mutation.scheduleUnpublish
     pub def scheduleUnpublish(): GeneratedAdmin.MutationScheduleUnpublishResolver[AdminEff] =
-        (_context, entryId, at) -> Ok(Schedules.schedule(AdminMapping.entryId("entryId", entryId), ScheduleAction.Unpublish, AdminMapping.timestampOf("at", at), false))
+        (_context, entryId, at) -> Ok(scheduleOf(entryId, ScheduleAction.Unpublish, at, false))
+
+    def scheduleOf(entryId: Id, action: ScheduleAction, at: String, withDependencies: Bool): Schedule \ Db + CmsErr + IdGen + Tenant + Session =
+        Schedules.schedule(Session.grant(), AdminMapping.entryId("entryId", entryId), action, AdminMapping.timestampOf("at", at), withDependencies)
 
     /// Mutation.cancelSchedule
     pub def cancelSchedule(): GeneratedAdmin.MutationCancelScheduleResolver[AdminEff] =
-        (_context, id) -> Ok(Schedules.cancel(AdminMapping.publicIdOf(id)))
+        (_context, id) -> Ok(cancelScheduleOf(id))
+
+    def cancelScheduleOf(id: Id): Schedule \ Db + CmsErr + Tenant + Session =
+        Schedules.cancel(Session.grant(), AdminMapping.publicIdOf(id))
 
     /// Mutation.createWebhook
     pub def createWebhook(): GeneratedAdmin.MutationCreateWebhookResolver[AdminEff] =
-        (_context, input) -> Ok(Webhooks.create(AdminMapping.webhookDraftOf(input)))
+        (_context, input) -> Ok(createWebhookOf(input))
+
+    def createWebhookOf(input: GeneratedAdmin.WebhookInput): IssuedWebhook \ Db + CmsErr + IdGen + Tenant + Session =
+        Webhooks.create(Session.grant(), AdminMapping.webhookDraftOf(input))
 
     /// Mutation.updateWebhook
     pub def updateWebhook(): GeneratedAdmin.MutationUpdateWebhookResolver[AdminEff] =
-        (_context, id, input) -> Ok(Webhooks.update(AdminMapping.publicIdOf(id), AdminMapping.webhookDraftOf(input)))
+        (_context, id, input) -> Ok(updateWebhookOf(id, input))
+
+    def updateWebhookOf(id: Id, input: GeneratedAdmin.WebhookInput): Webhook \ Db + CmsErr + Tenant + Session =
+        Webhooks.update(Session.grant(), AdminMapping.publicIdOf(id), AdminMapping.webhookDraftOf(input))
 
     /// Mutation.deleteWebhook。消した id を返す
     pub def deleteWebhook(): GeneratedAdmin.MutationDeleteWebhookResolver[AdminEff] =
-        (_context, id) -> { Webhooks.delete(AdminMapping.publicIdOf(id)); Ok(id) }
+        (_context, id) -> { deleteWebhookOf(id); Ok(id) }
+
+    def deleteWebhookOf(id: Id): Unit \ DbWrite + CmsErr + Tenant + Session =
+        Webhooks.delete(Session.grant(), AdminMapping.publicIdOf(id))
 
     /// Mutation.redeliverWebhook
     pub def redeliverWebhook(): GeneratedAdmin.MutationRedeliverWebhookResolver[AdminEff] =
-        (_context, deliveryId) -> Ok(Webhooks.redeliver(AdminMapping.publicIdOf(deliveryId)))
+        (_context, deliveryId) -> Ok(redeliverOf(deliveryId))
+
+    def redeliverOf(deliveryId: Id): WebhookDelivery \ Db + CmsErr + Tenant + Session =
+        Webhooks.redeliver(Session.grant(), AdminMapping.publicIdOf(deliveryId))
 
     /// type Mutation のリゾルバ一式
     pub def resolvers(deps: Deps): GeneratedAdmin.MutationResolvers[AdminEff] =

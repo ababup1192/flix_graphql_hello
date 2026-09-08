@@ -22,17 +22,17 @@ mod TestPublishPlanPg {
     ///   b3 { title: "three" }
     ///
     def seedGraph(title: String): String \ Db + CmsErr + Tenant + IdGen + Session =
-        let issued = Webhooks.create({ name = "site", url = "https://example.com/hook", events = List#{WebhookEvent.EntryPublished}, active = true });
+        let issued = Webhooks.create(Session.grant(), { name = "site", url = "https://example.com/hook", events = List#{WebhookEvent.EntryPublished}, active = true });
         let profiles = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("profiles", "書き手"));
         discard ContentTypes.addField(Session.grant(), profiles#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
         let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
         discard ContentTypes.addField(Session.grant(), blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
         discard ContentTypes.addField(Session.grant(), blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
         discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("body", FieldKind.RichText, FieldConfig.empty()));
-        discard ContentEntries.create(profiles#id, Some(CmsTestKit.entryId("p1")), CmsTestKit.entryData(List#{("name", Json.JString("山田"))}));
-        discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b3")), CmsTestKit.entryData(List#{("title", Json.JString("three"))}));
-        discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b2")), CmsTestKit.entryData(List#{("title", Json.JString("two")), ("body", docLinkingTo("b3"))}));
-        discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString(title)), ("profile", Json.JString("p1")), ("body", docLinkingTo("b2"))}));
+        discard ContentEntries.create(Session.grant(), profiles#id, Some(CmsTestKit.entryId("p1")), CmsTestKit.entryData(List#{("name", Json.JString("山田"))}));
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b3")), CmsTestKit.entryData(List#{("title", Json.JString("three"))}));
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b2")), CmsTestKit.entryData(List#{("title", Json.JString("two")), ("body", docLinkingTo("b3"))}));
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString(title)), ("profile", Json.JString("p1")), ("body", docLinkingTo("b2"))}));
         issued#webhook#publicId
 
     /// 計画を (id, 理由, その entry の違反の数) の列にする。
@@ -41,7 +41,7 @@ mod TestPublishPlanPg {
 
     /// 4 つの entry の stage。
     def stages(): List[(String, Stage)] \ DbRead + CmsErr + Tenant + Session =
-        List#{"p1", "b1", "b2", "b3"} |> List.map(id -> (id, ContentEntries.get(CmsTestKit.entryId(id))#stage))
+        List#{"p1", "b1", "b2", "b3"} |> List.map(id -> (id, ContentEntries.get(Session.grant(), CmsTestKit.entryId(id))#stage))
 
     /// 計画は参照先が先（b1 の直接の参照先は id 順に b2, p1。b2 の先に b3）で、要求した b1 だけ REQUESTED。
     /// publishMany は同じ順で全部公開し、entry.published が 4 件積まれる。何度呼んでも計画は同じ（書き込まない）。
@@ -51,12 +51,12 @@ mod TestPublishPlanPg {
     def testPgPublishPlanThenPublishMany(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
             let webhookId = seedGraph("one");
-            let plan = ContentEntries.publishPlan(CmsTestKit.entryIds(List#{"b1"}), true);
-            let published = ContentEntries.publishMany(CmsTestKit.entryIds(List#{"b1"}), "tester", true);
+            let plan = ContentEntries.publishPlan(Session.grant(), CmsTestKit.entryIds(List#{"b1"}), true);
+            let published = ContentEntries.publishMany(Session.grant(), CmsTestKit.entryIds(List#{"b1"}), "tester", true);
             (stepsOf(plan), plan#violations,
              published |> List.map(entry -> EntryId.text(entry#id)),
              stages(),
-             Webhooks.deliveries(webhookId, 20) |> List.length)
+             Webhooks.deliveries(Session.grant(), webhookId, 20) |> List.length)
         });
         Assert.assertEq(
             expected = Ok(Ok((
@@ -73,9 +73,9 @@ mod TestPublishPlanPg {
     def testPgPublishManyPublishesNothingOnViolation(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
             let webhookId = seedGraph("");
-            let plan = ContentEntries.publishPlan(CmsTestKit.entryIds(List#{"b2", "b1"}), true);
-            let failed = CmsTestKit.failureMessage(() -> ContentEntries.publishMany(CmsTestKit.entryIds(List#{"b2", "b1"}), "tester", true));
-            (stepsOf(plan), failed, stages(), Webhooks.deliveries(webhookId, 20) |> List.length)
+            let plan = ContentEntries.publishPlan(Session.grant(), CmsTestKit.entryIds(List#{"b2", "b1"}), true);
+            let failed = CmsTestKit.failureMessage(() -> ContentEntries.publishMany(Session.grant(), CmsTestKit.entryIds(List#{"b2", "b1"}), "tester", true));
+            (stepsOf(plan), failed, stages(), Webhooks.deliveries(Session.grant(), webhookId, 20) |> List.length)
         });
         Assert.assertEq(
             expected = Ok(Ok((
@@ -91,11 +91,11 @@ mod TestPublishPlanPg {
     def testPgPublishPlanWithoutDependenciesAndCycles(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
             discard seedGraph("one");
-            let outside = ContentEntries.publishPlan(CmsTestKit.entryIds(List#{"b2"}), false);
-            let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publishMany(CmsTestKit.entryIds(List#{"b2"}), "tester", false));
-            let together = ContentEntries.publishPlan(CmsTestKit.entryIds(List#{"b2", "b3"}), false);
-            discard ContentEntries.update(CmsTestKit.entryId("b3"), CmsTestKit.entryData(List#{("body", docLinkingTo("b2"))}), 1);
-            let cycle = ContentEntries.publishPlan(CmsTestKit.entryIds(List#{"b2"}), true);
+            let outside = ContentEntries.publishPlan(Session.grant(), CmsTestKit.entryIds(List#{"b2"}), false);
+            let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publishMany(Session.grant(), CmsTestKit.entryIds(List#{"b2"}), "tester", false));
+            let together = ContentEntries.publishPlan(Session.grant(), CmsTestKit.entryIds(List#{"b2", "b3"}), false);
+            discard ContentEntries.update(Session.grant(), CmsTestKit.entryId("b3"), CmsTestKit.entryData(List#{("body", docLinkingTo("b2"))}), 1);
+            let cycle = ContentEntries.publishPlan(Session.grant(), CmsTestKit.entryIds(List#{"b2"}), true);
             (outside#violations, blocked, stepsOf(together), together#violations, stepsOf(cycle), cycle#violations)
         });
         Assert.assertEq(

@@ -14,12 +14,12 @@ mod TestPreviewPg {
         let seed = () -> CmsTestKit.withIds(List#{"e1", "e2"}, () -> {
             let blogs = ContentTypes.create(Session.grant(), { previewUrl = Some("https://site.example/preview/{id}") | CmsTestKit.typeDraft("blogs", "記事") });
             discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-            let first = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("draft one"))}));
-            discard ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("draft two"))}));
-            PreviewTokens.issue(PgTestSupport.pepper(), first#id, { ttlSeconds = 3600i64, nowMillis = farFuture() })
+            let first = ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("draft one"))}));
+            discard ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("draft two"))}));
+            PreviewTokens.issue(Session.grant(), PgTestSupport.pepper(), first#id, { ttlSeconds = 3600i64, nowMillis = farFuture() })
         });
         let (own, other, listing, published, tampered, url) = PgTestSupport.withContentApiAndPool(seed, (pool, _) -> {
-            let issued = PgTestSupport.mutateOrBug(pool, () -> PreviewTokens.issue(PgTestSupport.pepper(), CmsTestKit.entryId("e1"), { ttlSeconds = 3600i64, nowMillis = farFuture() }));
+            let issued = PgTestSupport.mutateOrBug(pool, () -> PreviewTokens.issue(Session.grant(), PgTestSupport.pepper(), CmsTestKit.entryId("e1"), { ttlSeconds = 3600i64, nowMillis = farFuture() }));
             let engine = PgTestSupport.contentEngine(pool);
             let asPreview = PgTestSupport.askEngineAs(pool, Engine.Content, engine, Credential.Preview(issued#token));
             let asTampered = PgTestSupport.askEngineAs(pool, Engine.Content, engine, Credential.Preview(issued#token + "x"));
@@ -50,7 +50,7 @@ mod TestPreviewPg {
     def testPgPreviewTokenViaAdminApi(): Unit \ {IO, Assert} =
         let (issued, tooLong) = PgTestSupport.withAdminApi(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
             let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
-            discard ContentEntries.create(blogs#id, None, CmsTestKit.entryData(Nil))
+            discard ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(Nil))
         }), (api, _) -> {
             let ask = PgTestSupport.askOwner(api);
             (ask("mutation { createPreviewToken(entryId: \"e1\") { entryId url } }"),

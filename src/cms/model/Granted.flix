@@ -69,3 +69,11 @@ instance Perm[ManageApiKeys] {
 instance Perm[ManageProject] {
     pub def permission(_proof: Granted[ManageProject]): Permission = Permission.ManageProject
 }
+
+// ---- 権限でなく来かたの印 ----
+
+///
+/// ログインの JWT で来た本人（かサーバ自身）。鍵や PAT の発行の入口が要求する（鍵で鍵を作る道を塞ぐ）。
+/// Permission の腕ではないので Perm の instance は無く、`Session.grant()` では作れない。作るのは `Session.grantInteractive()` だけ。
+///
+pub enum Interactive

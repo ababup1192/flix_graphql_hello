@@ -17,7 +17,8 @@ mod AssetResolvers {
         }
 
     def usedBy(id: AssetId): List[Entry] \ DbRead + CmsErr + Tenant + Session =
-        Assets.holders(Session.grant(), id) |> List.filterMap(ContentEntries.find)
+        let reader = Session.grant();
+        Assets.holders(Session.grant(), id) |> List.filterMap(entryId -> ContentEntries.find(reader, entryId))
 
 }
 

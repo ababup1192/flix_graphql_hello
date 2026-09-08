@@ -1,24 +1,38 @@
 ///
 /// entry の下書きと公開を読み書きするユースケース。生成された EntriesQueries を並べる層。
 /// 中身の検証は EntryValidation（下書きは緩く、公開は required まで）、行と値の変換は EntryRows。
+/// pub の入口は権限の証明（`Granted[ReadDraft]` / `Granted[WriteEntries]` / `Granted[PublishEntries]`。`Session.grant()` で作る）を最初の引数で受け、自分では判定しない。
 ///
 mod ContentEntries {
+
+    ///
+    /// コンテンツ API がどの stage を読むか。公開中は誰でも読める（プロジェクトが private ならキーの検査は認証が済ませている）ので証明が要らず、
+    /// 下書きは readDraft の証明を載せる（1 件なら `Session.grantOn(entryResource)` でプレビュートークンも通る）。
+    ///
+    pub enum StageAccess {
+        case Published
+        case Draft(Granted[ReadDraft])
+    }
+
+    /// 読む stage。
+    pub def stageOf(access: StageAccess): Stage = match access {
+        case StageAccess.Published => Stage.Published
+        case StageAccess.Draft(_)  => Stage.Draft
+    }
 
     // ---- 読む ----
 
     ///
     /// 型の entry の一覧（管理 API）。更新が新しい順。search が空なら全件、あればどれかの値に含む物。SQL は 2 本（一覧と件数）。
     ///
-    pub def list(typeId: TypeId, entryQuery: EntryQuery): EntryPage \ DbRead + Tenant + CmsErr + Session =
-        Session.require(Permission.ReadDraft);
+    pub def list(_proof: Granted[ReadDraft], typeId: TypeId, entryQuery: EntryQuery): EntryPage \ DbRead + Tenant =
         let filter = if (entryQuery#search == "") Nil else Condition.AnyValueContains(entryQuery#search) :: Nil;
         page(typeId, Nil, Stage.Draft, { filter = filter, orderBy = Nil, first = entryQuery#first, skip = entryQuery#skip })
 
     ///
     /// id で 1 つ（下書きの中身）。無ければ（ゴミ箱の物も）None。
     ///
-    pub def find(id: EntryId): Option[Entry] \ DbRead + Tenant + CmsErr + Session =
-        Session.require(Permission.ReadDraft);
+    pub def find(_proof: Granted[ReadDraft], id: EntryId): Option[Entry] \ DbRead + Tenant =
         lookup(id)
 
     /// id で 1 つ（下書きの中身）。権限は見ない（ユースケースの内部で使う）。
@@ -28,8 +42,7 @@ mod ContentEntries {
     ///
     /// id で 1 つ。無ければ notFound。
     ///
-    pub def get(id: EntryId): Entry \ DbRead + CmsErr + Tenant + Session =
-        Session.require(Permission.ReadDraft);
+    pub def get(_proof: Granted[ReadDraft], id: EntryId): Entry \ DbRead + CmsErr + Tenant =
         load(id)
 
     /// id で 1 つ。無ければ notFound。権限は見ない（ユースケースの内部で使う）。
@@ -41,8 +54,8 @@ mod ContentEntries {
     ///
     /// stage の行を id で 1 つ。その stage の中身が無ければ（未公開など）None。参照先は 1 段先読みする。
     ///
-    pub def findByStage(owner: ContentType, id: EntryId, stage: Stage): Option[Entry] \ DbRead + Tenant + CmsErr + Session =
-        match stage { case Stage.Draft => Session.requireOn(Permission.ReadDraft, Authz.entryResource(id)) case Stage.Published => () };
+    pub def findByStage(owner: ContentType, id: EntryId, access: StageAccess): Option[Entry] \ DbRead + Tenant =
+        let stage = stageOf(access);
         EntriesQueries.findEntryByStage({ id = EntryId.text(id), stage = EntryRows.stageToDb(stage), projectId = Tenant.currentId() })
             |> Option.map(EntryRows.toEntry(stage))
             |> Option.flatMap(entry -> attachLinked(owner, stage, entry :: Nil) |> List.head)
@@ -50,24 +63,17 @@ mod ContentEntries {
     ///
     /// stage の行の一覧。絞り込みと並び順は EntryFilterSql が SQL にする。SQL は 2 本（一覧と件数）。
     ///
-    pub def listByStage(owner: ContentType, stage: Stage, listQuery: ListQuery): EntryPage \ DbRead + Tenant + CmsErr + Session =
-        requireStage(stage);
+    pub def listByStage(owner: ContentType, access: StageAccess, listQuery: ListQuery): EntryPage \ DbRead + Tenant =
+        let stage = stageOf(access);
         let found = page(owner#id, owner#fields, stage, listQuery);
         { entries = attachLinked(owner, stage, found#entries) | found }
 
     ///
     /// singleton 用。stage の行を 1 つだけ（更新が新しい物）。件数は数えない。
     ///
-    pub def firstByStage(owner: ContentType, stage: Stage): Option[Entry] \ DbRead + Tenant + CmsErr + Session =
-        requireStage(stage);
+    pub def firstByStage(owner: ContentType, access: StageAccess): Option[Entry] \ DbRead + Tenant =
+        let stage = stageOf(access);
         rows(owner#id, owner#fields, stage, { filter = Nil, orderBy = Nil, first = 1, skip = 0 }) |> attachLinked(owner, stage) |> List.head
-
-    /// 下書きを読むには readDraft が要る。公開中は誰でも読める（プロジェクトが private ならキーの検査は Runner が済ませている）。
-    /// 一覧の下書きは readDraft が要る（プレビュートークンでは読めない。1 件の下書きは findByStage が entry ごとに見る）。
-    def requireStage(stage: Stage): Unit \ Session + CmsErr = match stage {
-        case Stage.Draft     => Session.require(Permission.ReadDraft)
-        case Stage.Published => ()
-    }
 
     ///
     /// stage の行の 1 ページと件数。参照の先読みはしない。
@@ -90,10 +96,9 @@ mod ContentEntries {
     /// 下書きを作る。id を渡せば（移行用）それを使い、無ければ振る。中身が型に合わなければ invalid。
     /// id はゴミ箱の物とも重ねられない（PK が残っている）。
     ///
-    pub def create(typeId: TypeId, givenId: Option[EntryId], given: EntryData): Entry \ Db + CmsErr + IdGen + Tenant + Session =
-        Session.require(Permission.WriteEntries);
+    pub def create(proof: Granted[WriteEntries], typeId: TypeId, givenId: Option[EntryId], given: EntryData): Entry \ Db + CmsErr + IdGen + Tenant =
         // 型を引き、中身を揃えて下書きの規則（と singleton の件数）で検査する
-        let owner = ContentTypes.get(typeId);
+        let owner = ContentTypes.fetch(Session.readDraftOfWriter(proof), typeId);
         let data = EntryValidation.normalize(owner#fields, given);
         CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data) ::: singletonViolations(owner));
         // id を決める。渡されていればそれ、無ければ振る
@@ -118,28 +123,28 @@ mod ContentEntries {
     ///
     /// 下書きを直す。patch のキーだけ上書きし、null で消す。expectedVersion が今の版と違えば conflict。
     ///
-    pub def update(id: EntryId, patch: EntryData, expectedVersion: Int32): Entry \ Db + CmsErr + Tenant + Session =
-        Session.require(Permission.WriteEntries);
+    pub def update(proof: Granted[WriteEntries], id: EntryId, patch: EntryData, expectedVersion: Int32): Entry \ Db + CmsErr + Tenant =
         let existing = load(id);
-        let owner = ContentTypes.get(existing#typeId);
+        let owner = ContentTypes.fetch(Session.readDraftOfWriter(proof), existing#typeId);
         // 今の下書き（型に無いキーは落とす）に patch を重ね、版の照合と検査は writeDraft
         writeDraft(owner, existing, EntryValidation.merge(EntryValidation.prune(owner#fields, existing#data), patch), expectedVersion)
 
     ///
-    /// ゴミ箱へ。無ければ notFound。公開中なら公開も取り下げる（公開側から消え、一意の値も空く）。
+    /// ゴミ箱へ。無ければ notFound。公開中なら公開も取り下げる（公開側から消え、一意の値も空く）ので、
+    /// 公開中の物には取り下げの証明も要る。無ければ（writer が公開中の物を消そうとした）forbidden(publishEntries)。
+    /// 呼ぶ側は `Session.tryGrant()` で持てるだけ渡す。
     ///
-    pub def delete(id: EntryId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
-        Session.require(Permission.WriteEntries);
+    pub def delete(proof: Granted[WriteEntries], unpublishing: Option[Granted[PublishEntries]], id: EntryId): Unit \ Db + CmsErr + IdGen + Tenant =
         let existing = load(id);
-        if (existing#stage == Stage.Published) discard unpublish(id) else ();
+        if (existing#stage == Stage.Published) discard unpublish(unpublishing |> CmsErr.orForbidden(Permission.PublishEntries), id) else ();
         discard EntriesQueries.deleteLinks({ fromEntryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft), projectId = Tenant.currentId() });
         discard EntriesQueries.softDeleteEntry({ id = EntryId.text(id), projectId = Tenant.currentId() });
-        notify(WebhookEvent.EntryDeleted, id, existing#typeId)
+        notify(Session.readDraftOfWriter(proof), WebhookEvent.EntryDeleted, id, existing#typeId)
 
     /// entry の出来事を Webhook に積み、プロジェクトの版を進める（同じ Tx）。
-    def notify(event: WebhookEvent, id: EntryId, typeId: TypeId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
+    def notify(reader: Granted[ReadDraft], event: WebhookEvent, id: EntryId, typeId: TypeId): Unit \ Db + CmsErr + IdGen + Tenant =
         Projects.bumpContentVersion();
-        Webhooks.emitEntry(event, id, ContentTypes.get(typeId)#apiId)
+        Webhooks.emitEntry(event, id, ContentTypes.fetch(reader, typeId)#apiId)
 
     // ---- 公開 ----
 
@@ -148,32 +153,31 @@ mod ContentEntries {
     /// 既に公開中なら公開側を下書きで上書きする（再公開）。
     /// 参照先が未公開なら invalid。withDependencies なら参照先を先に（再帰的に）公開する。循環は 1 度だけ辿る。
     ///
-    pub def publish(id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant + Session =
-        Session.require(Permission.PublishEntries);
-        publishWithin(Nil, id, author, withDependencies)
+    pub def publish(proof: Granted[PublishEntries], id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant =
+        publishWithin(proof, Nil, id, author, withDependencies)
 
-    /// 公開の本体。visited は withDependencies で辿った entry（循環を 1 度で止める）。権限は publish が見る。
-    def publishWithin(visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant + Session =
+    /// 公開の本体。visited は withDependencies で辿った entry（循環を 1 度で止める）。
+    def publishWithin(proof: Granted[PublishEntries], visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant =
         // 下書きを読み、公開の規則で検査する（unique は advisory lock 付き）
         let existing = load(id);
-        let owner = ContentTypes.get(existing#typeId);
+        let owner = ContentTypes.fetch(Session.readDraftOfPublisher(proof), existing#typeId);
         let data = EntryValidation.prune(owner#fields, existing#data);
         let report = reportOf(true, owner, existing, data);
         CmsErr.raiseIfAny(report#violations);
         // 未公開の参照先を先に公開するか、invalid で止める
         let pending = report#unpublishedDependencies |> List.map(dependency -> dependency#id);
-        publishDependencies(visited, id, author, withDependencies, pending);
+        publishDependencies(proof, visited, id, author, withDependencies, pending);
         // published の行を書き、版を積み、entry を公開中にする
         commitPublished(owner, existing, data, author);
-        notify(WebhookEvent.EntryPublished, id, existing#typeId);
+        notify(Session.readDraftOfPublisher(proof), WebhookEvent.EntryPublished, id, existing#typeId);
         load(id)
 
     ///
     /// 未公開の参照先の扱い。withDependencies なら（この entry を visited に足して）先に再帰的に公開し、でなければ invalid。
     ///
-    def publishDependencies(visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool, pending: List[EntryId]): Unit \ Db + CmsErr + IdGen + Tenant + Session =
+    def publishDependencies(proof: Granted[PublishEntries], visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool, pending: List[EntryId]): Unit \ Db + CmsErr + IdGen + Tenant =
         if (withDependencies)
-            List.forEach(dependency -> if (List.memberOf(dependency, id :: visited)) () else discard publishWithin(id :: visited, dependency, author, true), pending)
+            List.forEach(dependency -> if (List.memberOf(dependency, id :: visited)) () else discard publishWithin(proof, id :: visited, dependency, author, true), pending)
         else
             CmsErr.raiseIfAny(pending |> List.map(dependency -> Violation.Violation("references", "参照先 '${dependency}' が未公開です（withDependencies: true で一緒に公開できます）")))
 
@@ -189,10 +193,9 @@ mod ContentEntries {
     /// 公開できるかを書き込まずに答える（dry-run）。違反を全部集め、未公開の参照先も返す。
     /// unique の検査はロックを取らない（参考値。押した瞬間の競合は publish 本体が止める）。
     ///
-    pub def publishReport(id: EntryId): PublishReport \ DbRead + CmsErr + Tenant + Session =
-        Session.require(Permission.ReadDraft);
+    pub def publishReport(proof: Granted[ReadDraft], id: EntryId): PublishReport \ DbRead + CmsErr + Tenant =
         let existing = load(id);
-        let owner = ContentTypes.get(existing#typeId);
+        let owner = ContentTypes.fetch(proof, existing#typeId);
         // publish 本体と同じ検査を、ロック無しで
         reportOf(false, owner, existing, EntryValidation.prune(owner#fields, existing#data))
 
@@ -216,29 +219,27 @@ mod ContentEntries {
     /// 公開計画（dry-run）。ids と（withDependencies なら）未公開の参照先を依存が先の順に並べ、1 つずつの publishReport を付ける。書き込まない。
     /// 無い id は notFound。
     ///
-    pub def publishPlan(ids: List[EntryId], withDependencies: Bool): PublishPlan \ DbRead + CmsErr + Tenant + Session =
-        Session.require(Permission.ReadDraft);
-        planOf(ids, withDependencies)
+    pub def publishPlan(proof: Granted[ReadDraft], ids: List[EntryId], withDependencies: Bool): PublishPlan \ DbRead + CmsErr + Tenant =
+        planOf(proof, ids, withDependencies)
 
     ///
     /// 計画を作り、通るならその順で全部公開する。1 つでも通らなければ invalid で、何も公開しない（呼ぶ側の Tx が全部戻す）。
     /// 違反の path は entry id を頭に付ける（"b1.fields.title"）。
     ///
-    pub def publishMany(ids: List[EntryId], author: String, withDependencies: Bool): List[Entry] \ Db + CmsErr + IdGen + Tenant + Session =
-        Session.require(Permission.PublishEntries);
-        let plan = planOf(ids, withDependencies);
+    pub def publishMany(proof: Granted[PublishEntries], ids: List[EntryId], author: String, withDependencies: Bool): List[Entry] \ Db + CmsErr + IdGen + Tenant =
+        let plan = planOf(Session.readDraftOfPublisher(proof), ids, withDependencies);
         CmsErr.raiseIfAny(plan#violations ::: (plan#steps |> List.flatMap(step -> step#report#violations |> List.map(prefixed(step#entry#id)))));
         // 計画の順なら参照先は先に公開済みなので、1 件ずつの publish（withDependencies 無し）で通る
-        plan#steps |> List.map(step -> publish(step#entry#id, author, false))
+        plan#steps |> List.map(step -> publish(proof, step#entry#id, author, false))
 
     /// 違反の path に entry id を付ける。
     def prefixed(id: EntryId, violation: Violation): Violation =
         let Violation.Violation(path, message) = violation;
         Violation.Violation("${EntryId.text(id)}.${path}", message)
 
-    /// 計画の本体。entry ごとの dry-run を集め（withDependencies なら未公開の参照先も辿る）、順は PublishOrder が決める。権限は呼ぶ側が見る。
-    def planOf(ids: List[EntryId], withDependencies: Bool): PublishPlan \ DbRead + CmsErr + Tenant + Session =
-        let reports = collectReports(withDependencies, Map.empty(), ids);
+    /// 計画の本体。entry ごとの dry-run を集め（withDependencies なら未公開の参照先も辿る）、順は PublishOrder が決める。
+    def planOf(reader: Granted[ReadDraft], ids: List[EntryId], withDependencies: Bool): PublishPlan \ DbRead + CmsErr + Tenant =
+        let reports = collectReports(reader, withDependencies, Map.empty(), ids);
         let dependencies = reports |> Map.map(match (_, report) -> report#unpublishedDependencies |> List.map(dependency -> dependency#id));
         let ordered = PublishOrder.plan(ids, withDependencies, dependencies);
         {
@@ -247,34 +248,33 @@ mod ContentEntries {
         }
 
     /// ids の entry ごとの dry-run を seen に足す。withDependencies なら未公開の参照先も辿る（見た物は 2 度引かない）。
-    def collectReports(withDependencies: Bool, seen: Map[EntryId, (Entry, PublishReport)], ids: List[EntryId]): Map[EntryId, (Entry, PublishReport)] \ DbRead + CmsErr + Tenant + Session =
+    def collectReports(reader: Granted[ReadDraft], withDependencies: Bool, seen: Map[EntryId, (Entry, PublishReport)], ids: List[EntryId]): Map[EntryId, (Entry, PublishReport)] \ DbRead + CmsErr + Tenant =
         List.foldLeft((acc, id) -> if (Map.memberOf(id, acc)) acc else {
             let existing = load(id);
-            let owner = ContentTypes.get(existing#typeId);
+            let owner = ContentTypes.fetch(reader, existing#typeId);
             let report = reportOf(false, owner, existing, EntryValidation.prune(owner#fields, existing#data));
             let next = Map.insert(id, (existing, report), acc);
-            if (withDependencies) collectReports(withDependencies, next, report#unpublishedDependencies |> List.map(dependency -> dependency#id)) else next
+            if (withDependencies) collectReports(reader, withDependencies, next, report#unpublishedDependencies |> List.map(dependency -> dependency#id)) else next
         }, seen, ids)
 
     ///
     /// 操作の影響。取り下げ・削除で壊れる参照元（公開の中身。削除なら下書きも）と、公開で一緒に動く未公開の参照先（再帰）。
     ///
-    pub def impact(id: EntryId, action: ImpactAction): Impact \ DbRead + CmsErr + Tenant + Session =
-        Session.require(Permission.ReadDraft);
+    pub def impact(proof: Granted[ReadDraft], id: EntryId, action: ImpactAction): Impact \ DbRead + CmsErr + Tenant =
         // 無ければ notFound
         discard load(id);
         // 操作ごとに、壊れる参照元（breaks）と一緒に動く参照先（cascades）を集める
         match action {
             case ImpactAction.Publish   => { breaks = Nil, cascades = dependenciesOf(id :: Nil, id) |> List.filterMap(lookup) }
-            case ImpactAction.Unpublish => { breaks = referrers(id, Stage.Published), cascades = Nil }
-            case ImpactAction.Delete    => { breaks = referrers(id, Stage.Published) ::: referrers(id, Stage.Draft), cascades = Nil }
+            case ImpactAction.Unpublish => { breaks = referrers(proof, id, Stage.Published), cascades = Nil }
+            case ImpactAction.Delete    => { breaks = referrers(proof, id, Stage.Published) ::: referrers(proof, id, Stage.Draft), cascades = Nil }
         }
 
     /// stage の中身でこの entry を参照している物。参照元は下書きの中身で返す。
-    def referrers(id: EntryId, stage: Stage): List[Referrer] \ DbRead + CmsErr + Tenant + Session =
+    def referrers(reader: Granted[ReadDraft], id: EntryId, stage: Stage): List[Referrer] \ DbRead + CmsErr + Tenant =
         EntriesQueries.referrerLinks({ toEntryId = EntryId.text(id), stage = EntryRows.stageToDb(stage), projectId = Tenant.currentId() })
             |> List.filterMap(row -> EntryId.parse(row#fromEntryId) |> Option.flatMap(lookup) |> Option.map(entry ->
-                { entry = entry, via = ContentTypes.getField(FieldId.FieldId(row#fieldId))#apiId, stage = stage }))
+                { entry = entry, via = ContentTypes.fetchField(reader, FieldId.FieldId(row#fieldId))#apiId, stage = stage }))
 
     /// 未公開の参照先を深さ優先で集める（依存の順。直接の参照先は id 順。重複と循環は visited で止める）。
     def dependenciesOf(visited: List[EntryId], id: EntryId): List[EntryId] \ DbRead + Tenant =
@@ -295,15 +295,14 @@ mod ContentEntries {
     ///
     /// 公開を取り下げる。published の行と一意の値を消す。下書きは残る。未公開なら何もしない。
     ///
-    pub def unpublish(id: EntryId): Entry \ Db + CmsErr + IdGen + Tenant + Session =
-        Session.require(Permission.PublishEntries);
+    pub def unpublish(proof: Granted[PublishEntries], id: EntryId): Entry \ Db + CmsErr + IdGen + Tenant =
         let existing = load(id);
         // 公開中の他の entry が参照していれば取り下げられない
         CmsErr.raiseIfAny(publishedReferrerViolations(id));
         // published の行（参照・中身・印）を消す
         deletePublished(id);
         // 公開中だった時だけ Webhook に積む
-        if (existing#stage == Stage.Published) notify(WebhookEvent.EntryUnpublished, id, existing#typeId) else ();
+        if (existing#stage == Stage.Published) notify(Session.readDraftOfPublisher(proof), WebhookEvent.EntryUnpublished, id, existing#typeId) else ();
         load(id)
 
     ///
@@ -331,16 +330,14 @@ mod ContentEntries {
     ///
     /// entry の版。新しい順。
     ///
-    pub def versions(id: EntryId): List[EntryVersion] \ DbRead + CmsErr + Tenant + Session =
-        Session.require(Permission.ReadDraft);
+    pub def versions(_proof: Granted[ReadDraft], id: EntryId): List[EntryVersion] \ DbRead + Tenant =
         EntriesQueries.listVersions({ entryId = EntryId.text(id), projectId = Tenant.currentId() }) |> List.map(EntryRows.toVersion)
 
     ///
     /// 複数の entry の版を 1 本の SELECT でまとめて。id → 版（新しい順）。渡した id は版が無くても（他のプロジェクトの物でも）空で載る。
     /// 一覧の行ごとに versions を引く代わりに使う（管理 API の先読み）。
     ///
-    pub def versionsOf(ids: List[EntryId]): Map[EntryId, List[EntryVersion]] \ DbRead + CmsErr + Tenant + Session =
-        Session.require(Permission.ReadDraft);
+    pub def versionsOf(_proof: Granted[ReadDraft], ids: List[EntryId]): Map[EntryId, List[EntryVersion]] \ DbRead + Tenant =
         let empty = ids |> List.map(id -> (id, Nil)) |> List.toMap;
         if (List.isEmpty(ids)) empty else {
             let found = EntriesQueries.listVersionsOf({ entryIds = List.map(EntryId.text, ids), projectId = Tenant.currentId() })
@@ -352,8 +349,7 @@ mod ContentEntries {
     ///
     /// 今の下書きを版として積む。
     ///
-    pub def saveVersion(id: EntryId, author: String): EntryVersion \ Db + CmsErr + Tenant + Session =
-        Session.require(Permission.WriteEntries);
+    pub def saveVersion(_proof: Granted[WriteEntries], id: EntryId, author: String): EntryVersion \ Db + CmsErr + Tenant =
         let existing = load(id);
         let inserted = EntriesQueries.insertVersion(EntryRows.versionInsert(existing, author, VersionReason.Save)) |> Rows.expectId;
         EntriesQueries.findVersion({ id = inserted, projectId = Tenant.currentId() }) |> Option.map(EntryRows.toVersion) |> CmsErr.orNotFound(Entity.Version, "${inserted}")
@@ -361,28 +357,25 @@ mod ContentEntries {
     ///
     /// 版の中身を下書きに戻す。版が他の entry の物なら notFound。expectedVersion は update と同じ楽観ロック。
     ///
-    pub def restoreVersion(id: EntryId, versionId: VersionId, expectedVersion: Int32): Entry \ Db + CmsErr + Tenant + Session =
-        Session.require(Permission.WriteEntries);
+    pub def restoreVersion(proof: Granted[WriteEntries], id: EntryId, versionId: VersionId, expectedVersion: Int32): Entry \ Db + CmsErr + Tenant =
         let found = EntriesQueries.findVersion({ id = VersionId.toInt64(versionId), projectId = Tenant.currentId() }) |> Option.map(EntryRows.toVersion)
             |> Option.filter(version -> version#entryId == id)
             |> CmsErr.orNotFound(Entity.Version, "${versionId}");
         let existing = load(id);
-        let owner = ContentTypes.get(existing#typeId);
+        let owner = ContentTypes.fetch(Session.readDraftOfWriter(proof), existing#typeId);
         writeDraft(owner, existing, EntryValidation.prune(owner#fields, found#data), expectedVersion)
 
     ///
     /// 2 つのバージョンの中身の差分（fromRef → toRef）。中身の比べ方は EntryDiff。
     ///
-    pub def diff(id: EntryId, fromRef: VersionRef, toRef: VersionRef): List[FieldChange] \ DbRead + CmsErr + Tenant + Session =
-        Session.require(Permission.ReadDraft);
+    pub def diff(proof: Granted[ReadDraft], id: EntryId, fromRef: VersionRef, toRef: VersionRef): List[FieldChange] \ DbRead + CmsErr + Tenant =
         let existing = load(id);
-        diffOf(ContentTypes.get(existing#typeId), existing, fromRef, toRef)
+        diffOf(proof, ContentTypes.fetch(proof, existing#typeId), existing, fromRef, toRef)
 
     ///
     /// 読み込み済みの entry と型で diff。一覧の行（先読みした型）から呼ぶ用で、entry と型は引き直さない。
     ///
-    pub def diffOf(owner: ContentType, existing: Entry, fromRef: VersionRef, toRef: VersionRef): List[FieldChange] \ DbRead + CmsErr + Tenant + Session =
-        Session.require(Permission.ReadDraft);
+    pub def diffOf(_proof: Granted[ReadDraft], owner: ContentType, existing: Entry, fromRef: VersionRef, toRef: VersionRef): List[FieldChange] \ DbRead + CmsErr + Tenant =
         EntryDiff.diff(owner#fields, versionData(existing, fromRef), versionData(existing, toRef))
 
     ///

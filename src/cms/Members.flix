@@ -1,20 +1,18 @@
 ///
-/// プロジェクトのメンバーと招待、組織の作成。誰が何をできるかは Session（役割）で守り、最後の owner は消せない。
+/// プロジェクトのメンバーと招待、組織の作成。pub の入口は manageMembers の証明（`Granted[ManageMembers]`）を最初の引数で受け、最後の owner は消せない。
 ///
 mod Members {
 
     ///
     /// 今のプロジェクトのメンバー。
     ///
-    pub def list(): List[Member] \ DbRead + CmsErr + Tenant + Session =
-        Session.require(Permission.ManageMembers);
+    pub def list(_proof: Granted[ManageMembers]): List[Member] \ DbRead + Tenant =
         AuthQueries.listMembers(Tenant.currentId()) |> List.map(AuthRows.toMember)
 
     ///
     /// 今のプロジェクトの招待。
     ///
-    pub def invitations(): List[Invitation] \ DbRead + CmsErr + Tenant + Session =
-        Session.require(Permission.ManageMembers);
+    pub def invitations(_proof: Granted[ManageMembers]): List[Invitation] \ DbRead + Tenant =
         AuthQueries.listInvitations(Tenant.currentId()) |> List.map(AuthRows.toInvitation)
 
     ///
@@ -23,29 +21,26 @@ mod Members {
     /// WhyNot: email でユーザーを探して直接付けるのを「同じ発行元のユーザーだけ」に限らないのは、招待は owner の明示の操作で、
     /// 発行元は環境で 1 つに決まっているため。
     ///
-    pub def invite(email: String, role: Role): Invitation \ Db + CmsErr + IdGen + Tenant + Session =
-        Session.require(Permission.ManageMembers);
+    pub def invite(proof: Granted[ManageMembers], email: String, role: Role): Invitation \ Db + CmsErr + IdGen + Tenant + Session =
         let normalized = String.toLowerCase(String.trim(email));
         CmsErr.raiseIfAny(if (String.isMatch(regex = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", normalized)) Nil else Violation.Violation("email", "'${email}' は email の形ではありません") :: Nil);
         let inviter = Session.currentUser();
         discard AuthQueries.upsertInvitation({ publicId = IdGen.freshPublicId(), projectId = Tenant.currentId(), email = normalized, role = Role.text(role), invitedBy = UserId.toInt64(inviter) });
-        invitations() |> List.find(invitation -> invitation#email == normalized) |> CmsErr.orNotFound(Entity.Invitation, normalized)
+        invitations(proof) |> List.find(invitation -> invitation#email == normalized) |> CmsErr.orNotFound(Entity.Invitation, normalized)
 
     ///
     /// 役割を変える。最後の owner を降格させる事はできない。
     ///
-    pub def changeRole(userId: UserId, role: Role): Member \ Db + CmsErr + Tenant + Session =
-        Session.require(Permission.ManageMembers);
+    pub def changeRole(proof: Granted[ManageMembers], userId: UserId, role: Role): Member \ Db + CmsErr + Tenant =
         let current = roleOf(userId) |> CmsErr.orNotFound(Entity.Member, "${userId}");
         if (current == Role.Owner and role != Role.Owner) guardLastOwner() else ();
         discard AuthQueries.upsertMembership({ userId = UserId.toInt64(userId), projectId = Tenant.currentId(), role = Role.text(role) });
-        list() |> List.find(member -> member#userId == userId) |> CmsErr.orNotFound(Entity.Member, "${userId}")
+        list(proof) |> List.find(member -> member#userId == userId) |> CmsErr.orNotFound(Entity.Member, "${userId}")
 
     ///
     /// 外す。最後の owner は外せない。
     ///
-    pub def remove(userId: UserId): Unit \ Db + CmsErr + Tenant + Session =
-        Session.require(Permission.ManageMembers);
+    pub def remove(_proof: Granted[ManageMembers], userId: UserId): Unit \ Db + CmsErr + Tenant =
         let current = roleOf(userId) |> CmsErr.orNotFound(Entity.Member, "${userId}");
         if (current == Role.Owner) guardLastOwner() else ();
         discard AuthQueries.deleteMembership({ userId = UserId.toInt64(userId), projectId = Tenant.currentId() })
@@ -53,8 +48,7 @@ mod Members {
     ///
     /// 招待を取り消す。
     ///
-    pub def cancelInvitation(publicId: String): Unit \ DbWrite + CmsErr + Tenant + Session =
-        Session.require(Permission.ManageMembers);
+    pub def cancelInvitation(_proof: Granted[ManageMembers], publicId: String): Unit \ DbWrite + CmsErr + Tenant =
         let deleted = AuthQueries.deleteInvitationByPublicId({ publicId = publicId, projectId = Tenant.currentId() });
         if (deleted == 0) CmsErr.notFound(Entity.Invitation, publicId) else ()
 

@@ -25,9 +25,9 @@ mod TestQueryBudgetPg {
         discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
         discard ContentTypes.addField(Session.grant(), blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
         List.range(0, authorCount()) |> List.forEach(a -> {
-            let author = ContentEntries.create(profiles#id, None, CmsTestKit.entryData(List#{("name", Json.JString("a${a}"))}));
+            let author = ContentEntries.create(Session.grant(), profiles#id, None, CmsTestKit.entryData(List#{("name", Json.JString("a${a}"))}));
             List.range(0, entryCount() / authorCount()) |> List.forEach(n ->
-                discard ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("t${a}-${n}")), ("profile", Json.JString(EntryId.text(author#id)))})))
+                discard ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("t${a}-${n}")), ("profile", Json.JString(EntryId.text(author#id)))})))
         })
 
     /// 管理 API: entries 50 件 × 10 フィールド。

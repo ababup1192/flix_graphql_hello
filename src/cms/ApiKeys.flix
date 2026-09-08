@@ -13,12 +13,10 @@ mod ApiKeys {
     pub def prefix(): String = "cms_"
 
     ///
-    /// 発行する。今のプロジェクトに付く。owner で、かつログインの JWT で来た本人だけ（PAT や鍵からは作れない）。
+    /// 発行する。今のプロジェクトに付く。manageApiKeys の証明と、ログインの JWT で来た本人の証明（`Granted[Interactive]`。PAT や鍵からは作れない）の 2 つを受ける。
     /// write の鍵は発行者が持つ役割より高い役割にはできず、期限は未来だけ。
     ///
-    pub def create(pepper: SecretHash.Pepper, draft: ApiKeyDraft, nowMillis: Int64): IssuedApiKey \ DbWrite + CmsErr + IdGen + Tenant + Session =
-        Session.require(Permission.ManageApiKeys);
-        Session.requireInteractive();
+    pub def create(_proof: Granted[ManageApiKeys], _login: Granted[Interactive], pepper: SecretHash.Pepper, draft: ApiKeyDraft, nowMillis: Int64): IssuedApiKey \ DbWrite + CmsErr + IdGen + Tenant + Session =
         CmsErr.raiseIfAny(Naming.validateName("name", draft#name));
         requireRoleWithinIssuer(draft#scope);
         CmsErr.raiseIfAny(validateExpiry(draft#expiresAt, nowMillis));
@@ -60,21 +58,21 @@ mod ApiKeys {
     ///
     /// 失効する。行は残す。
     ///
-    pub def revoke(publicId: String): Unit \ DbWrite + CmsErr + Tenant + Session =
-        Session.require(Permission.ManageApiKeys);
+    pub def revoke(_proof: Granted[ManageApiKeys], publicId: String): Unit \ DbWrite + CmsErr + Tenant =
         let changed = AuthQueries.revokeApiKey({ publicId = publicId, projectId = Tenant.currentId() });
         if (changed == 0) CmsErr.notFound(Entity.ApiKey, publicId) else ()
 
     ///
     /// 今のプロジェクトの鍵の一覧。
     ///
-    pub def list(): List[ApiKey] \ DbRead + CmsErr + Tenant + Session =
-        Session.require(Permission.ManageApiKeys);
+    pub def list(_proof: Granted[ManageApiKeys]): List[ApiKey] \ DbRead + Tenant =
         AuthQueries.listApiKeys(Tenant.currentId()) |> List.map(AuthRows.toApiKey)
 
     ///
     /// 生の鍵からこのプロジェクトの範囲を引く。hash で引いた後にプロジェクトが一致するかを確かめる（鍵がプロジェクトを決めない）。
     /// 失効した物、期限の切れた物、他のプロジェクトの物、知らない物は None。
+    ///
+    /// WhyNot: 証明を取らないのは、認証（Authentication.resolve）が認証済みユーザーを決める前に呼ぶ物で、まだ判定する主体が無いため。
     ///
     pub def resolve(pepper: SecretHash.Pepper, key: String, projectId: ProjectId, nowMillis: Int64): Option[ResolvedApiKey] \ DbRead =
         AuthQueries.findApiKeyByHash(SecretHash.hash(pepper, key))
@@ -83,6 +81,8 @@ mod ApiKeys {
 
     ///
     /// 最終使用時刻を書く。1 分に 1 回だけ（それより新しければ何もしない）。書いた行数を返す。
+    ///
+    /// WhyNot: 証明を取らないのは resolve と同じ（認証の Tx で、鍵が使われた事実を書くだけ）。
     ///
     pub def touch(id: Int64, projectId: ProjectId): Int32 \ DbWrite =
         AuthQueries.touchApiKey({ id = id, projectId = ProjectId.toInt64(projectId) })

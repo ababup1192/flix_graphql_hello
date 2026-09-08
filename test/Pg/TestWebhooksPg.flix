@@ -34,23 +34,23 @@ mod TestWebhooksPg {
     def testPgWebhookOutboxAndDispatch(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withPool(pool -> {
             let issued = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1", "e1"}, () -> {
-                let issued = Webhooks.create(draft(List#{WebhookEvent.EntryPublished, WebhookEvent.EntryUnpublished, WebhookEvent.SchemaChanged}));
+                let issued = Webhooks.create(Session.grant(), draft(List#{WebhookEvent.EntryPublished, WebhookEvent.EntryUnpublished, WebhookEvent.SchemaChanged}));
                 let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
                 discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-                let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
-                discard ContentEntries.publish(entry#id, "tester", false);
-                discard ContentEntries.unpublish(entry#id);
+                let entry = ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
+                discard ContentEntries.publish(Session.grant(), entry#id, "tester", false);
+                discard ContentEntries.unpublish(Session.grant(), entry#id);
                 issued
             }));
             let webhookId = issued#webhook#publicId;
-            let listDeliveries = () -> PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(webhookId, 20));
+            let listDeliveries = () -> PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), webhookId, 20));
             let queued = listDeliveries() |> List.map(delivery -> (delivery#event, delivery#status, delivery#attempts));
             let received = Ref.fresh(Static, Nil);
             let firstTick = tickWith(500, received, pool);
             let afterFailure = listDeliveries() |> List.map(delivery -> (delivery#status, delivery#attempts, delivery#lastStatus));
             let secondTick = tickWith(500, received, pool);
             let oldest = listDeliveries() |> List.last |> Option.map(delivery -> delivery#id) |> Option.getWithDefault("?");
-            discard PgTestSupport.mutate(pool, () -> Webhooks.redeliver(oldest));
+            discard PgTestSupport.mutate(pool, () -> Webhooks.redeliver(Session.grant(), oldest));
             let thirdTick = tickWith(200, received, pool);
             let redelivered = listDeliveries() |> List.find(delivery -> delivery#id == oldest) |> Option.map(delivery -> (delivery#status, delivery#attempts, delivery#lastStatus, Option.nonEmpty(delivery#deliveredAt)));
             let lastRequest = Ref.get(received) |> List.head;
@@ -123,13 +123,13 @@ mod TestWebhooksPg {
     @Test
     def testPgWebhookDeletedEventAndInactive(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"w1", "w2", "e1"}, () -> {
-            let active = Webhooks.create(draft(List#{WebhookEvent.EntryDeleted}));
-            let inactive = Webhooks.create({ active = false | draft(List#{WebhookEvent.EntryDeleted, WebhookEvent.SchemaChanged}) });
+            let active = Webhooks.create(Session.grant(), draft(List#{WebhookEvent.EntryDeleted}));
+            let inactive = Webhooks.create(Session.grant(), { active = false | draft(List#{WebhookEvent.EntryDeleted, WebhookEvent.SchemaChanged}) });
             let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
-            let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(Nil));
-            ContentEntries.delete(entry#id);
-            (Webhooks.deliveries(active#webhook#publicId, 20) |> List.map(delivery -> delivery#event),
-             Webhooks.deliveries(inactive#webhook#publicId, 20) |> List.length)
+            let entry = ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(Nil));
+            ContentEntries.delete(Session.grant(), Session.tryGrant(), entry#id);
+            (Webhooks.deliveries(Session.grant(), active#webhook#publicId, 20) |> List.map(delivery -> delivery#event),
+             Webhooks.deliveries(Session.grant(), inactive#webhook#publicId, 20) |> List.length)
         }));
         Assert.assertEq(expected = Ok(Ok((List#{WebhookEvent.EntryDeleted}, 0))), result)
 
@@ -142,19 +142,19 @@ mod TestWebhooksPg {
     def testPgWebhookFailsAfterFiveAttempts(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withPool(pool -> {
             let issued = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1"}, () -> {
-                let issued = Webhooks.create(draft(List#{WebhookEvent.SchemaChanged}));
+                let issued = Webhooks.create(Session.grant(), draft(List#{WebhookEvent.SchemaChanged}));
                 discard ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
                 issued
             }));
             let received = Ref.fresh(Static, Nil);
-            let deliveryId = PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(issued#webhook#publicId, 1)) |> List.head |> Option.map(delivery -> delivery#id) |> Option.getWithDefault("?");
+            let deliveryId = PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), issued#webhook#publicId, 1)) |> List.head |> Option.map(delivery -> delivery#id) |> Option.getWithDefault("?");
             let attempt = () -> {
                 discard tickWith(500, received, pool);
-                discard PgTestSupport.mutate(pool, () -> Webhooks.redeliver(deliveryId))
+                discard PgTestSupport.mutate(pool, () -> Webhooks.redeliver(Session.grant(), deliveryId))
             };
             List.forEach(_ -> attempt(), List.range(0, 4));
             discard tickWith(500, received, pool);
-            let delivery = PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(issued#webhook#publicId, 1)) |> List.head;
+            let delivery = PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), issued#webhook#publicId, 1)) |> List.head;
             (delivery |> Option.map(found -> (found#status, found#attempts, found#lastStatus, found#lastError)), List.length(Ref.get(received)))
         });
         Assert.assertEq(expected = (Some((DeliveryStatus.Failed, 5, 500, "HTTP 500")), 5), outcome)
@@ -168,7 +168,7 @@ mod TestWebhooksPg {
     def testPgWebhookClaimIsExclusive(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withPool(pool -> {
             discard PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1"}, () -> {
-                discard Webhooks.create(draft(List#{WebhookEvent.SchemaChanged}));
+                discard Webhooks.create(Session.grant(), draft(List#{WebhookEvent.SchemaChanged}));
                 ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"))
             }));
             DbError.runWithFailure(() -> Jdbc.withConnection(PgTestSupport.appConfig(), conn -> {
@@ -193,18 +193,18 @@ mod TestWebhooksPg {
     def testPgWebhookKeepsOrderPerWebhook(): Unit \ {IO, Assert} =
         let outcome = PgTestSupport.withPool(pool -> {
             let issued = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1"}, () -> {
-                let issued = Webhooks.create(draft(List#{WebhookEvent.SchemaChanged}));
+                let issued = Webhooks.create(Session.grant(), draft(List#{WebhookEvent.SchemaChanged}));
                 let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
                 discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
                 issued
             }));
             let received = Ref.fresh(Static, Nil);
-            let deliveries = () -> PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(issued#webhook#publicId, 10)) |> List.reverse;
+            let deliveries = () -> PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), issued#webhook#publicId, 10)) |> List.reverse;
             let ids = deliveries() |> List.map(delivery -> delivery#id);
             let first = tickWith(500, received, pool);
             let afterFirst = deliveries() |> List.map(delivery -> delivery#attempts);
             let blocked = tickWith(500, received, pool);
-            discard PgTestSupport.mutate(pool, () -> Webhooks.redeliver(List.head(ids) |> Option.getWithDefault("?")));
+            discard PgTestSupport.mutate(pool, () -> Webhooks.redeliver(Session.grant(), List.head(ids) |> Option.getWithDefault("?")));
             let third = tickWith(200, received, pool);
             let sentOrder = Ref.get(received) |> List.reverse |> List.map(req -> header("X-Cms-Delivery", req));
             (List.length(ids), first, afterFirst, blocked, third, sentOrder == (ids ::: List.take(1, ids)) or sentOrder == (List.take(1, ids) ::: ids), deliveries() |> List.map(delivery -> delivery#status))

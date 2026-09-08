@@ -31,11 +31,11 @@ mod TestRlsPg {
         let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
         discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
         discard ContentTypes.addField(Session.grant(), blogs#id, { target = Some(tags#id) | CmsTestKit.fieldDraft("tag", FieldKind.Reference, FieldConfig.empty()) });
-        let tag = ContentEntries.create(tags#id, None, CmsTestKit.entryData(List#{("label", Json.JString("news"))}));
-        let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hello")), ("tag", Json.JString(EntryId.text(tag#id)))}));
-        discard ContentEntries.saveVersion(entry#id, "tester");
+        let tag = ContentEntries.create(Session.grant(), tags#id, None, CmsTestKit.entryData(List#{("label", Json.JString("news"))}));
+        let entry = ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hello")), ("tag", Json.JString(EntryId.text(tag#id)))}));
+        discard ContentEntries.saveVersion(Session.grant(), entry#id, "tester");
         discard Assets.createUpload(Session.grant(), { fileName = "photo.png", mime = "image/png", size = 5i64 });
-        discard Webhooks.create({ name = "site", url = "https://example.com/hook", events = List#{WebhookEvent.EntryPublished}, active = true });
+        discard Webhooks.create(Session.grant(), { name = "site", url = "https://example.com/hook", events = List#{WebhookEvent.EntryPublished}, active = true });
         shop
 
     ///
@@ -95,16 +95,16 @@ mod TestRlsPg {
             let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
             let asOwner = (projectId, thunk) -> PgTestSupport.asProject(projectId, () -> Session.runWith(Accounts.actorFor(owner, projectId, Login.Interactive), thunk));
             asOwner(ProjectId.default(), () -> {
-                discard Members.invite("a@test.dev", Role.Editor);
-                discard Members.invite("b@test.dev", Role.Viewer);
-                discard ApiKeys.create(pepper, { name = "default-key", scope = ApiKeyScope.Read, expiresAt = None }, 0i64)
+                discard Members.invite(Session.grant(), "a@test.dev", Role.Editor);
+                discard Members.invite(Session.grant(), "b@test.dev", Role.Viewer);
+                discard ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, { name = "default-key", scope = ApiKeyScope.Read, expiresAt = None }, 0i64)
             });
             asOwner(shop, () -> {
-                discard Members.invite("a@test.dev", Role.Writer);
-                discard ApiKeys.create(pepper, { name = "shop-key", scope = ApiKeyScope.Read, expiresAt = None }, 0i64)
+                discard Members.invite(Session.grant(), "a@test.dev", Role.Writer);
+                discard ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, { name = "shop-key", scope = ApiKeyScope.Read, expiresAt = None }, 0i64)
             });
             let alice = Accounts.resolveUser(bootstrap, { issuer = "test", subject = "a", email = "a@test.dev", name = "a" });
-            let pat = Session.runWith(Accounts.actorWithoutProject(alice, Login.Interactive), () -> PersonalTokens.issue(pepper, { name = "cli", scope = PatScope.Read, ttlDays = None }, 0i64));
+            let pat = Session.runWith(Accounts.actorWithoutProject(alice, Login.Interactive), () -> PersonalTokens.issue(Session.grantInteractive(), pepper, { name = "cli", scope = PatScope.Read, ttlDays = None }, 0i64));
             (shop, alice, SecretHash.hash(pepper, pat#token))
         }));
         let outcome = DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(PgTestSupport.appConfig(), _ -> {

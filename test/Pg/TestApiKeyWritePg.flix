@@ -124,8 +124,8 @@ mod TestApiKeyWritePg {
         let farFuture = 4_102_444_800_000i64;
         let pepper = PgTestSupport.pepper();
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1", "k2"}, () -> PgTestSupport.asOwner(() -> {
-            let forever = ApiKeys.create(pepper, { name = "ci", scope = ApiKeyScope.Write(Role.Owner), expiresAt = None }, now);
-            let untilFarFuture = ApiKeys.create(pepper, { name = "short", scope = ApiKeyScope.Read, expiresAt = Some(Timestamp.fromEpochMillis(farFuture)) }, now);
+            let forever = ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, { name = "ci", scope = ApiKeyScope.Write(Role.Owner), expiresAt = None }, now);
+            let untilFarFuture = ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, { name = "short", scope = ApiKeyScope.Read, expiresAt = Some(Timestamp.fromEpochMillis(farFuture)) }, now);
             let summary = found -> found |> Option.map(key -> (key#name, key#scope));
             (ApiKeys.resolve(pepper, forever#key, ProjectId.default(), farFuture) |> summary,
              ApiKeys.resolve(pepper, untilFarFuture#key, ProjectId.default(), farFuture - 1i64) |> summary,
@@ -139,7 +139,7 @@ mod TestApiKeyWritePg {
     @Test
     def testPgTouchApiKeyOncePerMinute(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"k1"}, () -> PgTestSupport.asOwner(() -> {
-            let issued = ApiKeys.create(PgTestSupport.pepper(), { name = "ci", scope = ApiKeyScope.Read, expiresAt = None }, 0i64);
+            let issued = ApiKeys.create(Session.grant(), Session.grantInteractive(), PgTestSupport.pepper(), { name = "ci", scope = ApiKeyScope.Read, expiresAt = None }, 0i64);
             (ApiKeys.touch(issued#id, ProjectId.default()), ApiKeys.touch(issued#id, ProjectId.default()))
         })));
         Assert.assertEq(expected = Ok(Ok((1, 0))), result)
@@ -152,15 +152,15 @@ mod TestApiKeyWritePg {
         let seedWithKey = () -> CmsTestKit.withIds(List#{"e1", "k1"}, () -> {
             let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
             discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-            let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
-            discard ContentEntries.publish(entry#id, "tester", false);
-            PgTestSupport.asOwner(() -> ApiKeys.create(PgTestSupport.pepper(), { name = "site", scope = ApiKeyScope.ReadDraft, expiresAt = None }, 0i64))#key
+            let entry = ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
+            discard ContentEntries.publish(Session.grant(), entry#id, "tester", false);
+            PgTestSupport.asOwner(() -> ApiKeys.create(Session.grant(), Session.grantInteractive(), PgTestSupport.pepper(), { name = "site", scope = ApiKeyScope.ReadDraft, expiresAt = None }, 0i64))#key
         });
         let outcome = PgTestSupport.withPool(pool -> {
             let key = PgTestSupport.seed(seedWithKey);
             let engine = PgTestSupport.contentEngine(pool);
             let admin = PgTestSupport.adminApi(pool);
-            let lastUsed = () -> PgTestSupport.mutateOrBug(pool, () -> PgTestSupport.asOwner(() -> ApiKeys.list() |> List.map(found -> Option.nonEmpty(found#lastUsedAt))));
+            let lastUsed = () -> PgTestSupport.mutateOrBug(pool, () -> PgTestSupport.asOwner(() -> ApiKeys.list(Session.grant()) |> List.map(found -> Option.nonEmpty(found#lastUsedAt))));
             let viaContent = PgTestSupport.askEngineAs(pool, Engine.Content, engine, Credential.ApiKey(key))("{ blogs { totalCount } }");
             let afterContent = lastUsed();
             let viaAdmin = PgTestSupport.askAs(admin, Credential.ApiKey(key))("{ contentTypes { apiId } }") |> snd;

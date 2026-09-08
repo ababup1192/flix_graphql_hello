@@ -15,26 +15,26 @@ mod TestBackgroundJobsPg {
     /// Webhook を 1 つ置き、blogs の e1..eN を作って公開する（entry.published の配信が N 件積まれる）。Webhook の public_id を返す。
     ///
     def publishEntries(count: Int32): String \ Db + CmsErr + IdGen + Tenant + Session =
-        let issued = Webhooks.create(hook());
+        let issued = Webhooks.create(Session.grant(), hook());
         let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
         discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
         List.range(1, count + 1) |> List.forEach(number -> {
-            let entry = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("e${number}")), CmsTestKit.entryData(List#{("title", Json.JString("e${number}"))}));
-            discard ContentEntries.publish(entry#id, "tester", false)
+            let entry = ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("e${number}")), CmsTestKit.entryData(List#{("title", Json.JString("e${number}"))}));
+            discard ContentEntries.publish(Session.grant(), entry#id, "tester", false)
         });
         issued#webhook#publicId
 
     /// 配信の id。古い順。
     def deliveryIds(pool: Pool, webhookId: String): List[String] \ IO =
-        PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(webhookId, 10)) |> List.map(delivery -> delivery#id) |> List.reverse
+        PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), webhookId, 10)) |> List.map(delivery -> delivery#id) |> List.reverse
 
     /// 配信の (id, status, attempts)。古い順。
     def deliveryStates(pool: Pool, webhookId: String): List[(String, DeliveryStatus, Int32)] \ IO =
-        PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(webhookId, 10)) |> List.map(delivery -> (delivery#id, delivery#status, delivery#attempts)) |> List.reverse
+        PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), webhookId, 10)) |> List.map(delivery -> (delivery#id, delivery#status, delivery#attempts)) |> List.reverse
 
     /// 予約の id。古い順。
     def scheduleIds(pool: Pool): List[String] \ IO =
-        PgTestSupport.mutateOrBug(pool, () -> Schedules.list(None, 10)) |> List.map(schedule -> schedule#id) |> List.reverse
+        PgTestSupport.mutateOrBug(pool, () -> Schedules.list(Session.grant(), None, 10)) |> List.map(schedule -> schedule#id) |> List.reverse
 
     def touch(sql: String, id: String): Unit \ IO =
         discard PgTestSupport.executeSql(sql, SqlValue.Str(id) :: Nil)
@@ -51,7 +51,7 @@ mod TestBackgroundJobsPg {
         let outcome = PgTestSupport.withPool(pool -> {
             let webhookId = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1"}, () -> {
                 let webhookId = publishEntries(3);
-                List.forEach(id -> discard Schedules.schedule(CmsTestKit.entryId(id), ScheduleAction.Publish, future(), false), List#{"e1", "e2", "e3"});
+                List.forEach(id -> discard Schedules.schedule(Session.grant(), CmsTestKit.entryId(id), ScheduleAction.Publish, future(), false), List#{"e1", "e2", "e3"});
                 webhookId
             }));
             let (s1, s2, s3) = match scheduleIds(pool) { case a :: b :: c :: Nil => (a, b, c) case other => bug!("予約が 3 件ではありません: ${other}") };

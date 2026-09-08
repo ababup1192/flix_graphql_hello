@@ -12,9 +12,9 @@ mod TestCdnCachePg {
     def seed(): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
         discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-        discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString("one"))}));
-        discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b2")), CmsTestKit.entryData(List#{("title", Json.JString("two"))}));
-        discard ContentEntries.publish(CmsTestKit.entryId("b1"), "tester", false)
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString("one"))}));
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b2")), CmsTestKit.entryData(List#{("title", Json.JString("two"))}));
+        discard ContentEntries.publish(Session.grant(), CmsTestKit.entryId("b1"), "tester", false)
 
     /// GET /graphql?query={ blogs { nodes { id } } }（パーセント符号化済み）。
     def get(headers: List[(String, String)]): HttpRequest =
@@ -48,7 +48,7 @@ mod TestCdnCachePg {
             let (firstStatus, firstEtag, firstIds) = handle(pool, engine, Nil);
             let ifNoneMatch = ("If-None-Match", firstEtag |> Option.getWithDefault("")) :: Nil;
             let (secondStatus, secondEtag, secondIds) = handle(pool, engine, ifNoneMatch);
-            discard PgTestSupport.mutateOrBug(pool, () -> ContentEntries.publish(CmsTestKit.entryId("b2"), "tester", false));
+            discard PgTestSupport.mutateOrBug(pool, () -> ContentEntries.publish(Session.grant(), CmsTestKit.entryId("b2"), "tester", false));
             let (thirdStatus, thirdEtag, thirdIds) = handle(pool, engine, ifNoneMatch);
             List#{
                 PgTestSupport.named("first", (firstStatus, Option.nonEmpty(firstEtag), firstIds)),

@@ -15,8 +15,8 @@ mod TestCdnPurgePg {
     def seed(): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
         discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-        discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString("one"))}));
-        discard ContentEntries.publish(CmsTestKit.entryId("b1"), "tester", false)
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString("one"))}));
+        discard ContentEntries.publish(Session.grant(), CmsTestKit.entryId("b1"), "tester", false)
 
     /// 積んで送る（BackgroundJobs.tick の purge の部分と同じ順）。相手は決まったステータスを返し、受けたリクエストを記録する。
     def enqueueAndTick(status: Int32, received: Ref[List[HttpRequest], Static], pool: Pool): (Result[String, Int32], Result[String, Int32]) \ IO =
@@ -53,7 +53,7 @@ mod TestCdnPurgePg {
             let first = enqueueAndTick(200, received, pool);
             let afterFirst = purges(pool);
             let second = enqueueAndTick(200, received, pool);
-            discard PgTestSupport.mutateOrBug(pool, () -> ContentEntries.unpublish(CmsTestKit.entryId("b1")));
+            discard PgTestSupport.mutateOrBug(pool, () -> ContentEntries.unpublish(Session.grant(), CmsTestKit.entryId("b1")));
             let third = enqueueAndTick(200, received, pool);
             let afterThird = purges(pool);
             let lastRequest = Ref.get(received) |> List.head |> Option.map(req -> (HttpRequest.url(req), header("Authorization", req), HttpRequest.body(req)));

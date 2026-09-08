@@ -58,7 +58,7 @@ mod TestMcpPg {
         let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
         PgTestSupport.asProject(shop, () -> {
             let items = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("items", "商品"));
-            let entry = ContentEntries.create(items#id, None, CmsTestKit.entryData(Nil));
+            let entry = ContentEntries.create(Session.grant(), items#id, None, CmsTestKit.entryData(Nil));
             EntryId.text(entry#id)
         })
 

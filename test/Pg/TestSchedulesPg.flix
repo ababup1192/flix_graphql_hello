@@ -13,15 +13,15 @@ mod TestSchedulesPg {
     def seedEntries(): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
         discard ContentTypes.addField(Session.grant(), blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
-        discard ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("ok"))}));
-        discard ContentEntries.create(blogs#id, None, CmsTestKit.entryData(Nil))
+        discard ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("ok"))}));
+        discard ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(Nil))
 
     def statusOf(pool: Pool, id: String): (ScheduleStatus, String) \ IO =
-        PgTestSupport.mutateOrBug(pool, () -> Schedules.list(None, 50))
+        PgTestSupport.mutateOrBug(pool, () -> Schedules.list(Session.grant(), None, 50))
             |> List.find(schedule -> schedule#id == id) |> Option.map(schedule -> (schedule#status, schedule#lastError)) |> Option.getWithDefault((ScheduleStatus.Cancelled, "?"))
 
     def stageOf(pool: Pool, id: String): Stage \ IO =
-        PgTestSupport.mutateOrBug(pool, () -> ContentEntries.find(CmsTestKit.entryId(id))) |> Option.map(entry -> entry#stage) |> Option.getWithDefault(Stage.Draft)
+        PgTestSupport.mutateOrBug(pool, () -> ContentEntries.find(Session.grant(), CmsTestKit.entryId(id))) |> Option.map(entry -> entry#stage) |> Option.getWithDefault(Stage.Draft)
 
     ///
     /// 過去の時刻の publish は tick で公開され done。required が欠けた entry は failed に理由。未来の物は拾われない。
@@ -32,13 +32,13 @@ mod TestSchedulesPg {
         let outcome = PgTestSupport.withPool(pool -> {
             let (okId, badId, laterId) = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"e1", "e2"}, () -> {
                 seedEntries();
-                (Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Publish, past(), false)#id,
-                 Schedules.schedule(CmsTestKit.entryId("e2"), ScheduleAction.Publish, past(), false)#id,
-                 Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Unpublish, future(), false)#id)
+                (Schedules.schedule(Session.grant(), CmsTestKit.entryId("e1"), ScheduleAction.Publish, past(), false)#id,
+                 Schedules.schedule(Session.grant(), CmsTestKit.entryId("e2"), ScheduleAction.Publish, past(), false)#id,
+                 Schedules.schedule(Session.grant(), CmsTestKit.entryId("e1"), ScheduleAction.Unpublish, future(), false)#id)
             }));
             let firstTick = ServerTestKit.quietly(() -> Scheduler.tick(pool));
             let afterPublish = (statusOf(pool, okId), statusOf(pool, badId), statusOf(pool, laterId), stageOf(pool, "e1"));
-            let unpublishId = PgTestSupport.mutateOrBug(pool, () -> Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Unpublish, past(), false)#id);
+            let unpublishId = PgTestSupport.mutateOrBug(pool, () -> Schedules.schedule(Session.grant(), CmsTestKit.entryId("e1"), ScheduleAction.Unpublish, past(), false)#id);
             let secondTick = ServerTestKit.quietly(() -> Scheduler.tick(pool));
             (firstTick, afterPublish, statusOf(pool, laterId), secondTick, statusOf(pool, unpublishId), stageOf(pool, "e1"))
         });
@@ -60,12 +60,12 @@ mod TestSchedulesPg {
         let outcome = PgTestSupport.withPool(pool -> {
             let id = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"e1", "e2"}, () -> {
                 seedEntries();
-                Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Publish, past(), false)#id
+                Schedules.schedule(Session.grant(), CmsTestKit.entryId("e1"), ScheduleAction.Publish, past(), false)#id
             }));
-            let cancelled = PgTestSupport.mutateOrBug(pool, () -> Schedules.cancel(id)) |> (schedule -> schedule#status);
-            let cancelAgainRejected = PgTestSupport.mutateOrBug(pool, () -> CmsTestKit.failureMessage(() -> Schedules.cancel(id))) |> Result.isErr;
+            let cancelled = PgTestSupport.mutateOrBug(pool, () -> Schedules.cancel(Session.grant(), id)) |> (schedule -> schedule#status);
+            let cancelAgainRejected = PgTestSupport.mutateOrBug(pool, () -> CmsTestKit.failureMessage(() -> Schedules.cancel(Session.grant(), id))) |> Result.isErr;
             // 落ちた事にする: 新しい予約を running のまま 1 時間前に拾った形にする
-            let stuckId = PgTestSupport.mutateOrBug(pool, () -> Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Publish, past(), false)#id);
+            let stuckId = PgTestSupport.mutateOrBug(pool, () -> Schedules.schedule(Session.grant(), CmsTestKit.entryId("e1"), ScheduleAction.Publish, past(), false)#id);
             discard PgTestSupport.executeSql("UPDATE scheduled_actions SET status = 'running', claimed_at = now() - interval '1 hour' WHERE id = $1", SqlValue.Str(stuckId) :: Nil);
             let untouched = ServerTestKit.quietly(() -> Scheduler.tick(pool));
             let beforeRecovery = statusOf(pool, stuckId);
@@ -89,13 +89,13 @@ mod TestSchedulesPg {
         let outcome = PgTestSupport.withPool(pool -> {
             let shop = PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"w1", "w2"}, () -> {
                 let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
-                discard Webhooks.create(hook());
+                discard Webhooks.create(Session.grant(), hook());
                 PgTestSupport.asProject(shop, () -> {
-                    discard Webhooks.create(hook());
+                    discard Webhooks.create(Session.grant(), hook());
                     let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
                     discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-                    discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("s1")), CmsTestKit.entryData(List#{("title", Json.JString("shop"))}));
-                    discard Schedules.schedule(CmsTestKit.entryId("s1"), ScheduleAction.Publish, past(), false)
+                    discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("s1")), CmsTestKit.entryData(List#{("title", Json.JString("shop"))}));
+                    discard Schedules.schedule(Session.grant(), CmsTestKit.entryId("s1"), ScheduleAction.Publish, past(), false)
                 });
                 shop
             }));
@@ -112,7 +112,7 @@ mod TestSchedulesPg {
     def testPgScheduledPublishVisibleInContentApi(): Unit \ {IO, Assert} =
         let seed = () -> CmsTestKit.withIds(List#{"e1", "e2"}, () -> {
             seedEntries();
-            discard Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Publish, past(), false)
+            discard Schedules.schedule(Session.grant(), CmsTestKit.entryId("e1"), ScheduleAction.Publish, past(), false)
         });
         let outcome = PgTestSupport.withContentApiAndPool(seed, (pool, ask) -> {
             let before = ask("{ blog(id: \"e1\") { title } blogs { totalCount } }") |> fst;
@@ -139,13 +139,13 @@ mod TestSchedulesPg {
                 discard ContentTypes.addField(Session.grant(), profiles#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
                 let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
                 discard ContentTypes.addField(Session.grant(), blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
-                discard ContentEntries.create(profiles#id, Some(CmsTestKit.entryId("p1")), CmsTestKit.entryData(List#{("name", Json.JString("山田"))}));
-                discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("profile", Json.JString("p1"))}));
-                Schedules.schedule(CmsTestKit.entryId("b1"), ScheduleAction.Publish, past(), false)#id
+                discard ContentEntries.create(Session.grant(), profiles#id, Some(CmsTestKit.entryId("p1")), CmsTestKit.entryData(List#{("name", Json.JString("山田"))}));
+                discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("profile", Json.JString("p1"))}));
+                Schedules.schedule(Session.grant(), CmsTestKit.entryId("b1"), ScheduleAction.Publish, past(), false)#id
             });
             let aloneTick = ServerTestKit.quietly(() -> Scheduler.tick(pool));
             let alone = (statusOf(pool, aloneId), stageOf(pool, "b1"), stageOf(pool, "p1"));
-            let togetherId = PgTestSupport.mutateOrBug(pool, () -> Schedules.schedule(CmsTestKit.entryId("b1"), ScheduleAction.Publish, past(), true)#id);
+            let togetherId = PgTestSupport.mutateOrBug(pool, () -> Schedules.schedule(Session.grant(), CmsTestKit.entryId("b1"), ScheduleAction.Publish, past(), true)#id);
             let togetherTick = ServerTestKit.quietly(() -> Scheduler.tick(pool));
             (aloneTick, alone, togetherTick, statusOf(pool, togetherId), stageOf(pool, "b1"), stageOf(pool, "p1"))
         });

@@ -27,15 +27,15 @@ mod TestContentVersionPg {
             let afterType = Projects.contentVersion();
             discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             let afterField = Projects.contentVersion();
-            let entry = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
+            let entry = ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
             let afterCreate = Projects.contentVersion();
-            discard ContentEntries.update(entry#id, CmsTestKit.entryData(List#{("title", Json.JString("hello"))}), entry#version);
+            discard ContentEntries.update(Session.grant(), entry#id, CmsTestKit.entryData(List#{("title", Json.JString("hello"))}), entry#version);
             let afterDraft = Projects.contentVersion();
-            discard ContentEntries.publish(entry#id, "tester", false);
+            discard ContentEntries.publish(Session.grant(), entry#id, "tester", false);
             let afterPublish = Projects.contentVersion();
-            discard ContentEntries.unpublish(entry#id);
+            discard ContentEntries.unpublish(Session.grant(), entry#id);
             let afterUnpublish = Projects.contentVersion();
-            ContentEntries.delete(entry#id);
+            ContentEntries.delete(Session.grant(), Session.tryGrant(), entry#id);
             let afterDelete = Projects.contentVersion();
             let other = PgTestSupport.asProject(shop, () -> Projects.contentVersion());
             List#{

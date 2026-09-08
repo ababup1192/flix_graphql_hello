@@ -1,5 +1,5 @@
 ///
-/// 権限の証明（Granted）。印の型 → Permission の表と、Session.grant が Authz の判定を通す / 通さない表。DB 無し。
+/// 権限の証明（Granted）。印の型 → Permission の表、Session.grant が Authz の判定を通す / 通さない表、tryGrant / grantInteractive、含意。DB 無し。
 ///
 mod TestGranted {
 
@@ -65,5 +65,44 @@ mod TestGranted {
             (tryGrant(preview, () -> (Session.grantOn(Authz.entryResource(e1)) : Granted[ReadDraft])),
              tryGrant(preview, () -> (Session.grantOn(Authz.entryResource(CmsTestKit.entryId("e2"))) : Granted[ReadDraft])),
              tryGrant(preview, () -> (Session.grant() : Granted[ReadDraft]))))
+
+    /// できるかどうかを forbidden にせず Option で返す。owner は publishEntries を持てるが、writer は持てず None。
+    @Test
+    def testTryGrantIsOptional(): Unit \ Assert =
+        let attempt = actor -> Session.runWith(actor, () -> (Session.tryGrant() : Option[Granted[PublishEntries]])) |> Option.map(Perm.permission);
+        Assert.assertEq(
+            expected = (Some(Permission.PublishEntries), None, None),
+            (attempt(user(Role.Owner :: Nil)), attempt(user(Role.Writer :: Nil)), attempt(Actor.Anonymous)))
+
+    /// ログインの JWT で来た本人の証明。ログインの JWT とサーバ自身は通り、PAT（write でも）と鍵は requiresLogin。
+    @Test
+    def testGrantInteractive(): Unit \ Assert =
+        let attempt = actor -> Session.runWith(actor, () -> CmsErr.runWithResult(() -> discard Session.grantInteractive()));
+        let notInteractive = Err(CmsFailure.RequiresLogin(LoginRequirement.Interactive));
+        Assert.assertEq(
+            expected = List#{Ok(()), Ok(()), notInteractive, notInteractive},
+            List#{
+                attempt(user(Role.Owner :: Nil)),
+                attempt(Actor.System),
+                attempt(Actor.User(UserId.UserId(1i64), "a@example.com", Role.Owner :: Nil, Login.PersonalToken(PatScope.Write))),
+                attempt(Actor.ApiKey("ci", ApiKeyScope.Write(Role.Owner)))
+            })
+
+    ///
+    /// 判定し直さない含意（`Session.readDraftOfWriter` / `readDraftOfPublisher`）が Authz と合っている事。
+    /// 主体の一覧（役割ごとの人、write の鍵、readDraft の鍵、匿名、System）で、writeEntries か publishEntries を持てる物は必ず readDraft も持てる。
+    ///
+    @Test
+    def testReadDraftIsImpliedByWriteAndPublish(): Unit \ Assert =
+        let actors = List#{
+            user(Role.Viewer :: Nil), user(Role.Writer :: Nil), user(Role.Editor :: Nil), user(Role.Owner :: Nil),
+            Actor.ApiKey("w", ApiKeyScope.Write(Role.Writer)), Actor.ApiKey("e", ApiKeyScope.Write(Role.Editor)), Actor.ApiKey("o", ApiKeyScope.Write(Role.Owner)),
+            Actor.ApiKey("d", ApiKeyScope.ReadDraft), Actor.ApiKey("r", ApiKeyScope.Read), Actor.Anonymous, Actor.System
+        };
+        let holds = actor -> {
+            let can = permission -> Authz.can(actor, permission, Authz.anyResource());
+            (not can(Permission.WriteEntries) or can(Permission.ReadDraft)) and (not can(Permission.PublishEntries) or can(Permission.ReadDraft))
+        };
+        Assert.assertEq(expected = List.map(_ -> true, actors), List.map(holds, actors))
 
 }

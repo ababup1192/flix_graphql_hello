@@ -29,14 +29,14 @@ mod TestPublishPg {
     def testPgPublishLifecycle(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"p1"}, () -> {
             let blogs = blogsForPublish();
-            let created = ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("slug", Json.JString("hello"))}));
-            let missing = CmsTestKit.failureMessage(() -> ContentEntries.publish(created#id, "tester", false));
-            let withTitle = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("Hello"))}), created#version);
-            let published = ContentEntries.publish(created#id, "tester", false);
-            let edited = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("views", CmsTestKit.intJson(5))}), withTitle#version);
-            let republished = ContentEntries.publish(created#id, "tester", false);
-            let unpublished = ContentEntries.unpublish(created#id);
-            let versions = ContentEntries.versions(created#id) |> List.map(version -> (version#version, version#reason, version#author));
+            let created = ContentEntries.create(Session.grant(), blogs, None, CmsTestKit.entryData(List#{("slug", Json.JString("hello"))}));
+            let missing = CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), created#id, "tester", false));
+            let withTitle = ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("title", Json.JString("Hello"))}), created#version);
+            let published = ContentEntries.publish(Session.grant(), created#id, "tester", false);
+            let edited = ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("views", CmsTestKit.intJson(5))}), withTitle#version);
+            let republished = ContentEntries.publish(Session.grant(), created#id, "tester", false);
+            let unpublished = ContentEntries.unpublish(Session.grant(), created#id);
+            let versions = ContentEntries.versions(Session.grant(), created#id) |> List.map(version -> (version#version, version#reason, version#author));
             (missing,
              (published#stage, published#changedSincePublish, Option.nonEmpty(published#publishedAt)),
              (edited#stage, edited#changedSincePublish),
@@ -59,10 +59,10 @@ mod TestPublishPg {
     def testPgRevertToPublishedContentClearsChanged(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"c1"}, () -> {
             let blogs = blogsForPublish();
-            let created = ContentEntries.create(blogs, None, titled("Hello", "hello"));
-            let published = ContentEntries.publish(created#id, "tester", false);
-            let edited = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("Edited"))}), published#version);
-            let reverted = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("Hello"))}), edited#version);
+            let created = ContentEntries.create(Session.grant(), blogs, None, titled("Hello", "hello"));
+            let published = ContentEntries.publish(Session.grant(), created#id, "tester", false);
+            let edited = ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("title", Json.JString("Edited"))}), published#version);
+            let reverted = ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("title", Json.JString("Hello"))}), edited#version);
             ((edited#stage, edited#changedSincePublish), (reverted#stage, reverted#changedSincePublish))
         }));
         Assert.assertEq(expected = Ok(Ok(((Stage.Published, true), (Stage.Published, false)))), result)
@@ -72,13 +72,13 @@ mod TestPublishPg {
     def testPgPublishUnique(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"u1", "u2"}, () -> {
             let blogs = blogsForPublish();
-            let first = ContentEntries.create(blogs, None, titled("One", "same"));
-            let second = ContentEntries.create(blogs, None, titled("Two", "same"));
-            discard ContentEntries.publish(first#id, "tester", false);
-            let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(second#id, "tester", false));
-            let again = CmsTestKit.messageOr(entry -> entry#stage, () -> ContentEntries.publish(first#id, "tester", false));
-            discard ContentEntries.unpublish(first#id);
-            let freed = CmsTestKit.messageOr(entry -> entry#stage, () -> ContentEntries.publish(second#id, "tester", false));
+            let first = ContentEntries.create(Session.grant(), blogs, None, titled("One", "same"));
+            let second = ContentEntries.create(Session.grant(), blogs, None, titled("Two", "same"));
+            discard ContentEntries.publish(Session.grant(), first#id, "tester", false);
+            let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), second#id, "tester", false));
+            let again = CmsTestKit.messageOr(entry -> entry#stage, () -> ContentEntries.publish(Session.grant(), first#id, "tester", false));
+            discard ContentEntries.unpublish(Session.grant(), first#id);
+            let freed = CmsTestKit.messageOr(entry -> entry#stage, () -> ContentEntries.publish(Session.grant(), second#id, "tester", false));
             (blocked, again, freed)
         }));
         Assert.assertEq(expected = Ok(Ok((Err("fields.slug: 'same' は公開中の entry 'u1' が使っています"), Ok(Stage.Published), Ok(Stage.Published)))), result)
@@ -88,12 +88,12 @@ mod TestPublishPg {
     def testPgVersions(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"v1", "v2"}, () -> {
             let blogs = blogsForPublish();
-            let created = ContentEntries.create(blogs, None, titled("Old", "old"));
-            let other = ContentEntries.create(blogs, None, titled("Other", "other"));
-            let saved = ContentEntries.saveVersion(created#id, "tester");
-            let edited = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("New"))}), created#version);
-            let restored = ContentEntries.restoreVersion(created#id, saved#id, edited#version);
-            let foreign = CmsErr.runWithResult(() -> ContentEntries.restoreVersion(other#id, saved#id, other#version)) |> Result.map(entry -> entry#version);
+            let created = ContentEntries.create(Session.grant(), blogs, None, titled("Old", "old"));
+            let other = ContentEntries.create(Session.grant(), blogs, None, titled("Other", "other"));
+            let saved = ContentEntries.saveVersion(Session.grant(), created#id, "tester");
+            let edited = ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("title", Json.JString("New"))}), created#version);
+            let restored = ContentEntries.restoreVersion(Session.grant(), created#id, saved#id, edited#version);
+            let foreign = CmsErr.runWithResult(() -> ContentEntries.restoreVersion(Session.grant(), other#id, saved#id, other#version)) |> Result.map(entry -> entry#version);
             (saved#reason, Map.get(CmsTestKit.apiId("title"), edited#data), Map.get(CmsTestKit.apiId("title"), restored#data), restored#version, foreign)
         }));
         Assert.assertEq(expected = Ok(Ok((VersionReason.Save, Some(Json.JString("New")), Some(Json.JString("Old")), 3, Err(CmsFailure.NotFound(Entity.Version, "1"))))), result)
@@ -106,12 +106,12 @@ mod TestPublishPg {
     def testPgDiffPublishedToDraft(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"d1", "d2"}, () -> {
             let blogs = blogsForPublish();
-            let created = ContentEntries.create(blogs, None, titled("Old", "old"));
-            let unpublished = ContentEntries.create(blogs, None, titled("Alone", "alone"));
-            let published = ContentEntries.publish(created#id, "tester", false);
-            discard ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("New"))}), published#version);
-            let changed = ContentEntries.diff(created#id, VersionRef.Published, VersionRef.Draft);
-            let firstPublish = ContentEntries.diff(unpublished#id, VersionRef.Published, VersionRef.Draft);
+            let created = ContentEntries.create(Session.grant(), blogs, None, titled("Old", "old"));
+            let unpublished = ContentEntries.create(Session.grant(), blogs, None, titled("Alone", "alone"));
+            let published = ContentEntries.publish(Session.grant(), created#id, "tester", false);
+            discard ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("title", Json.JString("New"))}), published#version);
+            let changed = ContentEntries.diff(Session.grant(), created#id, VersionRef.Published, VersionRef.Draft);
+            let firstPublish = ContentEntries.diff(Session.grant(), unpublished#id, VersionRef.Published, VersionRef.Draft);
             (changed, firstPublish)
         }));
         Assert.assertEq(expected = Ok(Ok((
@@ -128,15 +128,15 @@ mod TestPublishPg {
     def testPgDiffBetweenVersions(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"b1", "b2"}, () -> {
             let blogs = blogsForPublish();
-            let created = ContentEntries.create(blogs, None, titled("Old", "old"));
-            let other = ContentEntries.create(blogs, None, titled("Other", "other"));
-            let first = ContentEntries.saveVersion(created#id, "tester");
-            let edited = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("New"))}), created#version);
-            let second = ContentEntries.saveVersion(created#id, "tester");
-            discard ContentEntries.restoreVersion(created#id, first#id, edited#version);
-            let between = ContentEntries.diff(created#id, VersionRef.Version(first#id), VersionRef.Version(second#id));
-            let restored = ContentEntries.diff(created#id, VersionRef.Version(first#id), VersionRef.Draft);
-            let foreign = CmsErr.runWithResult(() -> ContentEntries.diff(other#id, VersionRef.Version(first#id), VersionRef.Draft));
+            let created = ContentEntries.create(Session.grant(), blogs, None, titled("Old", "old"));
+            let other = ContentEntries.create(Session.grant(), blogs, None, titled("Other", "other"));
+            let first = ContentEntries.saveVersion(Session.grant(), created#id, "tester");
+            let edited = ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("title", Json.JString("New"))}), created#version);
+            let second = ContentEntries.saveVersion(Session.grant(), created#id, "tester");
+            discard ContentEntries.restoreVersion(Session.grant(), created#id, first#id, edited#version);
+            let between = ContentEntries.diff(Session.grant(), created#id, VersionRef.Version(first#id), VersionRef.Version(second#id));
+            let restored = ContentEntries.diff(Session.grant(), created#id, VersionRef.Version(first#id), VersionRef.Draft);
+            let foreign = CmsErr.runWithResult(() -> ContentEntries.diff(Session.grant(), other#id, VersionRef.Version(first#id), VersionRef.Draft));
             (between, restored, foreign)
         }));
         Assert.assertEq(expected = Ok(Ok((
@@ -185,14 +185,14 @@ mod TestPublishPg {
     def testPgRestoreThenRepublish(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"r1"}, () -> {
             let blogs = blogsForPublish();
-            let created = ContentEntries.create(blogs, None, titled("Old", "old"));
-            let first = ContentEntries.publish(created#id, "tester", false);
-            let edited = ContentEntries.update(created#id, titled("New", "new"), first#version);
-            discard ContentEntries.publish(created#id, "tester", false);
-            let oldest = ContentEntries.versions(created#id) |> List.last |> Option.map(version -> version#id) |> Option.getWithDefault(VersionId.VersionId(0i64));
-            let restored = ContentEntries.restoreVersion(created#id, oldest, edited#version);
-            let republished = CmsTestKit.messageOr(entry -> (entry#stage, entry#changedSincePublish), () -> ContentEntries.publish(created#id, "tester", false));
-            let publicSide = ContentEntries.findByStage(ContentTypes.get(blogs), created#id, Stage.Published) |> Option.map(entry -> Map.get(CmsTestKit.apiId("title"), entry#data));
+            let created = ContentEntries.create(Session.grant(), blogs, None, titled("Old", "old"));
+            let first = ContentEntries.publish(Session.grant(), created#id, "tester", false);
+            let edited = ContentEntries.update(Session.grant(), created#id, titled("New", "new"), first#version);
+            discard ContentEntries.publish(Session.grant(), created#id, "tester", false);
+            let oldest = ContentEntries.versions(Session.grant(), created#id) |> List.last |> Option.map(version -> version#id) |> Option.getWithDefault(VersionId.VersionId(0i64));
+            let restored = ContentEntries.restoreVersion(Session.grant(), created#id, oldest, edited#version);
+            let republished = CmsTestKit.messageOr(entry -> (entry#stage, entry#changedSincePublish), () -> ContentEntries.publish(Session.grant(), created#id, "tester", false));
+            let publicSide = ContentEntries.findByStage(ContentTypes.fetch(Session.grant(), blogs), created#id, ContentEntries.StageAccess.Published) |> Option.map(entry -> Map.get(CmsTestKit.apiId("title"), entry#data));
             ((restored#changedSincePublish, Map.get(CmsTestKit.apiId("slug"), restored#data)), republished, publicSide)
         }));
         Assert.assertEq(expected = Ok(Ok(((true, Some(Json.JString("old"))), Ok((Stage.Published, false)), Some(Some(Json.JString("Old")))))), result)
@@ -204,15 +204,15 @@ mod TestPublishPg {
     def testPgRestoreUniqueCollisionRejectedOnPublish(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"a", "b"}, () -> {
             let blogs = blogsForPublish();
-            let a = ContentEntries.create(blogs, None, titled("A", "same"));
-            let saved = ContentEntries.saveVersion(a#id, "tester");
-            let freed = ContentEntries.update(a#id, titled("A", "free"), a#version);
-            discard ContentEntries.publish(a#id, "tester", false);
-            let b = ContentEntries.create(blogs, None, titled("B", "same"));
-            discard ContentEntries.publish(b#id, "tester", false);
-            let restored = ContentEntries.restoreVersion(a#id, saved#id, freed#version);
-            let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(a#id, "tester", false));
-            let publicSide = ContentEntries.findByStage(ContentTypes.get(blogs), a#id, Stage.Published) |> Option.map(entry -> Map.get(CmsTestKit.apiId("slug"), entry#data));
+            let a = ContentEntries.create(Session.grant(), blogs, None, titled("A", "same"));
+            let saved = ContentEntries.saveVersion(Session.grant(), a#id, "tester");
+            let freed = ContentEntries.update(Session.grant(), a#id, titled("A", "free"), a#version);
+            discard ContentEntries.publish(Session.grant(), a#id, "tester", false);
+            let b = ContentEntries.create(Session.grant(), blogs, None, titled("B", "same"));
+            discard ContentEntries.publish(Session.grant(), b#id, "tester", false);
+            let restored = ContentEntries.restoreVersion(Session.grant(), a#id, saved#id, freed#version);
+            let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), a#id, "tester", false));
+            let publicSide = ContentEntries.findByStage(ContentTypes.fetch(Session.grant(), blogs), a#id, ContentEntries.StageAccess.Published) |> Option.map(entry -> Map.get(CmsTestKit.apiId("slug"), entry#data));
             (Map.get(CmsTestKit.apiId("slug"), restored#data), blocked, publicSide)
         }));
         Assert.assertEq(expected = Ok(Ok((Some(Json.JString("same")), Err("fields.slug: 'same' は公開中の entry 'b' が使っています"), Some(Some(Json.JString("free")))))), result)
@@ -221,15 +221,15 @@ mod TestPublishPg {
     @Test
     def testPgRestoreThenPublishEmitsWebhook(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"w1"}, () -> {
-            let issued = Webhooks.create({ name = "site", url = "https://example.com/hook", events = List#{WebhookEvent.EntryPublished}, active = true });
+            let issued = Webhooks.create(Session.grant(), { name = "site", url = "https://example.com/hook", events = List#{WebhookEvent.EntryPublished}, active = true });
             let blogs = blogsForPublish();
-            let created = ContentEntries.create(blogs, Some(CmsTestKit.entryId("r1")), titled("Old", "old"));
-            let saved = ContentEntries.saveVersion(created#id, "tester");
-            let edited = ContentEntries.update(created#id, titled("New", "new"), created#version);
-            discard ContentEntries.restoreVersion(created#id, saved#id, edited#version);
-            let events = () -> Webhooks.deliveries(issued#webhook#publicId, 10) |> List.map(delivery -> delivery#event);
+            let created = ContentEntries.create(Session.grant(), blogs, Some(CmsTestKit.entryId("r1")), titled("Old", "old"));
+            let saved = ContentEntries.saveVersion(Session.grant(), created#id, "tester");
+            let edited = ContentEntries.update(Session.grant(), created#id, titled("New", "new"), created#version);
+            discard ContentEntries.restoreVersion(Session.grant(), created#id, saved#id, edited#version);
+            let events = () -> Webhooks.deliveries(Session.grant(), issued#webhook#publicId, 10) |> List.map(delivery -> delivery#event);
             let afterRestore = events();
-            discard ContentEntries.publish(created#id, "tester", false);
+            discard ContentEntries.publish(Session.grant(), created#id, "tester", false);
             (afterRestore, events())
         }));
         Assert.assertEq(expected = Ok(Ok((Nil, List#{WebhookEvent.EntryPublished}))), result)
@@ -239,14 +239,14 @@ mod TestPublishPg {
     def testPgPublishedVisibleInContentApi(): Unit \ {IO, Assert} =
         let seed = () -> CmsTestKit.withIds(List#{"c1"}, () -> {
             let blogs = blogsForPublish();
-            let created = ContentEntries.create(blogs, None, titled("Public", "public"));
-            discard ContentEntries.publish(created#id, "tester", false);
-            discard ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("Edited"))}), created#version)
+            let created = ContentEntries.create(Session.grant(), blogs, None, titled("Public", "public"));
+            discard ContentEntries.publish(Session.grant(), created#id, "tester", false);
+            discard ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("title", Json.JString("Edited"))}), created#version)
         });
         let outcome = PgTestSupport.withContentApiAndPool(seed, (pool, ask) -> {
             let published = ask("{ blog(id: \"c1\") { title stage } blogs { totalCount } }") |> fst;
             let draft = ask("{ blog(id: \"c1\", stage: DRAFT) { title } }") |> fst;
-            discard PgTestSupport.mutate(pool, () -> ContentEntries.delete(CmsTestKit.entryId("c1")));
+            discard PgTestSupport.mutate(pool, () -> ContentEntries.delete(Session.grant(), Session.tryGrant(), CmsTestKit.entryId("c1")));
             let afterDelete = ask("{ blogs { totalCount } }") |> fst;
             (published, draft, afterDelete)
         });
@@ -267,13 +267,13 @@ mod TestPublishPg {
             discard ContentTypes.addField(Session.grant(), blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
             let slug = ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = CmsTestKit.apiId("title") |> Some | FieldConfig.empty() }));
             let toggle = flag -> { name = None, required = None, unique = Some(flag), localized = None, config = None };
-            let a = ContentEntries.create(blogs#id, None, titled("A", "same"));
-            let c = ContentEntries.create(blogs#id, None, titled("C", "same"));
-            discard ContentEntries.publish(a#id, "tester", false);
+            let a = ContentEntries.create(Session.grant(), blogs#id, None, titled("A", "same"));
+            let c = ContentEntries.create(Session.grant(), blogs#id, None, titled("C", "same"));
+            discard ContentEntries.publish(Session.grant(), a#id, "tester", false);
             let turnedOn = ContentTypes.updateField(Session.grant(), slug#id, toggle(true)) |> (field -> field#unique);
-            let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(c#id, "tester", false));
+            let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), c#id, "tester", false));
             discard ContentTypes.updateField(Session.grant(), slug#id, toggle(false));
-            let freed = CmsTestKit.messageOr(entry -> entry#stage, () -> ContentEntries.publish(c#id, "tester", false));
+            let freed = CmsTestKit.messageOr(entry -> entry#stage, () -> ContentEntries.publish(Session.grant(), c#id, "tester", false));
             let again = ContentTypes.updateField(Session.grant(), slug#id, toggle(true)) |> (field -> field#unique);
             (turnedOn, blocked, freed, again)
         }));
@@ -285,11 +285,11 @@ mod TestPublishPg {
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"n1", "n2"}, () -> {
             let blogs = blogsForPublish();
             let codes = ContentTypes.addField(Session.grant(), blogs, { unique = true | CmsTestKit.fieldDraft("code", FieldKind.Number, FieldConfig.empty()) });
-            let first = ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("One")), ("slug", Json.JString("one")), ("code", CmsTestKit.floatJson(1.0))}));
-            let second = ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("Two")), ("slug", Json.JString("two")), ("code", CmsTestKit.intJson(1))}));
-            let untouched = ContentEntries.unpublish(first#id);
-            discard ContentEntries.publish(first#id, "tester", false);
-            let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(second#id, "tester", false));
+            let first = ContentEntries.create(Session.grant(), blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("One")), ("slug", Json.JString("one")), ("code", CmsTestKit.floatJson(1.0))}));
+            let second = ContentEntries.create(Session.grant(), blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("Two")), ("slug", Json.JString("two")), ("code", CmsTestKit.intJson(1))}));
+            let untouched = ContentEntries.unpublish(Session.grant(), first#id);
+            discard ContentEntries.publish(Session.grant(), first#id, "tester", false);
+            let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), second#id, "tester", false));
             (ApiId.text(codes#apiId), untouched#updatedAt == first#updatedAt, blocked)
         }));
         Assert.assertEq(expected = Ok(Ok(("code", true, Err("fields.code: '1' は公開中の entry 'n1' が使っています")))), result)
@@ -303,8 +303,8 @@ mod TestPublishPg {
     def testPgUniqueLockSerializesConcurrentPublish(): Unit \ {IO, Assert, Chan, NonDet} =
         PgTestSupport.seed(() -> CmsTestKit.withIds(List#{"a", "b"}, () -> {
             let blogs = blogsForPublish();
-            discard ContentEntries.create(blogs, None, titled("A", "same"));
-            discard ContentEntries.create(blogs, None, titled("B", "same"))
+            discard ContentEntries.create(Session.grant(), blogs, None, titled("A", "same"));
+            discard ContentEntries.create(Session.grant(), blogs, None, titled("B", "same"))
         }));
         Assert.assertEq(expected = Err("fields.slug: 'same' は公開中の entry 'a' が使っています"), PgTestSupport.withPool(raceSameSlug))
 
@@ -317,7 +317,7 @@ mod TestPublishPg {
             let (release, releaseRx) = Channel.buffered(1);
             let (done, doneRx) = Channel.buffered(1);
             spawn discard PgTestSupport.mutate(pool, () -> {
-                discard ContentEntries.publish(CmsTestKit.entryId("a"), "tester", false);
+                discard ContentEntries.publish(Session.grant(), CmsTestKit.entryId("a"), "tester", false);
                 Channel.send((), started);
                 Channel.recv(releaseRx)
             }) @ rc;
@@ -334,7 +334,7 @@ mod TestPublishPg {
     /// プール越しに 1 つの Tx で publish し、(失敗の文言, stage) の形で返す。
     ///
     def publishOutcome(pool: Pool, id: String): Result[String, Stage] \ IO =
-        PgTestSupport.mutate(pool, () -> ContentEntries.publish(CmsTestKit.entryId(id), "tester", false))
+        PgTestSupport.mutate(pool, () -> ContentEntries.publish(Session.grant(), CmsTestKit.entryId(id), "tester", false))
             |> Result.map(entry -> entry#stage)
             |> Result.mapErr(ApplicationFailure.describe)
 }

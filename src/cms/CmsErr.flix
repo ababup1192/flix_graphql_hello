@@ -123,6 +123,14 @@ mod CmsErr {
         case None        => CmsErr.invalid(Violation.Violation(path, message) :: Nil)
     }
 
+    ///
+    /// 条件付きで要る証明が無ければ forbidden（呼ぶ側が `Session.tryGrant()` で持てるだけ渡した物を、要る所で開く）。
+    ///
+    pub def orForbidden(permission: Permission, proof: Option[Granted[p]]): Granted[p] \ CmsErr = match proof {
+        case Some(found) => found
+        case None        => CmsErr.forbidden(permission)
+    }
+
     pub def orNotFound(entity: Entity, id: String, value: Option[a]): a \ CmsErr = match value {
         case Some(found) => found
         case None        => CmsErr.notFound(entity, id)

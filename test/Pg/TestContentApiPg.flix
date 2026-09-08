@@ -13,9 +13,9 @@ mod TestContentApiPg {
         discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
         discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("views", FieldKind.Number, FieldConfig.empty()));
         discard ContentTypes.addField(Session.grant(), blogs#id, { many = true | CmsTestKit.fieldDraft("tags", FieldKind.Text, FieldConfig.empty()) });
-        discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString("Flix で GraphQL")), ("views", CmsTestKit.intJson(10)), ("tags", Json.JArray(Vector#{Json.JString("flix")}))}));
-        discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b2")), CmsTestKit.entryData(List#{("title", Json.JString("Elm の話")), ("views", CmsTestKit.intJson(30))}));
-        discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b3")), CmsTestKit.entryData(List#{("title", Json.JString("flix と PostgreSQL")), ("views", CmsTestKit.intJson(20))}))
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString("Flix で GraphQL")), ("views", CmsTestKit.intJson(10)), ("tags", Json.JArray(Vector#{Json.JString("flix")}))}));
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b2")), CmsTestKit.entryData(List#{("title", Json.JString("Elm の話")), ("views", CmsTestKit.intJson(30))}));
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b3")), CmsTestKit.entryData(List#{("title", Json.JString("flix と PostgreSQL")), ("views", CmsTestKit.intJson(20))}))
 
     /// where / orderBy / first / skip / stage が効き、値は kind の型で返る。PUBLISHED はまだ無いので 0 件。
     @Test
