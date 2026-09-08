@@ -104,7 +104,9 @@ def serve(version: String, sink: Log.Sink, started: Started): Unit \ {IO, Sys.En
     // 予約公開と Webhook の配信はプロセス内のワーカーで回す。積むのはリクエストの Tx（outbox）、拾って実行するのはここ
     region rc {
     BackgroundJobs.installShutdownHook(jobs, sink);
-    if (jobsOn) spawn BackgroundJobs.runForever(started#pool, jobs, heal, sink) @ rc else Log.warn("jobs off (CMS_JOBS=off): POST /jobs/tick か別の worker で回してください", Log.Fields.empty());
+    if (jobsOn) spawn BackgroundJobs.runForever(started#pool, jobs, sink) @ rc else Log.warn("jobs off (CMS_JOBS=off): POST /jobs/tick か別の worker で回してください", Log.Fields.empty());
+    // WhyNot: CMS_JOBS=off の時に見張りを止めないのは、接続プールが壊れる事は仕事を回すかどうかと関係が無いため
+    spawn BackgroundJobs.watchForever(started#pool, jobs, heal, sink) @ rc;
     let maxConnections = Sys.Env.getVar("CMS_MAX_CONNECTIONS") |> Option.flatMap(Int32.fromString) |> Option.filter(n -> n > 0) |> Option.getWithDefault(256);
     let listener = HttpServer.open({ bind = bind, maxConnections = maxConnections | HttpServer.defaultConfig() });
     let runtime = {

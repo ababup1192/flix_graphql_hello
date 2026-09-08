@@ -2,6 +2,7 @@
 /// プロセス内のバックグラウンドワーカー。予約公開と Webhook の tick を定期的に回し、実行中に落ちた行の回復と古い記録の掃除もする。
 /// 同じ tick は外部トリガー（POST /jobs/tick）からも呼べる。どちらから呼ばれても DB のロック（SKIP LOCKED）で二重にはならない。
 /// 停止（SIGTERM）は shutdown hook で受け、新しい仕事を拾うのをやめて実行中の 1 周が終わるまで待つ。
+/// 自己回復の見張り（watchForever）は仕事の周とは別のスレッドで、自分の周期で回る。
 ///
 mod BackgroundJobs {
 
@@ -13,6 +14,9 @@ mod BackgroundJobs {
 
     /// tick の間隔（ミリ秒）。
     def intervalMs(): Int64 = 2000i64
+
+    /// 自己回復の見張りの間隔（ミリ秒）。
+    def healIntervalMs(): Int64 = 2000i64
 
     /// 実行中のまま残った行を戻すまでの分。
     def staleMinutes(): Int64 = 10i64
@@ -37,13 +41,34 @@ mod BackgroundJobs {
     ///
     /// 止まらずに回す。失敗はログに出して次の周へ。停止が始まったら抜ける。周ごとに Log を sink で入れ直す（spawn の中なので Main の handler は届かない）。
     ///
-    pub def runForever(pool: Pool, state: State, heal: Option[SelfHeal.Watch], sink: Log.Sink): Unit \ IO =
+    pub def runForever(pool: Pool, state: State, sink: Log.Sink): Unit \ IO =
         if (Ref.get(state#stopping)) Log.runWith(sink, () -> Log.info("jobs stopping", Log.Fields.empty()))
         else {
-            Log.runWith(sink, () -> { round(pool, state); healCheck(pool, state, heal) });
+            Log.runWith(sink, () -> round(pool, state));
             Thread.sleep(intervalMs());
-            runForever(pool, state, heal, sink)
+            runForever(pool, state, sink)
         }
+
+    ///
+    /// 自己回復の見張りだけを healIntervalMs ごとに回す。停止が始まったら抜ける。
+    ///
+    /// WhyNot: 仕事の周（runForever）に相乗りしないのは、DB が止まっている間は 1 周が tick の待ちぶんだけ伸び、
+    /// 観測の粒度が設定より粗くなるため（実験 2 回目で 2 秒のはずが約 17 秒だった）。見張りは別スレッドで自分の周期を持つ。
+    ///
+    pub def watchForever(pool: Pool, state: State, heal: Option[SelfHeal.Watch], sink: Log.Sink): Unit \ IO =
+        if (Ref.get(state#stopping)) ()
+        else {
+            let startedAt = System.currentTimeMillis();
+            Log.runWith(sink, () -> healCheck(pool, state, heal));
+            Thread.sleep(nextWaitMs(healIntervalMs(), System.currentTimeMillis() - startedAt));
+            watchForever(pool, state, heal, sink)
+        }
+
+    ///
+    /// 次の周まで待つミリ秒。1 周に掛かった時間を間隔から引く。間隔を超えていたら 0（待たずに次へ）。
+    ///
+    pub def nextWaitMs(intervalMs: Int64, elapsedMs: Int64): Int64 =
+        if (elapsedMs >= intervalMs) 0i64 else intervalMs - elapsedMs
 
     ///
     /// プールが壊れたまま戻らないかを見張り、決まったら自分で終わる。CMS_SELF_HEAL=off なら見張らない。
