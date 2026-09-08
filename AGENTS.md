@@ -29,6 +29,8 @@ Flix から graphql-java（Java の GraphQL ライブラリ）を Java interop �
 
 特にコードコメントは WhyNot を重視し、How・What を書かない。実装の由来や旧実装などの歴史背景も書かない。
 
+エントリポイント（Main の起動、runRoute、BackgroundJobs.tick、Authentication.resolve）と重要なワークフローだけは例外で、塊ごとに「ここで何をしているか」の短い What コメントを置き、環境変数を読む・依存を組む・エンジンを作る・listen する、のような意味の単位で関数を分ける。ユースケースや規則には広げない。
+
 ## ビルドと実行
 
 Flix コンパイラは flix_game_engine の devbox が持つ jar を借りる（`bin/flix` が解決する）。
