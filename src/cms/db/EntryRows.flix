@@ -43,19 +43,27 @@ mod EntryRows {
     ///
     /// entries と entry_contents（stage の行）を JOIN した行から Entry を組む。
     ///
-    /// changedSincePublish は「読んだ stage の行の updated_at（content_updated_at）」と「published の行の updated_at」の比較。
-    /// 管理 API は draft の行を読むので下書きが進んだかが分かり、コンテンツ API が published の行を読めば常に false。
+    /// changedSincePublish は「読んだ stage の行の中身」と「published の行の中身」の等値。
+    /// 管理 API は draft の行を読むので下書きが公開中と違うかが分かり、コンテンツ API が published の行を読めば常に false。
     ///
-    pub def toEntry(contentStage: Stage, row: { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Json, contentUpdatedAt = Timestamp.Timestamp, publishedUpdatedAt = Option[Timestamp.Timestamp] | r }): Entry \ DbErr =
+    /// WhyNot: 行の updated_at を比べないのは、公開中と同じ中身に書き戻しても時刻は進んでいて CHANGED のままになるため。
+    ///
+    pub def toEntry(contentStage: Stage, row: { id = String, typeId = Int64, version = Int32, stage = String, publishedAt = Option[Timestamp.Timestamp], createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp, data = Json, publishedData = Option[Json] | r }): Entry \ DbErr =
         let stage = stageFromDb(row#stage) |> Rows.orRaise("entries.stage", row#stage);
+        let data = dataFromJson(row#data);
+        // WhyNot: Option.map(dataFromJson) にしないのは、effect（DbErr）を使う式をラムダに直に書くと JVM の VerifyError になるため
+        let sameAsPublished = match row#publishedData {
+            case Some(published) => dataFromJson(published) == data
+            case None            => false
+        };
         {
             id          = EntryId.parse(row#id) |> Rows.orRaise("entries.id", row#id),
             typeId      = TypeId.TypeId(row#typeId),
             version     = row#version,
             stage       = stage,
-            data        = dataFromJson(row#data),
+            data        = data,
             publishedAt = row#publishedAt,
-            changedSincePublish = stage == Stage.Published and (row#publishedUpdatedAt |> Option.map(published -> Timestamp.toEpochMicros(row#contentUpdatedAt) > Timestamp.toEpochMicros(published)) |> Option.getWithDefault(false)),
+            changedSincePublish = stage == Stage.Published and not sameAsPublished,
             contentStage = contentStage,
             linked      = Linked.empty(),
             createdAt   = row#createdAt,

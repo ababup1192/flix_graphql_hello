@@ -13,7 +13,10 @@ pub enum Tool with Eq, Order, ToString {
     case Impact
     case Publish
     case Unpublish
+    case DeleteEntry
+    case RestoreVersion
     case PreviewUrl
+    case Whoami
 }
 
 mod Tool {
@@ -23,7 +26,8 @@ mod Tool {
     ///
     pub def all(): List[Tool] =
         Tool.ListTypes :: Tool.GetType :: Tool.SearchEntries :: Tool.GetEntry :: Tool.DiffEntry :: Tool.CreateEntry ::
-        Tool.UpdateEntry :: Tool.PublishCheck :: Tool.Impact :: Tool.Publish :: Tool.Unpublish :: Tool.PreviewUrl :: Nil
+        Tool.UpdateEntry :: Tool.PublishCheck :: Tool.Impact :: Tool.Publish :: Tool.Unpublish :: Tool.DeleteEntry :: Tool.RestoreVersion ::
+        Tool.PreviewUrl :: Tool.Whoami :: Nil
 
     ///
     /// tools/call の name。API の一部なので綴りは変えない。
@@ -40,7 +44,10 @@ mod Tool {
         case Tool.Impact        => "impact"
         case Tool.Publish       => "publish"
         case Tool.Unpublish     => "unpublish"
+        case Tool.DeleteEntry   => "delete_entry"
+        case Tool.RestoreVersion => "restore_version"
         case Tool.PreviewUrl    => "preview_url"
+        case Tool.Whoami        => "whoami"
     }
 
     ///
@@ -172,7 +179,7 @@ mod McpTools {
     def versionRefArg(name: String, description: String): ArgDef =
         ArgDef.ArgDef(name, description, true, ArgType.Obj(
             ArgDef.ArgDef("stage", "DRAFT（今の下書き）か PUBLISHED（公開中の中身。未公開なら空で、差分は全部 ADDED）", false, ArgType.Enum(readStages() |> List.map(fst))) ::
-            ArgDef.ArgDef("versionId", "バージョンの id（get_entry の versions か diff の応答）", false, ArgType.Str) :: Nil))
+            ArgDef.ArgDef("versionId", "バージョンの id（get_entry の応答の versions[].id）", false, ArgType.Str) :: Nil))
 
     ///
     /// RICH_TEXT に渡す Markdown の方言（Markdown.flix の冒頭の要約）。create_entry / update_entry の description に載せる。
@@ -186,61 +193,127 @@ mod McpTools {
         ++ "数式は `$…$`（行内）と `$$` の行で囲む（ブロック）。TeX のまま。"
         ++ "コードは ```` ```lang:path/file {1,3-5} ````（`:` の後がファイル名、`{}` が強調する行。どちらも省ける。lang が mermaid なら図）。"
         ++ "画像は `![alt](asset:ID \"caption\")`、動画は `@[video](asset:ID)`。1 行に画像を空白区切りで 2 つ以上並べると gallery。"
+        ++ "画像に使えるのは asset の id だけで、外部 URL の画像（`![alt](https://…)`）は image にならず alt を URL へのリンクにした文字になる。"
         ++ "他の entry へのリンクは `[text](entry:ID)`。"
         ++ "タスクは `- [ ]` / `- [x]`。"
         ++ "URL だけの行は YouTube / Vimeo / X なら embed、他は linkCard。"
         ++ "下線は `<u>…</u>`。入れ子は 2 空白"
 
     ///
-    /// 全ツールの定義。tools/list の inputSchema も引数の復号もこの表から出す（二重管理しない）。
+    /// 値の形の決まり（description に載せる）。試用で AI が迷った所だけ。
     ///
-    pub def tools(): List[ToolDef] =
-        { tool = Tool.ListTypes, description = "content type の一覧（フィールドの定義込み）。entry を作る前に、型の apiId とフィールドの apiId / kind をここで確かめる",
-          args = Nil, readOnlyHint = true, destructiveHint = false, idempotentHint = true } ::
-        { tool = Tool.GetType, description = "content type 1 つ（フィールドの定義込み）",
-          args = ArgDef.ArgDef("apiId", "content type の apiId", true, ArgType.Str) :: Nil, readOnlyHint = true, destructiveHint = false, idempotentHint = true } ::
-        { tool = Tool.SearchEntries, description = "型の entry を検索する。更新が新しい順。RICH_TEXT の値は平文にして返す。stage を渡すとこのページの中から DRAFT / PUBLISHED / CHANGED を絞る",
+    pub def fieldValueGuide(): String =
+        "値の形: SLUG は config.sourceField があっても自動生成しない（create 時に自分で入れる。required なら無いと公開できない）。"
+        ++ "REFERENCE は entry の id の文字列で、存在しない id でも下書きには通り、publish_check で参照先の消失として出る。"
+        ++ "DATE は ISO 8601 の文字列で、日付だけ（2026-09-08）は UTC の 0 時に揃える。ASSET と本文の画像は asset の id だけ（外部 URL は使えない）。"
+
+    ///
+    /// 全ツールの定義。tools/list の inputSchema も引数の復号もこの表から出す（二重管理しない）。並びは Tool.all。
+    ///
+    /// WhyNot: 1 つのリストに書かないのは、description が長くて 1 つの関数に置くと呼び出し側に inline されて JVM の「Method too large」で落ちるため。
+    ///
+    pub def tools(): List[ToolDef] = Tool.all() |> List.map(definitionOf)
+
+    ///
+    /// ツールの定義。
+    ///
+    pub def definitionOf(tool: Tool): ToolDef = match tool {
+        case Tool.ListTypes      => listTypesDef()
+        case Tool.GetType        => getTypeDef()
+        case Tool.SearchEntries  => searchEntriesDef()
+        case Tool.GetEntry       => getEntryDef()
+        case Tool.DiffEntry      => diffEntryDef()
+        case Tool.CreateEntry    => createEntryDef()
+        case Tool.UpdateEntry    => updateEntryDef()
+        case Tool.PublishCheck   => publishCheckDef()
+        case Tool.Impact         => impactDef()
+        case Tool.Publish        => publishDef()
+        case Tool.Unpublish      => unpublishDef()
+        case Tool.DeleteEntry    => deleteEntryDef()
+        case Tool.RestoreVersion => restoreVersionDef()
+        case Tool.PreviewUrl     => previewUrlDef()
+        case Tool.Whoami         => whoamiDef()
+    }
+
+    def listTypesDef(): ToolDef =
+        { tool = Tool.ListTypes, description = "content type の一覧（フィールドの定義込み）。entry を作る前に、型の apiId とフィールドの apiId / kind をここで確かめる。${fieldValueGuide()}",
+          args = Nil, readOnlyHint = true, destructiveHint = false, idempotentHint = true }
+
+    def getTypeDef(): ToolDef =
+        { tool = Tool.GetType, description = "content type 1 つ（フィールドの定義込み）。${fieldValueGuide()}",
+          args = ArgDef.ArgDef("apiId", "content type の apiId", true, ArgType.Str) :: Nil, readOnlyHint = true, destructiveHint = false, idempotentHint = true }
+
+    def searchEntriesDef(): ToolDef =
+        { tool = Tool.SearchEntries, description = "型の entry を検索する。更新が新しい順。RICH_TEXT の値は平文にして全文返す（長い本文はそのまま大きい）。"
+                                                   ++ "stage はサーバでは絞らず、取ってきたこのページの中から DRAFT / PUBLISHED / CHANGED を残す（skip と組み合わせると 2 ページ目が 0 件になりうる。サーバ側の絞り込みは次の段で足す）。"
+                                                   ++ "totalCount は stage で絞る前の件数、count はこのページに残った件数",
           args = typeArg() ::
-                 ArgDef.ArgDef("search", "下書きの中身に含む文字列", false, ArgType.Str) ::
+                 ArgDef.ArgDef("search", "下書きの中身に含む文字列（本文・タグの値にも当たる）", false, ArgType.Str) ::
                  ArgDef.ArgDef("first", "件数（既定 20、最大 100）", false, ArgType.Int) ::
                  ArgDef.ArgDef("skip", "読み飛ばす件数（既定 0）", false, ArgType.Int) ::
-                 ArgDef.ArgDef("stage", "entry の状態で絞る", false, ArgType.Enum(entryStages())) :: Nil,
-          readOnlyHint = true, destructiveHint = false, idempotentHint = true } ::
-        { tool = Tool.GetEntry, description = "entry 1 つ。stage は DRAFT（既定。今の下書き）か PUBLISHED（公開中の中身）。format は RICH_TEXT の値の返し方（markdown が既定。text / html / doc）。version は下書きの楽観ロック用で、publish しても進まない（update_entry で進む）",
+                 ArgDef.ArgDef("stage", "entry の状態で絞る（このページの中だけ）", false, ArgType.Enum(entryStages())) :: Nil,
+          readOnlyHint = true, destructiveHint = false, idempotentHint = true }
+
+    def getEntryDef(): ToolDef =
+        { tool = Tool.GetEntry, description = "entry 1 つ。stage は DRAFT（既定。今の下書き）か PUBLISHED（公開中の中身。fields だけが公開中の物で、stage と version は下書きの物のまま）。"
+                                              ++ "format は RICH_TEXT の値の返し方（markdown が既定。text / html / doc）。version は下書きの楽観ロック用で、publish しても進まない（update_entry で進む）。"
+                                              ++ "versions はバージョンの一覧（新しい順。id / version / reason / author / createdAt。中身は含めない）で、diff_entry と restore_version の versionId はここから取る",
           args = entryIdArg() ::
                  ArgDef.ArgDef("stage", "どちらの中身を読むか（既定 DRAFT）", false, ArgType.Enum(readStages() |> List.map(fst))) ::
                  ArgDef.ArgDef("format", "RICH_TEXT の値の返し方（既定 markdown）", false, ArgType.Enum(formats() |> List.map(fst))) :: Nil,
-          readOnlyHint = true, destructiveHint = false, idempotentHint = true } ::
-        { tool = Tool.DiffEntry, description = "entry の 2 つのバージョンの差分（from → to）。RICH_TEXT は Markdown の行差分。publish の前に from: { stage: PUBLISHED }, to: { stage: DRAFT } で何が変わるかを見る",
-          args = entryIdArg() :: versionRefArg("from", "比べる元。{ stage } か { versionId } のどちらか 1 つ") :: versionRefArg("to", "比べる先。{ stage } か { versionId } のどちらか 1 つ") :: Nil,
-          readOnlyHint = true, destructiveHint = false, idempotentHint = true } ::
-        { tool = Tool.CreateEntry, description = "下書きを作る。fields は apiId → 値。RICH_TEXT のフィールドは Markdown の文字列で渡せる（doc に変換する）。公開はしない（publish を別に呼ぶ）。${markdownGuide()}",
-          args = typeArg() :: ArgDef.ArgDef("fields", "apiId → 値のオブジェクト", true, ArgType.Json) :: Nil,
-          readOnlyHint = false, destructiveHint = false, idempotentHint = false } ::
-        { tool = Tool.UpdateEntry, description = "下書きを直す。fields のキーだけ上書きし、null で消す。RICH_TEXT は Markdown の文字列で渡せる。expectedVersion は get_entry の version（違えば CONFLICT で actualVersion が返るので、読み直してから）。${markdownGuide()}",
-          args = entryIdArg() :: ArgDef.ArgDef("fields", "apiId → 値のオブジェクト（上書きするキーだけ）", true, ArgType.Json) :: ArgDef.ArgDef("expectedVersion", "get_entry で読んだ version", true, ArgType.Int) :: Nil,
-          readOnlyHint = false, destructiveHint = false, idempotentHint = false } ::
-        { tool = Tool.PublishCheck, description = "公開できるか（書き込まない）。violations が空なら publish は通る。publish の前に必ず呼ぶ",
-          args = entryIdArg() :: Nil, readOnlyHint = true, destructiveHint = false, idempotentHint = true } ::
-        { tool = Tool.Impact, description = "操作の影響（書き込まない）。breaks は壊れる参照元、cascades は一緒に動く参照先。publish の前に impact(id, PUBLISH)、unpublish の前に impact(id, UNPUBLISH) を呼ぶ",
-          args = entryIdArg() :: ArgDef.ArgDef("action", "PUBLISH / UNPUBLISH / DELETE", true, ArgType.Enum(impactActions())) :: Nil,
-          readOnlyHint = true, destructiveHint = false, idempotentHint = true } ::
-        { tool = Tool.Publish, description = "下書きを公開する。前に publish_check と impact(id, PUBLISH) と diff_entry を呼び、結果を確かめてから呼ぶ。withDependencies なら未公開の参照先も先に公開する",
-          args = entryIdArg() :: ArgDef.ArgDef("withDependencies", "未公開の参照先も一緒に公開する（既定 false）", false, ArgType.Bool) :: Nil,
-          readOnlyHint = false, destructiveHint = false, idempotentHint = true } ::
-        { tool = Tool.Unpublish, description = "公開を取り下げる（下書きは残る）。前に impact(id, UNPUBLISH) を呼び、breaks が空である事を確かめてから呼ぶ",
-          args = entryIdArg() :: Nil, readOnlyHint = false, destructiveHint = true, idempotentHint = true } ::
-        { tool = Tool.PreviewUrl, description = "下書きを公開前のサイトで見るプレビュートークンと URL を発行する（1 時間で切れる。型に previewUrl が無ければ url は null）",
-          args = entryIdArg() :: Nil, readOnlyHint = false, destructiveHint = false, idempotentHint = false } :: Nil
+          readOnlyHint = true, destructiveHint = false, idempotentHint = true }
 
-    ///
-    /// ツールの定義。表に無いのは表の書き忘れなので止める。
-    ///
-    pub def definitionOf(tool: Tool): ToolDef =
-        match tools() |> List.find(definition -> definition#tool == tool) {
-            case Some(found) => found
-            case None        => bug!("tools() に ${tool} の定義がありません")
-        }
+    def diffEntryDef(): ToolDef =
+        { tool = Tool.DiffEntry, description = "entry の 2 つのバージョンの差分（from → to）。RICH_TEXT は両方にあれば Markdown の行差分（TEXT）、片方に無ければ doc ごと ADDED / REMOVED。"
+                                               ++ "publish の前に from: { stage: PUBLISHED }, to: { stage: DRAFT } で何が変わるかを見る。versionId は get_entry の versions から",
+          args = entryIdArg() :: versionRefArg("from", "比べる元。{ stage } か { versionId } のどちらか 1 つ") :: versionRefArg("to", "比べる先。{ stage } か { versionId } のどちらか 1 つ") :: Nil,
+          readOnlyHint = true, destructiveHint = false, idempotentHint = true }
+
+    def createEntryDef(): ToolDef =
+        { tool = Tool.CreateEntry, description = "下書きを作る。fields は apiId → 値。RICH_TEXT のフィールドは Markdown の文字列で渡せる（doc に変換する）。公開はしない（publish を別に呼ぶ）。${fieldValueGuide()}${markdownGuide()}",
+          args = typeArg() :: ArgDef.ArgDef("fields", "apiId → 値のオブジェクト", true, ArgType.Json) :: Nil,
+          readOnlyHint = false, destructiveHint = false, idempotentHint = false }
+
+    def updateEntryDef(): ToolDef =
+        { tool = Tool.UpdateEntry, description = "下書きを直す。fields のキーだけ上書きし、null で消す。RICH_TEXT は Markdown の文字列で渡せる。expectedVersion は get_entry の version（違えば CONFLICT で actualVersion が返るので、読み直してから）。${fieldValueGuide()}${markdownGuide()}",
+          args = entryIdArg() :: ArgDef.ArgDef("fields", "apiId → 値のオブジェクト（上書きするキーだけ）", true, ArgType.Json) :: ArgDef.ArgDef("expectedVersion", "get_entry で読んだ version", true, ArgType.Int) :: Nil,
+          readOnlyHint = false, destructiveHint = false, idempotentHint = false }
+
+    def publishCheckDef(): ToolDef =
+        { tool = Tool.PublishCheck, description = "公開できるか（書き込まない）。ok は violations が空という意味。unpublishedDependencies（未公開の参照先）があれば、素の publish は INVALID で失敗し、publish に withDependencies: true が要る。publish の前に必ず呼ぶ",
+          args = entryIdArg() :: Nil, readOnlyHint = true, destructiveHint = false, idempotentHint = true }
+
+    def impactDef(): ToolDef =
+        { tool = Tool.Impact, description = "操作の影響（書き込まない）。breaks は壊れる参照元、cascades は一緒に動く参照先。publish の前に impact(id, PUBLISH)、unpublish の前に impact(id, UNPUBLISH)、delete_entry の前に impact(id, DELETE) を呼ぶ",
+          args = entryIdArg() :: ArgDef.ArgDef("action", "PUBLISH / UNPUBLISH / DELETE", true, ArgType.Enum(impactActions())) :: Nil,
+          readOnlyHint = true, destructiveHint = false, idempotentHint = true }
+
+    def publishDef(): ToolDef =
+        { tool = Tool.Publish, description = "下書きを公開する。前に publish_check と impact(id, PUBLISH) と diff_entry を呼び、結果を確かめてから呼ぶ。publish_check に unpublishedDependencies があれば withDependencies: true で未公開の参照先も先に公開する（無いと INVALID）",
+          args = entryIdArg() :: ArgDef.ArgDef("withDependencies", "未公開の参照先も一緒に公開する（既定 false）", false, ArgType.Bool) :: Nil,
+          readOnlyHint = false, destructiveHint = false, idempotentHint = true }
+
+    def unpublishDef(): ToolDef =
+        { tool = Tool.Unpublish, description = "公開を取り下げる（下書きは残る）。前に impact(id, UNPUBLISH) を呼び、breaks が空である事を確かめてから呼ぶ",
+          args = entryIdArg() :: Nil, readOnlyHint = false, destructiveHint = true, idempotentHint = true }
+
+    def deleteEntryDef(): ToolDef =
+        { tool = Tool.DeleteEntry, description = "entry をゴミ箱に入れる。ゴミ箱に入るだけで戻せる（DB からは消えない）。公開中なら公開の取り下げも含み、公開中の entry が参照していれば拒まれる。先に impact(id, DELETE) を呼び、breaks が空である事を確かめてから呼ぶ",
+          args = entryIdArg() :: Nil, readOnlyHint = false, destructiveHint = true, idempotentHint = true }
+
+    def restoreVersionDef(): ToolDef =
+        { tool = Tool.RestoreVersion, description = "バージョンの中身を下書きに戻す（versionId は get_entry の versions から）。公開側は動かないので、公開するには publish。expectedVersion は get_entry の version（違えば CONFLICT）",
+          args = entryIdArg() :: ArgDef.ArgDef("versionId", "戻すバージョンの id（get_entry の versions[].id）", true, ArgType.Str) :: ArgDef.ArgDef("expectedVersion", "get_entry で読んだ version", true, ArgType.Int) :: Nil,
+          readOnlyHint = false, destructiveHint = false, idempotentHint = false }
+
+    def previewUrlDef(): ToolDef =
+        { tool = Tool.PreviewUrl, description = "下書きを公開前のサイトで見るプレビュートークンと URL を発行する（1 時間で切れる）。型に previewUrl が無ければ url は null で、howToUse にトークンの使い方が入る: "
+                                                ++ "コンテンツ API（GET / POST /graphql）に X-Preview-Token: <token> を付けると、この entry と参照先の下書きが読める",
+          args = entryIdArg() :: Nil, readOnlyHint = false, destructiveHint = false, idempotentHint = false }
+
+    def whoamiDef(): ToolDef =
+        { tool = Tool.Whoami, description = "今の身元（API キー / PAT / ログイン）の名前・役割・scope と、使える権限（permissions）の一覧。tools/list は権限で絞らないので、書く前にここで確かめると FORBIDDEN を避けられる",
+          args = Nil, readOnlyHint = true, destructiveHint = false, idempotentHint = true }
 
     // ---- tools/list ----
 
@@ -382,10 +455,13 @@ mod McpTools {
         request("query($typeId: ID!, $search: String, $first: Int, $skip: Int) { entries(typeId: $typeId, search: $search, first: $first, skip: $skip) { totalCount nodes { ${entrySummarySelection()} fields } } }",
             Map#{ "typeId" => Value.Str(typeId), "search" => search |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null), "first" => Value.Int(first), "skip" => Value.Int(skip) })
 
-    /// entry と全型の定義。withVersions なら公開時のバージョン（公開中の中身）も。
-    pub def entryRequest(id: String, withVersions: Bool): GraphqlRequest =
-        let versions = if (withVersions) " versions { id version reason fields createdAt }" else "";
-        request("query($id: ID!) { entry(id: $id) { ${entrySummarySelection()} fields${versions} } contentTypes { id fields { ${fieldDefSelection(2)} } } }", Map#{ "id" => Value.Str(id) })
+    /// EntryVersion の中身以外（get_entry の versions に出す物）。
+    def versionSummarySelection(): String = "id version reason author createdAt"
+
+    /// entry（バージョンの一覧込み）と全型の定義。withVersionFields なら各バージョンの中身も（公開中の中身を読む時）。
+    pub def entryRequest(id: String, withVersionFields: Bool): GraphqlRequest =
+        let versionFields = if (withVersionFields) " fields" else "";
+        request("query($id: ID!) { entry(id: $id) { ${entrySummarySelection()} fields versions { ${versionSummarySelection()}${versionFields} } } contentTypes { id fields { ${fieldDefSelection(2)} } } }", Map#{ "id" => Value.Str(id) })
 
     pub def diffRequest(id: String, fromRef: Value, toRef: Value): GraphqlRequest =
         request("query($id: ID!, $from: VersionRef!, $to: VersionRef!) { entry(id: $id) { id diff(from: $from, to: $to) { ${fieldChangeSelection(3)} } } }",
@@ -413,8 +489,24 @@ mod McpTools {
     pub def unpublishRequest(id: String): GraphqlRequest =
         request("mutation($id: ID!) { unpublishEntry(id: $id) { ${entrySummarySelection()} } }", Map#{ "id" => Value.Str(id) })
 
+    pub def deleteEntryRequest(id: String): GraphqlRequest =
+        request("mutation($id: ID!) { deleteEntry(id: $id) }", Map#{ "id" => Value.Str(id) })
+
+    pub def restoreVersionRequest(id: String, versionId: String, expectedVersion: Int32): GraphqlRequest =
+        request("mutation($id: ID!, $versionId: ID!, $expectedVersion: Int!) { restoreVersion(id: $id, versionId: $versionId, expectedVersion: $expectedVersion) { ${entrySummarySelection()} } }",
+            Map#{ "id" => Value.Str(id), "versionId" => Value.Str(versionId), "expectedVersion" => Value.Int(expectedVersion) })
+
     pub def previewUrlRequest(id: String): GraphqlRequest =
         request("mutation($id: ID!) { createPreviewToken(entryId: $id) { token entryId expiresAt url } }", Map#{ "id" => Value.Str(id) })
+
+    pub def whoamiRequest(): GraphqlRequest =
+        request("{ viewer { kind name roles scope permissions } }", Map.empty())
+
+    ///
+    /// url が無い時の preview_url の案内。
+    ///
+    pub def previewHowToUse(): String =
+        "コンテンツ API（GET / POST /graphql）に X-Preview-Token: <token> を付けると、この entry と参照先の下書きが読める（型に previewUrl を設定すれば url が出る）"
 
     // ---- 実行 ----
 
@@ -470,7 +562,16 @@ mod McpTools {
         case Tool.Impact        => ask(execute, impactRequest(strArg("id", args), strArg("action", args))) |> Result.map(Value.field("impact"))
         case Tool.Publish       => ask(execute, publishRequest(strArg("id", args), boolArg("withDependencies", args))) |> Result.map(Value.field("publishEntry"))
         case Tool.Unpublish     => ask(execute, unpublishRequest(strArg("id", args))) |> Result.map(Value.field("unpublishEntry"))
-        case Tool.PreviewUrl    => ask(execute, previewUrlRequest(strArg("id", args))) |> Result.map(Value.field("createPreviewToken"))
+        case Tool.DeleteEntry   => ask(execute, deleteEntryRequest(strArg("id", args))) |> Result.map(data -> Value.Obj(Map#{ "id" => Value.field("deleteEntry", data), "deleted" => Value.Bool(true) }))
+        case Tool.RestoreVersion => ask(execute, restoreVersionRequest(strArg("id", args), strArg("versionId", args), intArg("expectedVersion", 0, args))) |> Result.map(Value.field("restoreVersion"))
+        case Tool.PreviewUrl    => ask(execute, previewUrlRequest(strArg("id", args))) |> Result.map(data -> withHowToUse(Value.field("createPreviewToken", data)))
+        case Tool.Whoami        => ask(execute, whoamiRequest()) |> Result.map(Value.field("viewer"))
+    }
+
+    /// preview_url の応答。url が null なら howToUse を足す。
+    def withHowToUse(preview: Value): Value = match Value.field("url", preview) {
+        case Value.Null => Value.Obj(Map.insert("howToUse", Value.Str(previewHowToUse()), objectFields(preview)))
+        case _          => preview
     }
 
     /// 型を apiId で引く。無ければ NOT_FOUND。
@@ -493,7 +594,7 @@ mod McpTools {
             |> List.map(withFields(defs, readConverter(Format.Text)));
         Value.Obj(Map#{ "totalCount" => Value.field("totalCount", page), "count" => Value.Int(List.length(nodes)), "nodes" => Value.List(nodes) })
 
-    /// get_entry。stage が PUBLISHED なら公開時のバージョンの中身。RICH_TEXT を format で写す。
+    /// get_entry。stage が PUBLISHED なら公開時のバージョンの中身。RICH_TEXT を format で写す。versions は中身を落として付ける。
     def getEntry(args: Map[String, Value], execute: GraphqlRequest -> GraphqlResponse \ ef): Result[Failure, Value] \ ef =
         let id = strArg("id", args);
         let stage = enumArg("stage", readStages(), ReadStage.Draft, args);
@@ -501,7 +602,12 @@ mod McpTools {
         ask(execute, entryRequest(id, stage == ReadStage.Published)) |> Result.flatMap(data ->
             orNotFound("Entry", "entry", id, Value.field("entry", data)) |> Result.flatMap(entry ->
                 contentOf(stage, id, entry) |> Result.map(fields ->
-                    Value.Obj(Map.insert("fields", mapRichText(fieldDefsFor(entry, data), readConverter(format), fields), Map.remove("versions", objectFields(entry)))))))
+                    Value.Obj(objectFields(entry)
+                        |> Map.insert("fields", mapRichText(fieldDefsFor(entry, data), readConverter(format), fields))
+                        |> Map.insert("versions", Value.List(listOf(Value.field("versions", entry)) |> List.map(withoutFields)))))))
+
+    /// バージョンの中身（fields）を落とす。
+    def withoutFields(version: Value): Value = Value.Obj(Map.remove("fields", objectFields(version)))
 
     /// stage の中身。DRAFT は fields、PUBLISHED は一番新しい PUBLISH のバージョンの fields（未公開なら NOT_FOUND）。
     def contentOf(stage: ReadStage, id: String, entry: Value): Result[Failure, Value] = match stage {

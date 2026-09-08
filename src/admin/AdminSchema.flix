@@ -11,6 +11,7 @@ mod AdminSchema {
             queryRoot    = AdminQueryResolvers.resolvers(),
             mutationRoot = AdminMutationResolvers.resolvers(deps),
             me                     = MeResolvers.resolvers(),
+            viewer                 = ViewerResolvers.resolvers(),
             organization           = OrganizationResolvers.resolvers(),
             organizationMembership = OrganizationMembershipResolvers.resolvers(),
             project_               = ProjectResolvers.resolvers(),

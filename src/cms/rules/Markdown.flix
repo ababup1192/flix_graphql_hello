@@ -7,8 +7,12 @@
 /// entry へのリンクは `[text](entry:ID)`、underline は `<u>…</u>`。入れ子は 2 空白、番号は 1 から振り直す。
 /// 数式は `$…$`（math マーク。TeX はそのまま）と `$$` の行で囲む mathBlock、text の `$` は `\$`。タスクリストは `- [ ]` `- [x]`（orderedList でも `1. [ ]`）。
 /// video は `@[video](asset:ID "caption"){poster=asset:ID}`。Mermaid は language が mermaid の codeBlock で、Markdown では普通のフェンス。
-/// 読む時は少し広く受け（`*` の箇条書き、`1)`、`***`、`__` と `*`、行末 2 空白、`![caption](asset:ID)`、summary の無い `<details>`、`- [X]`）、
+/// 読む時は少し広く受け（`*` の箇条書き、`1)`、`***`、`__` と `*`、行末 2 空白、summary の無い `<details>`、`- [X]`）、
 /// 読めない物は段落の text に落として必ず RichText.validate に通る doc を返す。
+/// image は asset 管理の物だけ（`asset:`）。`![alt](URL)` は image にせず、alt を URL へのリンクにした文字に落とす。
+///
+/// WhyNot: asset 管理外の画像を違反にしないのは、fromMarkdown が「必ず validate に通る doc を返す」約束で、違反は doc の検査の仕事のため。
+/// 文字に落とす時に URL をリンクとして残すのは、書いた物が読み戻しで消えず、`\[` に化けた文字にもならないようにするため。
 ///
 /// WhyNot: Java の Markdown ライブラリを使わないのは、方言（asset: / entry: / alerts / {#id}）を完全に握るためと、依存を増やさないため。
 ///
@@ -305,14 +309,10 @@ mod Markdown {
         let Clip.Clip(assetId, caption, poster) = clip;
         "@[video](asset:${assetId}${caption |> Option.map(found -> " \"${escapeTitle(found)}\"") |> Option.getWithDefault("")})${poster |> Option.map(found -> "{poster=asset:${found}}") |> Option.getWithDefault("")}"
 
-    /// `![alt](asset:ID "caption"){width=W height=H}`。caption は title の位置。alt だけの時は空の title を書く（title が無い形は caption と読むため）。
+    /// `![alt](asset:ID "caption"){width=W height=H}`。caption は title の位置で、無ければ書かない。
     def renderPicture(picture: Picture): String =
         let Picture.Picture(assetId, alt, caption, size) = picture;
-        let title = match (alt, caption) {
-            case (_, Some(found)) => " \"${escapeTitle(found)}\""
-            case (Some(_), None)  => " \"\""
-            case (None, None)     => ""
-        };
+        let title = caption |> Option.map(found -> " \"${escapeTitle(found)}\"") |> Option.getWithDefault("");
         "![${alt |> Option.map(escape) |> Option.getWithDefault("")}](asset:${assetId}${title})${size |> Option.map(match (width, height) -> "{width=${width} height=${height}}") |> Option.getWithDefault("")}"
 
     /// title の中では `"` も逃がす。
@@ -728,17 +728,14 @@ mod Markdown {
     }
 
     ///
-    /// `![alt](asset:ID "caption"){width=W height=H}` を 1 つ。title が無い `![caption](asset:ID)` は caption と読む。
+    /// `![alt](asset:ID "caption"){width=W height=H}` を 1 つ。[] が alt、title が caption（CommonMark と同じ置き場所）。
     /// (image, 残りの文字)。
     ///
     def takePicture(text: String): Option[(Picture, String)] =
-        match captures("^!\\[((?:[^\\]\\\\]|\\\\.)*)\\]\\(asset:([A-Za-z0-9_-]{1,64})( \"((?:[^\"\\\\]|\\\\.)*)\")?\\)(?:\\{width=([0-9]{1,9}) height=([0-9]{1,9})\\})?([\\s\\S]*)$", text) {
-            case bracket :: assetId :: titlePart :: title :: width :: height :: rest :: Nil =>
+        match captures("^!\\[((?:[^\\]\\\\]|\\\\.)*)\\]\\(asset:([A-Za-z0-9_-]{1,64})(?: \"((?:[^\"\\\\]|\\\\.)*)\")?\\)(?:\\{width=([0-9]{1,9}) height=([0-9]{1,9})\\})?([\\s\\S]*)$", text) {
+            case bracket :: assetId :: title :: width :: height :: rest :: Nil =>
                 let size = Int32.fromString(width) |> Option.flatMap(w -> Int32.fromString(height) |> Option.map(h -> (w, h)));
-                let picture =
-                    if (String.isEmpty(titlePart)) Picture.Picture(assetId, None, Some(unescape(bracket)) |> Option.filter(String.nonEmpty), size)
-                    else Picture.Picture(assetId, Some(unescape(bracket)) |> Option.filter(String.nonEmpty), Some(unescape(title)) |> Option.filter(String.nonEmpty), size);
-                Some((picture, rest))
+                Some((Picture.Picture(assetId, Some(unescape(bracket)) |> Option.filter(String.nonEmpty), Some(unescape(title)) |> Option.filter(String.nonEmpty), size), rest))
             case _ => None
         }
 
@@ -787,6 +784,7 @@ mod Markdown {
         case '`'  => codeStep(marks, text, pos)
         case '$'  => mathStep(marks, text, pos)
         case '<'  => angleStep(marks, text, pos)
+        case '!'  => bangStep(marks, text, pos)
         case '['  => linkStep(marks, text, pos)
         case ' '  => spaceStep(text, pos)
         case '*'  => delimiterStep(marks, text, pos)
@@ -833,17 +831,31 @@ mod Markdown {
             }
         else Step.Literal('<', pos + 1)
 
-    /// `[text](target)`。閉じないか target に空白があれば `[` の文字。`![` は image の書き方なので link にしない。
+    /// `[text](target)`。閉じないか target に空白があれば `[` の文字。`![` は image の書き方なので link にしない（bangStep が見る）。
     def linkStep(marks: List[Mark], text: String, pos: Int32): Step =
-        let found = (if (String.nth(pos - 1, text) == Some('!')) None else String.indexOfLeftWithOffset(substr = "](", offset = pos + 1, text))
-            |> Option.flatMap(labelEnd -> closingParen(text, labelEnd + 2) |> Option.map(targetEnd -> (labelEnd, targetEnd)))
-            |> Option.filter(match (labelEnd, targetEnd) -> not String.exists(Char.isWhitespace, String.slice(start = labelEnd + 2, end = targetEnd, text)));
-        match found {
-            case Some((labelEnd, targetEnd)) =>
-                let target = linkTarget(String.slice(start = labelEnd + 2, end = targetEnd, text));
-                Step.Nested(scanInlines(marks ::: (Mark.Link(target) :: Nil), String.slice(start = pos + 1, end = labelEnd, text)), targetEnd + 1)
-            case None => Step.Literal('[', pos + 1)
+        match (if (String.nth(pos - 1, text) == Some('!')) None else findLink(text, pos)) {
+            case Some((labelEnd, targetEnd)) => linkNested(marks, text, pos, labelEnd, targetEnd)
+            case None                        => Step.Literal('[', pos + 1)
         }
+
+    /// `![alt](URL)`。asset 管理外の画像は image にせず、alt を URL へのリンクにする。`![alt](asset:ID)` が文の途中にある時は `!` の文字のまま。
+    def bangStep(marks: List[Mark], text: String, pos: Int32): Step =
+        match (if (String.nth(pos + 1, text) == Some('[')) findLink(text, pos + 1) else None) {
+            case Some((labelEnd, targetEnd)) if not String.startsWith(prefix = "asset:", String.slice(start = labelEnd + 2, end = targetEnd, text)) =>
+                linkNested(marks, text, pos + 1, labelEnd, targetEnd)
+            case _ => Step.Literal('!', pos + 1)
+        }
+
+    /// pos の `[` から `](target)` の形を探す。(`](` の位置, 閉じる `)` の位置)。閉じないか target に空白があれば None。
+    def findLink(text: String, pos: Int32): Option[(Int32, Int32)] =
+        String.indexOfLeftWithOffset(substr = "](", offset = pos + 1, text)
+            |> Option.flatMap(labelEnd -> closingParen(text, labelEnd + 2) |> Option.map(targetEnd -> (labelEnd, targetEnd)))
+            |> Option.filter(match (labelEnd, targetEnd) -> not String.exists(Char.isWhitespace, String.slice(start = labelEnd + 2, end = targetEnd, text)))
+
+    /// link の中身を link マーク付きで解析した 1 歩。pos は `[` の位置。
+    def linkNested(marks: List[Mark], text: String, pos: Int32, labelEnd: Int32, targetEnd: Int32): Step =
+        let target = linkTarget(String.slice(start = labelEnd + 2, end = targetEnd, text));
+        Step.Nested(scanInlines(marks ::: (Mark.Link(target) :: Nil), String.slice(start = pos + 1, end = labelEnd, text)), targetEnd + 1)
 
     /// 括弧の対応を数えて閉じる `)` の位置。
     def closingParen(text: String, start: Int32): Option[Int32] =

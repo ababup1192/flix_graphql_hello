@@ -46,6 +46,13 @@ mod AdminQueryResolvers {
     pub def impact(): GeneratedAdmin.QueryImpactResolver[AdminEff] =
         (_context, id, action) -> Ok(ContentEntries.impact(AdminMapping.entryId("id", id), AdminMapping.impactActionOf(action)))
 
+    /// Query.viewer。今の主体をそのまま見せる（DB は引かない）
+    pub def viewer(): GeneratedAdmin.QueryViewerResolver[AdminEff] =
+        _context -> Ok(currentViewer())
+
+    /// 今の主体の見え方。ラムダの中で effect を使わないための切り出し（VerifyError）。
+    def currentViewer(): Viewer \ Session = Authz.viewerOf(Session.current())
+
     /// Query.me
     pub def me(): GeneratedAdmin.QueryMeResolver[AdminEff] =
         _context -> Ok(Accounts.me())
@@ -77,6 +84,6 @@ mod AdminQueryResolvers {
     /// type Query のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.QueryResolvers[AdminEff] =
         { contentTypes = contentTypes(), contentType = contentType(), entries = entries(), entry = entry(), assets = assets(), asset = asset(),
-          publishCheck = publishCheck(), impact = impact(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries(), schedules = schedules() }
+          publishCheck = publishCheck(), impact = impact(), viewer = viewer(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries(), schedules = schedules() }
 
 }

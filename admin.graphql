@@ -19,6 +19,8 @@ type Query {
   publishCheck(id: ID!): PublishReport!
   """操作の影響。取り下げ・削除で壊れる参照元と、公開で一緒に動く参照先"""
   impact(id: ID!, action: ImpactAction!): Impact!
+  """今の身元（API キー / PAT / ログイン）と、できる事。何者としてこの API を叩いているかを確かめる"""
+  viewer: Viewer!
 
   """自分。ログインしていなければ null。organizations と projects は自分が触れる物だけ"""
   me: Me
@@ -301,6 +303,35 @@ type Me {
   permissions: [String!]!
   organizations: [OrganizationMembership!]!
   projects: [ProjectMembership!]!
+}
+
+"""今の身元の種類"""
+enum ViewerKind {
+  """ログインの JWT で来た人"""
+  USER
+  """Personal Access Token で来た人"""
+  PERSONAL_TOKEN
+  """プロジェクトの API キー"""
+  API_KEY
+  """プレビュートークン"""
+  PREVIEW
+  """身元無し"""
+  ANONYMOUS
+  """サーバ自身（内部の処理）"""
+  SYSTEM
+}
+
+"""今の身元。名前・役割・scope と、できる事"""
+type Viewer {
+  kind: ViewerKind!
+  """人なら email、鍵なら鍵の名前。無ければ空"""
+  name: String!
+  """役割。人は今のプロジェクトでの役割（read の PAT は viewer に落ちる）、WRITE の鍵はその role。無ければ空"""
+  roles: [Role!]!
+  """鍵か PAT の scope（read / readDraft / write）。それ以外は null"""
+  scope: String
+  """できる事（readDraft / writeEntries / publishEntries / manageTypes / manageAssets / manageMembers / manageApiKeys / manageProject のうち通る物）"""
+  permissions: [String!]!
 }
 
 type Organization {

@@ -91,6 +91,15 @@ mod AdminMapping {
         case Role.Owner  => GeneratedAdmin.Role.Owner
     }
 
+    pub def viewerKindToGql(kind: ViewerKind): GeneratedAdmin.ViewerKind = match kind {
+        case ViewerKind.User          => GeneratedAdmin.ViewerKind.User
+        case ViewerKind.PersonalToken => GeneratedAdmin.ViewerKind.PersonalToken
+        case ViewerKind.ApiKey        => GeneratedAdmin.ViewerKind.ApiKey
+        case ViewerKind.Preview       => GeneratedAdmin.ViewerKind.Preview
+        case ViewerKind.Anonymous     => GeneratedAdmin.ViewerKind.Anonymous
+        case ViewerKind.System        => GeneratedAdmin.ViewerKind.System
+    }
+
     pub def orgRoleToGql(role: OrgRole): GeneratedAdmin.OrgRole = match role {
         case OrgRole.Member => GeneratedAdmin.OrgRole.Member
         case OrgRole.Owner  => GeneratedAdmin.OrgRole.Owner

@@ -4,7 +4,7 @@
 ///
 /// 型かフィールドを足すと、このテストが落ちる。期待値に足すだけでは足りない。
 /// **そのフィールドを test/Pg/TestAdminMutationsPg（Account API は TestAccountPg / TestPersonalTokenPg、
-/// コンテンツ API は TestAssetsPg）の selection にも足して、GraphQL 越しに 1 度は選ぶ事。**
+/// コンテンツ API は TestAssetsPg、Viewer は TestMcpPg の whoami）の selection にも足して、GraphQL 越しに 1 度は選ぶ事。**
 /// リゾルバのラムダは JVM の VerifyError で落ちる事があり、それは型検査でもスキーマの組み立てでも出ず、
 /// そのフィールドを選んだ query を実行した時にだけ出る。
 ///
@@ -65,10 +65,11 @@ mod TestApiSurface {
                 "Project: id slug name visibility" ::
                 "ProjectMembership: project role" ::
                 "PublishReport: ok violations unpublishedDependencies" ::
-                "Query: contentTypes contentType entries entry assets asset publishCheck impact me members invitations apiKeys webhooks webhookDeliveries schedules" ::
+                "Query: contentTypes contentType entries entry assets asset publishCheck impact viewer me members invitations apiKeys webhooks webhookDeliveries schedules" ::
                 "Referrer: entry via stage" ::
                 "Schedule: id entryId action runAt withDependencies status requestedBy lastError overdue createdAt doneAt" ::
                 "Upload: asset uploadUrl expiresInSeconds" ::
+                "Viewer: kind name roles scope permissions" ::
                 "Violation: path message" ::
                 "Webhook: id name url events active createdAt" ::
                 "WebhookDelivery: id event status attempts nextAttemptAt lastStatus lastError createdAt deliveredAt" :: Nil,

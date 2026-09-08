@@ -63,7 +63,7 @@ mod TestMcpPg {
     ///
     ///   list_types → get_type → create_entry(body: Markdown) → search_entries → publish_check → impact(PUBLISH)
     ///     → diff_entry(DRAFT, DRAFT) → publish → diff_entry(PUBLISHED, DRAFT) → get_entry(markdown) → get_entry(PUBLISHED, text)
-    ///     → update_entry → preview_url → impact(UNPUBLISH) → unpublish
+    ///     → update_entry → preview_url → impact(UNPUBLISH) → unpublish → restore_version(公開時のバージョン) → whoami → delete_entry → get_entry(NOT_FOUND)
     ///
     @Test
     def testPgMcpAllTools(): Unit \ {IO, Assert} =
@@ -91,6 +91,12 @@ mod TestMcpPg {
             let preview = tool("preview_url", idArg);
             let impactUnpublish = tool("impact", obj(List#{ ("id", Value.Str(entryId)), ("action", Value.Str("UNPUBLISH")) }));
             let unpublished = tool("unpublish", idArg);
+            let versionId = Value.path(List#{"versions"}, snd(readMarkdown)) |> listOf |> List.head |> Option.map(Value.field("id")) |> Option.getWithDefault(Value.Null);
+            let restored = tool("restore_version", obj(List#{ ("id", Value.Str(entryId)), ("versionId", versionId), ("expectedVersion", Value.field("version", snd(unpublished))) }));
+            let restoredTitle = tool("get_entry", idArg);
+            let me = tool("whoami", Value.Null);
+            let deleted = tool("delete_entry", idArg);
+            let gone = tool("get_entry", idArg);
             List#{
                 PgTestSupport.named("list_types", (fst(types), snd(types) |> listOf |> List.map(Value.field("apiId")))),
                 PgTestSupport.named("get_type", (fst(posts), Value.field("apiId", snd(posts)), snd(posts) |> Value.field("fields") |> listOf |> List.map(Value.field("kind")))),
@@ -106,7 +112,12 @@ mod TestMcpPg {
                 PgTestSupport.named("update_entry", (fst(updated), Value.field("stage", snd(updated)))),
                 PgTestSupport.named("preview_url", (fst(preview), Value.field("token", snd(preview)) |> Value.asStr |> Option.map(String.startsWith(prefix = "pv_")), Value.field("url", snd(preview)) |> Value.asStr |> Option.map(String.contains(substr = "?preview=pv_")))),
                 PgTestSupport.named("impact UNPUBLISH", (fst(impactUnpublish), snd(impactUnpublish))),
-                PgTestSupport.named("unpublish", (fst(unpublished), Value.field("stage", snd(unpublished)))) }
+                PgTestSupport.named("unpublish", (fst(unpublished), Value.field("stage", snd(unpublished)))),
+                PgTestSupport.named("get_entry versions", Value.path(List#{"versions"}, snd(readMarkdown)) |> listOf |> List.map(listed -> (Value.field("reason", listed), Value.field("version", listed), Value.field("fields", listed)))),
+                PgTestSupport.named("restore_version", (fst(restored), Value.field("version", snd(restored)), Value.path(List#{"fields", "title"}, snd(restoredTitle)))),
+                PgTestSupport.named("whoami", (fst(me), Value.field("kind", snd(me)), Value.field("name", snd(me)), Value.field("roles", snd(me)), Value.field("scope", snd(me)), Value.field("permissions", snd(me)))),
+                PgTestSupport.named("delete_entry", (fst(deleted), Value.field("id", snd(deleted)) == Value.Str(entryId), Value.field("deleted", snd(deleted)))),
+                PgTestSupport.named("get_entry after delete", (fst(gone), Value.field("code", snd(gone)))) }
         });
         let empty = Value.List(Nil);
         Assert.assertEq(
@@ -125,7 +136,13 @@ mod TestMcpPg {
                 PgTestSupport.named("update_entry", (Value.Bool(false), Value.Str("CHANGED"))),
                 PgTestSupport.named("preview_url", (Value.Bool(false), Some(true), Some(true))),
                 PgTestSupport.named("impact UNPUBLISH", (Value.Bool(false), obj(List#{ ("breaks", empty), ("cascades", empty) }))),
-                PgTestSupport.named("unpublish", (Value.Bool(false), Value.Str("DRAFT"))) },
+                PgTestSupport.named("unpublish", (Value.Bool(false), Value.Str("DRAFT"))),
+                PgTestSupport.named("get_entry versions", List#{ (Value.Str("PUBLISH"), Value.Int(1), Value.Null) }),
+                PgTestSupport.named("restore_version", (Value.Bool(false), Value.Int(3), Value.Str("Hello"))),
+                PgTestSupport.named("whoami", (Value.Bool(false), Value.Str("USER"), Value.Str("owner@test"), Value.List(Value.Str("OWNER") :: Nil), Value.Null,
+                    Value.List(List#{ "manageApiKeys", "manageAssets", "manageMembers", "manageProject", "manageTypes", "publishEntries", "readDraft", "writeEntries" } |> List.map(Value.Str)))),
+                PgTestSupport.named("delete_entry", (Value.Bool(false), true, Value.Bool(true))),
+                PgTestSupport.named("get_entry after delete", (Value.Bool(true), Value.Str("NOT_FOUND"))) },
             outcome)
 
     /// 配列。配列でなければ空。

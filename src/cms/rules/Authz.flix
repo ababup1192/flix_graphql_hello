@@ -106,6 +106,20 @@ mod Authz {
         (membership |> Option.toList) ::: (if (orgRole == Some(OrgRole.Owner)) Role.Owner :: Nil else Nil)
 
     ///
+    /// 主体の見え方（管理 API の viewer）。permissions は全部の権限を can に通した物なので、判定とずれない。
+    ///
+    pub def viewerOf(actor: Actor): Viewer =
+        let permissions = Permission.all() |> List.filter(permission -> can(actor, permission, anyResource())) |> List.map(Permission.text) |> List.sort;
+        match actor {
+            case Actor.User(_, email, roles, Login.Interactive)          => { kind = ViewerKind.User, name = email, roles = roles, scope = None, permissions = permissions }
+            case Actor.User(_, email, roles, Login.PersonalToken(scope)) => { kind = ViewerKind.PersonalToken, name = email, roles = effectiveRoles(Login.PersonalToken(scope), roles), scope = Some(PatScope.text(scope)), permissions = permissions }
+            case Actor.ApiKey(name, scope)                               => { kind = ViewerKind.ApiKey, name = name, roles = ApiKeyScope.roleOf(scope) |> Option.toList, scope = Some(ApiKeyScope.text(scope)), permissions = permissions }
+            case Actor.Preview(_)                                        => { kind = ViewerKind.Preview, name = "", roles = Nil, scope = None, permissions = permissions }
+            case Actor.Anonymous                                         => { kind = ViewerKind.Anonymous, name = "", roles = Nil, scope = None, permissions = permissions }
+            case Actor.System                                            => { kind = ViewerKind.System, name = "", roles = Nil, scope = None, permissions = permissions }
+        }
+
+    ///
     /// 一覧の絞り込み。今は空（誰でも全件）。後で属性ベースの権限（このタグの記事だけ）をここから SQL の条件として出す。
     ///
     pub def readFilter(_actor: Actor): List[Condition] = Nil

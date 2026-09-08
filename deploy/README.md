@@ -74,7 +74,7 @@ curl -s -X POST https://cms.example.com/p/blog/admin/graphql -H "Authorization: 
 # Claude Code に繋ぐ（鍵は createApiKey の scope: WRITE、PAT なら --header "Authorization: Bearer cmspat_..."）
 claude mcp add --transport http cms http://127.0.0.1:8080/mcp --header "X-Api-Key: $CMS_API_KEY"
 
-# 繋がったか（tools/list が 12 件返る）
+# 繋がったか（tools/list が 15 件返る）
 claude mcp list
 
 # 手で叩く
@@ -84,12 +84,13 @@ curl -s -X POST http://127.0.0.1:8080/mcp -H 'Content-Type: application/json' -H
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_entry","arguments":{"type":"blogs","fields":{"title":"Hello","body":"# 見出し\n\n本文"}}}}'
 ```
 
-ツール（12）: `list_types` / `get_type(apiId)` / `search_entries(type, search, first, skip, stage)` / `get_entry(id, stage, format)` / `diff_entry(id, from, to)` /
-`create_entry(type, fields)` / `update_entry(id, fields, expectedVersion)` / `publish_check(id)` / `impact(id, action)` / `publish(id, withDependencies)` / `unpublish(id)` / `preview_url(id)`。
+ツール（15）: `list_types` / `get_type(apiId)` / `search_entries(type, search, first, skip, stage)` / `get_entry(id, stage, format)` / `diff_entry(id, from, to)` /
+`create_entry(type, fields)` / `update_entry(id, fields, expectedVersion)` / `publish_check(id)` / `impact(id, action)` / `publish(id, withDependencies)` / `unpublish(id)` /
+`delete_entry(id)`（ゴミ箱へ。戻せる） / `restore_version(id, versionId, expectedVersion)`（versionId は `get_entry` の `versions`） / `preview_url(id)` / `whoami()`（身元と使える権限）。
 RICH_TEXT のフィールドは Markdown の文字列で書け、`get_entry` の `format`（markdown / text / html / doc）で読み方を選ぶ。
 本文の書き方（GFM + callout / details / 数式 / `asset:` / `entry:` の方言の要約）は `create_entry` / `update_entry` の description に載っている（エージェントはそれを読んで書く）。
-説明（description）は仕様として扱う: `publish` の前に `publish_check` と `impact(id, PUBLISH)` と `diff_entry` を、`unpublish` の前に `impact(id, UNPUBLISH)` を呼ぶ。
-`tools/list` は主体が呼べる物に絞らない（全部出す。呼べなければ `FORBIDDEN` が返る）。
+説明（description）は仕様として扱う: `publish` の前に `publish_check` と `impact(id, PUBLISH)` と `diff_entry` を、`unpublish` の前に `impact(id, UNPUBLISH)` を、`delete_entry` の前に `impact(id, DELETE)` を呼ぶ。
+`tools/list` は主体が呼べる物に絞らない（全部出す。呼べなければ `FORBIDDEN` が返る。`whoami` で先に確かめられる）。
 
 業務エラー（FORBIDDEN / NOT_FOUND / CONFLICT / INVALID …）は全部 `tools/call` の result に `isError: true` で、`content[0].text` に
 [error-codes.md](../docs/design/error-codes.md) の `extensions`（code / message / violations / entity / id / expectedVersion / actualVersion）がそのまま JSON で入る。

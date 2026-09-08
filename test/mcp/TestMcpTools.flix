@@ -52,7 +52,7 @@ mod TestMcpTools {
             expected = List#{
                 "list_types:", "get_type: apiId", "search_entries: type", "get_entry: id", "diff_entry: from id to",
                 "create_entry: fields type", "update_entry: expectedVersion fields id", "publish_check: id", "impact: action id",
-                "publish: id", "unpublish: id", "preview_url: id" },
+                "publish: id", "unpublish: id", "delete_entry: id", "restore_version: expectedVersion id versionId", "preview_url: id", "whoami:" },
             McpTools.tools() |> List.map(definition ->
                 "${Tool.name(definition#tool)}: ${definition#args |> List.filter(ArgDef.isRequired) |> List.map(ArgDef.name) |> List.sort |> List.join(" ")}" |> String.trim))
 
@@ -143,6 +143,43 @@ mod TestMcpTools {
                 McpTools.updateEntryRequest("e1", obj(Nil), 3),
                 McpTools.publishRequest("e1", true),
                 McpTools.impactRequest("e1", "UNPUBLISH") } |> List.map(variablesOf))
+
+    /// get_entry は versions をバージョンの一覧（中身の fields を落とした物）として返す。中身は entry の fields だけ。
+    @Test
+    def testGetEntryVersionsWithoutFields(): Unit \ Assert =
+        let version = obj(List#{ ("id", Value.Str("v1")), ("version", Value.Int(2)), ("reason", Value.Str("PUBLISH")), ("author", Value.Str("a")), ("createdAt", Value.Str("t")), ("fields", obj(List#{ ("title", Value.Str("old")) })) });
+        let entry = obj(List#{ ("id", Value.Str("e1")), ("typeId", Value.Str("t1")), ("stage", Value.Str("CHANGED")), ("fields", obj(List#{ ("title", Value.Str("new")) })), ("versions", Value.List(version :: Nil)) });
+        let data = obj(List#{ ("entry", entry), ("contentTypes", Value.List(Nil)) });
+        Assert.assertEq(
+            expected = Ok(List#{
+                Value.List(obj(List#{ ("id", Value.Str("v1")), ("version", Value.Int(2)), ("reason", Value.Str("PUBLISH")), ("author", Value.Str("a")), ("createdAt", Value.Str("t")) }) :: Nil),
+                obj(List#{ ("title", Value.Str("new")) }),
+                obj(List#{ ("title", Value.Str("old")) }) }),
+            Result.flatMap(draft -> McpTools.call(Tool.GetEntry, Map#{ "id" => Value.Str("e1"), "stage" => Value.Str("PUBLISHED") }, fixed(data)) |> Result.map(published ->
+                List#{ Value.field("versions", draft), Value.field("fields", draft), Value.field("fields", published) }),
+                McpTools.call(Tool.GetEntry, Map#{ "id" => Value.Str("e1") }, fixed(data))))
+
+    /// preview_url は url が null なら howToUse（X-Preview-Token の使い方）を足し、url があれば足さない。
+    @Test
+    def testPreviewUrlHowToUse(): Unit \ Assert =
+        let issued = url -> obj(List#{ ("createPreviewToken", obj(List#{ ("token", Value.Str("pv_x")), ("url", url) })) });
+        Assert.assertEq(
+            expected = (Ok(Value.Str(McpTools.previewHowToUse())), Ok(Value.Null)),
+            (McpTools.call(Tool.PreviewUrl, Map#{ "id" => Value.Str("e1") }, fixed(issued(Value.Null))) |> Result.map(Value.field("howToUse")),
+             McpTools.call(Tool.PreviewUrl, Map#{ "id" => Value.Str("e1") }, fixed(issued(Value.Str("https://site/p?preview=pv_x")))) |> Result.map(Value.field("howToUse"))))
+
+    /// delete_entry / restore_version / whoami の variables と応答の形。delete_entry は { id, deleted: true }、whoami は data.viewer。
+    @Test
+    def testDeleteRestoreWhoami(): Unit \ Assert =
+        let viewer = obj(List#{ ("kind", Value.Str("API_KEY")), ("permissions", Value.List(Value.Str("readDraft") :: Nil)) });
+        Assert.assertEq(
+            expected = (
+                Ok(obj(List#{ ("id", Value.Str("e1")), ("deleted", Value.Bool(true)) })),
+                Map#{ "id" => Value.Str("e1"), "versionId" => Value.Str("7"), "expectedVersion" => Value.Int(3) },
+                Ok(viewer)),
+            (McpTools.call(Tool.DeleteEntry, Map#{ "id" => Value.Str("e1") }, fixed(obj(List#{ ("deleteEntry", Value.Str("e1")) }))),
+             McpTools.restoreVersionRequest("e1", "7", 3)#variables,
+             McpTools.call(Tool.Whoami, Map.empty(), fixed(obj(List#{ ("viewer", viewer) })))))
 
     /// diff_entry は from / to の VersionRef をそのまま variables に渡し、応答の entry.diff を返す。entry が無ければ NOT_FOUND。
     @Test

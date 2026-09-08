@@ -130,6 +130,11 @@ pub enum Permission with Eq, Order, ToString {
 }
 
 mod Permission {
+    /// 全部の権限（viewer の permissions を組む用）。
+    pub def all(): List[Permission] =
+        Permission.ReadDraft :: Permission.WriteEntries :: Permission.PublishEntries :: Permission.ManageTypes ::
+        Permission.ManageAssets :: Permission.ManageMembers :: Permission.ManageApiKeys :: Permission.ManageProject :: Nil
+
     pub def text(permission: Permission): String = match permission {
         case Permission.ReadDraft      => "readDraft"
         case Permission.WriteEntries   => "writeEntries"
@@ -169,6 +174,35 @@ pub enum Actor with Eq, Order, ToString {
     case Preview(EntryId)
     case System
 }
+
+///
+/// 今の身元の種類（管理 API の viewer に出す）。Actor の case と 1 対 1 で、人はどう来たかで分ける。
+///
+pub enum ViewerKind with Eq, Order, ToString {
+    /// ログインの JWT で来た人
+    case User
+    /// PAT で来た人
+    case PersonalToken
+    /// プロジェクトの API キー
+    case ApiKey
+    /// プレビュートークン
+    case Preview
+    /// 身元無し
+    case Anonymous
+    /// サーバ自身
+    case System
+}
+
+///
+/// 今の身元の見え方（管理 API の viewer）。
+///
+/// - kind: 種類
+/// - name: 人なら email、鍵なら鍵の名前。無ければ空
+/// - roles: 判定に使う役割（read の PAT は viewer に落とした物、WRITE の鍵はその role）
+/// - scope: 鍵か PAT の scope の文字列。それ以外は None
+/// - permissions: Session.require が通る権限の名前
+///
+pub type alias Viewer = { kind = ViewerKind, name = String, roles = List[Role], scope = Option[String], permissions = List[String] }
 
 ///
 /// API キーの範囲。

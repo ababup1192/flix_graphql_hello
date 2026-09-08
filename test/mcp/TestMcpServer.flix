@@ -105,11 +105,16 @@ mod TestMcpServer {
     /// 通知（id 無し）は Accepted（HTTP 202、body 無し）。method が何でも同じ。ping は空の result。
     @Test
     def testNotificationAndPing(): Unit \ Assert =
+        let bodies = List#{
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}",
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/cancelled\",\"params\":{}}",
+            requestJson("ping", "{}") };
         Assert.assertEq(
-            expected = (true, true, obj(Nil)),
-            (replyOf("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}", fixed(Value.Null)) == McpServer.Reply.Accepted,
-             replyOf("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/cancelled\",\"params\":{}}", fixed(Value.Null)) == McpServer.Reply.Accepted,
-             Value.field("result", bodyOf(replyOf(requestJson("ping", "{}"), fixed(Value.Null))))))
+            expected = List#{
+                McpServer.Reply.Accepted,
+                McpServer.Reply.Accepted,
+                McpServer.Reply.Body(obj(List#{ ("jsonrpc", Value.Str("2.0")), ("id", Value.Int(1)), ("result", obj(Nil)) })) },
+            bodies |> List.map(body -> replyOf(body, fixed(Value.Null))))
 
     /// MCP-Protocol-Version: 無ければ 2025-03-26、知っている値はそれ、知らない値は Err（HTTP 400）。名前の大文字小文字は問わない。
     @Test

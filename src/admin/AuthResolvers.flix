@@ -18,6 +18,18 @@ mod MeResolvers {
 
 }
 
+mod ViewerResolvers {
+
+    /// type Viewer のリゾルバ一式
+    pub def resolvers(): GeneratedAdmin.ViewerResolvers[AdminEff] =
+        {
+            kind  = (_context, source) -> Ok(AdminMapping.viewerKindToGql(source#kind)),
+            roles = (_context, source) -> Ok(source#roles |> List.map(AdminMapping.roleToGql))
+            | GeneratedAdmin.viewerDefaults()
+        }
+
+}
+
 mod OrganizationResolvers {
 
     /// type Organization のリゾルバ一式

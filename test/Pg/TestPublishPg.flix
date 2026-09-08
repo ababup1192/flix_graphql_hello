@@ -52,6 +52,21 @@ mod TestPublishPg {
             (Stage.Draft, true),
             List#{(3, VersionReason.Publish, "tester"), (2, VersionReason.Publish, "tester")}))), result)
 
+    /// 公開中と同じ中身に戻すと CHANGED は消える（判定は下書きと公開中の中身の等値で、書いた時刻ではない）。
+    ///
+    ///   create(Hello/hello) → publish → update(title: Edited) → CHANGED → update(title: Hello) → PUBLISHED
+    @Test
+    def testPgRevertToPublishedContentClearsChanged(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"c1"}, () -> {
+            let blogs = blogsForPublish();
+            let created = ContentEntries.create(blogs, None, titled("Hello", "hello"));
+            let published = ContentEntries.publish(created#id, "tester", false);
+            let edited = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("Edited"))}), published#version);
+            let reverted = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Json.JString("Hello"))}), edited#version);
+            ((edited#stage, edited#changedSincePublish), (reverted#stage, reverted#changedSincePublish))
+        }));
+        Assert.assertEq(expected = Ok(Ok(((Stage.Published, true), (Stage.Published, false)))), result)
+
     /// unique は公開中の値と照らす。同じ slug の 2 件目は invalid、取り下げれば通る。自分の再公開は通る。
     @Test
     def testPgPublishUnique(): Unit \ {IO, Assert} =

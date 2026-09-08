@@ -37,7 +37,7 @@ query upsertContent(entryId: String, stage: String, data: Json) -> exec {
 // stage の行を読む。where は断片 DSL のスロットで、JSONB の式（c.data->>'title'）を EntryFilterSql が組む
 
 query findEntryByStage(id: String, stage: String, projectId: Int64) -> one {
-    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at
+    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, p.data AS published_data
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = :stage
     LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'
@@ -47,7 +47,7 @@ query findEntryByStage(id: String, stage: String, projectId: Int64) -> one {
 query listEntriesByStage(typeId: Int64, stage: String, limit: Int64, offset: Int64, projectId: Int64) -> many
     with filter: Pred[entry_contents], order: Order[entry_contents]
 {
-    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at
+    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, p.data AS published_data
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = :stage
     LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'
@@ -116,7 +116,7 @@ query findVersion(id: Int64, projectId: Int64) -> one {
 // ---- 参照 ----
 
 query findEntriesByStage(ids: List[String], stage: String, projectId: Int64) -> many {
-    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, c.updated_at AS content_updated_at, p.updated_at AS published_updated_at
+    SELECT e.id, e.type_id, e.version, e.stage, e.published_at, e.created_at, e.updated_at, c.data, p.data AS published_data
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = :stage
     LEFT JOIN entry_contents AS p ON p.entry_id = e.id AND p.stage = 'published'
