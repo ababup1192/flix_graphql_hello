@@ -51,19 +51,62 @@ MCP の tools/call は毎回 **2 行**（`mcp tools/call` と `request`。同じ
 | 手 | 予約公開（過去の時刻） | `job done`、info、`job.kind: schedule`、`job.id`（ULID）、`id`（entry）、`detail: publish e01619631a48` | 妥当。**`project` が無い** |
 | 手 | Webhook（受け手が落ちている） | `job retry`、warn、`job.kind: webhook`、`http.response.status_code: 0`、`detail: HTTP 0 IoError(ConnectionFailed, java.net.ConnectException)` | severity は妥当。**`project` も webhook の id も無い**ので、どの受け手が落ちているか行から分からない。`status_code: 0` は「繋がらなかった」の印としては読みにくい |
 
-### 行の実例
+## ログの種類ごとの代表の行
+
+生ログ（server.log）から message ごとに 1 行ずつ。属性の差が意味を持つ物（request の 4xx など）は形ごとに出す。
+
+### 起動と停止
 
 ```json
-{"time":"2026-09-08T03:40:13.373Z","severity":"info","message":"mcp tools/call","credential.kind":"api-key","duration_ms":29,"http.request.method":"POST","id":"32778237421c","mcp.outcome":"error","mcp.tool":"publish","request.id":"01M1ZHM7N013G9DMDQ1B5C2GX5","service":"cms","url.path":"/mcp","version":"dev"}
+{"time":"2026-09-08T03:39:15.846Z","severity":"warn","message":"db: CMS_DB_APP_PASSWORD が無いので所有者で繋ぐ（RLS は効くがロール分離は無い）","db.user":"cms","service":"cms","version":"dev"}
+{"time":"2026-09-08T03:39:16.311Z","severity":"info","message":"listening","server.address":"127.0.0.1","server.port":8080,"service":"cms","version":"dev"}
+{"time":"2026-09-08T04:01:20.872Z","severity":"info","message":"jobs drained","service":"cms","version":"dev"}
+```
+
+### request（1 リクエスト 1 行）
+
+```json
+// 管理 API の 200。operation.name は名前付きの操作だけ、credential.kind は jwt / api-key / pat / preview
+{"time":"2026-09-08T03:56:41.498Z","severity":"info","message":"request","credential.kind":"jwt","duration_ms":10,"graphql.operation.name":"NoType","graphql.operation.type":"query","http.request.body.size":64,"http.request.method":"POST","http.response.body.size":29,"http.response.status_code":200,"project":"default","request.id":"trial-notfound-001","service":"cms","url.path":"/admin/graphql","version":"dev"}
+// 業務エラー（200 + graphql.error_codes）
 {"time":"2026-09-08T03:40:13.373Z","severity":"info","message":"request","credential.kind":"api-key","duration_ms":29,"graphql.error_codes":["INVALID"],"graphql.operation.type":"mutation","http.request.body.size":194,"http.request.method":"POST","http.response.body.size":405,"http.response.status_code":200,"project":"default","request.id":"01M1ZHM7N013G9DMDQ1B5C2GX5","service":"cms","url.path":"/mcp","version":"dev"}
-{"time":"2026-09-08T03:39:42.756Z","severity":"info","message":"request","duration_ms":0,"http.request.body.size":0,"http.request.method":"GET","http.response.body.size":48,"http.response.status_code":405,"request.id":"01M1ZHK9S3682ZGD8C4BDMKAWX","service":"cms","url.path":"/mcp","version":"dev"}
+// 知らない API キー（200 + FORBIDDEN、info。問題 1）
 {"time":"2026-09-08T03:57:03.019Z","severity":"info","message":"request","credential.kind":"api-key","duration_ms":6,"graphql.error_codes":["FORBIDDEN"],"graphql.operation.type":"query","http.request.body.size":38,"http.request.method":"POST","http.response.body.size":228,"http.response.status_code":200,"project":"default","request.id":"trial-badkey","service":"cms","url.path":"/admin/graphql","version":"dev"}
+// 死んだ PAT（200 + UNAUTHENTICATED、info。問題 1）
 {"time":"2026-09-08T03:57:27.883Z","severity":"info","message":"request","credential.kind":"pat","duration_ms":12,"graphql.error_codes":["UNAUTHENTICATED"],"graphql.operation.type":"query","http.request.body.size":38,"http.request.method":"POST","http.response.body.size":237,"http.response.status_code":200,"project":"default","request.id":"trial-deadpat","service":"cms","url.path":"/admin/graphql","version":"dev"}
+// MCP の notifications/initialized（202、本文無し）
+{"time":"2026-09-08T03:39:42.754Z","severity":"info","message":"request","credential.kind":"api-key","duration_ms":1,"http.request.body.size":54,"http.request.method":"POST","http.response.body.size":0,"http.response.status_code":202,"project":"default","request.id":"01M1ZHK9S1XDC3V7TTAAKRJPCM","service":"cms","url.path":"/mcp","version":"dev"}
+// MCP-Protocol-Version の不一致（400。理由が無い。問題 3）
+{"time":"2026-09-08T03:39:42.744Z","severity":"info","message":"request","credential.kind":"api-key","duration_ms":1,"http.request.body.size":440,"http.request.method":"POST","http.response.body.size":170,"http.response.status_code":400,"project":"default","request.id":"01M1ZHK9RQ56YHGH89KRS14Y83","service":"cms","url.path":"/mcp","version":"dev"}
+// Origin 違い（403、warn。Origin の値が無い。問題 3）
 {"time":"2026-09-08T03:56:46.786Z","severity":"warn","message":"request","credential.kind":"api-key","duration_ms":0,"http.request.body.size":40,"http.request.method":"POST","http.response.body.size":108,"http.response.status_code":403,"project":"default","request.id":"trial-origin","service":"cms","url.path":"/mcp","version":"dev"}
+// ルート表に無いパス（404。credential.kind / project はルート表の前なので無い）
+{"time":"2026-09-08T03:56:45.134Z","severity":"info","message":"request","duration_ms":0,"http.request.body.size":0,"http.request.method":"GET","http.response.body.size":48,"http.response.status_code":404,"request.id":"trial-404","service":"cms","url.path":"/nope","version":"dev"}
+// SSE 用の GET /mcp（405）
+{"time":"2026-09-08T03:39:42.756Z","severity":"info","message":"request","duration_ms":0,"http.request.body.size":0,"http.request.method":"GET","http.response.body.size":48,"http.response.status_code":405,"request.id":"01M1ZHK9S3682ZGD8C4BDMKAWX","service":"cms","url.path":"/mcp","version":"dev"}
+// 2 MB の本文（413。onServed の経路で method / path / request.id が無い。問題 6）
 {"time":"2026-09-08T03:57:24.540Z","severity":"info","message":"request","duration_ms":0,"http.request.body.size":0,"http.request.method":"-","http.response.body.size":0,"http.response.status_code":413,"service":"cms","url.path":"-","version":"dev"}
+```
+
+### mcp tools/call（request の行と同じ request.id で 2 行目）
+
+```json
+// ok。id は引数に entry id があるツールだけ
+{"time":"2026-09-08T03:39:50.394Z","severity":"info","message":"mcp tools/call","credential.kind":"api-key","duration_ms":53,"http.request.method":"POST","mcp.outcome":"ok","mcp.tool":"whoami","request.id":"01M1ZHKH65CZRR3H8FHWJCFWDJ","service":"cms","url.path":"/mcp","version":"dev"}
+// error。理由は request の行の graphql.error_codes を見る（MCP 側が作る NOT_FOUND はどちらにも無い。問題 4）
+{"time":"2026-09-08T03:40:13.373Z","severity":"info","message":"mcp tools/call","credential.kind":"api-key","duration_ms":29,"http.request.method":"POST","id":"32778237421c","mcp.outcome":"error","mcp.tool":"publish","request.id":"01M1ZHM7N013G9DMDQ1B5C2GX5","service":"cms","url.path":"/mcp","version":"dev"}
+```
+
+### job（ワーカーの 1 件 1 行）
+
+```json
+// 予約公開の done。project が無い（問題 5）
 {"time":"2026-09-08T03:58:25.713Z","severity":"info","message":"job done","detail":"publish e01619631a48","id":"e01619631a48","job.id":"01M1ZJNJ46S1M1HV7BE25Q9W6J","job.kind":"schedule","job.outcome":"done","service":"cms","version":"dev"}
+// Webhook の再試行（warn）。project と webhook の id が無く、status_code: 0 は「繋がらなかった」（問題 5・8）
 {"time":"2026-09-08T03:58:25.753Z","severity":"warn","message":"job retry","detail":"HTTP 0 IoError(ConnectionFailed, java.net.ConnectException)","http.response.status_code":0,"job.id":"01M1ZJNJDC2W2F8DQ3APC1ZNRB","job.kind":"webhook","job.outcome":"retry","service":"cms","version":"dev"}
 ```
+
+今回出なかった種類: `error` / `fatal`（DB の失敗 `field failed`、guard が受けた Throwable の `exception.*`）、`job failed`、`mcp` 以外の Route の行。
 
 ## severity は妥当か
 
