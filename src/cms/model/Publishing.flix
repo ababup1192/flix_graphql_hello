@@ -34,3 +34,30 @@ pub type alias Referrer = { entry = Entry, via = ApiId, stage = Stage }
 /// - cascades: 一緒に動く entry。公開なら先に公開される未公開の参照先（再帰的に集めた物）
 ///
 pub type alias Impact = { breaks = List[Referrer], cascades = List[Entry] }
+
+///
+/// 公開計画の 1 つの entry が計画に入った理由。
+///
+pub enum PlanReason with Eq, Order, ToString {
+    /// ids で渡された物
+    case Requested
+    /// withDependencies で足した未公開の参照先
+    case Dependency
+}
+
+///
+/// 公開計画の 1 手。
+///
+/// - entry: 公開する entry（下書きの中身）
+/// - reason: 計画に入った理由
+/// - report: その entry だけの dry-run
+///
+pub type alias PublishPlanStep = { entry = Entry, reason = PlanReason, report = PublishReport }
+
+///
+/// 公開計画（dry-run）。steps の順に publishMany が公開する。
+///
+/// - steps: 依存が先の順
+/// - violations: 計画そのものの違反。参照の循環と、計画の外の未公開の参照先（withDependencies: false の時）。steps の report の違反は含まない
+///
+pub type alias PublishPlan = { steps = List[PublishPlanStep], violations = List[Violation] }

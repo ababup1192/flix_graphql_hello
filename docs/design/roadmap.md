@@ -41,7 +41,7 @@ HTTP サーバの同時接続の上限（`CMS_MAX_CONNECTIONS`。超えたら 50
 
 | # | 機能 | 誰に | 時間 | 中身 |
 |---|---|---|---|---|
-| 11 | 公開計画（まとめて dry-run、一括公開の `plan`） | 編集者 | 半日 | 複数件の `publishReport` と依存順。**microCMS には無い** |
+| 11 | 公開計画（まとめて dry-run、一括公開。2026-09-08 に実装済み） | 編集者 | 済み | `publishPlan(ids, withDependencies)` が entry ごとの `publishReport` を参照先が先の順（`steps`。REQUESTED / DEPENDENCY）に並べ、`publishMany(ids, withDependencies)` が同じ順で 1 つの mutation（1 つの Tx）で全部公開する。1 つでも通らなければ何も公開せず INVALID（path は `b1.fields.title` のように entry id 付き）。順は純粋な `PublishOrder`（深さ優先の後順。循環と、`withDependencies: false` の計画の外の参照先は計画の違反）。**microCMS には無い** |
 | 12 | 公開の巻き戻し（`revertPublish`）と時点指定の読み出し（`at`） | 編集者・監査 | 1.5 日 | 版から 1 Tx で戻す。コンテンツ API に `at` を足す。**microCMS には無い** |
 | 13 | 型の export / apply | 開発者 | 半日 | SDL に寄せた書式で往復。差分の計画、削除の保護、`@renamedFrom` |
 | 14 | codegen の手順と CI の雛形 | 開発者 | 1 日 | elm-graphql / graphql-codegen に委ねる。Webhook で PR を開く |

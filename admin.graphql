@@ -19,6 +19,9 @@ type Query {
   publishCheck(id: ID!): PublishReport!
   """操作の影響。取り下げ・削除で壊れる参照元と、公開で一緒に動く参照先"""
   impact(id: ID!, action: ImpactAction!): Impact!
+  """複数の entry をまとめて dry-run し、公開する順（参照先が先）を返す。書き込まない。
+  withDependencies なら未公開の参照先も計画に入る（reason: DEPENDENCY）。ok なら publishMany は同じ順で通る"""
+  publishPlan(ids: [ID!]!, withDependencies: Boolean = true): PublishPlan!
   """今の身元（API キー / PAT / ログイン）と、できる事。何者としてこの API を叩いているかを確かめる"""
   viewer: Viewer!
 
@@ -74,6 +77,32 @@ enum ContentStage {
   PUBLISHED
 }
 
+"""公開計画の entry が計画に入った理由"""
+enum PlanReason {
+  """ids で渡した物"""
+  REQUESTED
+  """withDependencies で足した未公開の参照先"""
+  DEPENDENCY
+}
+
+"""公開計画の 1 手"""
+type PublishPlanStep {
+  entry: Entry!
+  reason: PlanReason!
+  """この entry だけの dry-run"""
+  report: PublishReport!
+}
+
+"""公開計画（dry-run）。steps の順に publishMany が公開する"""
+type PublishPlan {
+  """steps の report が全部 ok で、violations も空"""
+  ok: Boolean!
+  """公開する順。参照先が先"""
+  steps: [PublishPlanStep!]!
+  """計画そのものの違反。参照の循環と、withDependencies: false の時の計画の外の未公開の参照先。steps の report の違反は含まない"""
+  violations: [Violation!]!
+}
+
 """操作の影響"""
 type Impact {
   """壊れる（参照先を失う）entry。取り下げ・削除の前に見せる"""
@@ -103,6 +132,9 @@ type Mutation {
   """下書きを公開する。required と unique と参照先の公開はここで検査する。公開中なら公開側を下書きで上書きする。
   withDependencies なら未公開の参照先を先に公開する"""
   publishEntry(id: ID!, withDependencies: Boolean = false): Entry!
+  """publishPlan と同じ計画を作り、ok ならその順で 1 つの Tx で全部公開する。1 つでも通らなければ何も公開せず INVALID
+  （violations の path は "b1.fields.title" のように entry id が頭に付く）。返すのは公開した順の entry"""
+  publishMany(ids: [ID!]!, withDependencies: Boolean = true): [Entry!]!
   """公開を取り下げる。下書きは残る"""
   unpublishEntry(id: ID!): Entry!
   """今の下書きをバージョンとして残す"""

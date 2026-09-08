@@ -50,6 +50,14 @@ mod AdminMutationResolvers {
     pub def publishEntry(): GeneratedAdmin.MutationPublishEntryResolver[AdminEff] =
         (_context, id, withDependencies) -> Ok(ContentEntries.publish(AdminMapping.entryId("id", id), Session.displayName(), withDependencies |> Option.getWithDefault(false)))
 
+    /// Mutation.publishMany。withDependencies の既定は true
+    pub def publishMany(): GeneratedAdmin.MutationPublishManyResolver[AdminEff] =
+        (_context, ids, withDependencies) -> Ok(publishManyAs(ids |> List.map(AdminMapping.entryId("ids")), withDependencies |> Option.getWithDefault(true)))
+
+    /// 今の主体の名前で一括公開する。ラムダの中で effect を使わないための切り出し（VerifyError）。
+    def publishManyAs(ids: List[EntryId], withDependencies: Bool): List[Entry] \ Db + CmsErr + IdGen + Tenant + Session =
+        ContentEntries.publishMany(ids, Session.displayName(), withDependencies)
+
     /// Mutation.unpublishEntry
     pub def unpublishEntry(): GeneratedAdmin.MutationUnpublishEntryResolver[AdminEff] =
         (_context, id) -> Ok(ContentEntries.unpublish(AdminMapping.entryId("id", id)))
@@ -161,6 +169,7 @@ mod AdminMutationResolvers {
             updateEntry       = updateEntry(),
             deleteEntry       = deleteEntry(),
             publishEntry      = publishEntry(),
+            publishMany       = publishMany(),
             unpublishEntry    = unpublishEntry(),
             saveVersion       = saveVersion(),
             restoreVersion    = restoreVersion(),

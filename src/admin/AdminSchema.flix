@@ -30,6 +30,8 @@ mod AdminSchema {
             upload       = UploadResolvers.resolvers(),
             violation     = ViolationResolvers.resolvers(),
             publishReport = PublishReportResolvers.resolvers(),
+            publishPlanStep = PublishPlanStepResolvers.resolvers(),
+            publishPlan   = PublishPlanResolvers.resolvers(),
             referrer      = ReferrerResolvers.resolvers(),
             impact        = ImpactResolvers.resolvers(),
             entry        = EntryResolvers.resolvers(),
