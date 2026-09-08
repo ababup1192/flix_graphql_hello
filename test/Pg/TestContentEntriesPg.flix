@@ -40,7 +40,7 @@ mod TestContentEntriesPg {
             let blogs = blogsWithFields();
             let created = ContentEntries.create(Session.grant(), blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("v1"))}));
             discard ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("title", Json.JString("v2"))}), 1);
-            let stale = CmsErr.runWithResult(() -> ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("title", Json.JString("v3"))}), 1));
+            let stale = CmsTestKit.runWithResult(() -> ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("title", Json.JString("v3"))}), 1));
             (stale |> Result.map(entry -> entry#version), ContentEntries.get(Session.grant(), created#id) |> (entry -> Map.get(CmsTestKit.apiId("title"), entry#data)))
         }));
         Assert.assertEq(expected = Ok(Ok((Err(CmsFailure.Conflict(Entity.Entry, "c1", 1, 2)), Some(Json.JString("v2"))))), result)

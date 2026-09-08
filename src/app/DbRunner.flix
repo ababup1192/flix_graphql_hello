@@ -21,7 +21,7 @@ mod DbRunner {
     /// JVM の例外の網は sqlfx の `Db.guard`（fatal は再送出、それ以外は DbErr.other）。ここでは置く位置だけを決める。
     ///
     /// WhyNot: sqlfx の withLazyTx が最内側で catch する事に任せないのは、その catch の内側に `run … with handler`
-    /// （CmsErr.runWithResult / Session.runWith）が入ると、その中で飛んだ例外が catch を素通りするため（2026-09-08 に 0.3.1 と
+    /// （runCmsErr / Session.runWith）が入ると、その中で飛んだ例外が catch を素通りするため（2026-09-08 に 0.3.1 と
     /// 0.4.0 の両方で実測。effect の操作を外の handler へ投げるだけなら catch は効く）。一番内側の handler の直下に置く必要があるので、
     /// transact は CmsErr → Session → SQL の数え → Db.guard(f) の順に入れ、f を直に包む。Session の handler はここだけ。
     ///
@@ -91,11 +91,28 @@ mod DbRunner {
         // retry → RLS の印付き Tx → 業務エラー → Session → SQL の数え → JVM の例外の catch（Db.guard）→ 本体、の順に包む
         let outcome = retryWith(counter, () ->
             TenantTx.withLazyTxResult(pool, scope, actor, () ->
-                CmsErr.runWithResult(() -> Session.runWith(actor, () -> counting(statements, () -> Db.guard(thunk))))));
+                runCmsErr(() -> Session.runWith(actor, () -> counting(statements, () -> Db.guard(thunk))))));
         // 再試行の回数と SQL の数をリクエストの行に
         noteRetries(observe, Ref.get(counter));
         noteStatements(observe, Ref.get(statements));
         toApplicationResult(outcome)
+
+    ///
+    /// 業務エラー（CmsErr）を Result に落とす。Tx の境界（transact / transactShared）だけが呼ぶ。
+    ///
+    /// WhyNot: pub にしない（CmsErr.runWithResult として外に出さない）のは、ユースケースの途中で呼ばれると業務エラーが Tx の中で
+    /// 値に潰れ、ROLLBACK も errors[] への写しも起きないため。private なので呼べる場所が型検査で決まり、名前の一覧（allowlist）で見張る必要が無い。
+    ///
+    def runCmsErr(thunk: Unit -> a \ ef): Result[CmsErr.CmsFailure, a] \ ef - CmsErr =
+        run {
+            Ok(thunk())
+        } with handler CmsErr {
+            def notFound(entity, id, _resume) = Err(CmsErr.CmsFailure.NotFound(entity, id))
+            def invalid(violations, _resume) = Err(CmsErr.CmsFailure.Invalid(violations))
+            def conflict(entity, id, expectedVersion, currentVersion, _resume) = Err(CmsErr.CmsFailure.Conflict(entity, id, expectedVersion, currentVersion))
+            def forbidden(permission, _resume) = Err(CmsErr.CmsFailure.Forbidden(permission))
+            def requiresLogin(requirement, _resume) = Err(CmsErr.CmsFailure.RequiresLogin(requirement))
+        }
 
     ///
     /// Tx の結果を ApplicationFailure に寄せる。DB の失敗は Infrastructure、業務エラーは Domain、成功はそのまま。
@@ -110,7 +127,7 @@ mod DbRunner {
     /// SQL の数を数え、外側の handler（withLazyTx の接続）へそのまま転送する。fetch / execute / executeReturning を 1 と数える。
     ///
     /// WhyNot: Db.guard の外に置くのは、一番内側の handler の直下に try を置く決まりのため（handler が try の内側に入ると例外が素通りする）。
-    /// CmsErr.runWithResult の内側に置くのは、業務エラーで抜けた後も数えた値を Ref から読めるため。
+    /// runCmsErr の内側に置くのは、業務エラーで抜けた後も数えた値を Ref から読めるため。
     ///
     def counting(counter: Ref[Int32, Static], thunk: Unit -> a \ ef): a \ ef + {SqlRead, SqlWrite, IO} =
         run {
@@ -270,7 +287,7 @@ mod DbRunner {
                 let statements = Ref.fresh(Static, 0);
                 let outcome = DbError.runWithFailure(() ->
                     onRequestTx(handle, () ->
-                        CmsErr.runWithResult(() -> Session.runWith(actor, () -> counting(statements, () -> Db.guard(thunk))))));
+                        runCmsErr(() -> Session.runWith(actor, () -> counting(statements, () -> Db.guard(thunk))))));
                 Ref.put(RequestTx.afterField(Ref.get(handle#state), outcome), handle#state);
                 observe(Log.Fields.empty() |> Log.Fields.int("db.statements", Int32.toInt64(Ref.get(statements))));
                 RequestTx.Attempt.Ran(toApplicationResult(outcome))

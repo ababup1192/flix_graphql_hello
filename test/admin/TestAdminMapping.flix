@@ -11,8 +11,8 @@ mod TestAdminMapping {
             AdminMapping.fieldId("id", AdminMapping.idOfField(FieldId.FieldId(7i64))),
             AdminMapping.versionId("id", AdminMapping.idOfVersion(VersionId.VersionId(9i64))));
         Assert.assertEq(expected = (Ok((TypeId.TypeId(42i64), FieldId.FieldId(7i64), VersionId.VersionId(9i64))), List#{"id"}),
-            (CmsErr.runWithResult(roundTrip),
-             CmsTestKit.failurePaths(CmsErr.runWithResult(() -> AdminMapping.typeId("id", Id.Id("TypeId(1)"))))))
+            (CmsTestKit.runWithResult(roundTrip),
+             CmsTestKit.failurePaths(CmsTestKit.runWithResult(() -> AdminMapping.typeId("id", Id.Id("TypeId(1)"))))))
 
     /// FieldKind と TypeKind は GraphQL の enum と全 case で往復する。
     @Test

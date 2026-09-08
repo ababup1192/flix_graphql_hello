@@ -4,6 +4,20 @@
 mod CmsTestKit {
 
     ///
+    /// 業務エラー（CmsErr）を Result に落とす。テストは自分で境界を作るのが仕事なので、本番の境界（DbRunner の private）と同じ handler をここに持つ。
+    ///
+    pub def runWithResult(thunk: Unit -> a \ ef): Result[CmsErr.CmsFailure, a] \ ef - CmsErr =
+        run {
+            Ok(thunk())
+        } with handler CmsErr {
+            def notFound(entity, id, _resume) = Err(CmsErr.CmsFailure.NotFound(entity, id))
+            def invalid(violations, _resume) = Err(CmsErr.CmsFailure.Invalid(violations))
+            def conflict(entity, id, expectedVersion, currentVersion, _resume) = Err(CmsErr.CmsFailure.Conflict(entity, id, expectedVersion, currentVersion))
+            def forbidden(permission, _resume) = Err(CmsErr.CmsFailure.Forbidden(permission))
+            def requiresLogin(requirement, _resume) = Err(CmsErr.CmsFailure.RequiresLogin(requirement))
+        }
+
+    ///
     /// 規則に合う綴りだけ渡す。合わなければテストの誤りなので止める。
     ///
     pub def apiId(text: String): ApiId = match ApiId.parse(text) {
@@ -128,7 +142,7 @@ mod CmsTestKit {
     /// 業務エラーを文言にし、成功側は pick で見る。
     ///
     pub def messageOr(pick: a -> b, thunk: Unit -> a \ ef): Result[String, b] \ ef - CmsErr =
-        CmsErr.runWithResult(thunk) |> Result.map(pick) |> Result.mapErr(CmsErr.toMessage)
+        CmsTestKit.runWithResult(thunk) |> Result.map(pick) |> Result.mapErr(CmsErr.toMessage)
 
     ///
     /// GraphQL の Value を比べる。違えば、両方を整形した JSON の行差分（`- 期待` / `+ 実際`）だけを文面にする。

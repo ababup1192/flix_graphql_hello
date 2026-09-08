@@ -1,3 +1,0 @@
-# CmsErr.runWithResult を呼んで良いファイル（Tx の境界）。scripts/check-cmserr.sh が突き合わせる
-# DbRunner.transact: Runner / 仕事 / エンジンの組み直し / テストの mutate が通る Tx の入口
-src/app/DbRunner.flix

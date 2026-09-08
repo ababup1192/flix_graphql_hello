@@ -69,6 +69,10 @@ mod CmsErr {
     ///
     /// CmsErr を 1 層の値にした形。境界で使う。
     ///
+    /// WhyNot: CmsErr を Result に落とす handler（runWithResult）をここに置かないのは、ユースケースの途中で呼ばれると業務エラーが
+    /// Tx の中で値に潰れ、ROLLBACK も errors[] への写しも起きないため。書く場所は Tx の境界（DbRunner の private）と、
+    /// 自分で境界を作るテスト（CmsTestKit.runWithResult）だけ。
+    ///
     pub enum CmsFailure with Eq, Order, ToString {
         case NotFound(Entity, String)
         case Invalid(List[Violation])
@@ -76,20 +80,6 @@ mod CmsErr {
         case Forbidden(Permission)
         case RequiresLogin(LoginRequirement)
     }
-
-    ///
-    /// CmsErr を Result に落とす。
-    ///
-    pub def runWithResult(thunk: Unit -> a \ ef): Result[CmsFailure, a] \ ef - CmsErr =
-        run {
-            Ok(thunk())
-        } with handler CmsErr {
-            def notFound(entity, id, _resume) = Err(CmsFailure.NotFound(entity, id))
-            def invalid(violations, _resume) = Err(CmsFailure.Invalid(violations))
-            def conflict(entity, id, expectedVersion, currentVersion, _resume) = Err(CmsFailure.Conflict(entity, id, expectedVersion, currentVersion))
-            def forbidden(permission, _resume) = Err(CmsFailure.Forbidden(permission))
-            def requiresLogin(requirement, _resume) = Err(CmsFailure.RequiresLogin(requirement))
-        }
 
     ///
     /// 人が読むメッセージ。GraphQL の errors[].message に出す。

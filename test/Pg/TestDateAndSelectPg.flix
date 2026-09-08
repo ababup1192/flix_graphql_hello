@@ -73,8 +73,8 @@ mod TestDateAndSelectPg {
             let events = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("events", "イベント"));
             discard ContentTypes.addField(Session.grant(), events#id, CmsTestKit.fieldDraft("heldOn", FieldKind.Date, FieldConfig.empty()));
             discard ContentTypes.addField(Session.grant(), events#id, { many = true | CmsTestKit.fieldDraft("topics", FieldKind.Select, { options = List#{"NEWS"} | FieldConfig.empty() }) });
-            let badDate = CmsTestKit.failurePaths(CmsErr.runWithResult(() -> ContentEntries.create(Session.grant(), events#id, None, CmsTestKit.entryData(List#{("heldOn", Json.JString("someday"))}))));
-            let badTopic = CmsTestKit.failurePaths(CmsErr.runWithResult(() -> ContentEntries.create(Session.grant(), events#id, None, CmsTestKit.entryData(List#{("topics", Json.JArray(Vector#{Json.JString("SPORTS")}))}))));
+            let badDate = CmsTestKit.failurePaths(CmsTestKit.runWithResult(() -> ContentEntries.create(Session.grant(), events#id, None, CmsTestKit.entryData(List#{("heldOn", Json.JString("someday"))}))));
+            let badTopic = CmsTestKit.failurePaths(CmsTestKit.runWithResult(() -> ContentEntries.create(Session.grant(), events#id, None, CmsTestKit.entryData(List#{("topics", Json.JArray(Vector#{Json.JString("SPORTS")}))}))));
             let saved = ContentEntries.create(Session.grant(), events#id, None, CmsTestKit.entryData(List#{("heldOn", Json.JString("2026-09-08"))}));
             (badDate, badTopic, Map.get(CmsTestKit.apiId("heldOn"), saved#data))
         });

@@ -48,7 +48,7 @@ mod TestContentTypesPg {
             let blogs = ContentTypes.create(Session.grant(), blogsDraft());
             discard ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("tags", "タグ"));
             let renamed = ContentTypes.update(Session.grant(), blogs#id, { name = Some("ブログ記事"), singular = None, plural = None, previewUrl = None });
-            let collision = CmsErr.runWithResult(() -> ContentTypes.update(Session.grant(), blogs#id, { name = None, singular = Some(CmsTestKit.typeName("Tag")), plural = None, previewUrl = None }));
+            let collision = CmsTestKit.runWithResult(() -> ContentTypes.update(Session.grant(), blogs#id, { name = None, singular = Some(CmsTestKit.typeName("Tag")), plural = None, previewUrl = None }));
             (renamed#name, TypeName.text(renamed#singular), collision |> Result.map(found -> TypeName.text(found#singular)))
         });
         Assert.assertEq(expected = Ok(Ok(("ブログ記事", "Blog", Err(CmsFailure.Invalid(List#{Violation.Violation("singular", "'Tag' は既に他の型が使っています")}))))), result)

@@ -44,7 +44,7 @@ mod PgTestSupport {
         DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(config(), _ -> {
             resetSchema();
             TenantTx.stampConnection(ProjectId.default());
-            CmsErr.runWithResult(() -> Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() -> withStorage(body)))))
+            CmsTestKit.runWithResult(() -> Tenant.runWith(ProjectId.default(), () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() -> withStorage(body)))))
         })))
 
     ///

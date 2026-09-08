@@ -48,7 +48,7 @@ mod TestNestedPg {
             let ids = top |> List.map(field -> field#id);
             let childId = FieldTree.flatten(top) |> List.find(field -> ApiId.text(field#apiId) == "headline") |> Option.map(field -> field#id);
             let reordered = ContentTypes.reorderFields(Session.grant(), pages, List.reverse(ids)) |> (owner -> owner#fields |> List.map(field -> ApiId.text(field#apiId)));
-            let mixed = CmsTestKit.failurePaths(CmsErr.runWithResult(() -> ContentTypes.reorderFields(Session.grant(), pages, List.reverse(ids) |> List.drop(1) |> (rest -> Option.toList(childId) ::: rest))));
+            let mixed = CmsTestKit.failurePaths(CmsTestKit.runWithResult(() -> ContentTypes.reorderFields(Session.grant(), pages, List.reverse(ids) |> List.drop(1) |> (rest -> Option.toList(childId) ::: rest))));
             (reordered, mixed)
         });
         Assert.assertEq(expected = Ok(Ok((List#{"sections", "related", "title"}, List#{"ids"}))), result)

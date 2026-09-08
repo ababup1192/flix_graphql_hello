@@ -12,7 +12,7 @@ mod TestGranted {
     /// 印の型は make の側で `Session.grant() : Granted[…]` と決める。
     ///
     def tryGrant(actor: Actor, make: Unit -> Granted[p] \ Session + CmsErr): Result[CmsFailure, Permission] with Perm[p] =
-        Session.runWith(actor, () -> CmsErr.runWithResult(make)) |> Result.map(Perm.permission)
+        Session.runWith(actor, () -> CmsTestKit.runWithResult(make)) |> Result.map(Perm.permission)
 
     /// 印の型 → Permission の表。System は全部できるので、8 つの印の証明を作って Permission に戻すと Permission.all() と同じ並びになる。
     @Test
@@ -77,7 +77,7 @@ mod TestGranted {
     /// ログインの JWT で来た本人の証明。ログインの JWT とサーバ自身は通り、PAT（write でも）と鍵は requiresLogin。
     @Test
     def testGrantInteractive(): Unit \ Assert =
-        let attempt = actor -> Session.runWith(actor, () -> CmsErr.runWithResult(() -> discard Session.grantInteractive()));
+        let attempt = actor -> Session.runWith(actor, () -> CmsTestKit.runWithResult(() -> discard Session.grantInteractive()));
         let notInteractive = Err(CmsFailure.RequiresLogin(LoginRequirement.Interactive));
         Assert.assertEq(
             expected = List#{Ok(()), Ok(()), notInteractive, notInteractive},

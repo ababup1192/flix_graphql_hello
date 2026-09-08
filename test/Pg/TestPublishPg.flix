@@ -93,7 +93,7 @@ mod TestPublishPg {
             let saved = ContentEntries.saveVersion(Session.grant(), created#id, "tester");
             let edited = ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("title", Json.JString("New"))}), created#version);
             let restored = ContentEntries.restoreVersion(Session.grant(), created#id, saved#id, edited#version);
-            let foreign = CmsErr.runWithResult(() -> ContentEntries.restoreVersion(Session.grant(), other#id, saved#id, other#version)) |> Result.map(entry -> entry#version);
+            let foreign = CmsTestKit.runWithResult(() -> ContentEntries.restoreVersion(Session.grant(), other#id, saved#id, other#version)) |> Result.map(entry -> entry#version);
             (saved#reason, Map.get(CmsTestKit.apiId("title"), edited#data), Map.get(CmsTestKit.apiId("title"), restored#data), restored#version, foreign)
         }));
         Assert.assertEq(expected = Ok(Ok((VersionReason.Save, Some(Json.JString("New")), Some(Json.JString("Old")), 3, Err(CmsFailure.NotFound(Entity.Version, "1"))))), result)
@@ -136,7 +136,7 @@ mod TestPublishPg {
             discard ContentEntries.restoreVersion(Session.grant(), created#id, first#id, edited#version);
             let between = ContentEntries.diff(Session.grant(), created#id, VersionRef.Version(first#id), VersionRef.Version(second#id));
             let restored = ContentEntries.diff(Session.grant(), created#id, VersionRef.Version(first#id), VersionRef.Draft);
-            let foreign = CmsErr.runWithResult(() -> ContentEntries.diff(Session.grant(), other#id, VersionRef.Version(first#id), VersionRef.Draft));
+            let foreign = CmsTestKit.runWithResult(() -> ContentEntries.diff(Session.grant(), other#id, VersionRef.Version(first#id), VersionRef.Draft));
             (between, restored, foreign)
         }));
         Assert.assertEq(expected = Ok(Ok((

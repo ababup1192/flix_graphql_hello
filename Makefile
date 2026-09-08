@@ -17,7 +17,6 @@ import-microcms:
 check:
 	bin/flix check
 	cd schemagen && ../bin/flix check
-	scripts/check-cmserr.sh
 	scripts/check-tx.sh
 	scripts/check-log-keys.sh
 
