@@ -23,6 +23,14 @@ query listAssets(projectId: Int64, limit: Int64, offset: Int64) -> many {
     LIMIT :limit OFFSET :offset
 }
 
+// cursor の続き。作成が新しい順なので (created_at, id) がその位置より前（古い）の物
+query listAssetsAfter(projectId: Int64, createdAt: Timestamp, id: String, limit: Int64) -> many {
+    SELECT id, key, file_name, mime, size, width, height, alt, status, created_at
+    FROM assets WHERE project_id = :projectId AND (created_at, id) < (:createdAt, :id)
+    ORDER BY created_at DESC, id DESC
+    LIMIT :limit
+}
+
 query countAssets(projectId: Int64) -> one {
     SELECT count(*)::bigint AS total FROM assets WHERE project_id = :projectId
 }

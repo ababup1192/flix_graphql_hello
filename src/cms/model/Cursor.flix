@@ -57,6 +57,14 @@ mod Cursor {
     /// asset の一覧の並び順（ofAsset と対）。
     pub def assetOrderBy(): OrderBy = (SortKey.ByCreatedAt, Direction.Desc) :: Nil
 
+    ///
+    /// asset の cursor の位置（作成時刻と id）。assetOrderBy で復号した物から取る。形が違えば None。
+    ///
+    pub def assetPosition(cursor: Cursor): Option[(Timestamp.Timestamp, AssetId)] = match keys(cursor) {
+        case (SortKey.ByCreatedAt, Direction.Desc, CursorValue.Micros(micros)) :: Nil => AssetId.parse(id(cursor)) |> Option.map(assetId -> (Timestamp.fromEpochMicros(micros), assetId))
+        case _ => None
+    }
+
     /// 並び順のキー 1 つの値を entry から取り出す。
     def valueOf(fields: List[FieldDef], key: SortKey, entry: Entry): CursorValue = match key {
         case SortKey.ById           => CursorValue.Text(EntryId.text(entry#id))

@@ -7,7 +7,7 @@ mod AssetsQueries {
     ///
     /// 生成元 assets.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 756252068
+    pub def sourceHash(): Int32 = -1741522449
 
     ///
     /// insertAsset: INSERT INTO assets (id, project_id, key, file_name, mime, size, status) VALUES ($1, $2, $3, $4, $5, $6, 'pending')
@@ -97,6 +97,33 @@ mod AssetsQueries {
         let sql = "SELECT id, key, file_name, mime, size, width, height, alt, status, created_at\n    FROM assets WHERE project_id = $1\n    ORDER BY created_at DESC, id DESC\n    LIMIT $2 OFFSET $3";
         let params = List#{SqlValue.Int64(args#projectId), SqlValue.Int64(args#limit), SqlValue.Int64(args#offset)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listAssetsDecoder(), sql, params))
+
+    ///
+    /// listAssetsAfter の 1 行。
+    ///
+    pub type alias ListAssetsAfterRow = { id = String, key = String, fileName = String, mime = String, size = Int64, width = Int32, height = Int32, alt = String, status = String, createdAt = Timestamp.Timestamp }
+
+    def listAssetsAfterDecoder(): Decoder[ListAssetsAfterRow] =
+        forA (
+            id <- Decoder.str("id");
+            key <- Decoder.str("key");
+            fileName <- Decoder.str("file_name");
+            mime <- Decoder.str("mime");
+            size <- Decoder.int64("size");
+            width <- Decoder.int32("width");
+            height <- Decoder.int32("height");
+            alt <- Decoder.str("alt");
+            status <- Decoder.str("status");
+            createdAt <- Decoder.timestamp("created_at")
+        ) yield { id = id, key = key, fileName = fileName, mime = mime, size = size, width = width, height = height, alt = alt, status = status, createdAt = createdAt }
+
+    ///
+    /// listAssetsAfter: SELECT id, key, file_name, mime, size, width, height, alt, status, created_at FROM assets WHERE project_id = $1 AND (created_at, id) < ($2, $3) ORDER BY created_at DESC, id DESC LIMIT $4
+    ///
+    pub def listAssetsAfter(args: { projectId = Int64, createdAt = Timestamp.Timestamp, id = String, limit = Int64 }): List[ListAssetsAfterRow] \ DbRead =
+        let sql = "SELECT id, key, file_name, mime, size, width, height, alt, status, created_at\n    FROM assets WHERE project_id = $1 AND (created_at, id) < ($2, $3)\n    ORDER BY created_at DESC, id DESC\n    LIMIT $4";
+        let params = List#{SqlValue.Int64(args#projectId), SqlValue.ofTimestamp(args#createdAt), SqlValue.Str(args#id), SqlValue.Int64(args#limit)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listAssetsAfterDecoder(), sql, params))
 
     ///
     /// countAssets の 1 行。

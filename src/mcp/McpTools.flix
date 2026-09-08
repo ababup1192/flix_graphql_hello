@@ -246,11 +246,12 @@ mod McpTools {
     def searchEntriesDef(): ToolDef =
         { tool = Tool.SearchEntries, description = "型の entry を検索する。更新が新しい順。RICH_TEXT の値は平文にして全文返す（長い本文はそのまま大きい）。"
                                                    ++ "stage はサーバでは絞らず、取ってきたこのページの中から DRAFT / PUBLISHED / CHANGED を残す（skip と組み合わせると 2 ページ目が 0 件になりうる。サーバ側の絞り込みは次の段で足す）。"
-                                                   ++ "totalCount は stage で絞る前の件数、count はこのページに残った件数",
+                                                   ++ "totalCount は stage で絞る前の件数、count はこのページに残った件数。next_cursor が null でなければ、それを after に渡して続きを読める",
           args = typeArg() ::
                  ArgDef.ArgDef("search", "下書きの中身に含む文字列（本文・タグの値にも当たる）", false, ArgType.Str) ::
                  ArgDef.ArgDef("first", "件数（既定 20、最大 100）", false, ArgType.Int) ::
-                 ArgDef.ArgDef("skip", "読み飛ばす件数（既定 0）", false, ArgType.Int) ::
+                 ArgDef.ArgDef("skip", "読み飛ばす件数（既定 0）。after とは同時に渡せない", false, ArgType.Int) ::
+                 ArgDef.ArgDef("after", "前の応答の next_cursor。その次から読む", false, ArgType.Str) ::
                  ArgDef.ArgDef("stage", "entry の状態で絞る（このページの中だけ）", false, ArgType.Enum(entryStages())) :: Nil,
           readOnlyHint = true, destructiveHint = false, idempotentHint = true }
 
@@ -455,9 +456,10 @@ mod McpTools {
     pub def typeRequest(apiId: String): GraphqlRequest =
         request("query McpGetType($apiId: String!) { contentType(apiId: $apiId) { ${typeSelection()} } }", Map#{ "apiId" => Value.Str(apiId) })
 
-    pub def entriesRequest(typeId: String, search: Option[String], first: Int32, skip: Int32): GraphqlRequest =
-        request("query McpSearchEntries($typeId: ID!, $search: String, $first: Int, $skip: Int) { entries(typeId: $typeId, search: $search, first: $first, skip: $skip) { totalCount nodes { ${entrySummarySelection()} fields } } }",
-            Map#{ "typeId" => Value.Str(typeId), "search" => search |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null), "first" => Value.Int(first), "skip" => Value.Int(skip) })
+    pub def entriesRequest(typeId: String, search: Option[String], first: Int32, skip: Int32, after: Option[String]): GraphqlRequest =
+        request("query McpSearchEntries($typeId: ID!, $search: String, $first: Int, $skip: Int, $after: String) { entries(typeId: $typeId, search: $search, first: $first, skip: $skip, after: $after) { totalCount pageInfo { hasNextPage endCursor } nodes { ${entrySummarySelection()} fields } } }",
+            Map#{ "typeId" => Value.Str(typeId), "search" => search |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null), "first" => Value.Int(first), "skip" => Value.Int(skip),
+                  "after" => after |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null) })
 
     /// EntryVersion の中身以外（get_entry の versions に出す物）。
     def versionSummarySelection(): String = "id version reason author createdAt"
@@ -582,21 +584,23 @@ mod McpTools {
     def getType(apiId: String, execute: GraphqlRequest -> GraphqlResponse \ ef): Result[Failure, Value] \ ef =
         ask(execute, typeRequest(apiId)) |> Result.flatMap(data -> orNotFound("ContentType", "content type", apiId, Value.field("contentType", data)))
 
-    /// search_entries。型を引いてから entries。RICH_TEXT は平文に。stage があればこのページの中から絞る。
+    /// search_entries。型を引いてから entries。RICH_TEXT は平文に。stage があればこのページの中から絞る。after は管理 API の cursor をそのまま通す。
     def searchEntries(args: Map[String, Value], execute: GraphqlRequest -> GraphqlResponse \ ef): Result[Failure, Value] \ ef =
         let first = Int32.min(100, Int32.max(1, intArg("first", 20, args)));
         let skip = Int32.max(0, intArg("skip", 0, args));
         let stage = optStrArg("stage", args);
         getType(strArg("type", args), execute) |> Result.flatMap(typeDef ->
-            ask(execute, entriesRequest(Value.field("id", typeDef) |> Value.asStr |> Option.getWithDefault(""), optStrArg("search", args), first, skip))
+            ask(execute, entriesRequest(Value.field("id", typeDef) |> Value.asStr |> Option.getWithDefault(""), optStrArg("search", args), first, skip, optStrArg("after", args)))
                 |> Result.map(data -> pageOf(fieldsOf(typeDef), stage, Value.field("entries", data))))
 
-    /// entries の応答を { totalCount, count, nodes } に。nodes は stage で絞り、fields の RICH_TEXT を平文に。
+    /// entries の応答を { totalCount, count, nodes, next_cursor } に。nodes は stage で絞り、fields の RICH_TEXT を平文に。
+    /// next_cursor は次のページがあれば endCursor、無ければ null。
     def pageOf(defs: List[Value], stage: Option[String], page: Value): Value =
         let nodes = listOf(Value.field("nodes", page))
             |> List.filter(node -> stage |> Option.forAll(wanted -> Value.field("stage", node) == Value.Str(wanted)))
             |> List.map(withFields(defs, readConverter(Format.Text)));
-        Value.Obj(Map#{ "totalCount" => Value.field("totalCount", page), "count" => Value.Int(List.length(nodes)), "nodes" => Value.List(nodes) })
+        let nextCursor = if (Value.path(List#{"pageInfo", "hasNextPage"}, page) == Value.Bool(true)) Value.path(List#{"pageInfo", "endCursor"}, page) else Value.Null;
+        Value.Obj(Map#{ "totalCount" => Value.field("totalCount", page), "count" => Value.Int(List.length(nodes)), "nodes" => Value.List(nodes), "next_cursor" => nextCursor })
 
     /// get_entry。stage が PUBLISHED なら公開時のバージョンの中身。RICH_TEXT を format で写す。versions は中身を落として付ける。
     def getEntry(args: Map[String, Value], execute: GraphqlRequest -> GraphqlResponse \ ef): Result[Failure, Value] \ ef =

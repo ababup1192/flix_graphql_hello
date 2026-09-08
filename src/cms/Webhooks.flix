@@ -47,10 +47,12 @@ mod Webhooks {
     ///
     /// 配信の記録。新しい順。
     ///
-    pub def deliveries(_proof: Granted[ManageProject], publicId: String, first: Int32): List[WebhookDelivery] \ DbRead + CmsErr + Tenant =
+    pub def deliveries(_proof: Granted[ManageProject], publicId: String, first: Int32, after: Option[String]): List[WebhookDelivery] \ DbRead + CmsErr + Tenant =
         let webhook = find(publicId);
-        WebhooksQueries.listDeliveries({ webhookId = webhook#id, projectId = Tenant.currentId(), limit = Int32.toInt64(first) })
-            |> List.map(WebhookRows.toDelivery)
+        (match after {
+            case None          => WebhooksQueries.listDeliveries({ webhookId = webhook#id, projectId = Tenant.currentId(), limit = Int32.toInt64(first) })
+            case Some(afterId) => WebhooksQueries.listDeliveriesAfter({ webhookId = webhook#id, projectId = Tenant.currentId(), afterId = afterId, limit = Int32.toInt64(first) })
+        }) |> List.map(WebhookRows.toDelivery)
 
     ///
     /// 配信をもう 1 度送る番にする。送っている最中の物は触れない。

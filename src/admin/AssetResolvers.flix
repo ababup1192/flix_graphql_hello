@@ -31,7 +31,23 @@ mod AssetPageResolvers {
     pub def resolvers(): GeneratedAdmin.AssetPageResolvers[AdminEff] =
         {
             nodes      = (_context, source) -> Ok(source#assets),
+            edges      = (_context, source) -> Ok(AssetPage.edges(source)),
+            pageInfo   = (_context, source) -> Ok(AssetPage.pageInfo(source)),
             totalCount = (_context, source) -> Ok(AdminMapping.sizeToGql(source#totalCount))
+        }
+
+}
+
+///
+/// 管理 API の type AssetEdge のリゾルバ。
+///
+mod AssetEdgeResolvers {
+
+    /// type AssetEdge のリゾルバ一式
+    pub def resolvers(): GeneratedAdmin.AssetEdgeResolvers[AdminEff] =
+        {
+            +node = (_context, source) -> Ok(source#node)
+            | GeneratedAdmin.assetEdgeDefaults()
         }
 
 }

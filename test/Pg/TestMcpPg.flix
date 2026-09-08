@@ -63,6 +63,33 @@ mod TestMcpPg {
         })
 
     ///
+    /// search_entries を first: 1 で 2 ページ辿る。1 ページ目は next_cursor を返し、それを after に渡した 2 ページ目は残りの 1 件で next_cursor は null。
+    /// after と skip を同時に渡すと INVALID。
+    ///
+    @Test
+    def testPgMcpSearchEntriesPages(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withAdminApi(() -> (), (api, _) -> {
+            seedPosts(api);
+            let engine = GraphqlTestKit.engineOrBug(api#schema);
+            let owner = PgTestSupport.ownerCredential();
+            let tool = (name, arguments) -> call(api, engine, owner, name, arguments);
+            let first = tool("create_entry", obj(List#{ ("type", Value.Str("posts")), ("fields", obj(List#{ ("title", Value.Str("one")) })) }));
+            let second = tool("create_entry", obj(List#{ ("type", Value.Str("posts")), ("fields", obj(List#{ ("title", Value.Str("two")) })) }));
+            let page1 = tool("search_entries", obj(List#{ ("type", Value.Str("posts")), ("first", Value.Int(1)) }));
+            let cursor = Value.field("next_cursor", snd(page1));
+            let page2 = tool("search_entries", obj(List#{ ("type", Value.Str("posts")), ("first", Value.Int(1)), ("after", cursor) }));
+            let both = tool("search_entries", obj(List#{ ("type", Value.Str("posts")), ("skip", Value.Int(1)), ("after", cursor) }));
+            let idsOf = page -> Value.field("nodes", snd(page)) |> listOf |> List.map(Value.field("id"));
+            (idsOf(page1), Option.nonEmpty(Value.asStr(cursor)), idsOf(page2), Value.field("next_cursor", snd(page2)),
+             fst(both), Value.field("code", snd(both)),
+             List#{ Value.field("id", snd(second)), Value.field("id", snd(first)) })
+        });
+        let (page1, hasCursor, page2, next, bothError, bothCode, created) = outcome;
+        Assert.assertEq(
+            expected = (List.take(1, created), true, List.drop(1, created), Value.Null, Value.Bool(true), Value.Str("INVALID")),
+            (page1, hasCursor, page2, next, bothError, bothCode))
+
+    ///
     /// 全ツールを owner で 1 度ずつ呼ぶ。Markdown の本文が doc に入り、markdown で戻る。
     ///
     ///   list_types → get_type → create_entry(body: Markdown) → search_entries → publish_check → impact(PUBLISH)

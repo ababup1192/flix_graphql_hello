@@ -20,7 +20,7 @@ mod TestAssetsPg {
             let beforeConfirm = CmsTestKit.failureMessage(() -> Assets.confirm(Session.grant(), upload#asset#id, { width = None, height = None, alt = None }));
             let putStatus = PgTestSupport.putTo(upload#uploadUrl, "image/png", "hello");
             let ready = Assets.confirm(Session.grant(), upload#asset#id, { width = Some(10), height = Some(20), alt = Some("写真") });
-            let listed = Assets.list(Session.grant(), 10, 0);
+            let listed = Assets.list(Session.grant(), 10, PageStart.Offset(0));
             Assets.delete(Session.grant(), upload#asset#id);
             (upload#asset#status, upload#asset#key, upload#expiresInSeconds,
              beforeConfirm, putStatus,

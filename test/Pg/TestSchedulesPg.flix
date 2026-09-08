@@ -17,7 +17,7 @@ mod TestSchedulesPg {
         discard ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(Nil))
 
     def statusOf(pool: Pool, id: String): (ScheduleStatus, String) \ IO =
-        PgTestSupport.mutateOrBug(pool, () -> Schedules.list(Session.grant(), None, 50))
+        PgTestSupport.mutateOrBug(pool, () -> Schedules.list(Session.grant(), None, 50, None))
             |> List.find(schedule -> schedule#id == id) |> Option.map(schedule -> (schedule#status, schedule#lastError)) |> Option.getWithDefault((ScheduleStatus.Cancelled, "?"))
 
     def stageOf(pool: Pool, id: String): Stage \ IO =

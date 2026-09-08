@@ -7,7 +7,7 @@ mod SchedulesQueries {
     ///
     /// 生成元 schedules.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 1032214916
+    pub def sourceHash(): Int32 = -905558366
 
     ///
     /// insertSchedule: INSERT INTO scheduled_actions (id, project_id, entry_id, action, run_at, with_dependencies, requested_by) VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -113,6 +113,60 @@ mod SchedulesQueries {
         let sql = "SELECT id, entry_id, action, run_at, with_dependencies, status, requested_by, last_error, created_at, done_at\n    FROM scheduled_actions WHERE project_id = $1 AND entry_id = $2 ORDER BY id DESC LIMIT $3";
         let params = List#{SqlValue.Int64(args#projectId), SqlValue.Str(args#entryId), SqlValue.Int64(args#limit)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listSchedulesOfEntryDecoder(), sql, params))
+
+    ///
+    /// listSchedulesAfter の 1 行。
+    ///
+    pub type alias ListSchedulesAfterRow = { id = String, entryId = String, action = String, runAt = Timestamp.Timestamp, withDependencies = Bool, status = String, requestedBy = String, lastError = String, createdAt = Timestamp.Timestamp, doneAt = Option[Timestamp.Timestamp] }
+
+    def listSchedulesAfterDecoder(): Decoder[ListSchedulesAfterRow] =
+        forA (
+            id <- Decoder.str("id");
+            entryId <- Decoder.str("entry_id");
+            action <- Decoder.str("action");
+            runAt <- Decoder.timestamp("run_at");
+            withDependencies <- Decoder.bool("with_dependencies");
+            status <- Decoder.str("status");
+            requestedBy <- Decoder.str("requested_by");
+            lastError <- Decoder.str("last_error");
+            createdAt <- Decoder.timestamp("created_at");
+            doneAt <- Decoder.opt(Decoder.timestamp("done_at"))
+        ) yield { id = id, entryId = entryId, action = action, runAt = runAt, withDependencies = withDependencies, status = status, requestedBy = requestedBy, lastError = lastError, createdAt = createdAt, doneAt = doneAt }
+
+    ///
+    /// listSchedulesAfter: SELECT id, entry_id, action, run_at, with_dependencies, status, requested_by, last_error, created_at, done_at FROM scheduled_actions WHERE project_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3
+    ///
+    pub def listSchedulesAfter(args: { projectId = Int64, afterId = String, limit = Int64 }): List[ListSchedulesAfterRow] \ DbRead =
+        let sql = "SELECT id, entry_id, action, run_at, with_dependencies, status, requested_by, last_error, created_at, done_at\n    FROM scheduled_actions WHERE project_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3";
+        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Str(args#afterId), SqlValue.Int64(args#limit)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listSchedulesAfterDecoder(), sql, params))
+
+    ///
+    /// listSchedulesOfEntryAfter の 1 行。
+    ///
+    pub type alias ListSchedulesOfEntryAfterRow = { id = String, entryId = String, action = String, runAt = Timestamp.Timestamp, withDependencies = Bool, status = String, requestedBy = String, lastError = String, createdAt = Timestamp.Timestamp, doneAt = Option[Timestamp.Timestamp] }
+
+    def listSchedulesOfEntryAfterDecoder(): Decoder[ListSchedulesOfEntryAfterRow] =
+        forA (
+            id <- Decoder.str("id");
+            entryId <- Decoder.str("entry_id");
+            action <- Decoder.str("action");
+            runAt <- Decoder.timestamp("run_at");
+            withDependencies <- Decoder.bool("with_dependencies");
+            status <- Decoder.str("status");
+            requestedBy <- Decoder.str("requested_by");
+            lastError <- Decoder.str("last_error");
+            createdAt <- Decoder.timestamp("created_at");
+            doneAt <- Decoder.opt(Decoder.timestamp("done_at"))
+        ) yield { id = id, entryId = entryId, action = action, runAt = runAt, withDependencies = withDependencies, status = status, requestedBy = requestedBy, lastError = lastError, createdAt = createdAt, doneAt = doneAt }
+
+    ///
+    /// listSchedulesOfEntryAfter: SELECT id, entry_id, action, run_at, with_dependencies, status, requested_by, last_error, created_at, done_at FROM scheduled_actions WHERE project_id = $1 AND entry_id = $2 AND id < $3 ORDER BY id DESC LIMIT $4
+    ///
+    pub def listSchedulesOfEntryAfter(args: { projectId = Int64, entryId = String, afterId = String, limit = Int64 }): List[ListSchedulesOfEntryAfterRow] \ DbRead =
+        let sql = "SELECT id, entry_id, action, run_at, with_dependencies, status, requested_by, last_error, created_at, done_at\n    FROM scheduled_actions WHERE project_id = $1 AND entry_id = $2 AND id < $3 ORDER BY id DESC LIMIT $4";
+        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Str(args#entryId), SqlValue.Str(args#afterId), SqlValue.Int64(args#limit)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listSchedulesOfEntryAfterDecoder(), sql, params))
 
     ///
     /// claimDueSchedules の 1 行。

@@ -26,15 +26,15 @@ mod TestBackgroundJobsPg {
 
     /// 配信の id。古い順。
     def deliveryIds(pool: Pool, webhookId: String): List[String] \ IO =
-        PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), webhookId, 10)) |> List.map(delivery -> delivery#id) |> List.reverse
+        PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), webhookId, 10, None)) |> List.map(delivery -> delivery#id) |> List.reverse
 
     /// 配信の (id, status, attempts)。古い順。
     def deliveryStates(pool: Pool, webhookId: String): List[(String, DeliveryStatus, Int32)] \ IO =
-        PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), webhookId, 10)) |> List.map(delivery -> (delivery#id, delivery#status, delivery#attempts)) |> List.reverse
+        PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), webhookId, 10, None)) |> List.map(delivery -> (delivery#id, delivery#status, delivery#attempts)) |> List.reverse
 
     /// 予約の id。古い順。
     def scheduleIds(pool: Pool): List[String] \ IO =
-        PgTestSupport.mutateOrBug(pool, () -> Schedules.list(Session.grant(), None, 10)) |> List.map(schedule -> schedule#id) |> List.reverse
+        PgTestSupport.mutateOrBug(pool, () -> Schedules.list(Session.grant(), None, 10, None)) |> List.map(schedule -> schedule#id) |> List.reverse
 
     def touch(sql: String, id: String): Unit \ IO =
         discard PgTestSupport.executeSql(sql, SqlValue.Str(id) :: Nil)

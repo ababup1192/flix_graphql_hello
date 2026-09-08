@@ -78,10 +78,17 @@ pub type alias Upload = { asset = Asset, uploadUrl = String, expiresInSeconds = 
 ///
 pub type alias AssetPage = { assets = List[Asset], cursors = List[String], totalCount = Int64, hasNextPage = Bool }
 
+///
+/// 一覧の 1 件と、その位置。
+///
+pub type alias AssetEdge = { cursor = String, node = Asset }
+
 mod AssetPage {
 
     pub def endCursor(page: AssetPage): Option[String] = List.last(page#cursors)
 
-    pub def edges(page: AssetPage): List[(String, Asset)] = List.zip(page#cursors, page#assets)
+    pub def edges(page: AssetPage): List[AssetEdge] = List.zip(page#cursors, page#assets) |> List.map(match (cursor, asset) -> { cursor = cursor, node = asset })
+
+    pub def pageInfo(page: AssetPage): PageInfo = { hasNextPage = page#hasNextPage, endCursor = endCursor(page) }
 
 }

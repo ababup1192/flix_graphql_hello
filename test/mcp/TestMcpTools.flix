@@ -119,14 +119,30 @@ mod TestMcpTools {
 
     // ---- 引数 → GraphQL リクエスト ----
 
-    /// search_entries は先に型を apiId で引き、次に entries を typeId と first / skip / search で引く。first は 100 に丸め、既定 20、skip は既定 0。
+    /// search_entries は先に型を apiId で引き、次に entries を typeId と first / skip / after / search で引く。first は 100 に丸め、既定 20、skip は既定 0、after は省けば null。
     @Test
     def testSearchEntriesRequests(): Unit \ Assert =
         let typeData = obj(List#{ ("contentType", obj(List#{ ("id", Value.Str("t1")), ("fields", Value.List(Nil)) })) });
         let seen = McpTools.call(Tool.SearchEntries, Map#{ "type" => Value.Str("posts"), "first" => Value.Int(500) }, typeThenEntries(typeData));
+        let withAfter = McpTools.call(Tool.SearchEntries, Map#{ "type" => Value.Str("posts"), "after" => Value.Str("c1") }, typeThenEntries(typeData));
         Assert.assertEq(
-            expected = Ok(List#{ Value.Str("t1"), Value.Int(100), Value.Int(0), Value.Null }),
-            seen |> Result.map(GraphqlTestKit.pick(List#{ List#{"totalCount", "variables", "typeId"}, List#{"totalCount", "variables", "first"}, List#{"totalCount", "variables", "skip"}, List#{"totalCount", "variables", "search"} })))
+            expected = (Ok(List#{ Value.Str("t1"), Value.Int(100), Value.Int(0), Value.Null, Value.Null }), Ok(List#{ Value.Int(20), Value.Str("c1") })),
+            (seen |> Result.map(GraphqlTestKit.pick(List#{ List#{"totalCount", "variables", "typeId"}, List#{"totalCount", "variables", "first"}, List#{"totalCount", "variables", "skip"}, List#{"totalCount", "variables", "search"}, List#{"totalCount", "variables", "after"} })),
+             withAfter |> Result.map(GraphqlTestKit.pick(List#{ List#{"totalCount", "variables", "first"}, List#{"totalCount", "variables", "after"} }))))
+
+    /// 応答の next_cursor は pageInfo.hasNextPage が true なら endCursor、でなければ null。inputSchema に after が出る。
+    @Test
+    def testSearchEntriesNextCursor(): Unit \ Assert =
+        let typeData = obj(List#{ ("contentType", obj(List#{ ("id", Value.Str("t1")), ("fields", Value.List(Nil)) })) });
+        let page = hasNext -> (request: GraphqlRequest) ->
+            if (String.contains(substr = "contentType(", request#queryText)) { data = typeData, errors = Nil }
+            else { data = obj(List#{ ("entries", obj(List#{ ("totalCount", Value.Int(5)), ("pageInfo", obj(List#{ ("hasNextPage", Value.Bool(hasNext)), ("endCursor", Value.Str("c9")) })), ("nodes", Value.List(Nil)) })) }), errors = Nil };
+        let args = Map#{ "type" => Value.Str("posts") };
+        Assert.assertEq(
+            expected = (Ok(Value.Str("c9")), Ok(Value.Null), Value.Str("string")),
+            (McpTools.call(Tool.SearchEntries, args, page(true)) |> Result.map(Value.field("next_cursor")),
+             McpTools.call(Tool.SearchEntries, args, page(false)) |> Result.map(Value.field("next_cursor")),
+             Value.path(List#{"properties", "after", "type"}, McpTools.inputSchema(McpTools.definitionOf(Tool.SearchEntries)#args))))
 
     /// 型（contentType(）には null、mutation には extensions 付きのエラーを返す execute。
     def typeMissingThenFailing(extensions: Map[String, Value], request: GraphqlRequest): GraphqlResponse =
@@ -172,7 +188,7 @@ mod TestMcpTools {
         let cases = List#{
             (McpTools.listTypesRequest(),                       ("query", Some("McpListTypes"))),
             (McpTools.typeRequest("blog"),                      ("query", Some("McpGetType"))),
-            (McpTools.entriesRequest("t1", None, 20, 0),        ("query", Some("McpSearchEntries"))),
+            (McpTools.entriesRequest("t1", None, 20, 0, None),  ("query", Some("McpSearchEntries"))),
             (McpTools.entryRequest("e1", false),                ("query", Some("McpGetEntry"))),
             (McpTools.diffRequest("e1", versionRef, versionRef), ("query", Some("McpDiffEntry"))),
             (McpTools.createEntryRequest("t1", obj(Nil)),       ("mutation", Some("McpCreateEntry"))),

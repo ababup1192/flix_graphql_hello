@@ -227,7 +227,7 @@ mod TestPublishPg {
             let saved = ContentEntries.saveVersion(Session.grant(), created#id, "tester");
             let edited = ContentEntries.update(Session.grant(), created#id, titled("New", "new"), created#version);
             discard ContentEntries.restoreVersion(Session.grant(), created#id, saved#id, edited#version);
-            let events = () -> Webhooks.deliveries(Session.grant(), issued#webhook#publicId, 10) |> List.map(delivery -> delivery#event);
+            let events = () -> Webhooks.deliveries(Session.grant(), issued#webhook#publicId, 10, None) |> List.map(delivery -> delivery#event);
             let afterRestore = events();
             discard ContentEntries.publish(Session.grant(), created#id, "tester", false);
             (afterRestore, events())

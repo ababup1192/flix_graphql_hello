@@ -7,7 +7,7 @@ mod WebhooksQueries {
     ///
     /// 生成元 webhooks.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -1110609775
+    pub def sourceHash(): Int32 = 1659694210
 
     ///
     /// insertWebhook の 1 行。
@@ -164,6 +164,32 @@ mod WebhooksQueries {
         let sql = "SELECT id, event, status, attempts, next_attempt_at, last_status, last_error, created_at, delivered_at\n    FROM webhook_deliveries WHERE webhook_id = $1 AND project_id = $2 ORDER BY id DESC LIMIT $3";
         let params = List#{SqlValue.Int64(args#webhookId), SqlValue.Int64(args#projectId), SqlValue.Int64(args#limit)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listDeliveriesDecoder(), sql, params))
+
+    ///
+    /// listDeliveriesAfter の 1 行。
+    ///
+    pub type alias ListDeliveriesAfterRow = { id = String, event = String, status = String, attempts = Int32, nextAttemptAt = Timestamp.Timestamp, lastStatus = Int32, lastError = String, createdAt = Timestamp.Timestamp, deliveredAt = Option[Timestamp.Timestamp] }
+
+    def listDeliveriesAfterDecoder(): Decoder[ListDeliveriesAfterRow] =
+        forA (
+            id <- Decoder.str("id");
+            event <- Decoder.str("event");
+            status <- Decoder.str("status");
+            attempts <- Decoder.int32("attempts");
+            nextAttemptAt <- Decoder.timestamp("next_attempt_at");
+            lastStatus <- Decoder.int32("last_status");
+            lastError <- Decoder.str("last_error");
+            createdAt <- Decoder.timestamp("created_at");
+            deliveredAt <- Decoder.opt(Decoder.timestamp("delivered_at"))
+        ) yield { id = id, event = event, status = status, attempts = attempts, nextAttemptAt = nextAttemptAt, lastStatus = lastStatus, lastError = lastError, createdAt = createdAt, deliveredAt = deliveredAt }
+
+    ///
+    /// listDeliveriesAfter: SELECT id, event, status, attempts, next_attempt_at, last_status, last_error, created_at, delivered_at FROM webhook_deliveries WHERE webhook_id = $1 AND project_id = $2 AND id < $3 ORDER BY id DESC LIMIT $4
+    ///
+    pub def listDeliveriesAfter(args: { webhookId = Int64, projectId = Int64, afterId = String, limit = Int64 }): List[ListDeliveriesAfterRow] \ DbRead =
+        let sql = "SELECT id, event, status, attempts, next_attempt_at, last_status, last_error, created_at, delivered_at\n    FROM webhook_deliveries WHERE webhook_id = $1 AND project_id = $2 AND id < $3 ORDER BY id DESC LIMIT $4";
+        let params = List#{SqlValue.Int64(args#webhookId), SqlValue.Int64(args#projectId), SqlValue.Str(args#afterId), SqlValue.Int64(args#limit)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listDeliveriesAfterDecoder(), sql, params))
 
     ///
     /// findDelivery の 1 行。

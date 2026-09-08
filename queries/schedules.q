@@ -29,6 +29,17 @@ query listSchedulesOfEntry(projectId: Int64, entryId: String, limit: Int64) -> m
     FROM scheduled_actions WHERE project_id = :projectId AND entry_id = :entryId ORDER BY id DESC LIMIT :limit
 }
 
+// after より古い物（id は ULID で時刻順）
+query listSchedulesAfter(projectId: Int64, afterId: String, limit: Int64) -> many {
+    SELECT id, entry_id, action, run_at, with_dependencies, status, requested_by, last_error, created_at, done_at
+    FROM scheduled_actions WHERE project_id = :projectId AND id < :afterId ORDER BY id DESC LIMIT :limit
+}
+
+query listSchedulesOfEntryAfter(projectId: Int64, entryId: String, afterId: String, limit: Int64) -> many {
+    SELECT id, entry_id, action, run_at, with_dependencies, status, requested_by, last_error, created_at, done_at
+    FROM scheduled_actions WHERE project_id = :projectId AND entry_id = :entryId AND id < :afterId ORDER BY id DESC LIMIT :limit
+}
+
 // unscoped: Scheduler はプロジェクトを跨いで時刻の来た物を拾い、1 件ずつそのプロジェクトの印で実行する（SKIP LOCKED で二重に拾わない）
 // プロジェクト slug はログの行（project）に出す。projects に RLS は無いので印無しで引ける
 query claimDueSchedules(limit: Int64) -> many {

@@ -167,6 +167,16 @@ pub type alias EntryVersion = {
 ///
 pub type alias EntryPage = { entries = List[Entry], cursors = List[String], totalCount = Int64, hasNextPage = Bool }
 
+///
+/// ページの続き。hasNextPage なら endCursor を after に渡して次を読む。
+///
+pub type alias PageInfo = { hasNextPage = Bool, endCursor = Option[String] }
+
+///
+/// 一覧の 1 件と、その位置。
+///
+pub type alias EntryEdge = { cursor = String, node = Entry }
+
 mod EntryPage {
 
     ///
@@ -186,9 +196,14 @@ mod EntryPage {
     pub def endCursor(page: EntryPage): Option[String] = List.last(page#cursors)
 
     ///
-    /// (cursor, entry) の並び。GraphQL の edges。
+    /// GraphQL の edges。
     ///
-    pub def edges(page: EntryPage): List[(String, Entry)] = List.zip(page#cursors, page#entries)
+    pub def edges(page: EntryPage): List[EntryEdge] = List.zip(page#cursors, page#entries) |> List.map(match (cursor, entry) -> { cursor = cursor, node = entry })
+
+    ///
+    /// GraphQL の pageInfo。
+    ///
+    pub def pageInfo(page: EntryPage): PageInfo = { hasNextPage = page#hasNextPage, endCursor = endCursor(page) }
 
     ///
     /// first（省けば default）を 0 〜 maxFirst に、skip（省けば 0）を 0 以上に丸める。0 は「件数だけ欲しい」用。

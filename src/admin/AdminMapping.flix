@@ -385,6 +385,131 @@ mod AdminMapping {
     pub def entryDataValue(data: EntryData): Value =
         Value.Obj(data |> Map.toList |> List.map(match (apiId, item) -> (ApiId.text(apiId), JsonValue.fromJson(item))) |> List.toMap)
 
+    // ---- 一覧の絞り込みと並び順 ----
+
+    ///
+    /// orderBy の入力を並び順に。field は id / publishedAt / updatedAt / createdAt かフィールドの apiId。規則外なら invalid。
+    ///
+    pub def entryOrderBy(input: Option[List[GeneratedAdmin.EntryOrderBy]]): OrderBy \ CmsErr =
+        input |> Option.getWithDefault(Nil) |> List.map(term ->
+            (SortKey.fromText(term#field) |> CmsErr.orInvalid("orderBy.field", "'${term#field}' は id / publishedAt / updatedAt / createdAt かフィールドの apiId にしてください"),
+             sortDirectionOf(term#direction)))
+
+    pub def sortDirectionOf(direction: GeneratedAdmin.SortDirection): Direction = match direction {
+        case GeneratedAdmin.SortDirection.Asc  => Direction.Asc
+        case GeneratedAdmin.SortDirection.Desc => Direction.Desc
+    }
+
+    ///
+    /// where の入力に、型の定義（フィールドの kind）が要るか。フィールドの条件があれば要る。
+    ///
+    pub def whereNeedsFields(input: Option[GeneratedAdmin.EntryWhere]): Bool =
+        input |> Option.flatMap(given -> given#fields) |> Option.exists(conditions -> not List.isEmpty(conditions))
+
+    ///
+    /// where の入力を絞り込みに。stage は entries.stage、id_in は規則に合う id だけ、fields は op と kind で Condition に写す。
+    /// 型に無い apiId、op と kind の組み合わせにない物、value の型が違う物は invalid。
+    ///
+    pub def entryWhere(fields: List[FieldDef], input: Option[GeneratedAdmin.EntryWhere]): Where \ CmsErr = match input {
+        case None        => Nil
+        case Some(given) =>
+            let stage = given#stage |> Option.map(contentStageOf) |> Option.map(Condition.StageEq) |> Option.toList;
+            let ids = given#id_in |> Option.map(idList -> Condition.IdIn(idList |> List.filterMap(id -> { let Id.Id(text) = id; EntryId.parse(text) }))) |> Option.toList;
+            let conditions = given#fields |> Option.getWithDefault(Nil) |> List.map(fieldCondition(fields));
+            stage ::: ids ::: conditions
+    }
+
+    pub def contentStageOf(stage: GeneratedAdmin.ContentStage): Stage = match stage {
+        case GeneratedAdmin.ContentStage.Draft     => Stage.Draft
+        case GeneratedAdmin.ContentStage.Published => Stage.Published
+    }
+
+    /// フィールド 1 つの条件。純粋な写し（fieldConditionOf）の Err を invalid にする。
+    def fieldCondition(fields: List[FieldDef], input: GeneratedAdmin.EntryFieldCondition): Condition \ CmsErr =
+        fieldConditionOf(fields, input) |> CmsErr.okOrInvalid
+
+    ///
+    /// フィールド 1 つの条件を Condition に。純粋。
+    ///
+    /// - EQ: kind の型の値（NUMBER は数、BOOLEAN は真偽値、DATE は日時の文字列、それ以外は文字列）
+    /// - IN: 文字列の配列
+    /// - CONTAINS / STARTS_WITH: 文字列（文字列の kind だけ）
+    /// - GT / GTE / LT / LTE: NUMBER は数、DATE は日時の文字列
+    /// - IS_NULL: 真偽値（省けば true）
+    /// - ARRAY_CONTAINS: 文字列（配列のフィールドだけ）
+    ///
+    /// 読めない日時は Never（何にも合わない）に倒す（コンテンツ API と同じ）。
+    ///
+    pub def fieldConditionOf(fields: List[FieldDef], input: GeneratedAdmin.EntryFieldCondition): Result[Violation, Condition] =
+        let path = "where.fields.${input#apiId}";
+        let value = input#value |> Option.getWithDefault(Value.Null);
+        let wrong = expected -> Err(Violation.Violation(path, "value は${expected}で渡してください"));
+        let unsupported = () -> Err(Violation.Violation(path, "この op はこのフィールドの kind には使えません"));
+        match ApiId.parse(input#apiId) |> Option.flatMap(apiId -> List.find(field -> field#apiId == apiId, fields)) {
+            case None        => Err(Violation.Violation(path, "'${input#apiId}' はこの型にありません"))
+            case Some(field) =>
+                let apiId = field#apiId;
+                let textual = not List.memberOf(field#kind, FieldKind.Number :: FieldKind.Boolean :: FieldKind.Date :: FieldKind.Object :: FieldKind.Blocks :: FieldKind.RichText :: Nil);
+                match input#op {
+                    case GeneratedAdmin.FieldConditionOp.IsNull => match value {
+                        case Value.Null    => Ok(Condition.IsNull(apiId, true))
+                        case Value.Bool(b) => Ok(Condition.IsNull(apiId, b))
+                        case _             => wrong("真偽値")
+                    }
+                    case GeneratedAdmin.FieldConditionOp.ArrayContains =>
+                        if (not field#many) unsupported() else match value {
+                            case Value.Str(text) => Ok(Condition.ArrayContains(apiId, text))
+                            case _               => wrong("文字列")
+                        }
+                    case GeneratedAdmin.FieldConditionOp.In =>
+                        if (not textual or field#many) unsupported() else match value {
+                            case Value.List(items) => items |> List.map(Value.asStr) |> Option.sequence |> Option.map(texts -> Condition.TextIn(apiId, texts)) |> Option.toOk(Violation.Violation(path, "value は文字列の配列で渡してください"))
+                            case _                 => wrong("文字列の配列")
+                        }
+                    case GeneratedAdmin.FieldConditionOp.Contains =>
+                        if (not textual or field#many) unsupported() else textOnly(wrong, value, text -> Condition.TextContains(apiId, text))
+                    case GeneratedAdmin.FieldConditionOp.StartsWith =>
+                        if (not textual or field#many) unsupported() else textOnly(wrong, value, text -> Condition.TextStartsWith(apiId, text))
+                    case GeneratedAdmin.FieldConditionOp.Eq =>
+                        if (field#many) unsupported() else match field#kind {
+                            case FieldKind.Number  => numberOnly(wrong, value, x -> Condition.NumberEq(apiId, x))
+                            case FieldKind.Boolean => match value { case Value.Bool(b) => Ok(Condition.BoolEq(apiId, b)) case _ => wrong("真偽値") }
+                            case FieldKind.Date    => dateOnly(wrong, value, at -> Condition.DateEq(apiId, at))
+                            case _                 => if (textual) textOnly(wrong, value, text -> Condition.TextEq(apiId, text)) else unsupported()
+                        }
+                    case GeneratedAdmin.FieldConditionOp.Gt  => rangeOf(field, wrong, unsupported, value, x -> Condition.NumberGt(apiId, x), at -> Condition.DateGt(apiId, at))
+                    case GeneratedAdmin.FieldConditionOp.Gte => rangeOf(field, wrong, unsupported, value, x -> Condition.NumberGte(apiId, x), at -> Condition.DateGte(apiId, at))
+                    case GeneratedAdmin.FieldConditionOp.Lt  => rangeOf(field, wrong, unsupported, value, x -> Condition.NumberLt(apiId, x), at -> Condition.DateLt(apiId, at))
+                    case GeneratedAdmin.FieldConditionOp.Lte => rangeOf(field, wrong, unsupported, value, x -> Condition.NumberLte(apiId, x), at -> Condition.DateLte(apiId, at))
+                }
+        }
+
+    /// 範囲の比較。NUMBER は数、DATE は日時、それ以外は使えない。
+    def rangeOf(field: FieldDef, wrong: String -> Result[Violation, Condition], unsupported: Unit -> Result[Violation, Condition], value: Value,
+                number: Float64 -> Condition, date: Timestamp.Timestamp -> Condition): Result[Violation, Condition] =
+        if (field#many) unsupported() else match field#kind {
+            case FieldKind.Number => numberOnly(wrong, value, number)
+            case FieldKind.Date   => dateOnly(wrong, value, date)
+            case _                => unsupported()
+        }
+
+    def textOnly(wrong: String -> Result[Violation, Condition], value: Value, make: String -> Condition): Result[Violation, Condition] = match value {
+        case Value.Str(text) => Ok(make(text))
+        case _               => wrong("文字列")
+    }
+
+    def numberOnly(wrong: String -> Result[Violation, Condition], value: Value, make: Float64 -> Condition): Result[Violation, Condition] = match value {
+        case Value.Float(x) => Ok(make(x))
+        case Value.Int(n)   => Ok(make(Int32.toFloat64(n)))
+        case _              => wrong("数")
+    }
+
+    /// 日時の文字列。読めなければ Never（何にも合わない）。
+    def dateOnly(wrong: String -> Result[Violation, Condition], value: Value, make: Timestamp.Timestamp -> Condition): Result[Violation, Condition] = match value {
+        case Value.Str(text) => Ok(DateValues.parse(text) |> Option.map(make) |> Option.getWithDefault(Condition.Never))
+        case _               => wrong("日時の文字列")
+    }
+
     // ---- 入力 → ドメイン ----
 
     ///

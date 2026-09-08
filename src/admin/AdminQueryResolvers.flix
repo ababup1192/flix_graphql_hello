@@ -25,14 +25,26 @@ mod AdminQueryResolvers {
 
     /// Query.entries。first は 0 〜 200 に丸める
     pub def entries(): GeneratedAdmin.QueryEntriesResolver[AdminEff] =
-        (_context, typeId, search, first, skip) -> {
-            let (limit, offset) = EntryPage.clamp(50, first, skip);
-            Ok(listKeepingIds(AdminMapping.typeId("typeId", typeId), EntryQuery.of(search |> Option.getWithDefault(""), limit, offset)))
-        }
+        (_context, typeId, search, conditions, orderBy, first, skip, after) ->
+            Ok(listEntries(typeId, search |> Option.getWithDefault(""), conditions, orderBy, EntryPage.clamp(50, first, skip), after))
+
+    ///
+    /// where / orderBy を写して一覧を引く。フィールドで絞る・並べる時だけ型の定義を引く（kind で式が決まる。それ以外は SQL を増やさない）。
+    /// after は orderBy と対で復号し、skip との同時指定は invalid。
+    ///
+    def listEntries(typeId: Id, search: String, conditions: Option[GeneratedAdmin.EntryWhere], orderBy: Option[List[GeneratedAdmin.EntryOrderBy]], page: (Int32, Int32), after: Option[String]): EntryPage \ DbRead + CmsErr + Tenant + Session + Preloaded =
+        let id = AdminMapping.typeId("typeId", typeId);
+        let order = AdminMapping.entryOrderBy(orderBy);
+        let fields = if (OrderBy.hasField(order) or AdminMapping.whereNeedsFields(conditions)) ContentTypes.get(Session.grant(), id)#fields else Nil;
+        let (first, skip) = page;
+        listKeepingIds(id, fields, {
+            search = search, filter = AdminMapping.entryWhere(fields, conditions), orderBy = order, first = first,
+            start = Cursor.pageStart(order, skip, after) |> CmsErr.okOrInvalid
+        })
 
     /// 一覧を引き、ページの entry id を先読みの写しに覚える（行の versions / diff がまとめて引くため。SQL は増えない）。
-    def listKeepingIds(typeId: TypeId, entryQuery: EntryQuery): EntryPage \ DbRead + CmsErr + Tenant + Session + Preloaded =
-        let page = ContentEntries.list(Session.grant(), typeId, Nil, entryQuery);
+    def listKeepingIds(typeId: TypeId, fields: List[FieldDef], entryQuery: EntryQuery): EntryPage \ DbRead + CmsErr + Tenant + Session + Preloaded =
+        let page = ContentEntries.list(Session.grant(), typeId, fields, entryQuery);
         Preloaded.keepEntryIds(page#entries |> List.map(entry -> entry#id));
         page
 
@@ -44,12 +56,12 @@ mod AdminQueryResolvers {
 
     /// Query.assets。first は 0 〜 200 に丸める
     pub def assets(): GeneratedAdmin.QueryAssetsResolver[AdminEff] =
-        (_context, first, skip) -> {
-            let (limit, offset) = EntryPage.clamp(50, first, skip);
-            Ok(listAssets(limit, offset))
-        }
+        (_context, first, skip, after) -> Ok(listAssets(EntryPage.clamp(50, first, skip), after))
 
-    def listAssets(first: Int32, skip: Int32): AssetPage \ DbRead + CmsErr + Tenant + Session = Assets.list(Session.grant(), first, skip)
+    /// after は作成が新しい順の cursor として復号し、skip との同時指定は invalid。
+    def listAssets(page: (Int32, Int32), after: Option[String]): AssetPage \ DbRead + CmsErr + Tenant + Session =
+        let (first, skip) = page;
+        Assets.list(Session.grant(), first, Cursor.pageStart(Cursor.assetOrderBy(), skip, after) |> CmsErr.okOrInvalid)
 
     /// Query.asset
     pub def asset(): GeneratedAdmin.QueryAssetResolver[AdminEff] =
@@ -109,17 +121,19 @@ mod AdminQueryResolvers {
 
     /// Query.webhookDeliveries
     pub def webhookDeliveries(): GeneratedAdmin.QueryWebhookDeliveriesResolver[AdminEff] =
-        (_context, webhookId, first) -> Ok(listDeliveries(webhookId, first))
+        (_context, webhookId, first, after) -> Ok(listDeliveries(webhookId, first, after))
 
-    def listDeliveries(webhookId: Id, first: Option[Int32]): List[WebhookDelivery] \ DbRead + CmsErr + Tenant + Session =
-        Webhooks.deliveries(Session.grant(), AdminMapping.publicIdOf(webhookId), EntryPage.clamp(20, first, None) |> fst)
+    /// after は配信の id（ULID）そのもの。
+    def listDeliveries(webhookId: Id, first: Option[Int32], after: Option[Id]): List[WebhookDelivery] \ DbRead + CmsErr + Tenant + Session =
+        Webhooks.deliveries(Session.grant(), AdminMapping.publicIdOf(webhookId), EntryPage.clamp(20, first, None) |> fst, after |> Option.map(AdminMapping.publicIdOf))
 
     /// Query.schedules
     pub def schedules(): GeneratedAdmin.QuerySchedulesResolver[AdminEff] =
-        (_context, entryId, first) -> Ok(listSchedules(entryId, first))
+        (_context, entryId, first, after) -> Ok(listSchedules(entryId, first, after))
 
-    def listSchedules(entryId: Option[Id], first: Option[Int32]): List[Schedule] \ DbRead + CmsErr + Tenant + Session =
-        Schedules.list(Session.grant(), entryId |> Option.map(AdminMapping.entryId("entryId")), EntryPage.clamp(50, first, None) |> fst)
+    /// after は予約の id（ULID）そのもの。
+    def listSchedules(entryId: Option[Id], first: Option[Int32], after: Option[Id]): List[Schedule] \ DbRead + CmsErr + Tenant + Session =
+        Schedules.list(Session.grant(), entryId |> Option.map(AdminMapping.entryId("entryId")), EntryPage.clamp(50, first, None) |> fst, after |> Option.map(AdminMapping.publicIdOf))
 
     /// Query.apiKeys
     pub def apiKeys(): GeneratedAdmin.QueryApiKeysResolver[AdminEff] =

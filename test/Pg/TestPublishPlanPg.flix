@@ -56,7 +56,7 @@ mod TestPublishPlanPg {
             (stepsOf(plan), plan#violations,
              published |> List.map(entry -> EntryId.text(entry#id)),
              stages(),
-             Webhooks.deliveries(Session.grant(), webhookId, 20) |> List.length)
+             Webhooks.deliveries(Session.grant(), webhookId, 20, None) |> List.length)
         });
         Assert.assertEq(
             expected = Ok(Ok((
@@ -75,7 +75,7 @@ mod TestPublishPlanPg {
             let webhookId = seedGraph("");
             let plan = ContentEntries.publishPlan(Session.grant(), CmsTestKit.entryIds(List#{"b2", "b1"}), true);
             let failed = CmsTestKit.failureMessage(() -> ContentEntries.publishMany(Session.grant(), CmsTestKit.entryIds(List#{"b2", "b1"}), "tester", true));
-            (stepsOf(plan), failed, stages(), Webhooks.deliveries(Session.grant(), webhookId, 20) |> List.length)
+            (stepsOf(plan), failed, stages(), Webhooks.deliveries(Session.grant(), webhookId, 20, None) |> List.length)
         });
         Assert.assertEq(
             expected = Ok(Ok((

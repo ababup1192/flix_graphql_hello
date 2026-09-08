@@ -25,12 +25,14 @@ mod Schedules {
     ///
     /// 今のプロジェクトの予約。新しい順。entryId を渡せばその entry の物だけ。
     ///
-    pub def list(_proof: Granted[ReadDraft], entryId: Option[EntryId], first: Int32): List[Schedule] \ DbRead + Tenant =
+    pub def list(_proof: Granted[ReadDraft], entryId: Option[EntryId], first: Int32, after: Option[String]): List[Schedule] \ DbRead + Tenant =
         let limit = Int32.toInt64(first);
-        match entryId {
-            case Some(id) => SchedulesQueries.listSchedulesOfEntry({ projectId = Tenant.currentId(), entryId = EntryId.text(id), limit = limit }) |> List.map(ScheduleRows.toSchedule)
-            case None     => SchedulesQueries.listSchedules({ projectId = Tenant.currentId(), limit = limit }) |> List.map(ScheduleRows.toSchedule)
-        }
+        (match (entryId, after) {
+            case (Some(id), None)          => SchedulesQueries.listSchedulesOfEntry({ projectId = Tenant.currentId(), entryId = EntryId.text(id), limit = limit })
+            case (Some(id), Some(afterId)) => SchedulesQueries.listSchedulesOfEntryAfter({ projectId = Tenant.currentId(), entryId = EntryId.text(id), afterId = afterId, limit = limit })
+            case (None, None)              => SchedulesQueries.listSchedules({ projectId = Tenant.currentId(), limit = limit })
+            case (None, Some(afterId))     => SchedulesQueries.listSchedulesAfter({ projectId = Tenant.currentId(), afterId = afterId, limit = limit })
+        }) |> List.map(ScheduleRows.toSchedule)
 
     def find(id: String): Schedule \ DbRead + CmsErr + Tenant =
         SchedulesQueries.findSchedule({ id = id, projectId = Tenant.currentId() }) |> Option.map(ScheduleRows.toSchedule) |> CmsErr.orNotFound(Entity.Schedule, id)

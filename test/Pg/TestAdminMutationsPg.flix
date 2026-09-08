@@ -146,7 +146,7 @@ mod TestAdminMutationsPg {
             let preview = ask("mutation { createPreviewToken(entryId: \"${entryId}\") { token entryId expiresAt url } }");
             let unpublished = ask("mutation { unpublishEntry(id: \"${entryId}\") { stage publishedAt } }");
             let deleted = ask("mutation { deleteEntry(id: \"${entryId}\") }");
-            let afterDelete = ask("{ entry(id: \"${entryId}\") { id } entries(typeId: \"${typeId}\") { totalCount } }");
+            let afterDelete = ask("{ entry(id: \"${entryId}\") { id } entries(typeId: \"${typeId}\") { totalCount edges { cursor node { id } } pageInfo { hasNextPage endCursor } } }");
             ((String.length(entryId) > 0,
              (GraphqlTestKit.stringAt(List#{"createEntry", "typeId"}, created) == typeId, GraphqlTestKit.valueAt(List#{"createEntry", "version"}, created), GraphqlTestKit.valueAt(List#{"createEntry", "stage"}, created), GraphqlTestKit.valueAt(List#{"createEntry", "fields"}, created), GraphqlTestKit.valueAt(List#{"createEntry", "publishedAt"}, created), GraphqlTestKit.valueAt(List#{"createEntry", "versions"}, created)),
              fst(checked),
@@ -190,7 +190,7 @@ mod TestAdminMutationsPg {
                 (true, true, Value.Null),
                 Value.Obj(Map#{ "unpublishEntry" => Value.Obj(Map#{ "stage" => Value.Str("DRAFT"), "publishedAt" => Value.Null }) }),
                 true,
-                Value.Obj(Map#{ "entry" => Value.Null, "entries" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }) }))),
+                Value.Obj(Map#{ "entry" => Value.Null, "entries" => Value.Obj(Map#{ "totalCount" => Value.Int(0), "edges" => Value.List(Nil), "pageInfo" => Value.Obj(Map#{ "hasNextPage" => Value.Bool(false), "endCursor" => Value.Null }) }) }))),
                 Nil),
             (outcome, Ref.get(errors)))
 
@@ -211,7 +211,7 @@ mod TestAdminMutationsPg {
             let altChanged = ask("mutation { updateAsset(id: \"${assetId}\", input: { alt: \"表紙\" }) { id alt } }");
             let listed = ask("{ assets { totalCount nodes { id } } asset(id: \"${assetId}\") { alt status } }");
             let deleted = ask("mutation { deleteAsset(id: \"${assetId}\") }");
-            let afterDelete = ask("{ assets { totalCount } asset(id: \"${assetId}\") { id } }");
+            let afterDelete = ask("{ assets { totalCount edges { cursor node { id } } pageInfo { hasNextPage endCursor } } asset(id: \"${assetId}\") { id } }");
             (String.length(assetId) > 0,
              (GraphqlTestKit.valueAt(List#{"createUploadUrl", "asset", "status"}, upload), GraphqlTestKit.valueAt(List#{"createUploadUrl", "asset", "fileName"}, upload), GraphqlTestKit.valueAt(List#{"createUploadUrl", "asset", "mime"}, upload), GraphqlTestKit.valueAt(List#{"createUploadUrl", "asset", "size"}, upload), GraphqlTestKit.valueAt(List#{"createUploadUrl", "asset", "width"}, upload), GraphqlTestKit.valueAt(List#{"createUploadUrl", "expiresInSeconds"}, upload)),
              putStatus,
@@ -232,7 +232,7 @@ mod TestAdminMutationsPg {
                 true,
                 true,
                 true,
-                Value.Obj(Map#{ "assets" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }), "asset" => Value.Null })),
+                Value.Obj(Map#{ "assets" => Value.Obj(Map#{ "totalCount" => Value.Int(0), "edges" => Value.List(Nil), "pageInfo" => Value.Obj(Map#{ "hasNextPage" => Value.Bool(false), "endCursor" => Value.Null }) }), "asset" => Value.Null })),
                 Nil),
             (outcome, Ref.get(errors)))
 

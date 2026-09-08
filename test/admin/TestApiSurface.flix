@@ -43,11 +43,13 @@ mod TestApiSurface {
             expected =
                 "ApiKey: id name scope role createdAt expiresAt lastUsedAt revokedAt" ::
                 "Asset: id url fileName mime size width height alt status createdAt usedBy" ::
-                "AssetPage: nodes totalCount" ::
+                "AssetEdge: cursor node" ::
+                "AssetPage: nodes edges pageInfo totalCount" ::
                 "ContentType: id apiId kind name singular plural previewUrl fields createdAt updatedAt" ::
                 "DiffLine: kind text" ::
                 "Entry: id typeId version stage fields publishedAt createdAt updatedAt versions diff" ::
-                "EntryPage: nodes totalCount" ::
+                "EntryEdge: cursor node" ::
+                "EntryPage: nodes edges pageInfo totalCount" ::
                 "EntryVersion: id version reason author fields createdAt" ::
                 "FieldChange: path kind before after children lines" ::
                 "FieldConfig: maxLength sourceField min max integer options" ::
@@ -61,6 +63,7 @@ mod TestApiSurface {
                 "Mutation: createContentType updateContentType deleteContentType addField updateField removeField reorderFields createEntry updateEntry deleteEntry publishEntry publishMany unpublishEntry saveVersion restoreVersion createUploadUrl confirmAsset updateAsset deleteAsset createPreviewToken schedulePublish scheduleUnpublish cancelSchedule updateProjectVisibility inviteMember cancelInvitation changeMemberRole removeMember createApiKey revokeApiKey createWebhook updateWebhook deleteWebhook redeliverWebhook" ::
                 "Organization: id name" ::
                 "OrganizationMembership: organization role" ::
+                "PageInfo: hasNextPage endCursor" ::
                 "PreviewToken: token entryId expiresAt url" ::
                 "Project: id slug name visibility" ::
                 "ProjectMembership: project role" ::

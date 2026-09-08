@@ -7,12 +7,13 @@ type Query {
   contentTypes: [ContentType!]!
   """id か apiId で 1 つ。無ければ null"""
   contentType(id: ID, apiId: String): ContentType
-  """型の entry の一覧。更新が新しい順。search は下書きの中身に含む文字列"""
-  entries(typeId: ID!, search: String, first: Int = 50, skip: Int = 0): EntryPage!
+  """型の entry の一覧。既定は更新が新しい順。search は下書きの中身に含む文字列。where / orderBy はコンテンツ API と同じ意味で、
+  after は前のページの pageInfo.endCursor（orderBy と対。skip とは同時に渡せない）"""
+  entries(typeId: ID!, search: String, where: EntryWhere, orderBy: [EntryOrderBy!], first: Int = 50, skip: Int = 0, after: String): EntryPage!
   """entry 1 つ。無ければ null"""
   entry(id: ID!): Entry
-  """asset の一覧。新しい順。アップロード途中（PENDING）の物も出る"""
-  assets(first: Int = 50, skip: Int = 0): AssetPage!
+  """asset の一覧。新しい順。アップロード途中（PENDING）の物も出る。after は前のページの pageInfo.endCursor（skip とは同時に渡せない）"""
+  assets(first: Int = 50, skip: Int = 0, after: String): AssetPage!
   """asset 1 つ。無ければ null"""
   asset(id: ID!): Asset
   """公開できるか。書き込まない。violations が空なら publishEntry は通る（unique は押した瞬間の競合を除く）"""
@@ -35,10 +36,10 @@ type Query {
   apiKeys: [ApiKey!]!
   """今のプロジェクトの Webhook（owner だけ）。secret は出ない"""
   webhooks: [Webhook!]!
-  """Webhook の配信の記録。新しい順（owner だけ）"""
-  webhookDeliveries(webhookId: ID!, first: Int = 20): [WebhookDelivery!]!
-  """予約公開の一覧。新しい順。entryId を渡せばその entry の物だけ"""
-  schedules(entryId: ID, first: Int = 50): [Schedule!]!
+  """Webhook の配信の記録。新しい順（owner だけ）。after は前のページの最後の id（id は時刻順なので、その id より古い物が続く）"""
+  webhookDeliveries(webhookId: ID!, first: Int = 20, after: ID): [WebhookDelivery!]!
+  """予約公開の一覧。新しい順。entryId を渡せばその entry の物だけ。after は前のページの最後の id"""
+  schedules(entryId: ID, first: Int = 50, after: ID): [Schedule!]!
 }
 
 """入力の 1 つの誤り。path は GraphQL の入力に対応（"fields.title" など）"""
@@ -453,10 +454,25 @@ type Asset {
   usedBy: [Entry!]!
 }
 
-"""asset の一覧の 1 ページ"""
+"""asset の一覧の 1 ページ。nodes か edges のどちらかを読む。次のページは pageInfo.endCursor を after に渡す"""
 type AssetPage {
   nodes: [Asset!]!
+  edges: [AssetEdge!]!
+  pageInfo: PageInfo!
   totalCount: Int!
+}
+
+type AssetEdge {
+  """この asset の位置。after に渡せる"""
+  cursor: String!
+  node: Asset!
+}
+
+"""ページの続き。hasNextPage なら endCursor を after に渡して次を読む"""
+type PageInfo {
+  hasNextPage: Boolean!
+  """このページの最後の位置。空のページなら null"""
+  endCursor: String
 }
 
 """署名付き URL の発行結果"""
@@ -579,10 +595,62 @@ type EntryVersion {
   createdAt: String!
 }
 
-"""entry の一覧の 1 ページ"""
+"""entry の一覧の 1 ページ。nodes か edges のどちらかを読む。次のページは pageInfo.endCursor を after に渡す"""
 type EntryPage {
   nodes: [Entry!]!
+  edges: [EntryEdge!]!
+  pageInfo: PageInfo!
   totalCount: Int!
+}
+
+type EntryEdge {
+  """この entry の位置。after に渡せる"""
+  cursor: String!
+  node: Entry!
+}
+
+"""entries の絞り込み。全部に合う物（AND）"""
+input EntryWhere {
+  """公開中か下書きか（CHANGED は公開中に含む）"""
+  stage: ContentStage
+  id_in: [ID!]
+  """フィールドの値の条件。コンテンツ API の <Singular>Where の葉（title_contains など）と同じ意味を apiId と op で書く"""
+  fields: [EntryFieldCondition!]
+}
+
+"""フィールド 1 つの条件。value の型は op と kind で決まる（EQ は kind の型、IN は文字列の配列、GT 〜 LTE は数値か日時の文字列、IS_NULL は真偽値、ARRAY_CONTAINS は文字列）"""
+input EntryFieldCondition {
+  apiId: String!
+  op: FieldConditionOp!
+  value: JSON
+}
+
+enum FieldConditionOp {
+  EQ
+  IN
+  """大文字小文字を区別しない部分一致（文字列だけ）"""
+  CONTAINS
+  """大文字小文字を区別しない前方一致（文字列だけ）"""
+  STARTS_WITH
+  GT
+  GTE
+  LT
+  LTE
+  """true なら値が無い物、false なら値がある物"""
+  IS_NULL
+  """配列のフィールドがこの値を含む"""
+  ARRAY_CONTAINS
+}
+
+"""並び順。field は id / publishedAt / updatedAt / createdAt かフィールドの apiId（配列でない物）"""
+input EntryOrderBy {
+  field: String!
+  direction: SortDirection!
+}
+
+enum SortDirection {
+  ASC
+  DESC
 }
 
 """content type の種別"""

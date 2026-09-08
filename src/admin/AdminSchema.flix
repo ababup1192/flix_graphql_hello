@@ -27,6 +27,8 @@ mod AdminSchema {
             webhookDelivery        = WebhookDeliveryResolvers.resolvers(),
             asset        = AssetResolvers.resolvers(),
             assetPage    = AssetPageResolvers.resolvers(),
+            assetEdge    = AssetEdgeResolvers.resolvers(),
+            pageInfo     = PageInfoResolvers.resolvers(),
             upload       = UploadResolvers.resolvers(),
             violation     = ViolationResolvers.resolvers(),
             publishReport = PublishReportResolvers.resolvers(),
@@ -39,6 +41,7 @@ mod AdminSchema {
             fieldChange  = FieldChangeResolvers.resolvers(),
             diffLine     = DiffLineResolvers.resolvers(),
             entryPage    = EntryPageResolvers.resolvers(),
+            entryEdge    = EntryEdgeResolvers.resolvers(),
             contentType  = ContentTypeResolvers.resolvers(),
             fieldDef     = FieldDefResolvers.resolvers(),
             fieldConfig  = FieldConfigResolvers.resolvers()

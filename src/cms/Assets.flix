@@ -80,11 +80,17 @@ mod Assets {
     }
 
     ///
-    /// 一覧。新しい順。first + 1 件引いて「次があるか」を決め、各 asset の位置（cursor）を付ける。
+    /// 一覧。新しい順。first + 1 件引いて「次があるか」を決め、各 asset の位置（cursor）を付ける。after なら cursor の位置より古い物。
     ///
-    pub def list(_proof: Granted[ReadDraft], first: Int32, skip: Int32): AssetPage \ DbRead + Tenant =
-        let (assets, hasNextPage) = AssetsQueries.listAssets({ projectId = Tenant.currentId(), limit = Int32.toInt64(first + 1), offset = Int32.toInt64(skip) })
-            |> List.map(AssetRows.toAsset) |> EntryPage.trimPage(first);
+    pub def list(_proof: Granted[ReadDraft], first: Int32, start: PageStart): AssetPage \ DbRead + CmsErr + Tenant =
+        let limit = Int32.toInt64(first + 1);
+        let rows = match start {
+            case PageStart.Offset(skip)  => AssetsQueries.listAssets({ projectId = Tenant.currentId(), limit = limit, offset = Int32.toInt64(skip) }) |> List.map(AssetRows.toAsset)
+            case PageStart.After(cursor) =>
+                let (createdAt, id) = Cursor.assetPosition(cursor) |> CmsErr.orInvalid("after", "cursor が壊れています");
+                AssetsQueries.listAssetsAfter({ projectId = Tenant.currentId(), createdAt = createdAt, id = AssetId.text(id), limit = limit }) |> List.map(AssetRows.toAsset)
+        };
+        let (assets, hasNextPage) = EntryPage.trimPage(first, rows);
         {
             assets = assets,
             cursors = assets |> List.map(asset -> Cursor.encode(Cursor.ofAsset(asset))),

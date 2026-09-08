@@ -44,6 +44,12 @@ query listDeliveries(webhookId: Int64, projectId: Int64, limit: Int64) -> many {
     FROM webhook_deliveries WHERE webhook_id = :webhookId AND project_id = :projectId ORDER BY id DESC LIMIT :limit
 }
 
+// after より古い物（id は ULID で時刻順）
+query listDeliveriesAfter(webhookId: Int64, projectId: Int64, afterId: String, limit: Int64) -> many {
+    SELECT id, event, status, attempts, next_attempt_at, last_status, last_error, created_at, delivered_at
+    FROM webhook_deliveries WHERE webhook_id = :webhookId AND project_id = :projectId AND id < :afterId ORDER BY id DESC LIMIT :limit
+}
+
 query findDelivery(id: String, projectId: Int64) -> one {
     SELECT id, event, status, attempts, next_attempt_at, last_status, last_error, created_at, delivered_at
     FROM webhook_deliveries WHERE id = :id AND project_id = :projectId

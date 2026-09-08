@@ -43,7 +43,7 @@ mod TestWebhooksPg {
                 issued
             }));
             let webhookId = issued#webhook#publicId;
-            let listDeliveries = () -> PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), webhookId, 20));
+            let listDeliveries = () -> PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), webhookId, 20, None));
             let queued = listDeliveries() |> List.map(delivery -> (delivery#event, delivery#status, delivery#attempts));
             let received = Ref.fresh(Static, Nil);
             let firstTick = tickWith(500, received, pool);
@@ -128,8 +128,8 @@ mod TestWebhooksPg {
             let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
             let entry = ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(Nil));
             ContentEntries.delete(Session.grant(), Session.tryGrant(), entry#id);
-            (Webhooks.deliveries(Session.grant(), active#webhook#publicId, 20) |> List.map(delivery -> delivery#event),
-             Webhooks.deliveries(Session.grant(), inactive#webhook#publicId, 20) |> List.length)
+            (Webhooks.deliveries(Session.grant(), active#webhook#publicId, 20, None) |> List.map(delivery -> delivery#event),
+             Webhooks.deliveries(Session.grant(), inactive#webhook#publicId, 20, None) |> List.length)
         }));
         Assert.assertEq(expected = Ok(Ok((List#{WebhookEvent.EntryDeleted}, 0))), result)
 
@@ -147,14 +147,14 @@ mod TestWebhooksPg {
                 issued
             }));
             let received = Ref.fresh(Static, Nil);
-            let deliveryId = PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), issued#webhook#publicId, 1)) |> List.head |> Option.map(delivery -> delivery#id) |> Option.getWithDefault("?");
+            let deliveryId = PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), issued#webhook#publicId, 1, None)) |> List.head |> Option.map(delivery -> delivery#id) |> Option.getWithDefault("?");
             let attempt = () -> {
                 discard tickWith(500, received, pool);
                 discard PgTestSupport.mutate(pool, () -> Webhooks.redeliver(Session.grant(), deliveryId))
             };
             List.forEach(_ -> attempt(), List.range(0, 4));
             discard tickWith(500, received, pool);
-            let delivery = PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), issued#webhook#publicId, 1)) |> List.head;
+            let delivery = PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), issued#webhook#publicId, 1, None)) |> List.head;
             (delivery |> Option.map(found -> (found#status, found#attempts, found#lastStatus, found#lastError)), List.length(Ref.get(received)))
         });
         Assert.assertEq(expected = (Some((DeliveryStatus.Failed, 5, 500, "HTTP 500")), 5), outcome)
@@ -199,7 +199,7 @@ mod TestWebhooksPg {
                 issued
             }));
             let received = Ref.fresh(Static, Nil);
-            let deliveries = () -> PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), issued#webhook#publicId, 10)) |> List.reverse;
+            let deliveries = () -> PgTestSupport.mutateOrBug(pool, () -> Webhooks.deliveries(Session.grant(), issued#webhook#publicId, 10, None)) |> List.reverse;
             let ids = deliveries() |> List.map(delivery -> delivery#id);
             let first = tickWith(500, received, pool);
             let afterFirst = deliveries() |> List.map(delivery -> delivery#attempts);

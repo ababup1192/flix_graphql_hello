@@ -112,7 +112,33 @@ mod EntryPageResolvers {
     pub def resolvers(): GeneratedAdmin.EntryPageResolvers[AdminEff] =
         {
             nodes      = (_context, source) -> Ok(source#entries),
+            edges      = (_context, source) -> Ok(EntryPage.edges(source)),
+            pageInfo   = (_context, source) -> Ok(EntryPage.pageInfo(source)),
             totalCount = (_context, source) -> Ok(EntryPage.totalCountInt32(source))
         }
+
+}
+
+///
+/// 管理 API の type EntryEdge のリゾルバ。
+///
+mod EntryEdgeResolvers {
+
+    /// type EntryEdge のリゾルバ一式
+    pub def resolvers(): GeneratedAdmin.EntryEdgeResolvers[AdminEff] =
+        {
+            +node = (_context, source) -> Ok(source#node)
+            | GeneratedAdmin.entryEdgeDefaults()
+        }
+
+}
+
+///
+/// 管理 API の type PageInfo のリゾルバ。素通し。
+///
+mod PageInfoResolvers {
+
+    /// type PageInfo のリゾルバ一式
+    pub def resolvers(): GeneratedAdmin.PageInfoResolvers[AdminEff] = GeneratedAdmin.pageInfoDefaults()
 
 }
