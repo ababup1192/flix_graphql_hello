@@ -43,8 +43,8 @@ services:
       ASSET_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD を .env に入れてください}
       ASSET_REGION: us-east-1
       ASSET_PUBLIC_URL: ${ASSET_PUBLIC_URL:?ASSET_PUBLIC_URL（画像の配信 URL）を .env に入れてください}
-    # SIGTERM で実行中の仕事（予約公開・Webhook）を最長 CMS_JOBS_DRAIN_SECONDS 待つ。それより長く取る
-    stop_grace_period: 20s
+    # SIGTERM で HTTP の接続と実行中の仕事を最長 CMS_SHUTDOWN_TIMEOUT_SECONDS（既定 20 秒）待つ。それより長く取る
+    stop_grace_period: 30s
     ports:
       - "127.0.0.1:8080:8080"
     # blocking（既定）にしない: cms は各スレッドが直に stdout へ書くので、docker daemon が詰まると

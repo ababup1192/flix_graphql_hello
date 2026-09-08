@@ -115,7 +115,7 @@ Origin ヘッダが付いていて `CMS_CORS_ORIGINS` に無ければ 403（無�
 `/health` の `jobs` にワーカーの最終実行時刻（`lastTickAt`）と、待ち・失敗の件数（`pendingSchedules` / `failedSchedules` / `pendingDeliveries` / `failedDeliveries`。数えられなければ -1）が出る。
 外形監視で `lastTickAt` が古ければワーカーが止まっている。`failedDeliveries` が増えていれば受け手が落ちている。仕事 1 件ごとに `{"message":"job delivered","job.kind":"webhook","job.id":...,"job.outcome":"delivered","detail":"HTTP 200",...}` の 1 行 JSON もログに出る（`job.id` は `X-Cms-Delivery` と同じ）。
 
-SIGTERM / SIGINT を受けると、`shutting down` の行を出し、新しい仕事を拾うのをやめ、実行中の 1 周が終わるまで（最長 `CMS_JOBS_DRAIN_SECONDS`。既定 15 秒）待って `jobs drained` を出してから終わる。compose の `stop_grace_period` はそれより長くする。
+SIGTERM / SIGINT を受けると次の順で止まる（下の「停止と終了コード」）。
 
 保険として、外の cron から同じ処理を呼べる（`CMS_JOBS_TOKEN` を設定した時だけ）。同時に呼ばれても二重にはならない。
 
@@ -219,6 +219,28 @@ DB の失敗の行（`message: "field failed"`）には `error.kind` が付く�
 `CMS_DB_LEAK_DETECTION_SECONDS` を入れると HikariCP が「借りたまま返らない接続」を見張るが、**警告の行は出ない**（cms は HikariCP の SLF4J を `slf4j-nop` で黙らせている。出すと Flix のテストが標準エラーで落ちるため）。
 気付き方は `/health` の `pool.active` が張り付く事の方で、しきい値の設定は将来 SLF4J の束縛を差し替えた時のために置いてある。
 
+### 停止と終了コード
+
+SIGTERM / SIGINT を受けると、この順で止まる。
+
+1. `shutting down` の行を出す
+2. listen（待ち受けのソケット）を閉じる。新しい接続はここで受けなくなる（前段は他の台へ回す）
+3. 処理中の接続が全部閉じるのを待つ（最長 `CMS_SHUTDOWN_TIMEOUT_SECONDS`。既定 20 秒）
+4. 新しい仕事を拾うのをやめ、実行中の 1 周が終わるのを同じ期限まで待って `jobs drained`
+5. 全部間に合えば**終了コード 0**。どれかが間に合わなければ warn の `shutdown timed out`（`shutdown.connections` / `shutdown.in_tick` に何が残ったか）を出して**終了コード 2**
+
+| 終了コード | 意味 |
+|---|---|
+| 0 | 綺麗に停止した（接続も仕事も片付いた） |
+| 1 | 起動に失敗した（`startup failed`） |
+| 2 | 停止の drain が間に合わなかった（`shutdown timed out`） |
+| 3 | 自己回復（`self-heal: exiting`。下） |
+
+compose の `stop_grace_period` は `CMS_SHUTDOWN_TIMEOUT_SECONDS` より長くする（既定なら 30s 以上）。短いと Docker が SIGKILL を送り、drain の途中で切れる。
+
+keep-alive の idle の接続も枠を占めるので、前段（Caddy）が接続を使い回している時は 3 で最長 15 秒（`idleTimeoutMs`）残りうる。
+`CMS_SHUTDOWN_TIMEOUT_SECONDS` はそれより長くしておく。
+
 ### 自己回復（自分で終わって再起動させる）
 
 OOM のような事故の後、プロセスは生きているのに接続プールだけが壊れ、PostgreSQL が健在でも `/health` が 503 を返し続ける事がある（実験 1 回目の S5。2 分観測して戻らなかった）。
@@ -280,7 +302,8 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_SIGNUP` | `open`（ログインした人は誰でも組織を作れる）/ `closed`（既定の組織の owner だけ） | open |
 | `CMS_JOBS` | `on` ならプロセス内のバックグラウンドワーカー（予約公開と Webhook の配信）を回す。`off` は外部トリガーか別の worker で回す時 | on |
 | `CMS_JOBS_TOKEN` | `POST /jobs/tick`（外部トリガー）を許す `X-Jobs-Token` の値。無ければその口は閉じる | 無し |
-| `CMS_JOBS_DRAIN_SECONDS` | 停止時に実行中の仕事を待つ秒数 | 15 |
+| `CMS_JOBS_DRAIN_SECONDS` | 自己回復（exit 3）で実行中の仕事を待つ秒数 | 15 |
+| `CMS_SHUTDOWN_TIMEOUT_SECONDS` | SIGTERM で HTTP の接続と実行中の仕事を待つ秒数。超えたら `shutdown timed out` と終了コード 2。compose の `stop_grace_period` はこれより長くする | 20 |
 | `CMS_SELF_HEAL` | `on` / `off`。接続プールが壊れたまま戻らない時に自分で終わって再起動させる（下の「自己回復」） | on |
 | `CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS` | プール経由で DB に届かない状態がこれだけ続いたら終わる | 90 |
 | `CMS_SELF_HEAL_WARMUP_SECONDS` | 起動からこれだけは自己回復を見送る（起動直後の DB 待ちで落ちないため） | 300 |

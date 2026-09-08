@@ -11,7 +11,7 @@ import java.lang.System
 /// CMS_DB_MAX_CONNECTIONS（接続プールの上限。既定 10）、CMS_DB_BORROW_TIMEOUT_SECONDS（接続を借りるのを待つ上限。既定 2）、ASSET_*（StorageConfig。省略時は asset 無し）、
 /// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_BASE_DOMAIN（`{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。省略時は /p/ だけ）、
 /// CMS_DEFAULT_PROJECT（プロジェクト slug 無しの時のプロジェクト slug。省略時は default、空ならプロジェクト slug 無しは 404）、CMS_SIGNUP（open / closed）、
-/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（停止時に実行中の仕事を待つ秒数。既定 15）、CMS_SELF_HEAL（on / off。プールが壊れたまま戻らない時に自分で終わる。既定 on）、CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（既定 90）、CMS_SELF_HEAL_WARMUP_SECONDS（起動から見送る秒数。既定 300）、CMS_CACHE_MAX_AGE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 60、0 で no-store）、
+/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（自己回復の停止で実行中の仕事を待つ秒数。既定 15）、CMS_SHUTDOWN_TIMEOUT_SECONDS（SIGTERM で HTTP の接続と仕事を待つ秒数。既定 20。超えたら終了コード 2）、CMS_SELF_HEAL（on / off。プールが壊れたまま戻らない時に自分で終わる。既定 on）、CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（既定 90）、CMS_SELF_HEAL_WARMUP_SECONDS（起動から見送る秒数。既定 300）、CMS_CACHE_MAX_AGE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 60、0 で no-store）、
 /// CMS_MODE=import-microcms（サーバを立てず、CMS_IMPORT_DIR の microCMS のスキーマを写してダミーの entry を CMS_IMPORT_COUNT 件ずつ積んで終わる）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
 /// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health とログの version に出す版。省略時は dev）、CMS_MAX_CONNECTIONS（HTTP の同時接続の上限。超えた接続は 503。既定 256）、
 /// CMS_LOG_LEVEL（trace / debug / info / warn / error / fatal。これより軽い行は出さない。既定 info）
@@ -103,12 +103,12 @@ def serve(version: String, sink: Log.Sink, started: Started): Unit \ {IO, Sys.En
     let bind = match deps#auth#mode { case AuthConfig.Mode.Dev => Some("127.0.0.1") case _ => None };
     // 予約公開と Webhook の配信はプロセス内のワーカーで回す。積むのはリクエストの Tx（outbox）、拾って実行するのはここ
     region rc {
-    BackgroundJobs.installShutdownHook(jobs, sink);
     if (jobsOn) spawn BackgroundJobs.runForever(started#pool, jobs, sink) @ rc else Log.warn("jobs off (CMS_JOBS=off): POST /jobs/tick か別の worker で回してください", Log.Fields.empty());
     // WhyNot: CMS_JOBS=off の時に見張りを止めないのは、接続プールが壊れる事は仕事を回すかどうかと関係が無いため
     spawn BackgroundJobs.watchForever(started#pool, jobs, heal, sink) @ rc;
     let maxConnections = Sys.Env.getVar("CMS_MAX_CONNECTIONS") |> Option.flatMap(Int32.fromString) |> Option.filter(n -> n > 0) |> Option.getWithDefault(256);
     let listener = HttpServer.open({ bind = bind, maxConnections = maxConnections | HttpServer.defaultConfig() });
+    Shutdown.installHook(listener, jobs, Shutdown.timeoutSeconds(Sys.Env.getVar("CMS_SHUTDOWN_TIMEOUT_SECONDS")) * 1000i64, sink);
     let runtime = {
         pool = started#pool, deps = deps, jwks = jwks, baseDomain = baseDomain, defaultProject = started#defaultProject,
         defaultProjectSlug = Sys.Env.getVar("CMS_DEFAULT_PROJECT") |> Option.getWithDefault("default") |> Some |> Option.filter(text -> not String.isEmpty(text)),

@@ -67,13 +67,15 @@
 | `server.port` | int | 起動の行 | |
 | `migration.version` | string | 起動の行 | `CMS_MIGRATE=apply` で当てた migration |
 | `db.user` | string | 起動の行 | 所有者で繋ぐ時の警告 |
+| `shutdown.connections` | int | `shutdown timed out` の行 | 期限までに閉じなかった HTTP の接続の数 |
+| `shutdown.in_tick` | bool | `shutdown timed out` の行 | 仕事の 1 周が途中のままだったか |
 
 ## severity の決め
 
 | severity | 何を |
 |---|---|
 | error | 5xx、handle の例外、Webhook の最後の失敗、予約公開の失敗、リゾルバの DB の失敗（INTERNAL）、ワーカーの 1 周の失敗 |
-| warn | 401 / 403、知らない鍵・死んだ PAT（HTTP は 200 でも `credential.kind: invalid` か `graphql.error_codes` に `UNAUTHENTICATED`）、限界の 503、Webhook の再試行、jobs off、所有者で DB に繋ぐ |
+| warn | 停止の待ち切れ（`shutdown timed out`。この後 exit 2）、401 / 403、知らない鍵・死んだ PAT（HTTP は 200 でも `credential.kind: invalid` か `graphql.error_codes` に `UNAUTHENTICATED`）、限界の 503、Webhook の再試行、jobs off、所有者で DB に繋ぐ |
 | info | 2xx / 4xx のリクエストの行（404 / 400 はユーザーの正常な失敗。MCP の tools/call もこの行）、job の done / delivered、起動（`listening`）、停止（SIGTERM / SIGINT の `shutting down` → `jobs drained`） |
 | debug | `/health` の 2xx（外形監視で 1 日 1.4k 行。集計を汚さない） |
 | fatal | 起動の失敗（この後 exit 1）、OutOfMemoryError |
@@ -90,7 +92,8 @@
 - 自己回復: プールが壊れたまま戻らないと決まったら `self-heal: exiting`（error。`reason` とプールの数字）を出し、停止と同じ drain をして終了コード 3 で終わる。
   その後の `Terminating due to java.lang.OutOfMemoryError` のような JVM の平文は JSON にできないので、収集器は終了コードとこの行で判断する
 - 起動: `main` が全体を包む。`CMS_MODE=import-microcms` のまとめは Log でなく stdout の平文（コマンドの出力）
-- 停止: SIGTERM / SIGINT の handler（`BackgroundJobs.shutdown`）が `shutting down` を出してから新しい周を止め、実行中の 1 周を待って `jobs drained`（上限を超えれば warn の `jobs drain timed out`）
+- 停止: SIGTERM / SIGINT の handler（`Shutdown.stop`）が `shutting down` を出してから listen を閉じ、HTTP の接続が引けるのを待ち、実行中の 1 周を待って `jobs drained`（上限を超えれば warn の `jobs drain timed out`）。
+  期限（`CMS_SHUTDOWN_TIMEOUT_SECONDS`）までに片付かなければ warn の `shutdown timed out`（`shutdown.connections` / `shutdown.in_tick`）を出して終了コード 2、全部片付けば 0
 
 ## Loki
 

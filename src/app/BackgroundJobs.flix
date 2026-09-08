@@ -9,8 +9,6 @@ mod BackgroundJobs {
     import java.lang.System
     import java.lang.Thread
     import java.lang.Throwable
-    import sun.misc.Signal
-    import sun.misc.SignalHandler
 
     /// tick の間隔（ミリ秒）。
     def intervalMs(): Int64 = 2000i64
@@ -135,35 +133,24 @@ mod BackgroundJobs {
         }
 
     ///
-    /// SIGTERM / SIGINT を受けたら、新しい周を始めず、実行中の 1 周が終わるまで（上限あり）待ってから終わる。
-    ///
-    /// WhyNot: 待たずに落ちても回復（claimed_at）で拾い直せるが、Webhook はその間に届いていて二重になりうる。
-    /// 数秒待つだけで通常のデプロイではそれが無くなる。
-    /// WhyNot: Runtime.addShutdownHook（Runnable）を使わないのは、Runnable の `run` が Flix の予約語で書けないため。
-    ///
-    pub def installShutdownHook(state: State, sink: Log.Sink): Unit \ IO =
-        let onSignal = new SignalHandler {
-            def handle(_this: SignalHandler, _signal: Signal): Unit \ IO = {
-                Log.runWith(sink, () -> shutdown(state));
-                System.exit(0)
-            }
-        };
-        discard Signal.handle(new Signal("TERM"), onSignal);
-        discard Signal.handle(new Signal("INT"), onSignal)
-
-    ///
-    /// 停止の入口。`shutting down` を 1 行出してから新しい周を止め、実行中の 1 周が終わるまで（上限あり）待つ。
+    /// 仕事だけの停止。`shutting down` を 1 行出してから新しい周を止め、実行中の 1 周が終わるまで（上限あり）待つ。
     /// 行を先に出すのは、止めた事が行から分かるようにするため（`jobs stopping` は周の頭でしか判定せず、待っている間は出ない）。
+    /// SIGTERM の停止は HTTP も待つので `Shutdown.stop` を使う。ここは自己回復（exit 3）の道。
     ///
     pub def shutdown(state: State): Unit \ {IO, Log} =
         Log.info("shutting down", Log.Fields.empty());
         Ref.put(true, state#stopping);
-        drain(state, System.currentTimeMillis() + state#drainMs)
+        discard drain(state, System.currentTimeMillis() + state#drainMs)
 
-    /// 実行中の 1 周が終わるか、期限が来るまで待つ。
-    def drain(state: State, deadline: Int64): Unit \ {IO, Log} =
-        if (not Ref.get(state#inTick)) Log.info("jobs drained", Log.Fields.empty())
-        else if (System.currentTimeMillis() > deadline) Log.warn("jobs drain timed out (claimed_at で拾い直す)", Log.Fields.empty())
+    ///
+    /// 実行中の 1 周が終わるか、期限が来るまで待つ。終わっていれば true。
+    ///
+    /// WhyNot: 待たずに落ちても回復（claimed_at）で拾い直せるが、Webhook はその間に届いていて二重になりうる。
+    /// 数秒待つだけで通常のデプロイではそれが無くなる。
+    ///
+    pub def drain(state: State, deadline: Int64): Bool \ {IO, Log} =
+        if (not Ref.get(state#inTick)) { Log.info("jobs drained", Log.Fields.empty()); true }
+        else if (System.currentTimeMillis() > deadline) { Log.warn("jobs drain timed out (claimed_at で拾い直す)", Log.Fields.empty()); false }
         else { Thread.sleep(100i64); drain(state, deadline) }
 
     ///
