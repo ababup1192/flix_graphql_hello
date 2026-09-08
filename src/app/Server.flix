@@ -117,13 +117,17 @@ mod Server {
     /// GET /health。DB に届けば {"status": "ok", "version": "...", "jobs": {"lastTickAt": ...}, "connections": {"active": 1, "max": 256}, "pool": {"active": 1, ...}}、届かなければ 503 で理由を付ける。
     /// DB に届いても、仕事の周か見張りの周が止まっていれば 503 で reason（`jobs stalled` / `watch stalled`）を付ける。
     /// connections は HTTP の接続、pool は DB の接続プール（別の物）。
-    /// 先に自己回復の判断を 1 回進める（プールが壊れたまま戻らないと決まれば、この中でプロセスが終わる）。
+    /// 最初に DB へ 1 回だけ届くかを見て、その結果で自己回復の判断を 1 回進める（プールが壊れたまま戻らないと決まれば、この中でプロセスが終わる）。
+    ///
+    /// WhyNot: 自己回復と checkDb で別々に ping を打たないのは、DB が落ちている間は 1 回が接続の借り待ちで数秒掛かり、
+    /// 2 回打つと /health の応答がその倍になるため（実験 4 回目の対照 4 で 10.3 秒）。
     ///
     /// WhyNot: 判断を見張りのスレッドだけに任せないのは、そのスレッドが OOM で死ぬと自己回復が永久に無効になるため。
     /// リクエストのスレッドは OOM の後も生きている側で、Docker の HEALTHCHECK が叩く限りここで判断が進む。
     ///
     def healthRoute(version: String, health: Health[ef], _routeRequest: RouteRequest): HttpResponse \ {Observe, ef} =
-        (health#heal)();
+        let db = (health#checkDb)();
+        (health#heal)(db);
         let stall = (health#stall)();
         Option.forEach(found -> Observe.note(Log.Fields.empty() |> Log.Fields.int(Health.stallKey(found), Health.stallMs(found))), stall);
         let summary = (health#jobsSummary)();
@@ -140,7 +144,7 @@ mod Server {
             "pendingDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#pendingDeliveries)),
             "failedDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedDeliveries)) });
         let base = Map#{ "version" => Value.Str(version), "jobs" => jobs, "connections" => connections, "pool" => pool };
-        match ((health#checkDb)(), stall) {
+        match (db, stall) {
             case (Ok(()), None)          => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map.insert("status", Value.Str("ok"), base))) }
             case (Ok(()), Some(found))   => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(base |> Map.insert("status", Value.Str("error")) |> Map.insert("reason", Value.Str(Health.stallReason(found))))) }
             case (Err(message), _)       => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(base |> Map.insert("status", Value.Str("error")) |> Map.insert("db", Value.Str(message)))) }

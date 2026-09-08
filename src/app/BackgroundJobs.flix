@@ -62,7 +62,7 @@ mod BackgroundJobs {
         else {
             let startedAt = System.currentTimeMillis();
             Ref.put(Some(startedAt), state#lastWatch);
-            Log.runWith(sink, () -> healCheck(pool, state, heal));
+            Log.runWith(sink, () -> healCheck(pool, state, heal, Result.isOk(Health.ping(pool))));
             Thread.sleep(nextWaitMs(healIntervalMs(), System.currentTimeMillis() - startedAt));
             watchForever(pool, state, heal, sink)
         }
@@ -84,9 +84,11 @@ mod BackgroundJobs {
     /// WhyNot: 外部トリガー（POST /jobs/tick）の tick に入れないのは、仕事を回すだけの口が理由でプロセスが終わると、
     /// 呼んだ側には接続断としか見えないため。/health は死活を答える口なので、そこで終わりが決まるのは筋が通る。
     ///
-    pub def healCheck(pool: Pool, state: State, heal: Option[SelfHeal.Watch]): Unit \ {IO, Log} = match heal {
+    /// WhyNot: ここで ping を打たないのは、/health が checkDb でも同じ ping を打つため。呼ぶ側が 1 回打った結果を渡す。
+    ///
+    pub def healCheck(pool: Pool, state: State, heal: Option[SelfHeal.Watch], pingOk: Bool): Unit \ {IO, Log} = match heal {
         case None        => ()
-        case Some(watch) => match SelfHeal.step(watch, pool) {
+        case Some(watch) => match SelfHeal.step(watch, SelfHeal.observe(watch, pool, pingOk)) {
             case SelfHeal.Decision.Keep         => ()
             case SelfHeal.Decision.Exit(reason) => if (SelfHeal.claimExit(watch)) exitForHeal(pool, state, reason) else ()
         }

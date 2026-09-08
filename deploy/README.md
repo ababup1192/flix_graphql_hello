@@ -270,8 +270,10 @@ OOM で JVM 自身が落ちる時（`-XX:+ExitOnOutOfMemoryError`）の最後の
 見張りのスレッド自体が止まった時は、`/health` が 503 と `"reason": "watch stalled"` を返す（最後に回ってから 30 秒より古い時）。
 リクエストの行には `jobs.stalled_ms` / `watch.stalled_ms` が付く。
 
-**`/health` は DB が落ちている時に `CMS_DB_BORROW_TIMEOUT_SECONDS` × 3 + backoff だけ返らない**（既定で 7〜8 秒。Dockerfile の `HEALTHCHECK --timeout=3s` は毎回 timeout 扱いになる）。
+**`/health` は DB が落ちている時に `CMS_DB_BORROW_TIMEOUT_SECONDS` ぶん（既定 2 秒）＋ プールを通さない接続を 1 本試すぶんだけ返らない。**
+ping は 1 回だけ打ち、その結果を自己回復の判断と応答の両方で使う（2 回打っていた頃は倍の 10 秒級だった）。
 接続を借りる所で待つので、ping の前に `SET LOCAL statement_timeout` を置いても効かない。もっと短くしたいなら `CMS_DB_BORROW_TIMEOUT_SECONDS=1` にする。
+Dockerfile の `HEALTHCHECK --timeout=3s` には収まらない事があるので、余裕を見るなら `--timeout` を伸ばす。
 
 予約公開と再起動: プロセスが落ちた時に実行中だった仕事は失われないが、`claimed_at` の回復で拾い直すのは 10 分後になる（その分だけ公開が遅れる）。
 

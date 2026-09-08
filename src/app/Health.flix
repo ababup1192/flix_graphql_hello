@@ -8,7 +8,7 @@
 /// - connections: HTTP の同時接続の今の数と上限
 /// - poolStats: DB の接続プールの数字（HTTP の接続数とは別）
 /// - stall: 仕事の周か見張りの周が止まっていれば、その理由（止まっていなければ None）
-/// - heal: 自己回復の判断を 1 回進める（Exit が決まればこの中でプロセスが終わる）
+/// - heal: checkDb の結果を渡して自己回復の判断を 1 回進める（Exit が決まればこの中でプロセスが終わる）
 ///
 /// WhyNot: effect にしないのは、入力（プール・ワーカー・Listener）が起動時に固定で、読む所が Server の直下なので
 /// 値で渡しても引数が 1 本しか増えないため。差し替えには当たるが、IdGen / ObjectStore のように深い所で使う物ではない。
@@ -21,7 +21,7 @@ pub type alias Health[ef: Eff] = {
     connections = Unit -> HttpServer.Connections \ ef,
     poolStats   = Unit -> Pool.PoolStats \ ef,
     stall       = Unit -> Option[Health.Stall] \ ef,
-    heal        = Unit -> Unit \ ef
+    heal        = Result[String, Unit] -> Unit \ ef
 }
 
 mod Health {
@@ -103,7 +103,7 @@ mod Health {
           connections = _ -> HttpServer.connections(listener),
           poolStats   = _ -> Pool.stats(pool),
           stall       = _ -> stalled(liveness(jobs, startedAt, jobsOn)),
-          heal        = _ -> BackgroundJobs.healCheck(pool, jobs, heal) }
+          heal        = db -> BackgroundJobs.healCheck(pool, jobs, heal, Result.isOk(db)) }
 
     /// 今の周の生死を読む。
     def liveness(jobs: BackgroundJobs.State, startedAt: Int64, jobsOn: Bool): Liveness \ IO =

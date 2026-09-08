@@ -138,15 +138,22 @@ mod SelfHeal {
         if (Ref.get(watch#exiting)) false else { Ref.put(true, watch#exiting); true }
 
     ///
-    /// 呼ばれた時に 1 回ぶん観測して決める。プール経由の ping が通っている間は新しい接続を開かない。
+    /// プール経由の ping の結果から 1 周ぶんの観測を作る。ping が通っている間は新しい接続を開かない。
+    ///
+    /// WhyNot: ここで ping を打たないのは、/health が同じ ping を checkDb でも打っていて、DB が落ちている間は
+    /// 借り待ちの分だけ応答が倍に伸びるため（実験 4 回目の対照 4 で 10.3 秒）。ping は呼ぶ側が 1 回打ってその結果を渡す。
+    ///
+    pub def observe(watch: Watch, pool: Pool, pingOk: Bool): Observation \ IO =
+        { at = System.currentTimeMillis(), pingOk = pingOk, freshOk = not pingOk and freshOk(watch#connection), stats = Pool.stats(pool) }
+
+    ///
+    /// 観測を 1 つ積んで決める。
     /// 判断は観測の列（それぞれが `at` を持つ）だけで決まるので、呼ばれる間隔が一定でなくても minUnhealthyMs の判定は変わらない。
     ///
     /// WhyNot: 見張りのスレッドからしか呼ばないようにしないのは、そのスレッドが OOM で死ぬと自己回復が永久に無効になるため
     /// （実験 3 回目の S5 で 2 回とも再現）。リクエストのスレッドは OOM の後も生きているので、/health からも同じ step を進める。
     ///
-    pub def step(watch: Watch, pool: Pool): Decision \ IO =
-        let pingOk = Result.isOk(Health.ping(pool));
-        let seen = { at = System.currentTimeMillis(), pingOk = pingOk, freshOk = not pingOk and freshOk(watch#connection), stats = Pool.stats(pool) };
+    pub def step(watch: Watch, seen: Observation): Decision \ IO =
         let window = (Ref.get(watch#seen) ::: seen :: Nil) |> keepLast(windowSize());
         Ref.put(window, watch#seen);
         decide(watch#settings, watch#startedAt, window)
