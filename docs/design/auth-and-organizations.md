@@ -228,4 +228,4 @@ Schema の `Field.erase` が全フィールドを Runner で包むので、Runne
 - private なプロジェクトのコンテンツ API は認証の Content の分岐で断る。匿名は `UNAUTHENTICATED`、メンバーでない人は `FORBIDDEN`（以前はどちらも INVALID）
 - 失敗は層ごとに 1 種類: 認証は `Rejection`、ドメインは `CmsFailure`、DB は `DbFailure`。Tx の境界（`DbRunner.transact`）は `ApplicationFailure`（`Infrastructure` / `Domain`）で返し、`toFieldResult` / `GraphqlErrors` / `LogFields` は平らな match で写す。ドメインは UNAUTHENTICATED を出せない
 - Unit of Work は**ルートフィールドごとの Tx のまま**（変えない）。1 リクエストに mutation を並べても互いに独立で、2 つ目が業務エラーでも 1 つ目は COMMIT されている。まとめたい操作は 1 つの mutation にする（`TestAdminMutationsPg.testPgRootFieldsAreIndependentTransactions`）
-- 数は `db.statements` / `db.transactions`（docs/logging.md）で見え、`TestQueryBudgetPg` が上限で見張る。実測: JWT で entries 50 件 × 10 フィールドが 3723 → 209 本、`contentTypes { name }` が 16 → 9 本（認証 1 回分）、API キーの一覧が 1208 → 204 本
+- 数は `db.statements` / `db.transactions`（docs/logging.md）で見え、`TestQueryBudgetPg` が上限で見張る。実測: JWT で entries 50 件 × 10 フィールドが 3723 → 209 本（認証 1 回）→ 12 本（版と型の先読み。`Preloaded`）、`contentTypes { name }` が 16 → 9 本（認証 1 回分）、API キーの一覧が 1208 → 204 → 7 本、コンテンツ API の一覧 50 件 + 参照先が API キーで 5 本

@@ -49,6 +49,7 @@ HTTP サーバの同時接続の上限（`CMS_MAX_CONNECTIONS`。超えたら 50
 | 15a | richText の doc に本文の穴を塞ぐ node（gallery / image の alt / linkCard / codeBlock の fileName と highlightLines） | 編集者 | 半日 | microCMS でカスタムフィールドに追い出されている物を本文の中に持てるようにする。バックエンドは doc の形・validate・HTML・Markdown の方言まで。エディタは管理画面で。脚注は後 |
 | 15b | richText の doc の第 2 弾（数式 / Mermaid / タスクリスト / 動画） | 編集者 | 半日 | 15a と同じ型。動画は AssetRules に mime ごとの上限。entryEmbed（本文に別の entry）は参照展開が絡むので差分と MCP の後に単独で |
 | 16 | 画像の `usedBy`（済み）、pending の掃除 cron、asset の先読み | 編集者・運用 | 半日 | 既存の query を出すだけ + 孤児の削除 |
+| 16a | 一覧の N+1 を先読みで塞ぐ（2026-09-08 に実装済み） | 運用 | 済み | 管理 API の `entries` の行の versions / diff をリクエスト単位の写し（`Preloaded`。Context の `preload`）からまとめて引く。JWT の一覧 50 件 × 10 フィールドが 209 → 12 本、API キーで 204 → 7 本。コンテンツ API の参照先は `Entry.linked` の先読みが既にあり 5 本。上限は `TestQueryBudgetPg`。残り: Tx の数（フィールドごとの 504）、コンテンツ API の 2 段目以降の参照、diff の PUBLISHED 側 |
 | 17 | 課金（Stripe）と組織の上限 | サービス | 1〜2 日 | [hosting-and-externalized-risk.md](hosting-and-externalized-risk.md) |
 | 18 | 監査ログ | 企業 | 半日 | `Actor` が入れば mutation の入口 1 か所 |
 | 19 | 編集中の表示（在席） | 編集者 | 半日 | 楽観ロックは済み。誰が開いているかを出す |
