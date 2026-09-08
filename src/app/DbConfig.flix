@@ -29,7 +29,7 @@ mod DbConfig {
     pub def poolFromEnv(connection: Jdbc.ConnectionConfig): Pool.PoolConfig \ Sys.Env =
         let base = Pool.defaultConfig(connection);
         { maxConnections           = maxConnections(base#maxConnections, Sys.Env.getVar("CMS_DB_MAX_CONNECTIONS")),
-          borrowTimeoutMs          = borrowTimeoutSeconds(Sys.Env.getVar("CMS_DB_BORROW_TIMEOUT_SECONDS")) * 1000,
+          borrowTimeoutMs          = borrowTimeoutMsFromEnv(),
           leakDetectionThresholdMs = leakDetectionSeconds(Sys.Env.getVar("CMS_DB_LEAK_DETECTION_SECONDS")) * 1000
         | base }
 
@@ -44,6 +44,12 @@ mod DbConfig {
     ///
     pub def maxConnections(fallback: Int32, raw: Option[String]): Int32 =
         raw |> Option.flatMap(Int32.fromString) |> Option.filter(count -> count >= 1) |> Option.getWithDefault(fallback)
+
+    ///
+    /// CMS_DB_BORROW_TIMEOUT_SECONDS をミリ秒で。プールの設定と /health の ping が同じ値を使う。
+    ///
+    pub def borrowTimeoutMsFromEnv(): Int32 \ Sys.Env =
+        borrowTimeoutSeconds(Sys.Env.getVar("CMS_DB_BORROW_TIMEOUT_SECONDS")) * 1000
 
     ///
     /// CMS_DB_BORROW_TIMEOUT_SECONDS の値を秒にする。無い・数字でない・1 未満なら既定の 2。

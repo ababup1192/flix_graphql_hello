@@ -93,11 +93,16 @@ mod Health {
 
     ///
     /// プールとワーカーと Listener の状態で答える。runJobs は仕事の行（Log）を出す。
-    /// startedAt はプロセスが起動した時刻、jobsOn は CMS_JOBS、heal は自己回復の見張り（CMS_SELF_HEAL=off なら None）。
+    /// startedAt はプロセスが起動した時刻、jobsOn は CMS_JOBS、heal は自己回復の見張り（CMS_SELF_HEAL=off なら None）、
+    /// borrowTimeoutMs は checkDb が接続を借りるのを待つ上限（CMS_DB_BORROW_TIMEOUT_SECONDS）。
+    ///
+    /// WhyNot: checkDb にプールの borrowTimeoutMs をそのまま使わせないのは、Hikari の借り待ちは満杯の時に他のリクエストの
+    /// 列に並ぶ形で、DB が止まっている間は /health がプールの設定ぶん張り付き、Docker の HEALTHCHECK の方が先に切れるため。
+    /// この呼び出しだけの上限で切る。
     ///
     pub def ofPool(pool: Pool, jobs: BackgroundJobs.State, listener: HttpServer.Listener,
-                   startedAt: Int64, jobsOn: Bool, heal: Option[SelfHeal.Watch]): Health[{IO, Log}] =
-        { checkDb     = _ -> ping(pool),
+                   startedAt: Int64, jobsOn: Bool, heal: Option[SelfHeal.Watch], borrowTimeoutMs: Int32): Health[{IO, Log}] =
+        { checkDb     = _ -> pingWithin(pool, borrowTimeoutMs),
           jobsSummary = _ -> BackgroundJobs.summary(pool, jobs),
           runJobs     = _ -> BackgroundJobs.tick(pool, jobs),
           connections = _ -> HttpServer.connections(listener),
@@ -116,6 +121,14 @@ mod Health {
     ///
     pub def ping(pool: Pool): Result[String, Unit] \ IO =
         DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Pool.withConnection(pool, _ -> discard Sql.fetch("SELECT 1", Nil))))
-            |> Result.mapErr(failure -> "${failure}")
+            |> Result.mapErr(DbError.describeFailure)
+
+    ///
+    /// `ping` に、この呼び出しだけの借り待ちの上限を付けた形。上限までに借りられなければ `timeout` の Err。
+    /// /health が使う（起動時の確認と自己回復の見張りは `ping`）。
+    ///
+    pub def pingWithin(pool: Pool, borrowTimeoutMs: Int32): Result[String, Unit] \ IO =
+        DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Pool.withConnectionTimeout(pool, borrowTimeoutMs, _ -> discard Sql.fetch("SELECT 1", Nil))))
+            |> Result.mapErr(DbError.describeFailure)
 
 }
