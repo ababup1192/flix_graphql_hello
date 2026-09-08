@@ -14,7 +14,7 @@ mod TestDbTimeoutPg {
     def timeoutPool(): Pool \ IO =
         let owner = PgTestSupport.config();
         let dsn = (run { Sys.Env.getVar("CMS_DSN") } with Sys.Env.runWithIO) |> Option.getWithDefault(owner#url);
-        Pool.open({ connection = { url = DbConfig.withTimeouts(1, dsn) | owner }, maxConnections = 1, borrowTimeoutMs = 500 })
+        Pool.open({ maxConnections = 1, borrowTimeoutMs = 500 | Pool.defaultConfig({ url = DbConfig.withTimeouts(1, dsn) | owner }) })
 
     /// 接続 1 本のプールからもう 1 度借りて SELECT 1 が通るか（Ok(1) なら返っている）。
     def borrowAgain(pool: Pool): Result[String, Int32] \ IO =

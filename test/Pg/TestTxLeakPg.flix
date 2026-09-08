@@ -7,7 +7,7 @@ mod TestTxLeakPg {
     import java.lang.Integer
 
     def singlePool(): Pool \ IO =
-        Pool.open({ connection = PgTestSupport.config(), maxConnections = 1, borrowTimeoutMs = 500 })
+        Pool.open({ maxConnections = 1, borrowTimeoutMs = 500 | Pool.defaultConfig(PgTestSupport.config()) })
 
     /// 接続 1 本のプールからもう 1 度借りて SELECT 1 が通るか（Ok(1) なら返っている）。
     def borrowAgain(pool: Pool): Result[String, Int32] \ IO =
