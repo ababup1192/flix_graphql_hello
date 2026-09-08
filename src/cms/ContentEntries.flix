@@ -98,7 +98,7 @@ mod ContentEntries {
     ///
     pub def create(proof: Granted[WriteEntries], typeId: TypeId, givenId: Option[EntryId], given: EntryData): Entry \ Db + CmsErr + IdGen + Tenant =
         // 型を引き、中身を揃えて下書きの規則（と singleton の件数）で検査する
-        let owner = ContentTypes.fetch(Session.readDraftOfWriter(proof), typeId);
+        let owner = ContentTypes.get(Session.readDraftOfWriter(proof), typeId);
         let data = EntryValidation.normalize(owner#fields, given);
         CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data) ::: singletonViolations(owner));
         // id を決める。渡されていればそれ、無ければ振る
@@ -125,7 +125,7 @@ mod ContentEntries {
     ///
     pub def update(proof: Granted[WriteEntries], id: EntryId, patch: EntryData, expectedVersion: Int32): Entry \ Db + CmsErr + Tenant =
         let existing = load(id);
-        let owner = ContentTypes.fetch(Session.readDraftOfWriter(proof), existing#typeId);
+        let owner = ContentTypes.get(Session.readDraftOfWriter(proof), existing#typeId);
         // 今の下書き（型に無いキーは落とす）に patch を重ね、版の照合と検査は writeDraft
         writeDraft(owner, existing, EntryValidation.merge(EntryValidation.prune(owner#fields, existing#data), patch), expectedVersion)
 
@@ -144,7 +144,7 @@ mod ContentEntries {
     /// entry の出来事を Webhook に積み、プロジェクトの版を進める（同じ Tx）。
     def notify(reader: Granted[ReadDraft], event: WebhookEvent, id: EntryId, typeId: TypeId): Unit \ Db + CmsErr + IdGen + Tenant =
         Projects.bumpContentVersion();
-        Webhooks.emitEntry(event, id, ContentTypes.fetch(reader, typeId)#apiId)
+        Webhooks.emitEntry(event, id, ContentTypes.get(reader, typeId)#apiId)
 
     // ---- 公開 ----
 
@@ -160,7 +160,7 @@ mod ContentEntries {
     def publishWithin(proof: Granted[PublishEntries], visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant =
         // 下書きを読み、公開の規則で検査する（unique は advisory lock 付き）
         let existing = load(id);
-        let owner = ContentTypes.fetch(Session.readDraftOfPublisher(proof), existing#typeId);
+        let owner = ContentTypes.get(Session.readDraftOfPublisher(proof), existing#typeId);
         let data = EntryValidation.prune(owner#fields, existing#data);
         let report = reportOf(true, owner, existing, data);
         CmsErr.raiseIfAny(report#violations);
@@ -195,7 +195,7 @@ mod ContentEntries {
     ///
     pub def publishReport(proof: Granted[ReadDraft], id: EntryId): PublishReport \ DbRead + CmsErr + Tenant =
         let existing = load(id);
-        let owner = ContentTypes.fetch(proof, existing#typeId);
+        let owner = ContentTypes.get(proof, existing#typeId);
         // publish 本体と同じ検査を、ロック無しで
         reportOf(false, owner, existing, EntryValidation.prune(owner#fields, existing#data))
 
@@ -251,7 +251,7 @@ mod ContentEntries {
     def collectReports(reader: Granted[ReadDraft], withDependencies: Bool, seen: Map[EntryId, (Entry, PublishReport)], ids: List[EntryId]): Map[EntryId, (Entry, PublishReport)] \ DbRead + CmsErr + Tenant =
         List.foldLeft((acc, id) -> if (Map.memberOf(id, acc)) acc else {
             let existing = load(id);
-            let owner = ContentTypes.fetch(reader, existing#typeId);
+            let owner = ContentTypes.get(reader, existing#typeId);
             let report = reportOf(false, owner, existing, EntryValidation.prune(owner#fields, existing#data));
             let next = Map.insert(id, (existing, report), acc);
             if (withDependencies) collectReports(reader, withDependencies, next, report#unpublishedDependencies |> List.map(dependency -> dependency#id)) else next
@@ -274,7 +274,7 @@ mod ContentEntries {
     def referrers(reader: Granted[ReadDraft], id: EntryId, stage: Stage): List[Referrer] \ DbRead + CmsErr + Tenant =
         EntriesQueries.referrerLinks({ toEntryId = EntryId.text(id), stage = EntryRows.stageToDb(stage), projectId = Tenant.currentId() })
             |> List.filterMap(row -> EntryId.parse(row#fromEntryId) |> Option.flatMap(lookup) |> Option.map(entry ->
-                { entry = entry, via = ContentTypes.fetchField(reader, FieldId.FieldId(row#fieldId))#apiId, stage = stage }))
+                { entry = entry, via = ContentTypes.getField(reader, FieldId.FieldId(row#fieldId))#apiId, stage = stage }))
 
     /// 未公開の参照先を深さ優先で集める（依存の順。直接の参照先は id 順。重複と循環は visited で止める）。
     def dependenciesOf(visited: List[EntryId], id: EntryId): List[EntryId] \ DbRead + Tenant =
@@ -362,7 +362,7 @@ mod ContentEntries {
             |> Option.filter(version -> version#entryId == id)
             |> CmsErr.orNotFound(Entity.Version, "${versionId}");
         let existing = load(id);
-        let owner = ContentTypes.fetch(Session.readDraftOfWriter(proof), existing#typeId);
+        let owner = ContentTypes.get(Session.readDraftOfWriter(proof), existing#typeId);
         writeDraft(owner, existing, EntryValidation.prune(owner#fields, found#data), expectedVersion)
 
     ///
@@ -370,7 +370,7 @@ mod ContentEntries {
     ///
     pub def diff(proof: Granted[ReadDraft], id: EntryId, fromRef: VersionRef, toRef: VersionRef): List[FieldChange] \ DbRead + CmsErr + Tenant =
         let existing = load(id);
-        diffOf(proof, ContentTypes.fetch(proof, existing#typeId), existing, fromRef, toRef)
+        diffOf(proof, ContentTypes.get(proof, existing#typeId), existing, fromRef, toRef)
 
     ///
     /// 読み込み済みの entry と型で diff。一覧の行（先読みした型）から呼ぶ用で、entry と型は引き直さない。

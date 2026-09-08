@@ -27,7 +27,7 @@ mod TestNestedPg {
     def testPgNestedDefinition(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
             let pages = pagesWithNested();
-            let loaded = ContentTypes.fetch(Session.grant(), pages);
+            let loaded = ContentTypes.get(Session.grant(), pages);
             let sections = loaded#fields |> List.find(field -> ApiId.text(field#apiId) == "sections");
             let badChild = CmsTestKit.failureMessage(() -> ContentTypes.addField(Session.grant(), pages, { parent = sections |> Option.map(field -> field#id) | CmsTestKit.fieldDraft("loose", FieldKind.Text, FieldConfig.empty()) }));
             (loaded#fields |> List.map(field -> ApiId.text(field#apiId)),
@@ -44,7 +44,7 @@ mod TestNestedPg {
     def testPgNestedReorderTopLevelOnly(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
             let pages = pagesWithNested();
-            let top = ContentTypes.fetch(Session.grant(), pages) |> (owner -> owner#fields);
+            let top = ContentTypes.get(Session.grant(), pages) |> (owner -> owner#fields);
             let ids = top |> List.map(field -> field#id);
             let childId = FieldTree.flatten(top) |> List.find(field -> ApiId.text(field#apiId) == "headline") |> Option.map(field -> field#id);
             let reordered = ContentTypes.reorderFields(Session.grant(), pages, List.reverse(ids)) |> (owner -> owner#fields |> List.map(field -> ApiId.text(field#apiId)));

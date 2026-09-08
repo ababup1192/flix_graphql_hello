@@ -42,17 +42,8 @@ mod ContentTypes {
     ///
     /// id で 1 つ。無ければ notFound。
     ///
-    pub def fetch(_proof: Granted[ReadDraft], id: TypeId): ContentType \ DbRead + CmsErr + Tenant =
+    pub def get(_proof: Granted[ReadDraft], id: TypeId): ContentType \ DbRead + CmsErr + Tenant =
         load(id)
-
-    ///
-    /// id で 1 つ。無ければ notFound。証明を自分で作る形。
-    ///
-    /// WhyNot: fetch に寄せないのは、ContentEntries / PreviewTokens がまだ Session.require の形で、証明を持っていないため。
-    /// それらが Granted に移ったら消して fetch を get に戻す。
-    ///
-    pub def get(id: TypeId): ContentType \ DbRead + CmsErr + Tenant + Session =
-        fetch(Session.grant(), id)
 
     /// id で 1 つ。無ければ notFound。権限は見ない（ユースケースの内部で使う）。
     def load(id: TypeId): ContentType \ DbRead + CmsErr + Tenant =
@@ -61,14 +52,8 @@ mod ContentTypes {
     ///
     /// フィールド 1 つ（children 付き）。無ければ notFound。
     ///
-    pub def fetchField(_proof: Granted[ReadDraft], id: FieldId): FieldDef \ DbRead + CmsErr + Tenant =
+    pub def getField(_proof: Granted[ReadDraft], id: FieldId): FieldDef \ DbRead + CmsErr + Tenant =
         loadField(id)
-
-    ///
-    /// フィールド 1 つ。無ければ notFound。証明を自分で作る形（get と同じ理由で、ContentEntries が移るまで）。
-    ///
-    pub def getField(id: FieldId): FieldDef \ DbRead + CmsErr + Tenant + Session =
-        fetchField(Session.grant(), id)
 
     /// フィールド 1 つ。無ければ notFound。権限は見ない（ユースケースの内部で使う）。
     def loadField(id: FieldId): FieldDef \ DbRead + CmsErr + Tenant =

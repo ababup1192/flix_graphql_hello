@@ -62,7 +62,7 @@ mod TestContentTypes {
     /// 行の config は FieldConfig に読まれ、kind と id はドメインの型になる。
     @Test
     def testContentTypesFieldShape(): Unit \ {Assert, IO} =
-        let (result, _) = record(() -> ContentTypes.fetch(Session.grant(), TypeId.TypeId(1i64)));
+        let (result, _) = record(() -> ContentTypes.get(Session.grant(), TypeId.TypeId(1i64)));
         Assert.assertEq(expected = Ok(Some((FieldId.FieldId(10i64), FieldKind.Text, Some(120), true))),
             result |> Result.map(contentType -> List.head(contentType#fields) |> Option.map(found -> (found#id, found#kind, found#config#maxLength, found#required))))
 

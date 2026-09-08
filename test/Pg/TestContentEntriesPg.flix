@@ -128,7 +128,7 @@ mod TestContentEntriesPg {
                 "mutation { createEntry(typeId: \"${typeId}\", id: \"e1\", fields: { title: \"hello\", views: 7 }) { id version stage fields } }");
             let updated = PgTestSupport.askOwner(api)(
                 "mutation { updateEntry(id: \"e1\", expectedVersion: 1, fields: { views: null }) { version fields } }");
-            let badKey = GraphqlTestKit.askRequest(api#schema, GraphqlTestKit.request(
+            let badKey = PgTestSupport.askOwnerRequest(api)(GraphqlTestKit.request(
                 "mutation($f: JSON!) { updateEntry(id: \"e1\", expectedVersion: 2, fields: $f) { version } }",
                 Map#{ "f" => Value.Obj(Map#{ "Bad Key" => Value.Int(1) }) })) |> snd;
             let listed = PgTestSupport.askOwner(api)( "{ entries(typeId: \"${typeId}\") { totalCount nodes { id } } }");

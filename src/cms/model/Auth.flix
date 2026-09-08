@@ -108,7 +108,7 @@ mod OrgRole {
 }
 
 ///
-/// 操作の種類。ユースケースが `Session.grant()`（証明 `Granted[p]`。印の型は Granted.flix）か `Session.require` で要求する。
+/// 操作の種類。ユースケースの入口が証明 `Granted[p]`（印の型は Granted.flix。`Session.grant()` が作る）で要求する。
 ///
 pub enum Permission with Eq, Order, ToString {
     /// 下書きと型の定義を読む（管理 API の Query 全部）
@@ -151,7 +151,7 @@ mod Permission {
 /// 人がどうやって来たか。ログインの JWT か、Personal Access Token（PAT）か。
 ///
 /// - Interactive: ログインの JWT（管理画面や、JWT を付けた curl）
-/// - PersonalToken: PAT。read なら役割は viewer に落ちる（Authz）。鍵や PAT の発行はできない（Session.requireInteractive）
+/// - PersonalToken: PAT。read なら役割は viewer に落ちる（Authz）。鍵や PAT の発行はできない（`Granted[Interactive]` は Session.grantInteractive がログインの JWT にだけ作る）
 ///
 pub enum Login with Eq, Order, ToString {
     case Interactive
@@ -200,7 +200,7 @@ pub enum ViewerKind with Eq, Order, ToString {
 /// - name: 人なら email、鍵なら鍵の名前。無ければ空
 /// - roles: 判定に使う役割（read の PAT は viewer に落とした物、WRITE の鍵はその role）
 /// - scope: 鍵か PAT の scope の文字列。それ以外は None
-/// - permissions: Session.require が通る権限の名前
+/// - permissions: Session.grant が通る権限の名前
 ///
 pub type alias Viewer = { kind = ViewerKind, name = String, roles = List[Role], scope = Option[String], permissions = List[String] }
 

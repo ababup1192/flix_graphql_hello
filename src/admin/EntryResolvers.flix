@@ -46,7 +46,7 @@ mod EntryResolvers {
         match Preloaded.contentType(id) {
             case Some(found) => found
             case None        => {
-                let owner = ContentTypes.fetch(Session.grant(), id);
+                let owner = ContentTypes.get(Session.grant(), id);
                 Preloaded.keepContentType(owner);
                 owner
             }

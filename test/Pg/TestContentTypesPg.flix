@@ -21,7 +21,7 @@ mod TestContentTypesPg {
             discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, { maxLength = Some(120) | FieldConfig.empty() }));
             discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("body", FieldKind.TextArea, FieldConfig.empty()));
             discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = Some(CmsTestKit.apiId("title")) | FieldConfig.empty() }));
-            let loaded = ContentTypes.fetch(Session.grant(), blogs#id);
+            let loaded = ContentTypes.get(Session.grant(), blogs#id);
             (TypeName.text(loaded#singular), ApiId.text(loaded#plural), loaded#kind, loaded#previewUrl,
              loaded#fields |> List.map(field -> (ApiId.text(field#apiId), field#position, field#config#maxLength, field#config#sourceField |> Option.map(ApiId.text))))
         });

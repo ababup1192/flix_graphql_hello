@@ -192,7 +192,7 @@ mod TestPublishPg {
             let oldest = ContentEntries.versions(Session.grant(), created#id) |> List.last |> Option.map(version -> version#id) |> Option.getWithDefault(VersionId.VersionId(0i64));
             let restored = ContentEntries.restoreVersion(Session.grant(), created#id, oldest, edited#version);
             let republished = CmsTestKit.messageOr(entry -> (entry#stage, entry#changedSincePublish), () -> ContentEntries.publish(Session.grant(), created#id, "tester", false));
-            let publicSide = ContentEntries.findByStage(ContentTypes.fetch(Session.grant(), blogs), created#id, ContentEntries.StageAccess.Published) |> Option.map(entry -> Map.get(CmsTestKit.apiId("title"), entry#data));
+            let publicSide = ContentEntries.findByStage(ContentTypes.get(Session.grant(), blogs), created#id, ContentEntries.StageAccess.Published) |> Option.map(entry -> Map.get(CmsTestKit.apiId("title"), entry#data));
             ((restored#changedSincePublish, Map.get(CmsTestKit.apiId("slug"), restored#data)), republished, publicSide)
         }));
         Assert.assertEq(expected = Ok(Ok(((true, Some(Json.JString("old"))), Ok((Stage.Published, false)), Some(Some(Json.JString("Old")))))), result)
@@ -212,7 +212,7 @@ mod TestPublishPg {
             discard ContentEntries.publish(Session.grant(), b#id, "tester", false);
             let restored = ContentEntries.restoreVersion(Session.grant(), a#id, saved#id, freed#version);
             let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), a#id, "tester", false));
-            let publicSide = ContentEntries.findByStage(ContentTypes.fetch(Session.grant(), blogs), a#id, ContentEntries.StageAccess.Published) |> Option.map(entry -> Map.get(CmsTestKit.apiId("slug"), entry#data));
+            let publicSide = ContentEntries.findByStage(ContentTypes.get(Session.grant(), blogs), a#id, ContentEntries.StageAccess.Published) |> Option.map(entry -> Map.get(CmsTestKit.apiId("slug"), entry#data));
             (Map.get(CmsTestKit.apiId("slug"), restored#data), blocked, publicSide)
         }));
         Assert.assertEq(expected = Ok(Ok((Some(Json.JString("same")), Err("fields.slug: 'same' は公開中の entry 'b' が使っています"), Some(Some(Json.JString("free")))))), result)

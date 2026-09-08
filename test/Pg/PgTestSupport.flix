@@ -285,6 +285,15 @@ mod PgTestSupport {
         askAs(api, ownerCredential())
 
     ///
+    /// owner として、variables 付きのリクエストで API に問い合わせる。
+    ///
+    pub def askOwnerRequest(api: Api): GraphqlRequest -> (Value, Option[String]) \ IO =
+        request -> match authenticateObserved(api#pool, api#engine, api#scope, _ -> (), ownerCredential()) {
+            case Err(rejection) => bug!("owner の認証に失敗しました: ${Rejection.message(rejection)}")
+            case Ok(found)      => executeAs(api#pool, api#scope, GraphqlTestKit.engineOrBug(api#schema), found#actor, _ -> (), request) |> GraphqlTestKit.summarize
+        }
+
+    ///
     /// テーブルを作り直して seed を当て、コンテンツ API に問い合わせる ask を body に渡す。エンジンは定義から組み直す（目印を毎回見る）。
     ///
     pub def withContentApi(seeding: Unit -> b \ ef2, body: (String -> (Value, Option[String]) \ IO) -> a \ ef): a \ (ef2 - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr, IdGen, Tenant, Session, ObjectStore}) + ef + IO =

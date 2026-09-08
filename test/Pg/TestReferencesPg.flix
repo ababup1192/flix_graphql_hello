@@ -43,7 +43,7 @@ mod TestReferencesPg {
         let result = PgTestSupport.withDb(() -> {
             let (profiles, blogs, _) = typesWithReferences();
             let blocked = CmsTestKit.failureMessage(() -> ContentTypes.delete(Session.grant(), profiles));
-            let profileField = ContentTypes.fetch(Session.grant(), blogs) |> (owner -> owner#fields |> List.find(field -> ApiId.text(field#apiId) == "profile"));
+            let profileField = ContentTypes.get(Session.grant(), blogs) |> (owner -> owner#fields |> List.find(field -> ApiId.text(field#apiId) == "profile"));
             Option.forEach(field -> ContentTypes.removeField(Session.grant(), field#id), profileField);
             ContentTypes.delete(Session.grant(), profiles);
             (blocked, ContentTypes.find(Session.grant(), profiles) |> Option.isEmpty)

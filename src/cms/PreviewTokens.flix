@@ -24,7 +24,7 @@ mod PreviewTokens {
     ///
     pub def issue(proof: Granted[ReadDraft], pepper: SecretHash.Pepper, entryId: EntryId, window: { ttlSeconds = Int64, nowMillis = Int64 }): PreviewToken \ DbRead + CmsErr + Tenant =
         let entry = ContentEntries.get(proof, entryId);
-        let owner = ContentTypes.fetch(proof, entry#typeId);
+        let owner = ContentTypes.get(proof, entry#typeId);
         let ttl = Int64.max(60i64, Int64.min(maxTtlSeconds(), window#ttlSeconds));
         let exp = window#nowMillis / 1000i64 + ttl;
         let payload = "${Tenant.currentId()}.${EntryId.text(entryId)}.${exp}";
