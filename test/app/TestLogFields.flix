@@ -96,6 +96,39 @@ mod TestLogFields {
             expected = List#{("credential.kind", Value.Str("invalid"))},
             Fields.empty() |> Fields.str("credential.kind", "api-key") |> LogFields.rejectedCredential |> Map.toList)
 
+    // ---- 4xx の理由と MCP ----
+
+    /// 4xx の理由は error.code と error.message。
+    @Test
+    def testRejection(): Unit \ Assert =
+        Assert.assertEq(
+            expected = List#{("error.code", Value.Str("no_route")), ("error.message", Value.Str("not found"))},
+            Fields.empty() |> LogFields.rejection("no_route", "not found") |> Map.toList)
+
+    /// 断った Origin は scheme + host だけ（パス・クエリ・fragment・制御文字は落ちる）。
+    @Test
+    def testOriginTable(): Unit \ Assert =
+        let cases = List#{
+            ("https://evil.example.com",             "https://evil.example.com"),
+            ("https://evil.example.com/path?q=1#f",  "https://evil.example.com"),
+            ("http://localhost:3000/",               "http://localhost:3000"),
+            ("null",                                 "null"),
+            ("https://a.example.com\n{\"fake\":1}",  "https://a.example.com{\"fake\":1}")
+        };
+        Assert.assertEq(expected = cases |> List.map(snd),
+            cases |> List.map(match (value, _) -> Fields.empty() |> LogFields.origin(value) |> Map.get("origin") |> Option.flatMap(Value.asStr) |> Option.getWithDefault("")))
+
+    /// tools/call の属性: mcp.tool / mcp.outcome、id と error.code はあれば。
+    @Test
+    def testMcpTable(): Unit \ Assert =
+        let cases = List#{
+            ({ tool = "whoami", id = None, isError = false, errorCode = None },
+             List#{("mcp.outcome", Value.Str("ok")), ("mcp.tool", Value.Str("whoami"))}),
+            ({ tool = "publish", id = Some("e1"), isError = true, errorCode = Some("INVALID") },
+             List#{("error.code", Value.Str("INVALID")), ("id", Value.Str("e1")), ("mcp.outcome", Value.Str("error")), ("mcp.tool", Value.Str("publish"))})
+        };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (summary, _) -> Fields.empty() |> LogFields.mcp(summary) |> Map.toList))
+
     // ---- GraphQL の境界 ----
 
     /// 操作の種類と名前。名前は operationName が勝ち、無ければ文書から、それも無ければ付かない。

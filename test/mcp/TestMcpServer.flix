@@ -171,14 +171,30 @@ mod TestMcpServer {
             expected = cases |> List.map(match (_, _, allowed) -> allowed),
             cases |> List.map(match (config, headers, _) -> McpServer.isOriginAllowed(config, headers)))
 
-    /// ログ用のまとめ: tools/call だけ Some((ツール名, 引数の id, isError))。他の method は None。引数そのものは残さない。
+    /// tools/call の応答（content[0].text が JSON の文字列）。
+    def bodyWith(text: String, isError: Bool): McpServer.Reply =
+        McpServer.Reply.Body(obj(List#{ ("result", obj(List#{ ("content", Value.List(obj(List#{ ("type", Value.Str("text")), ("text", Value.Str(text)) }) :: Nil)), ("isError", Value.Bool(isError)) })) }))
+
+    /// tools/call のリクエスト。
+    def callOf(name: String, arguments: Value): McpServer.Message =
+        McpServer.Message.Request(Value.Int(1), "tools/call", obj(List#{ ("name", Value.Str(name)), ("arguments", arguments) }))
+
+    /// ログ用のまとめ: tools/call だけ Some。id は引数の物、無ければ結果の物（create_entry）。isError なら content の code、401 は UNAUTHENTICATED。
+    /// 他の method は None。引数そのものは残さない。
     @Test
-    def testCallSummary(): Unit \ Assert =
-        let call = McpServer.Message.Request(Value.Int(1), "tools/call", obj(List#{ ("name", Value.Str("publish")), ("arguments", obj(List#{ ("id", Value.Str("e1")), ("withDependencies", Value.Bool(true)) })) }));
-        let ping = McpServer.Message.Request(Value.Int(1), "ping", Value.Null);
-        let failed = McpServer.Reply.Body(obj(List#{ ("result", obj(List#{ ("isError", Value.Bool(true)) })) }));
-        Assert.assertEq(
-            expected = (Some(("publish", "e1", true)), None),
-            (McpServer.callSummary(call, failed), McpServer.callSummary(ping, failed)))
+    def testCallSummaryTable(): Unit \ Assert =
+        let withId = obj(List#{ ("id", Value.Str("e1")), ("withDependencies", Value.Bool(true)) });
+        let cases = List#{
+            ((callOf("publish", withId), bodyWith("{\"id\":\"e1\",\"stage\":\"PUBLISHED\"}", false)),                                          Some(("publish", Some("e1"), false, None))),
+            ((callOf("publish", withId), bodyWith("{\"code\":\"INVALID\",\"message\":\"x\"}", true)),                                           Some(("publish", Some("e1"), true, Some("INVALID")))),
+            ((callOf("create_entry", obj(List#{ ("type", Value.Str("blog")), ("fields", obj(Nil)) })), bodyWith("{\"id\":\"e2\",\"stage\":\"DRAFT\"}", false)), Some(("create_entry", Some("e2"), false, None))),
+            ((callOf("get_entry", obj(List#{ ("id", Value.Str("gone")) })), bodyWith("{\"code\":\"NOT_FOUND\",\"entity\":\"Entry\",\"id\":\"gone\"}", true)), Some(("get_entry", Some("gone"), true, Some("NOT_FOUND")))),
+            ((callOf("whoami", Value.Null), bodyWith("{\"kind\":\"API_KEY\"}", false)),                                                          Some(("whoami", None, false, None))),
+            ((callOf("list_types", Value.Null), bodyWith("[{\"id\":\"t1\"}]", false)),                                                           Some(("list_types", None, false, None))),
+            ((callOf("publish", withId), McpServer.Reply.Unauthenticated(Value.Null)),                                                         Some(("publish", Some("e1"), true, Some("UNAUTHENTICATED")))),
+            ((McpServer.Message.Request(Value.Int(1), "ping", Value.Null), bodyWith("{}", false)),                                             None)
+        };
+        Assert.assertEq(expected = cases |> List.map(snd),
+            cases |> List.map(match ((message, reply), _) -> McpServer.callSummary(message, reply) |> Option.map(summary -> (summary#tool, summary#id, summary#isError, summary#errorCode))))
 
 }

@@ -136,18 +136,40 @@ mod McpServer {
         }
 
     ///
-    /// ログ用のまとめ。tools/call なら Some((ツール名, 引数の id（無ければ空）, isError))。引数そのものは残さない（本文に秘密が入りうる）。
+    /// ログ用のまとめ。
     ///
-    pub def callSummary(message: Message, reply: Reply): Option[(String, String, Bool)] = match (message, reply) {
+    /// - tool: ツール名
+    /// - id: entry の id。引数の id、無ければ結果（content の JSON）の id（create_entry で作った物）
+    /// - isError: result の isError（401 も true）
+    /// - errorCode: isError の時の content の JSON の code（NOT_FOUND など。401 は UNAUTHENTICATED）
+    ///
+    pub type alias CallSummary = { tool = String, id = Option[String], isError = Bool, errorCode = Option[String] }
+
+    ///
+    /// ログ用のまとめ。tools/call なら Some。引数そのものは残さない（本文に秘密が入りうる）。
+    ///
+    pub def callSummary(message: Message, reply: Reply): Option[CallSummary] = match (message, reply) {
         case (Message.Request(_, "tools/call", params), Reply.Body(body)) =>
-            Some((Value.field("name", params) |> Value.asStr |> Option.getWithDefault(""),
-                  Value.path(List#{"arguments", "id"}, params) |> Value.asStr |> Option.getWithDefault(""),
-                  Value.path(List#{"result", "isError"}, body) == Value.Bool(true)))
+            let isError = Value.path(List#{"result", "isError"}, body) == Value.Bool(true);
+            let content = contentJson(body);
+            Some({ tool = toolNameOf(params), id = argumentId(params) |> Option.withDefault(default = Value.field("id", content) |> Value.asStr),
+                   isError = isError, errorCode = if (isError) Value.field("code", content) |> Value.asStr else None })
         case (Message.Request(_, "tools/call", params), Reply.Unauthenticated(_)) =>
-            Some((Value.field("name", params) |> Value.asStr |> Option.getWithDefault(""),
-                  Value.path(List#{"arguments", "id"}, params) |> Value.asStr |> Option.getWithDefault(""),
-                  true))
+            Some({ tool = toolNameOf(params), id = argumentId(params), isError = true, errorCode = Some("UNAUTHENTICATED") })
         case _ => None
     }
+
+    def toolNameOf(params: Value): String =
+        Value.field("name", params) |> Value.asStr |> Option.getWithDefault("")
+
+    def argumentId(params: Value): Option[String] =
+        Value.path(List#{"arguments", "id"}, params) |> Value.asStr
+
+    /// result の content[0].text を JSON に読み戻した物。読めなければ Null（切り詰めた本文など）。
+    def contentJson(body: Value): Value =
+        match Value.path(List#{"result", "content"}, body) {
+            case Value.List(first :: _) => Value.field("text", first) |> Value.asStr |> Option.flatMap(text -> JsonValue.parse(text) |> Result.toOption) |> Option.getWithDefault(Value.Null)
+            case _                      => Value.Null
+        }
 
 }

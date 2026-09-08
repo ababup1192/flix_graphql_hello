@@ -9,7 +9,7 @@
 ///
 /// WhyNot: effect にしないのは、入力（プール・ワーカー・Listener）が起動時に固定で、読む所が Server の直下なので
 /// 値で渡しても引数が 1 本しか増えないため。差し替えには当たるが、IdGen / ObjectStore のように深い所で使う物ではない。
-/// ログと時計を持たないのは、それらは Log と Time.Clock の effect で Route に付くため。
+/// ログを持たないのは、それは Log の effect で Route に付くため。
 ///
 pub type alias Health[ef: Eff] = {
     checkDb     = Unit -> Result[String, Unit] \ ef,

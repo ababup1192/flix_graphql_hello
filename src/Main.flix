@@ -122,7 +122,7 @@ def serve(version: String, sink: Log.Sink, started: Started): Unit \ {IO, Sys.En
 type alias Runtime = {
     pool = Pool, deps = Deps, jwks = TokenVerifier.JwksCache, baseDomain = Option[String], defaultProject = Option[ProjectId], defaultProjectSlug = Option[String],
     accountEngine = Graphql.Engine, adminEngines = AdminEngine.Cache, engineCache = ContentEngine.Cache,
-    config = ServerConfig, sink = Log.Sink, routes = List[Route[{Graphql, Log, Time.Clock.Clock, IO}]] }
+    config = ServerConfig, sink = Log.Sink, routes = List[Route[{Graphql, Log, Observe, IO}]] }
 
 ///
 /// 1 リクエスト（接続のスレッド）の入口。request id を決め、Log を入れ直して span（request.id / cf.ray / method / path）を張り、
@@ -138,7 +138,8 @@ def dispatch(runtime: Runtime, request: HttpRequest): HttpResponse \ IO =
 
 ///
 /// middleware（request id → CORS → Host のプロジェクト → 身元）を通してルート表で振り分け、行の engine に合わせてエンジンを入れて実行する。
-/// 404 / 405 / 503 も CORS と X-Request-Id を通る。処理の中で決まる属性（credential.kind / project / graphql.*）は extra に積み、リクエストの行に乗せる。
+/// 404 / 405 / 503 も CORS と X-Request-Id を通る。処理の中で決まる属性（credential.kind / project / graphql.*、Route が Observe に積む mcp.* や 4xx の理由）は
+/// extra に積み、リクエストの行に乗せる。
 ///
 /// WhyNot: リクエストの行を HttpServer の onServed でなくここで出すのは、onServed には request id も身元も GraphQL の結果も無く、
 /// スレッドを跨がずに届ける口が無いため。onServed は handle が投げた・読めなかった・書けなかった物だけを出す（logServed）。
@@ -153,7 +154,7 @@ def serveRequest(runtime: Runtime, requestId: String, span: Log.Fields, request:
                 Server.wrapProjectFromHost(runtime#baseDomain,
                     Credentials.wrap(tokenHeaderOf(runtime#deps#auth), verifierOf(runtime#deps#auth, runtime#jwks),
                         Server.dispatch(runtime#routes, (found, routeRequest) -> runRoute(runtime, span, extra, found, routeRequest))))));
-    let response = pipeline({ request = request, params = Map.empty(), credential = Credential.Missing });
+    let response = Observe.runWithRef(extra, () -> pipeline({ request = request, params = Map.empty(), credential = Credential.Missing }));
     let fields = Ref.get(extra)
         |> LogFields.response(response#status, System.currentTimeMillis() - startedAt, Int32.toInt64(Http.utf8Length(request#body)), Int32.toInt64(Http.utf8Length(response#body)));
     Log.emit({ severity = LogFields.responseSeverity(request#path, response#status, false, fields), message = "request", fields = fields });
@@ -190,7 +191,7 @@ def emitServed(served: HttpServer.Served): Unit \ {IO, Log} =
 /// WhyNot: エンジンの要らない道（/health、/jobs/tick）でエンジンを組まないのは、型定義が壊れた時に死活監視まで 503 になり、
 /// プロジェクトの SELECT が余分に走るため。
 ///
-def runRoute(runtime: Runtime, span: Log.Fields, extra: Ref[Log.Fields, Static], found: Route[{Graphql, Log, Time.Clock.Clock, IO}], routeRequest: RouteRequest): HttpResponse \ {IO, Log} =
+def runRoute(runtime: Runtime, span: Log.Fields, extra: Ref[Log.Fields, Static], found: Route[{Graphql, Log, Observe, IO}], routeRequest: RouteRequest): HttpResponse \ {IO, Log, Observe} =
     let projectSlug = Map.get(Router.projectSlugParam(), routeRequest#params);
     let routeFields = Log.Fields.empty()
         |> Log.Fields.str("credential.kind", LogFields.credentialKind(routeRequest#credential))
@@ -199,18 +200,23 @@ def runRoute(runtime: Runtime, span: Log.Fields, extra: Ref[Log.Fields, Static],
     let contextFields = span |> Log.Fields.merge(routeFields);
     let execute = () -> (found#handle)(routeRequest);
     match found#engine {
-        case None                 => Graphql.runWithoutEngine(() -> withClock(execute))
+        case None                 => Graphql.runWithoutEngine(execute)
         case Some(Engine.Account) => runObserved(runtime#accountEngine, contextFields, extra, execute)
         case Some(engine)         =>
             match resolveProject(runtime#pool, runtime#defaultProject, projectSlug) {
-                case Err(message)        => Server.unavailable(message)
-                case Ok(None)            => Server.notFound("プロジェクト '${projectSlug |> Option.getWithDefault("")}' がありません")
+                case Err(message)        => unavailable(message)
+                case Ok(None)            => { let message = "プロジェクト '${projectSlug |> Option.getWithDefault("")}' がありません"; Observe.note(Log.Fields.empty() |> LogFields.rejection("no_project", message)); Server.notFound(message) }
                 case Ok(Some(projectId)) => match engineOf(runtime, engine, projectId) {
                     case Ok(built)    => runObserved(built, contextFields, extra, execute)
-                    case Err(message) => Server.unavailable(message)
+                    case Err(message) => unavailable(message)
                 }
             }
     }
+
+/// 503。理由をリクエストの行に積む。
+def unavailable(message: String): HttpResponse \ Observe =
+    Observe.note(Log.Fields.empty() |> LogFields.rejection("unavailable", message));
+    Server.unavailable(message)
 
 ///
 /// エンジンで Graphql effect を本物の実行にし、時計を入れる。実行ごとに Context に span を入れ（Runner がリゾルバの中の行に付ける）、
@@ -220,9 +226,9 @@ def runRoute(runtime: Runtime, span: Log.Fields, extra: Ref[Log.Fields, Static],
 /// WhyNot: observe を effect にしないのは、Runner は graphql-java の Java コールバックの中で動き、effect はそこを越えられないため。
 /// Ref を閉じ込めたラムダは値なので越えられる。
 ///
-def runObserved(engine: Graphql.Engine, contextFields: Log.Fields, extra: Ref[Log.Fields, Static], thunk: Unit -> HttpResponse \ {Graphql, Log, Time.Clock.Clock, IO}): HttpResponse \ {IO, Log} =
+def runObserved(engine: Graphql.Engine, contextFields: Log.Fields, extra: Ref[Log.Fields, Static], thunk: Unit -> HttpResponse \ {Graphql, Log, Observe, IO}): HttpResponse \ {IO, Log, Observe} =
     run {
-        withClock(thunk)
+        thunk()
     } with handler Graphql {
         def execute(request, context, resume) = {
             let observe = fields -> Ref.put(Map.union(fields, Ref.get(extra)), extra);
@@ -231,15 +237,6 @@ def runObserved(engine: Graphql.Engine, contextFields: Log.Fields, extra: Ref[Lo
             resume(response)
         }
     }
-
-///
-/// Route の時計（MCP の所要時間）を本物にする。
-///
-/// WhyNot: 呼ぶ所で Time.Clock.runWithIO(() -> …) と書かないのは、ラムダに包むと subeffecting で Log と region の effect が
-/// 署名から消えた事にされ、「Unused effect」で落ちるため（2026-09-08 に実測）。名前の付いた関数で受けると通る。
-///
-def withClock(thunk: Unit -> HttpResponse \ {Graphql, Log, Time.Clock.Clock, IO}): HttpResponse \ {Graphql, Log, IO} =
-    Time.Clock.runWithIO(thunk)
 
 ///
 /// 行の engine に合う、このプロジェクトのエンジン。コンテンツ API は型の定義から組み（目印で組み直す）、管理 API はプロジェクトごとに 1 つ。

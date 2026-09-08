@@ -11,10 +11,21 @@ mod TestServer {
         serve(Server.defaultConfig(), HealthFake.ok(), Credential.Missing, request)
 
     ///
-    /// Server.handle をログ無し・時計 0 で呼ぶ（Route は Log と Time.Clock を持つ）。
+    /// Server.handle をログ無し・属性無しで呼ぶ（Route は Log と Observe を持つ）。
     ///
     def serve(config: ServerConfig, health: Health[{}], credential: Credential, request: HttpRequest): HttpResponse \ Graphql =
         ServerTestKit.quietly(() -> Server.handle(config, health, credential, request))
+
+    ///
+    /// Server.handle を呼び、(ステータス, リクエストの行に積んだ error.code) を返す。
+    ///
+    def rejectionOf(config: ServerConfig, request: HttpRequest): (Int32, Option[String]) \ Graphql =
+        let (response, fields) = fst(Log.runWithList(() -> Observe.collect(() -> Server.handle(config, HealthFake.ok(), Credential.Missing, request))));
+        (response#status, Map.get("error.code", fields) |> Option.flatMap(Value.asStr))
+
+    /// メソッドとパスとヘッダだけのリクエスト。
+    def requestOf(method: String, path: String, headers: List[(String, String)], body: String): HttpRequest =
+        { version = "HTTP/1.1", method = method, path = path, headers = headers, body = body }
 
     ///
     /// POST /graphql に JSON ボディを載せたリクエスト。
@@ -119,6 +130,61 @@ mod TestServer {
     def testServerMethodNotAllowedHasAllowHeader(): Unit \ Assert =
         Assert.assertEq(expected = ("Allow", "POST, GET") :: Nil,
             GraphqlFake.runWithEcho(() -> handle({ version = "HTTP/1.1", method = "PUT", path = "/graphql", headers = Nil, body = "" }))#headers)
+
+    /// 4xx はリクエストの行に error.code（短い固定の語）を積む。200 は積まない。
+    @Test
+    def testServerRejectionCodeTable(): Unit \ Assert =
+        let json = ("Content-Type", "application/json") :: Nil;
+        let opened = { jobsToken = Some("secret") | Server.defaultConfig() };
+        let cases = List#{
+            ((Server.defaultConfig(), requestOf("PUT", "/graphql", Nil, "")),                                      (405, Some("method_not_allowed"))),
+            ((Server.defaultConfig(), requestOf("POST", "/", Nil, "")),                                            (404, Some("no_route"))),
+            ((Server.defaultConfig(), requestOf("POST", "/graphql", ("Content-Type", "text/plain") :: Nil, "{}")), (415, Some("unsupported_media_type"))),
+            ((Server.defaultConfig(), requestOf("POST", "/graphql", json, "{")),                                   (400, Some("bad_json"))),
+            ((Server.defaultConfig(), requestOf("POST", "/graphql", json, "{\"q\": 1}")),                          (400, Some("bad_request"))),
+            ((Server.defaultConfig(), requestOf("GET", "/graphql", Nil, "")),                                      (400, Some("bad_request"))),
+            ((Server.defaultConfig(), requestOf("GET", "/graphql?query=mutation%20%7B%20x%20%7D", Nil, "")),     (405, Some("method_not_allowed"))),
+            ((Server.defaultConfig(), requestOf("POST", "/jobs/tick", ("X-Jobs-Token", "x") :: Nil, "")),          (404, Some("no_route"))),
+            ((opened, requestOf("POST", "/jobs/tick", ("X-Jobs-Token", "wrong") :: Nil, "")),                      (403, Some("jobs_token"))),
+            ((Server.defaultConfig(), requestOf("POST", "/graphql", json, "{\"query\": \"{ x }\"}")),              (200, None))
+        };
+        Assert.assertEq(expected = cases |> List.map(snd),
+            GraphqlFake.runWithEcho(() -> cases |> List.map(match ((config, request), _) -> rejectionOf(config, request))))
+
+    /// MCP の本文を読む前の検査: 415 / 403 / 400 / 401 と error.code。403 は Origin（scheme + host）も積む。通る物は Ok。
+    @Test
+    def testServerMcpPrecheckTable(): Unit \ Assert =
+        let json = ("Content-Type", "application/json") :: Nil;
+        let routeRequest = (headers, credential) -> { request = requestOf("POST", "/mcp", headers, "{}"), params = Map.empty(), credential = credential };
+        let summarize = outcome -> match outcome {
+            case Ok(())                  => Ok(())
+            case Err((response, fields)) => Err((response#status, Map.get("error.code", fields) |> Option.flatMap(Value.asStr), Map.get("origin", fields) |> Option.flatMap(Value.asStr)))
+        };
+        let cases = List#{
+            ((Nil, Credential.Missing),                                                                          Err((415, Some("unsupported_media_type"), None))),
+            ((("Origin", "https://evil.example.com/path?q=1") :: json, Credential.ApiKey("cms_x")),               Err((403, Some("origin"), Some("https://evil.example.com")))),
+            ((("MCP-Protocol-Version", "2099-01-01") :: json, Credential.ApiKey("cms_x")),                       Err((400, Some("protocol_version"), None))),
+            ((json, Credential.Preview("pv_x")),                                                                Err((400, Some("preview_token"), None))),
+            ((json, Credential.Invalid("PAT は失効しています")),                                                 Err((401, Some("unauthenticated"), None))),
+            ((("Origin", "https://admin.example.com") :: json, Credential.ApiKey("cms_x")),                      Ok(())),
+            ((json, Credential.Missing),                                                                         Ok(()))
+        };
+        Assert.assertEq(expected = cases |> List.map(snd),
+            cases |> List.map(match ((headers, credential), _) -> Server.mcpPrecheck(adminConfig(), routeRequest(headers, credential)) |> summarize))
+
+    /// parse に落ちた MCP の本文の理由: 壊れた JSON は bad_json、形の違う物は bad_request。message は応答の物。
+    @Test
+    def testServerMcpParseRejectionTable(): Unit \ Assert =
+        let cases = List#{
+            ("{",                          Some("bad_json")),
+            ("[]",                         Some("bad_request")),
+            ("{\"jsonrpc\":\"2.0\"}",      Some("bad_request"))
+        };
+        Assert.assertEq(expected = cases |> List.map(snd),
+            cases |> List.map(match (body, _) -> match McpServer.parse(body) {
+                case Err(errorBody) => Server.mcpParseRejection(errorBody) |> Map.get("error.code") |> Option.flatMap(Value.asStr)
+                case Ok(_)          => None
+            }))
 
     // ---- GET /graphql ----
 
@@ -273,10 +339,10 @@ mod TestServer {
     @Test
     def testServerProjectSlugParam(): Unit \ Assert =
         let table = Server.routes(Server.defaultConfig(), HealthFake.ok()) |> Router.withProjectPrefix;
-        let slugOf = (baseDomain, path, host) ->
+        let slugOf = (baseDomain, path, host) -> Observe.ignore(() ->
             Server.wrapProjectFromHost(baseDomain, Server.dispatch(table, (_, routeRequest) ->
                 { status = 200, headers = Nil, body = Map.get(Router.projectSlugParam(), routeRequest#params) |> Option.getWithDefault("") }))
-                ({ request = { version = "HTTP/1.1", method = "GET", path = path, headers = ("Host", host) :: Nil, body = "" }, params = Map.empty(), credential = Credential.Missing })#body;
+                ({ request = { version = "HTTP/1.1", method = "GET", path = path, headers = ("Host", host) :: Nil, body = "" }, params = Map.empty(), credential = Credential.Missing })#body);
         Assert.assertEq(expected = ("shop", "business", ""),
             (slugOf(Some("example.com"), "/p/shop/graphql", "consumer.example.com"),
              slugOf(Some("example.com"), "/admin/graphql", "business.example.com"),

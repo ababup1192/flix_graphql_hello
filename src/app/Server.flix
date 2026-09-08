@@ -29,7 +29,7 @@ mod Server {
     /// - POST /jobs/tick: 外部トリガー。X-Jobs-Token が設定と一致すればワーカーを 1 周回す（無ければ 404）
     /// - POST /mcp: MCP サーバ（JSON-RPC。tools だけ）。管理 API のエンジンへの GraphQL クライアントとして動く
     ///
-    pub def routes(config: ServerConfig, health: Health[ef]): List[Route[{Graphql, Log, Time.Clock.Clock, ef}]] =
+    pub def routes(config: ServerConfig, health: Health[ef]): List[Route[{Graphql, Log, Observe, ef}]] =
         Router.route(Method.Post, "/graphql",         Some(Engine.Content), widen(executeBody)) ::
         Router.route(Method.Get,  "/graphql",         Some(Engine.Content), widen(executeQueryString(config#cacheMaxAge))) ::
         Router.route(Method.Post, "/admin/graphql",   Some(Engine.Admin),   widen(executeBody)) ::
@@ -48,21 +48,22 @@ mod Server {
     ///
     /// リクエストを 1 つ処理する。エンジンは呼ぶ側が入れておく（表の engine は見ない）。health は /health と /jobs/tick が読む値。
     /// 表に無いパスは 404、パスはあるがメソッドが違えば 405 と Allow、OPTIONS は preflight。許したオリジンからのリクエストには CORS ヘッダを足す。
+    /// 4xx の理由（error.code / error.message）は Observe に積む。
     ///
-    pub def handle(config: ServerConfig, health: Health[ef], credential: Credential, request: HttpRequest): HttpResponse \ {Graphql, Log, Time.Clock.Clock, ef} =
+    pub def handle(config: ServerConfig, health: Health[ef], credential: Credential, request: HttpRequest): HttpResponse \ {Graphql, Log, Observe, ef} =
         let table = routes(config, health) |> Router.withProjectPrefix;
         let pipeline = Cors.wrap(config#cors, Router.allowedMethods(table), dispatch(table, (found, routeRequest) -> (found#handle)(routeRequest)));
         pipeline({ request = request, params = Map.empty(), credential = credential })
 
     ///
     /// 表で振り分ける handler。一致した行は found に渡す（Main はここで engine を見てエンジンを入れる）。
-    /// 404 と 405 はここで返す。
+    /// 404 と 405 はここで返す（理由は Observe に積む）。
     ///
-    pub def dispatch(routes: List[Route[ef1]], found: (Route[ef1], RouteRequest) -> HttpResponse \ ef2): Handler[ef2] =
+    pub def dispatch(routes: List[Route[ef1]], found: (Route[ef1], RouteRequest) -> HttpResponse \ ef2): Handler[ef2 + Observe] =
         routeRequest -> match Router.matchRequest(routes, routeRequest#request) {
             case Match.Found(matched, params)   => found(matched, Router.withParams(params, routeRequest))
-            case Match.MethodNotAllowed(allowed) => errorResponse(405, ("Allow", Method.join(allowed)) :: Nil, "${Method.join(allowed)} only")
-            case Match.NotFound                  => errorResponse(404, Nil, "not found")
+            case Match.MethodNotAllowed(allowed) => reject(405, ("Allow", Method.join(allowed)) :: Nil, "method_not_allowed", "${Method.join(allowed)} only")
+            case Match.NotFound                  => reject(404, Nil, "no_route", "not found")
         }
 
     ///
@@ -133,12 +134,12 @@ mod Server {
     ///
     /// POST /jobs/tick。トークンが設定されていなければ 404（存在を見せない）、違えば 403、合えば 1 周回して失敗の説明を返す。
     ///
-    def jobsTick(jobsToken: Option[String], health: Health[ef], routeRequest: RouteRequest): HttpResponse \ ef =
+    def jobsTick(jobsToken: Option[String], health: Health[ef], routeRequest: RouteRequest): HttpResponse \ {Observe, ef} =
         let given = Http.findHeader("X-Jobs-Token", routeRequest#request#headers);
         match jobsToken {
-            case None => errorResponse(404, Nil, "not found")
+            case None => reject(404, Nil, "no_route", "not found")
             case Some(expected) =>
-                if (given != Some(expected)) errorResponse(403, Nil, "X-Jobs-Token が違います")
+                if (given != Some(expected)) reject(403, Nil, "jobs_token", "X-Jobs-Token が違います")
                 else {
                     let failures = (health#runJobs)();
                     { status = if (List.isEmpty(failures)) 200 else 500, headers = Nil,
@@ -149,20 +150,34 @@ mod Server {
     ///
     /// POST /mcp。Content-Type が JSON でなければ 415、Origin が許可外なら 403、知らない MCP-Protocol-Version は 400、
     /// プレビュートークンは 400（この経路では受けない）、壊れたログインの JWT と死んだ PAT は 401 + WWW-Authenticate。
-    /// parse に落ちた本文は 400、通知は 202、それ以外は 200 で JSON-RPC の応答。tools/call は Log の行（mcp.tool / mcp.outcome）を出す。
+    /// parse に落ちた本文は 400、通知は 202、それ以外は 200 で JSON-RPC の応答。tools/call の属性（mcp.tool / mcp.outcome / id / error.code）は
+    /// Observe に積んでリクエストの行に乗せる。
     ///
-    def mcpRoute(config: ServerConfig, routeRequest: RouteRequest): HttpResponse \ {Graphql, Log, Time.Clock.Clock} =
+    def mcpRoute(config: ServerConfig, routeRequest: RouteRequest): HttpResponse \ {Graphql, Observe} =
         match mcpPrecheck(config, routeRequest) {
-            case Err(response) => response
-            case Ok(())        => match McpServer.parse(routeRequest#request#body) {
-                case Err(errorBody) => jsonResponse(400, Nil, errorBody)
+            case Err((response, fields)) => { Observe.note(fields); response }
+            case Ok(())                  => match McpServer.parse(routeRequest#request#body) {
+                case Err(errorBody) => { Observe.note(mcpParseRejection(errorBody)); jsonResponse(400, Nil, errorBody) }
                 case Ok(message)    =>
-                    let startedAt = Time.Clock.now();
                     let reply = McpServer.dispatch(config#version, message, executeAs(routeRequest#credential));
-                    logMcpCall(routeRequest#credential, message, reply, Time.Clock.now() - startedAt);
+                    noteMcpCall(message, reply);
                     toMcpResponse(reply)
             }
         }
+
+    /// tools/call の属性を積む。他の method は何も積まない。
+    def noteMcpCall(message: McpServer.Message, reply: McpServer.Reply): Unit \ Observe =
+        match McpServer.callSummary(message, reply) {
+            case None          => ()
+            case Some(summary) => Observe.note(Log.Fields.empty() |> LogFields.mcp(summary))
+        }
+
+    ///
+    /// parse に落ちた本文の理由。-32700（壊れた JSON）は bad_json、それ以外（バッチ・method 無し）は bad_request。
+    ///
+    pub def mcpParseRejection(errorBody: Value): Log.Fields =
+        let code = if (Value.path(List#{"error", "code"}, errorBody) == Value.Int(McpServer.parseErrorCode())) "bad_json" else "bad_request";
+        Log.Fields.empty() |> LogFields.rejection(code, Value.path(List#{"error", "message"}, errorBody) |> Value.asStr |> Option.getWithDefault(""))
 
     ///
     /// 身元付きで Graphql effect を呼ぶ。McpServer.dispatch の execute。
@@ -173,17 +188,24 @@ mod Server {
         Graphql.execute(request, Context.withCredential(credential))
 
     ///
-    /// MCP の本文を読む前の検査。Err はそのまま返す応答。
+    /// MCP の本文を読む前の検査。Err はそのまま返す応答と、リクエストの行に積む理由（error.code / error.message。403 は origin も）。
     ///
-    def mcpPrecheck(config: ServerConfig, routeRequest: RouteRequest): Result[HttpResponse, Unit] =
+    pub def mcpPrecheck(config: ServerConfig, routeRequest: RouteRequest): Result[(HttpResponse, Log.Fields), Unit] =
         let request = routeRequest#request;
-        if (not isJson(request)) Err(errorResponse(415, Nil, "Content-Type: application/json で送ってください"))
-        else if (not McpServer.isOriginAllowed(config#cors, request#headers)) Err(jsonResponse(403, Nil, McpServer.errorBody(Value.Null, McpServer.invalidRequestCode(), "この Origin からは受け付けません")))
+        let rejected = (status, headers, code, message) -> (jsonResponse(status, headers, McpServer.errorBody(Value.Null, McpServer.invalidRequestCode(), message)), Log.Fields.empty() |> LogFields.rejection(code, message));
+        if (not isJson(request)) {
+            let message = "Content-Type: application/json で送ってください";
+            Err((errorResponse(415, Nil, message), Log.Fields.empty() |> LogFields.rejection("unsupported_media_type", message)))
+        }
+        else if (not McpServer.isOriginAllowed(config#cors, request#headers)) {
+            let (response, fields) = rejected(403, Nil, "origin", "この Origin からは受け付けません");
+            Err((response, fields |> LogFields.origin(Http.findHeader("Origin", request#headers) |> Option.getWithDefault(""))))
+        }
         else match (McpServer.protocolVersionOf(request#headers), routeRequest#credential) {
-            case (Err(version), _)                => Err(jsonResponse(400, Nil, McpServer.errorBody(Value.Null, McpServer.invalidRequestCode(), "MCP-Protocol-Version '${version}' には対応していません（${List.join(" / ", McpServer.supportedProtocolVersions())}）")))
-            case (Ok(_), Credential.Preview(_))   => Err(jsonResponse(400, Nil, McpServer.errorBody(Value.Null, McpServer.invalidRequestCode(), "プレビュートークンはこの経路では受け付けません（API キーか PAT で）")))
-            case (Ok(_), Credential.Invalid(reason)) => Err(jsonResponse(401, ("WWW-Authenticate", "Bearer error=\"invalid_token\"") :: Nil, McpServer.errorBody(Value.Null, McpServer.invalidRequestCode(), "認証に失敗しました: ${reason}")))
-            case (Ok(_), _)                       => Ok(())
+            case (Err(version), _)                   => Err(rejected(400, Nil, "protocol_version", "MCP-Protocol-Version '${version}' には対応していません（${List.join(" / ", McpServer.supportedProtocolVersions())}）"))
+            case (Ok(_), Credential.Preview(_))      => Err(rejected(400, Nil, "preview_token", "プレビュートークンはこの経路では受け付けません（API キーか PAT で）"))
+            case (Ok(_), Credential.Invalid(reason)) => Err(rejected(401, ("WWW-Authenticate", "Bearer error=\"invalid_token\"") :: Nil, "unauthenticated", "認証に失敗しました: ${reason}"))
+            case (Ok(_), _)                          => Ok(())
         }
 
     ///
@@ -196,22 +218,6 @@ mod Server {
     }
 
     ///
-    /// tools/call の行。主体は身元の種類だけ、引数は残さない（id だけ）。
-    ///
-    def logMcpCall(credential: Credential, message: McpServer.Message, reply: McpServer.Reply, elapsedMillis: Int64): Unit \ Log =
-        match McpServer.callSummary(message, reply) {
-            case None => ()
-            case Some((tool, entryId, isError)) =>
-                Log.Fields.empty()
-                    |> Log.Fields.str("mcp.tool", tool)
-                    |> Log.Fields.str("mcp.outcome", if (isError) "error" else "ok")
-                    |> Log.Fields.opt("id", if (String.isEmpty(entryId)) None else Some(entryId))
-                    |> Log.Fields.str("credential.kind", LogFields.credentialKind(credential))
-                    |> Log.Fields.int("duration_ms", elapsedMillis)
-                    |> Log.info("mcp tools/call")
-        }
-
-    ///
     /// JSON の応答。
     ///
     def jsonResponse(status: Int32, headers: List[(String, String)], body: Value): HttpResponse =
@@ -220,11 +226,16 @@ mod Server {
     ///
     /// POST の JSON ボディを GraphqlRequest に読んで実行する。Content-Type が JSON でなければ 415、壊れた JSON・形の違うボディは 400。
     ///
-    def executeBody(routeRequest: RouteRequest): HttpResponse \ Graphql =
-        if (not isJson(routeRequest#request)) errorResponse(415, Nil, "Content-Type: application/json で送ってください")
-        else match JsonValue.parse(routeRequest#request#body) |> Result.mapErr(message -> "invalid JSON: ${message}") |> Result.flatMap(toRequest) {
-            case Ok(request)  => { status = 200, headers = Nil, body = JsonValue.toJsonString(toValue(Graphql.execute(request, Context.withCredential(routeRequest#credential)))) }
-            case Err(message) => errorResponse(400, Nil, message)
+    def executeBody(routeRequest: RouteRequest): HttpResponse \ {Graphql, Observe} =
+        if (not isJson(routeRequest#request)) reject(415, Nil, "unsupported_media_type", "Content-Type: application/json で送ってください")
+        else {
+            let parsed = JsonValue.parse(routeRequest#request#body)
+                |> Result.mapErr(message -> ("bad_json", "invalid JSON: ${message}"))
+                |> Result.flatMap(body -> toRequest(body) |> Result.mapErr(message -> ("bad_request", message)));
+            match parsed {
+                case Ok(request)            => { status = 200, headers = Nil, body = JsonValue.toJsonString(toValue(Graphql.execute(request, Context.withCredential(routeRequest#credential)))) }
+                case Err((code, message))   => reject(400, Nil, code, message)
+            }
         }
 
     ///
@@ -234,7 +245,7 @@ mod Server {
     /// WhyNot: 身元付きの応答をキャッシュしないのは、鍵ごとに違う中身（下書き、非公開プロジェクト）が共有キャッシュから他人に出るため。
     /// Vary で鍵のヘッダを指しても、鍵の値ごとに溜まる事自体を避ける。
     ///
-    def executeQueryString(cacheMaxAge: Option[Int32], routeRequest: RouteRequest): HttpResponse \ Graphql =
+    def executeQueryString(cacheMaxAge: Option[Int32], routeRequest: RouteRequest): HttpResponse \ {Graphql, Observe} =
         let credential = routeRequest#credential;
         let params = Http.parseQueryString(routeRequest#request#path);
         let parsed = forM (
@@ -244,9 +255,9 @@ mod Server {
                 |> Option.getWithDefault(Ok(Map.empty()))
         ) yield { queryText = queryText, variables = variables, operationName = Map.get("operationName", params) |> Option.filter(text -> not String.isEmpty(text)) };
         match parsed {
-            case Err(message) => errorResponse(400, Nil, message)
+            case Err(message) => reject(400, Nil, "bad_request", message)
             case Ok(graphqlRequest) =>
-                if (not isReadOnly(graphqlRequest#queryText)) errorResponse(405, ("Allow", "POST") :: Nil, "GET は query だけです。mutation は POST で送ってください")
+                if (not isReadOnly(graphqlRequest#queryText)) reject(405, ("Allow", "POST") :: Nil, "method_not_allowed", "GET は query だけです。mutation は POST で送ってください")
                 else {
                     let response = Graphql.execute(graphqlRequest, Context.withCredential(credential));
                     let cacheable = cacheMaxAge |> Option.filter(_ -> credential == Credential.Missing and List.isEmpty(response#errors));
@@ -337,6 +348,13 @@ mod Server {
     def toValue(response: GraphqlResponse): Value =
         let fields = Map#{ "data" => response#data };
         Value.Obj(if (List.isEmpty(response#errors)) fields else Map.insert("errors", Value.List(response#errors), fields))
+
+    ///
+    /// 4xx を返し、理由（error.code / error.message）をリクエストの行に積む。
+    ///
+    def reject(status: Int32, headers: List[(String, String)], code: String, message: String): HttpResponse \ Observe =
+        Observe.note(Log.Fields.empty() |> LogFields.rejection(code, message));
+        errorResponse(status, headers, message)
 
     ///
     /// エラーを GraphQL と同じ errors[].message の形で返す。headers は 405 の Allow のように

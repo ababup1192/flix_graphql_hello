@@ -83,6 +83,41 @@ mod LogFields {
         case _                 => false
     }
 
+    // ---- 4xx の理由 ----
+
+    ///
+    /// 4xx を返す理由。error.code は短い固定の語（集計用）、error.message は応答本文に入れた文。
+    ///
+    pub def rejection(code: String, message: String, fields: Fields): Fields =
+        fields |> Fields.str("error.code", code) |> Fields.str("error.message", message)
+
+    ///
+    /// 断った Origin。scheme + host だけ（パスやクエリは無い。制御文字は落とす）。
+    ///
+    pub def origin(value: String, fields: Fields): Fields =
+        fields |> Fields.str("origin", originHost(value))
+
+    /// "https://admin.example.com/x?y" → "https://admin.example.com"。
+    def originHost(value: String): String =
+        let cleaned = String.replaceMatches(regex = "\\p{Cntrl}", to = "", value);
+        let (scheme, rest) = match String.indexOf(substr = "://", cleaned) {
+            case Some(index) => (String.takeLeft(index + 3, cleaned), String.dropLeft(index + 3, cleaned))
+            case None        => ("", cleaned)
+        };
+        scheme + String.takeWhile(ch -> ch != '/' and ch != '?' and ch != '#', rest)
+
+    // ---- MCP ----
+
+    ///
+    /// tools/call の属性。ツール名・結果・entry の id（引数か結果の物）、isError なら content の code を error.code に。引数は残さない。
+    ///
+    pub def mcp(summary: McpServer.CallSummary, fields: Fields): Fields =
+        fields
+            |> Fields.str("mcp.tool", summary#tool)
+            |> Fields.str("mcp.outcome", if (summary#isError) "error" else "ok")
+            |> Fields.opt("id", summary#id)
+            |> Fields.opt("error.code", summary#errorCode)
+
     // ---- GraphQL ----
 
     ///

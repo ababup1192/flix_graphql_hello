@@ -98,7 +98,7 @@ protocol error は JSON-RPC の -32700 / -32600 / -32601 / -32602 だけ。壊�
 GraphQL の経路（`/admin/graphql` など）では 200 で `errors[].extensions.code` が `UNAUTHENTICATED`。どちらもログは warn）、
 Origin ヘッダが付いていて `CMS_CORS_ORIGINS` に無ければ 403（無ければ通す。CLI は Origin を付けない）、プレビュートークンは 400。
 `content[0].text` が 256 KB を超えたら本文だけ切って `structuredContent.truncated: true` が付く。
-`tools/call` は 1 行 JSON（`{"message":"mcp tools/call","mcp.tool":…,"mcp.outcome":"ok","id":…,"credential.kind":"api-key","duration_ms":…,"request.id":…}`）でログに出る。引数は残さない（キーは [docs/logging.md](../docs/logging.md)）。
+`tools/call` はリクエストの行（`{"message":"request","url.path":"/mcp","mcp.tool":…,"mcp.outcome":"ok","id":…,"credential.kind":"api-key","duration_ms":…,"request.id":…}`）に乗ってログに出る（1 リクエスト 1 行。`mcp.outcome` が `error` なら `error.code` も）。引数は残さない（キーは [docs/logging.md](../docs/logging.md)）。
 
 ## CDN に乗せる（GET）
 
