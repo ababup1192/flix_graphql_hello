@@ -95,4 +95,4 @@ HTTP サーバの同時接続の上限（`CMS_MAX_CONNECTIONS`。超えたら 50
 - MCP v1 は legacy（2025-06-18 の形。initialize 握手、セッション無し）を喋る。modern（2026-07-28。server/discover、ヘッダ照合）は v2。実機の `claude mcp add` が legacy に落ちて来る事が v1 の合否条件
 - MCP は admin engine への GraphQL クライアント。ユースケースを直に呼ばない（Session を持たない pub 関数を素通りするため）
 - upload_asset（confirm が無いと pending のまま）と schedule（cancel と list を対にしないと事故）は v1 に入れない
-- Session を持たない pub のユースケース関数（ContentEntries.get / ContentTypes.get / getField / versionData）は「呼べば漏れる」ので、MCP の後に private 化して pub の入口を Session 付きに揃える
+- Session を持たない pub のユースケース関数（ContentEntries.get / ContentTypes.get / getField / versionData）は「呼べば漏れる」ので、MCP の後に private 化して pub の入口を Session 付きに揃える（済み。pub の入口は Session.require を通り、例外は `scripts/session-allowlist.txt` を `make check` の `scripts/check-session.sh` が見張る）
