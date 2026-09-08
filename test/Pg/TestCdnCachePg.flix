@@ -27,10 +27,10 @@ mod TestCdnCachePg {
         let response = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handleWithVersion(config, HealthFake.ok(), Credential.Missing, auth, version, get(headers))));
         (response#status, Http.findHeader("ETag", response#headers), idsOf(response#body))
 
-    /// 本文の data.blogs.nodes[].id。本文が無ければ空。
+    /// 本文の data.blogs.nodes[].id を id 順に。本文が無ければ空（一覧の既定の並びは新しい順なので、順序は見ない）。
     def idsOf(body: String): List[String] = match JsonValue.parse(body) {
         case Ok(parsed) => match Value.path(List#{"data", "blogs", "nodes"}, parsed) {
-            case Value.List(nodes) => nodes |> List.filterMap(node -> Value.field("id", node) |> Value.asStr)
+            case Value.List(nodes) => nodes |> List.filterMap(node -> Value.field("id", node) |> Value.asStr) |> List.sort
             case _                 => Nil
         }
         case Err(_) => Nil

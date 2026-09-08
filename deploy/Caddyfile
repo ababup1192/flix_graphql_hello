@@ -4,6 +4,11 @@
 
 {$CMS_DOMAIN} {
 	encode zstd gzip
+	# コンテンツ API の GET は cms が Cache-Control / ETag / Vary を決める（docs/design/cdn.md）。
+	# reverse_proxy は上流のヘッダをそのまま通すので、ここで Cache-Control を上書き・削除しない。
+	# 前段に Cloudflare を置くなら cache rule（deploy/cloudflare-cache-rules.md）で GET /graphql を cache eligible にする。
+	# WhyNot: Caddy 自身のキャッシュ（cache-handler）を使わないのは、鍵付きの応答は no-store で弾けるが Vary の扱いが
+	# モジュールごとに違い、Cloudflare と二重に持つと purge の相手が 2 つになるため。
 	reverse_proxy cms:8080
 }
 

@@ -50,7 +50,7 @@ HTTP サーバの同時接続の上限（`CMS_MAX_CONNECTIONS`。超えたら 50
 | 15b | richText の doc の第 2 弾（数式 / Mermaid / タスクリスト / 動画） | 編集者 | 半日 | 15a と同じ型。動画は AssetRules に mime ごとの上限。entryEmbed（本文に別の entry）は参照展開が絡むので差分と MCP の後に単独で |
 | 16 | 画像の `usedBy`（済み）、pending の掃除 cron、asset の先読み | 編集者・運用 | 半日 | 既存の query を出すだけ + 孤児の削除 |
 | 16a | 一覧の N+1 を先読みで塞ぐ（2026-09-08 に実装済み） | 運用 | 済み | 管理 API の `entries` の行の versions / diff をリクエスト単位の写し（`Preloaded`。Context の `preload`）からまとめて引く。JWT の一覧 50 件 × 10 フィールドが 209 → 12 本、API キーで 204 → 7 本。コンテンツ API の参照先は `Entry.linked` の先読みが既にあり 5 本。上限は `TestQueryBudgetPg`。残り: Tx の数（フィールドごとの 504）、コンテンツ API の 2 段目以降の参照、diff の PUBLISHED 側 |
-| 16b | 公開側を CDN に乗せる（GET と Cache-Control は #7 で済み。残りは「公開した瞬間に反映」） | サイト運営者 | 1〜2 日 | プロジェクトの版（公開・非公開・削除で進む）をキャッシュキーに入れる（microCMS と同じ方式。purge を呼ばず、タグ purge の有料枠も要らない）。応答に `ETag` と版のヘッダ。deploy/ に Caddy（flush と cache）と Cloudflare（cache rule）の見本。セルフホストは CDN 無しでも動く。順番は 16a の後、検索（pg_bigm）と基盤 4 つ（使用量の計測 / レート制限 / export / ゴミ箱）の前 |
+| 16b | 公開側を CDN に乗せる（2026-09-08 に実装済み） | サイト運営者 | 済み | プロジェクトの版（`projects.content_version`。公開・取り下げ・削除・型の変更で進む）を weak な `ETag` に入れ、`If-None-Match` が合えば 304（SQL は版の 1 本）。`Cache-Control` は `s-maxage=10, max-age=0, stale-while-revalidate=60` が既定。purge は任意（`CMS_CDN_PURGE_URL` / `CMS_CDN_PURGE_TOKEN`。outbox `cdn_purges` を tick が送る）。deploy/ に Caddy と Cloudflare の cache rule の見本。決めた事は [cdn.md](cdn.md) |
 | 17 | 課金（Stripe）と組織の上限 | サービス | 1〜2 日 | [hosting-and-externalized-risk.md](hosting-and-externalized-risk.md) |
 | 18 | 監査ログ | 企業 | 半日 | `Actor` が入れば mutation の入口 1 か所 |
 | 19 | 編集中の表示（在席） | 編集者 | 半日 | 楽観ロックは済み。誰が開いているかを出す |

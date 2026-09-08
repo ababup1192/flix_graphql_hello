@@ -103,8 +103,12 @@ Origin ヘッダが付いていて `CMS_CORS_ORIGINS` に無ければ 403（無�
 ## CDN に乗せる（GET）
 
 コンテンツ API は `GET /graphql?query=...&variables=...` でも読める（mutation は 405）。鍵もプレビュートークンも無い問い合わせで errors が無ければ
-`Cache-Control: public, max-age=60, s-maxage=60, stale-while-revalidate=60`（秒数は `CMS_CACHE_MAX_AGE`）が付くので、Cloudflare などの CDN がそのまま溜める。
+`Cache-Control: public, s-maxage=10, max-age=0, stale-while-revalidate=60`（秒数は `CMS_CACHE_S_MAXAGE` / `CMS_CACHE_MAX_AGE` / `CMS_CACHE_STALE_WHILE_REVALIDATE`）と
+weak な `ETag: W/"v<プロジェクトの版>-<query のハッシュ>"` が付く。版は公開・取り下げ・削除・型の変更で進むので、公開した瞬間に古いキャッシュは外れ、
+変わっていなければ `If-None-Match` に 304 で答える（GraphQL は実行せず、SQL は版の 1 本）。
 鍵やトークン付きの応答は `private, no-store` で、共有キャッシュには入らない。公開サイトのビルドや SWR の fetch は GET を使い、書く操作と下書きは POST を使う。
+Cloudflare の Cache Rules の見本は [cloudflare-cache-rules.md](cloudflare-cache-rules.md)、Caddy は [Caddyfile](Caddyfile)（Cache-Control を素通し）。
+`CMS_CDN_PURGE_URL` と `CMS_CDN_PURGE_TOKEN` を両方入れると、版が進んだプロジェクトの purge（Cloudflare の `purge_everything`）をバックグラウンドの tick が送る（任意。決めた事は [docs/design/cdn.md](../docs/design/cdn.md)）。
 
 ## 予約公開とバックグラウンドワーカー
 
@@ -328,7 +332,10 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS` | プール経由で DB に届かない状態がこれだけ続いたら終わる | 90 |
 | `CMS_SELF_HEAL_WARMUP_SECONDS` | 起動からこれだけは自己回復を見送る（起動直後の DB 待ちで落ちないため） | 300 |
 | `CMS_SELF_HEAL_JITTER_SECONDS` | 終わる時刻をプロセスごとにずらす上乗せの上限（0 秒からこの値の間で 1 回引く） | 10 |
-| `CMS_CACHE_MAX_AGE` | コンテンツ API の GET で、鍵もトークンも無い応答に付ける `Cache-Control` の秒数（CDN 用）。0 で no-store | 60 |
+| `CMS_CACHE_S_MAXAGE` | コンテンツ API の GET で、鍵もトークンも無い応答の `Cache-Control` の `s-maxage`（CDN が持つ秒数）。`CMS_CACHE_MAX_AGE` と両方 0 で no-store | 10 |
+| `CMS_CACHE_MAX_AGE` | 同じ応答の `max-age`（ブラウザが持つ秒数）。0 なら毎回 CDN に確かめに来る（ETag で 304） | 0 |
+| `CMS_CACHE_STALE_WHILE_REVALIDATE` | 同じ応答の `stale-while-revalidate`（期限切れの後、裏で取り直しながら古い物を返してよい秒数） | 60 |
+| `CMS_CDN_PURGE_URL` / `CMS_CDN_PURGE_TOKEN` | 両方あれば、版が進んだプロジェクトの CDN の purge を tick で送る（Cloudflare の `purge_cache` に `{"purge_everything": true}`、`Authorization: Bearer`）。失敗は Webhook と同じ間隔で再試行 | 無し |
 | `CMS_MAX_CONNECTIONS` | HTTP の同時接続の上限。超えた接続は `503` と `Retry-After: 1` で断る（待ち行列は無い）。今の数は `/health` の `connections` | 256 |
 | `CMS_LOG_LEVEL` | ログの最低 severity（`debug` / `info` / `warn` / `error`）。`debug` で `/health` の行も出る | info |
 | `CMS_BASE_DOMAIN` | `{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。無ければ `/p/{プロジェクト slug}/` だけ | 無し |

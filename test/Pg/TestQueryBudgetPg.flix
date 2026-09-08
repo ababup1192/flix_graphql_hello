@@ -25,11 +25,8 @@ mod TestQueryBudgetPg {
         discard ContentTypes.addField(blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
         List.range(0, authorCount()) |> List.forEach(a -> {
             let author = ContentEntries.create(profiles#id, None, CmsTestKit.entryData(List#{("name", Json.JString("a${a}"))}));
-            List.range(0, entryCount() / authorCount()) |> List.forEach(n -> {
-                let blog = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("t${a}-${n}")), ("profile", Json.JString(EntryId.text(author#id)))}));
-                // 匿名のコンテンツ API（公開中しか読めない）で 50 件が引けるように公開しておく（参照先の profile も一緒に）
-                discard ContentEntries.publish(blog#id, "seed", true)
-            })
+            List.range(0, entryCount() / authorCount()) |> List.forEach(n ->
+                discard ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("t${a}-${n}")), ("profile", Json.JString(EntryId.text(author#id)))})))
         })
 
     /// 管理 API: entries 50 件 × 10 フィールド。
@@ -39,6 +36,15 @@ mod TestQueryBudgetPg {
     /// コンテンツ API: blogs 50 件と参照先の profile。
     def contentListQuery(): String =
         "{ blogs(stage: DRAFT, first: ${entryCount()}) { totalCount nodes { id title profile { id name } } } }"
+
+    /// この型の entry を全部、管理 API で公開する（参照先も一緒に）。
+    def publishAll(ask: String -> (Value, Option[String]) \ IO, typeId: String): Unit \ IO =
+        let ids = ask("{ entries(typeId: \"${typeId}\", first: ${entryCount()}) { nodes { id } } }")
+            |> fst |> Value.path(List#{"entries", "nodes"});
+        match ids {
+            case Value.List(nodes) => nodes |> List.forEach(node -> discard ask("mutation { publishEntry(id: \"${Value.field("id", node) |> Value.asStr |> Option.getWithDefault("")}\", withDependencies: true) { id } }"))
+            case _                 => bug!("entries が引けません")
+        }
 
     /// コンテンツ API（匿名。公開中）: blogs 50 件と参照先の profile。
     def publishedListQuery(): String =
@@ -96,12 +102,19 @@ mod TestQueryBudgetPg {
             let ask = PgTestSupport.askOwner(api);
             let typeId = GraphqlTestKit.stringAt(List#{"contentType", "id"}, ask("{ contentType(apiId: \"blogs\") { id } }"));
             let key = Credential.ApiKey(GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, ask("mutation { createApiKey(name: \"ci\", scope: WRITE, role: EDITOR) { key } }")));
+            // 管理 API の分は下書きのまま測る（公開すると entry ごとに版が 1 つ増え、versions { id } の Tx が 50 増える）
+            let jwtEntries = measure(api#pool, Engine.Admin, admin, owner, listQuery(typeId));
+            let jwtTypes = measure(api#pool, Engine.Admin, admin, owner, "{ contentTypes { name } }");
+            let keyEntries = measure(api#pool, Engine.Admin, admin, key, listQuery(typeId));
+            let keyContent = measure(api#pool, Engine.Content, content, key, contentListQuery());
+            // 匿名のコンテンツ API は公開中しか読めないので、ここで 50 件を公開してから測る（参照先の profile も一緒に）
+            publishAll(ask, typeId);
             let (notModified, executed) = measureAnonymous(api#pool, content, publishedListQuery());
             List#{
-                (budget("jwt entries 50x10", measure(api#pool, Engine.Admin, admin, owner, listQuery(typeId))), (16, 510)),
-                (budget("jwt contentTypes name", measure(api#pool, Engine.Admin, admin, owner, "{ contentTypes { name } }")), (12, 5)),
-                (budget("api-key entries 50x10", measure(api#pool, Engine.Admin, admin, key, listQuery(typeId))), (12, 510)),
-                (budget("api-key content blogs 50 + profile", measure(api#pool, Engine.Content, content, key, contentListQuery())), (8, 260)),
+                (budget("jwt entries 50x10", jwtEntries), (16, 510)),
+                (budget("jwt contentTypes name", jwtTypes), (12, 5)),
+                (budget("api-key entries 50x10", keyEntries), (12, 510)),
+                (budget("api-key content blogs 50 + profile", keyContent), (8, 260)),
                 (budget("anonymous content GET 304", notModified), (4, 1)),
                 (budget("anonymous content GET 200 blogs 50 + profile", executed), (8, 260))
             }
