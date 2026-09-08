@@ -219,6 +219,22 @@ DB の失敗の行（`message: "field failed"`）には `error.kind` が付く�
 `CMS_DB_LEAK_DETECTION_SECONDS` を入れると HikariCP が「借りたまま返らない接続」を見張るが、**警告の行は出ない**（cms は HikariCP の SLF4J を `slf4j-nop` で黙らせている。出すと Flix のテストが標準エラーで落ちるため）。
 気付き方は `/health` の `pool.active` が張り付く事の方で、しきい値の設定は将来 SLF4J の束縛を差し替えた時のために置いてある。
 
+### 自己回復（自分で終わって再起動させる）
+
+OOM のような事故の後、プロセスは生きているのに接続プールだけが壊れ、PostgreSQL が健在でも `/health` が 503 を返し続ける事がある（実験 1 回目の S5。2 分観測して戻らなかった）。
+プールを作り直す口が無いので、cms は**自分で終わって、コンテナに起こし直させる**。2 秒ごとの周で次の 4 つがそろった時だけ終わる。
+
+1. 起動から 5 分経っている（起動直後の DB 待ちで落ちない）
+2. プール経由の ping が `CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS`（既定 90 秒）以上続けて失敗している
+3. その間に、**プールを通さない新しい接続**では DB に届いた（DB 自体が落ちている時は終わらない。終わっても直らないため）
+4. プロセスごとの jitter（0〜30 秒）も過ぎている（複数台が同じ時刻に落ちない）
+
+終わる時は `{"severity":"error","message":"self-heal: exiting","reason":...,"db.pool.active":...}` を出し、停止（SIGTERM）と同じ drain をしてから**終了コード 3**。
+compose の `restart: unless-stopped` が起こし直す。`CMS_SELF_HEAL=off` で止められる。
+
+OOM で JVM 自身が落ちる時（`-XX:+ExitOnOutOfMemoryError`）の最後の行 `Terminating due to java.lang.OutOfMemoryError` は **JSON ではない**（JVM が出す物で、アプリ側では塞げない）。
+収集器は終了コード 3 と、その直前の行で判断する（LogQL なら `__error__ != ""` で拾う）。
+
 **`/health` は DB が落ちている時に 15〜20 秒返らない**（Dockerfile の `HEALTHCHECK --timeout=3s` は毎回 timeout 扱いになる）。
 今の sqlfx の API には `Pool.withConnection` に待ちの上限を渡す口が無く、ping の前に `SET LOCAL statement_timeout` を置いても接続を借りる所で待つので効かない。
 短くするには sqlfx 側に borrow の上限を渡す口が要る（次の回し）。それまでは「`/health` が返らない = DB に届いていない」として扱う。
@@ -264,6 +280,8 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_JOBS` | `on` ならプロセス内のバックグラウンドワーカー（予約公開と Webhook の配信）を回す。`off` は外部トリガーか別の worker で回す時 | on |
 | `CMS_JOBS_TOKEN` | `POST /jobs/tick`（外部トリガー）を許す `X-Jobs-Token` の値。無ければその口は閉じる | 無し |
 | `CMS_JOBS_DRAIN_SECONDS` | 停止時に実行中の仕事を待つ秒数 | 15 |
+| `CMS_SELF_HEAL` | `on` / `off`。接続プールが壊れたまま戻らない時に自分で終わって再起動させる（下の「自己回復」） | on |
+| `CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS` | プール経由で DB に届かない状態がこれだけ続いたら終わる。起動から 5 分は見送る | 90 |
 | `CMS_CACHE_MAX_AGE` | コンテンツ API の GET で、鍵もトークンも無い応答に付ける `Cache-Control` の秒数（CDN 用）。0 で no-store | 60 |
 | `CMS_MAX_CONNECTIONS` | HTTP の同時接続の上限。超えた接続は `503` と `Retry-After: 1` で断る（待ち行列は無い）。今の数は `/health` の `connections` | 256 |
 | `CMS_LOG_LEVEL` | ログの最低 severity（`debug` / `info` / `warn` / `error`）。`debug` で `/health` の行も出る | info |

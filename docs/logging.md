@@ -48,7 +48,11 @@
 | `error.kind` | string | リゾルバの失敗の行 | DB の失敗の種類（sqlfx の TransientDbErr の名前 `deadlock` / `timeout` / `connectionLost`）。再試行で枯渇した物は最後の失敗の種類。「DB が落ちた」と「DB が遅い」を読み分ける。制約違反などには付かない |
 | `db.retries` | int | リクエストの行 | 一時的な失敗で呼び直した回数。1 以上の時だけ |
 | `db.pool.waiting` | int | リクエストの行 | DB の接続プールを借りるのを待っているスレッドの数。Runner の入口で 1 回読み、1 以上の時だけ |
-| `db.pool.active` | int | リクエストの行 | 借りられている接続の数。`db.pool.waiting` が付く行にだけ |
+| `db.pool.active` | int | リクエストの行、`self-heal: exiting` の行 | 借りられている接続の数。リクエストの行には `db.pool.waiting` が付く時だけ |
+| `db.pool.idle` | int | `self-heal: exiting` の行 | 空いている接続の数 |
+| `db.pool.total` | int | `self-heal: exiting` の行 | 開いている接続の数（active + idle） |
+| `db.pool.max` | int | `self-heal: exiting` の行 | プールの上限 |
+| `reason` | string | `self-heal: exiting` の行 | 自分で終わると決めた理由（何 ms 届かなかったか） |
 | `origin` | string | 403 のリクエストの行（MCP） | 断った `Origin` の scheme + host（パスやクエリは無い） |
 | `entity` | string | 業務エラーの行 | `extensions.entity` と同じ |
 | `id` | string | 業務エラーの行、予約公開の行、MCP のリクエストの行、プレビューの span | entry の id など。連番は出さない。MCP は引数の id、無ければ結果の id（create_entry で作った物） |
@@ -83,6 +87,8 @@
 - リゾルバの中: Runner が `deps#log` で入れ直し（graphql-java の Java コールバックの中なので dispatch の handler は届かない）、Context の span に `user.id` / `api_key.name` を足す。今出るのは DB の失敗（`field failed`）だけ。
   同じ属性（と検証に落ちた印）は Context の `observe` でリクエストの行にも戻す（Ref を閉じ込めた関数の値。Java のコールバックの中から effect は届かない）
 - ワーカー: `BackgroundJobs.runForever` が周ごとに入れ直す。外部トリガー `POST /jobs/tick` はリクエストの span の中で出る
+- 自己回復: プールが壊れたまま戻らないと決まったら `self-heal: exiting`（error。`reason` とプールの数字）を出し、停止と同じ drain をして終了コード 3 で終わる。
+  その後の `Terminating due to java.lang.OutOfMemoryError` のような JVM の平文は JSON にできないので、収集器は終了コードとこの行で判断する
 - 起動: `main` が全体を包む。`CMS_MODE=import-microcms` のまとめは Log でなく stdout の平文（コマンドの出力）
 - 停止: SIGTERM / SIGINT の handler（`BackgroundJobs.shutdown`）が `shutting down` を出してから新しい周を止め、実行中の 1 周を待って `jobs drained`（上限を超えれば warn の `jobs drain timed out`）
 

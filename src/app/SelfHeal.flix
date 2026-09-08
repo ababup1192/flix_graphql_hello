@@ -1,0 +1,132 @@
+///
+/// DB の接続プールが壊れたまま戻らなくなった時に、自分で終わってコンテナに起こし直させる判断。
+/// 実験 1 回目（docs/design/trials/failure-experiment-round1-2026-09-08.md）の S5 で、OOM の後にプロセスは生き残るのに
+/// プールが壊れたままで、PostgreSQL が健在でも /health が 503 を返し続けた（自力では戻らなかった）。
+///
+/// 判断は純粋な `decide`、外の世界に触るのは `observe` の 1 関数だけ。
+///
+/// WhyNot: プールを作り直さないのは、プールは Main が起動時に組んで全部に配っている値で、
+/// 差し替えると Runner・エンジンのキャッシュ・ワーカーの持ち回りが全部変わるため。プロセスを終えれば
+/// コンテナ（restart: unless-stopped）が同じ物を組み直す。
+///
+/// WhyNot: ping が失敗しただけで終わらないのは、DB 自体が落ちている時に終わっても直らず、
+/// 再起動を繰り返して復旧の邪魔をするため。プールを通さない新しい接続で届く時（= 壊れているのはこちら）だけ終わる。
+///
+mod SelfHeal {
+
+    import java.lang.System
+
+    ///
+    /// 見張りの設定。
+    ///
+    /// - minUnhealthyMs: プール経由で届かない状態がこれだけ続いたら終わりを考える
+    /// - warmupMs: 起動からこれだけは見送る（起動直後の DB 待ちで終わらないため）
+    /// - jitterMs: プロセスごとの上乗せ。複数台が同じ時刻に終わらないようにする
+    ///
+    pub type alias Settings = { minUnhealthyMs = Int64, warmupMs = Int64, jitterMs = Int64 }
+
+    ///
+    /// 1 周ぶんの観測。
+    ///
+    /// - at: 観測した時刻（UNIX ミリ秒）
+    /// - pingOk: プールから借りた接続で SELECT 1 が通ったか
+    /// - freshOk: プールを通さない新しい接続で SELECT 1 が通ったか（pingOk が true の時は見ない）
+    /// - stats: その時のプールの数字
+    ///
+    pub type alias Observation = { at = Int64, pingOk = Bool, freshOk = Bool, stats = Pool.PoolStats }
+
+    ///
+    /// 見張りの結果。Exit は理由（ログの reason に出す）を持つ。
+    ///
+    pub enum Decision with Eq, ToString {
+        case Keep
+        case Exit(String)
+    }
+
+    /// minUnhealthyMs の既定（秒）。
+    pub def defaultMinUnhealthySeconds(): Int64 = 90i64
+
+    /// warmupMs の既定（ミリ秒）。
+    pub def defaultWarmupMs(): Int64 = 300000i64
+
+    ///
+    /// CMS_SELF_HEAL（on / off。既定 on）と CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（既定 90）から設定を組む。
+    /// off なら None（見張らない）。数字でない・0 以下は既定の秒数。
+    ///
+    pub def settingsFrom(mode: Option[String], seconds: Option[String], jitterMs: Int64): Option[Settings] =
+        if (mode == Some("off")) None
+        else
+            let configured = seconds |> Option.flatMap(Int64.fromString) |> Option.filter(value -> value > 0i64) |> Option.getWithDefault(defaultMinUnhealthySeconds());
+            Some({ minUnhealthyMs = configured * 1000i64, warmupMs = defaultWarmupMs(), jitterMs = jitterMs })
+
+    ///
+    /// 環境変数から設定を組む。jitter は呼ぶ側が決めた上乗せ（プロセスごとに 1 回）。
+    ///
+    pub def fromEnv(jitterMs: Int64): Option[Settings] \ Sys.Env =
+        settingsFrom(Sys.Env.getVar("CMS_SELF_HEAL"), Sys.Env.getVar("CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS"), jitterMs)
+
+    ///
+    /// 観測の列（古い順）から決める。次の 4 つが全部そろった時だけ Exit。
+    ///
+    /// 1. 起動から warmupMs 経っている
+    /// 2. プール経由の ping が minUnhealthyMs 以上続けて失敗している
+    /// 3. その間に、プールを通さない新しい接続では DB に届いた
+    /// 4. jitter を足した長さも過ぎている
+    ///
+    pub def decide(settings: Settings, startedAt: Int64, observations: List[Observation]): Decision =
+        match (List.last(observations), List.head(unhealthySuffix(observations))) {
+            case (Some(latest), Some(first)) => decideOn(settings, startedAt, latest#at - first#at, latest, unhealthySuffix(observations))
+            case _                           => Decision.Keep
+        }
+
+    /// 4 つの条件を順に見る。
+    def decideOn(settings: Settings, startedAt: Int64, unhealthyMs: Int64, latest: Observation, streak: List[Observation]): Decision =
+        if (latest#at - startedAt < settings#warmupMs) Decision.Keep
+        else if (unhealthyMs < settings#minUnhealthyMs + settings#jitterMs) Decision.Keep
+        else if (not List.exists(seen -> seen#freshOk, streak)) Decision.Keep
+        else Decision.Exit("DB の接続プールから ${unhealthyMs} ms 続けて届かず、プールを通さない新しい接続では届いている")
+
+    /// 末尾に続いている失敗だけ（間に 1 回でも成功があれば、そこで切れる）。
+    def unhealthySuffix(observations: List[Observation]): List[Observation] =
+        observations |> List.reverse |> List.takeWhile(seen -> not seen#pingOk) |> List.reverse
+
+    ///
+    /// 見張りの持ち物。observe が 1 周ごとに観測を積む。
+    ///
+    /// - settings: 判断の設定
+    /// - startedAt: プロセスが起動した時刻（UNIX ミリ秒）
+    /// - connection: プールを通さない接続を 1 本開くための接続情報
+    /// - seen: 直近の観測（古い順。窓の外は捨てる）
+    ///
+    pub type alias Watch = { settings = Settings, startedAt = Int64, connection = Jdbc.ConnectionConfig, seen = Ref[List[Observation], Static] }
+
+    ///
+    /// 覚えておく観測の数。2 秒ごとなので 300 個で 10 分。minUnhealthyMs（既定 90 秒）より十分に長い。
+    ///
+    def windowSize(): Int32 = 300
+
+    pub def createWatch(settings: Settings, startedAt: Int64, connection: Jdbc.ConnectionConfig): Watch \ IO =
+        { settings = settings, startedAt = startedAt, connection = connection, seen = Ref.fresh(Static, Nil) }
+
+    ///
+    /// 1 周ぶん観測して決める。プール経由の ping が通っている間は新しい接続を開かない。
+    ///
+    pub def observe(watch: Watch, pool: Pool): Decision \ IO =
+        let pingOk = Result.isOk(Health.ping(pool));
+        let seen = { at = System.currentTimeMillis(), pingOk = pingOk, freshOk = not pingOk and freshOk(watch#connection), stats = Pool.stats(pool) };
+        let window = (Ref.get(watch#seen) ::: seen :: Nil) |> keepLast(windowSize());
+        Ref.put(window, watch#seen);
+        decide(watch#settings, watch#startedAt, window)
+
+    /// 末尾の count 個だけ残す。
+    def keepLast(count: Int32, observations: List[Observation]): List[Observation] =
+        observations |> List.reverse |> List.take(count) |> List.reverse
+
+    ///
+    /// プールを通さない接続を 1 本開いて SELECT 1 を投げ、閉じる。届けば true。
+    ///
+    pub def freshOk(connection: Jdbc.ConnectionConfig): Bool \ IO =
+        DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(connection, _ -> discard Sql.fetch("SELECT 1", Nil))))
+            |> Result.isOk
+
+}

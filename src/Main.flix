@@ -10,7 +10,7 @@ import java.lang.System
 /// CMS_DB_TIMEOUT_SECONDS（接続ごとに DB 側で効かせる時間の上限。既定 30、0 で無効）、CMS_DB_LEAK_DETECTION_SECONDS（借りたまま返さない接続の検出。既定 0 で無効）、ASSET_*（StorageConfig。省略時は asset 無し）、
 /// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_BASE_DOMAIN（`{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。省略時は /p/ だけ）、
 /// CMS_DEFAULT_PROJECT（プロジェクト slug 無しの時のプロジェクト slug。省略時は default、空ならプロジェクト slug 無しは 404）、CMS_SIGNUP（open / closed）、
-/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（停止時に実行中の仕事を待つ秒数。既定 15）、CMS_CACHE_MAX_AGE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 60、0 で no-store）、
+/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（停止時に実行中の仕事を待つ秒数。既定 15）、CMS_SELF_HEAL（on / off。プールが壊れたまま戻らない時に自分で終わる。既定 on）、CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（既定 90）、CMS_CACHE_MAX_AGE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 60、0 で no-store）、
 /// CMS_MODE=import-microcms（サーバを立てず、CMS_IMPORT_DIR の microCMS のスキーマを写してダミーの entry を CMS_IMPORT_COUNT 件ずつ積んで終わる）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
 /// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health とログの version に出す版。省略時は dev）、CMS_MAX_CONNECTIONS（HTTP の同時接続の上限。超えた接続は 503。既定 256）、
 /// CMS_LOG_LEVEL（trace / debug / info / warn / error / fatal。これより軽い行は出さない。既定 info）
@@ -46,7 +46,7 @@ def start(version: String, sink: Log.Sink): Unit \ {IO, Fs.FileRead, Sys.Exit, S
 ///
 /// 起動時に組む物。
 ///
-type alias Started = { pool = Pool, adminEngines = AdminEngine.Cache, deps = Deps, defaultProject = Option[ProjectId], accountEngine = Graphql.Engine }
+type alias Started = { pool = Pool, dbConnection = Jdbc.ConnectionConfig, adminEngines = AdminEngine.Cache, deps = Deps, defaultProject = Option[ProjectId], accountEngine = Graphql.Engine }
 
 ///
 /// SDL と生成物の一致、DB、migrations、ロール、プール、依存、既定プロジェクト、エンジンの順に確かめて組む。
@@ -59,7 +59,8 @@ def boot(sink: Log.Sink): Result[String, Started] \ {IO, Fs.FileRead, Sys.Env, L
         _           <- prepareMigrations(connection, Sys.Env.getVar("CMS_MIGRATE"));
         appConnection <- Ok(DbConfig.appFromEnv(connection));
         _           <- ensureAppRole(connection, appConnection);
-        pool        <- openPool(appConnection |> Option.getWithDefault(connection));
+        dbConnection <- Ok(appConnection |> Option.getWithDefault(connection));
+        pool        <- openPool(dbConnection);
         storage     <- StorageConfig.fromEnv();
         auth        <- AuthConfig.fromEnv();
         deps        <- Ok({ storage = storage, auth = auth, log = sink });
@@ -67,7 +68,7 @@ def boot(sink: Log.Sink): Result[String, Started] \ {IO, Fs.FileRead, Sys.Env, L
         accountEngine  <- AccountSchema.engine(pool, deps);
         adminEngines <- Ok(AdminEngine.create(deps));
         _           <- AdminEngine.current(adminEngines, pool, defaultProject |> Option.getWithDefault(ProjectId.default()))
-    ) yield { pool = pool, adminEngines = adminEngines, deps = deps, defaultProject = defaultProject, accountEngine = accountEngine }
+    ) yield { pool = pool, dbConnection = dbConnection, adminEngines = adminEngines, deps = deps, defaultProject = defaultProject, accountEngine = accountEngine }
 
 ///
 /// CMS_MODE=import-microcms。microCMS のスキーマを写してダミーを積み、終わる。
@@ -93,6 +94,7 @@ def serve(version: String, sink: Log.Sink, started: Started): Unit \ {IO, Sys.En
     let jobsOn = Sys.Env.getVar("CMS_JOBS") |> Option.getWithDefault("on") != "off";
     let drainSeconds = Sys.Env.getVar("CMS_JOBS_DRAIN_SECONDS") |> Option.flatMap(Int64.fromString) |> Option.getWithDefault(15i64);
     let jobs = BackgroundJobs.createState(drainSeconds);
+    let heal = healWatch(started);
     let cacheMaxAge = Sys.Env.getVar("CMS_CACHE_MAX_AGE") |> Option.flatMap(Int32.fromString) |> Option.getWithDefault(60);
     let config = { cors = cors, version = version, jobsToken = jobsToken, cacheMaxAge = if (cacheMaxAge > 0) Some(cacheMaxAge) else None };
     let engineCache = ContentEngine.create(deps);
@@ -101,7 +103,7 @@ def serve(version: String, sink: Log.Sink, started: Started): Unit \ {IO, Sys.En
     // 予約公開と Webhook の配信はプロセス内のワーカーで回す。積むのはリクエストの Tx（outbox）、拾って実行するのはここ
     region rc {
     BackgroundJobs.installShutdownHook(jobs, sink);
-    if (jobsOn) spawn BackgroundJobs.runForever(started#pool, jobs, sink) @ rc else Log.warn("jobs off (CMS_JOBS=off): POST /jobs/tick か別の worker で回してください", Log.Fields.empty());
+    if (jobsOn) spawn BackgroundJobs.runForever(started#pool, jobs, heal, sink) @ rc else Log.warn("jobs off (CMS_JOBS=off): POST /jobs/tick か別の worker で回してください", Log.Fields.empty());
     let maxConnections = Sys.Env.getVar("CMS_MAX_CONNECTIONS") |> Option.flatMap(Int32.fromString) |> Option.filter(n -> n > 0) |> Option.getWithDefault(256);
     let listener = HttpServer.open({ bind = bind, maxConnections = maxConnections | HttpServer.defaultConfig() });
     let runtime = {
@@ -115,6 +117,19 @@ def serve(version: String, sink: Log.Sink, started: Started): Unit \ {IO, Sys.En
         |> Log.info("listening");
     HttpServer.listen(listener, served -> logServed(sink, served), request -> dispatch(runtime, request))
     }
+
+///
+/// プールが壊れたまま戻らないかを見張る物。CMS_SELF_HEAL=off なら None（見張らない）。
+///
+def healWatch(started: Started): Option[SelfHeal.Watch] \ {IO, Sys.Env} =
+    SelfHeal.fromEnv(healJitterMs())
+        |> Option.map(settings -> SelfHeal.createWatch(settings, System.currentTimeMillis(), started#dbConnection))
+
+///
+/// 複数台が同じ時刻に自分を終わらせないための上乗せ（0〜30 秒）。プロセスごとに 1 回だけ決める。
+///
+def healJitterMs(): Int64 \ IO =
+    Math.Random.runWithIO(() -> Float64.clampToInt64(min = 0i64, max = 30000i64, nanValue = 0i64, Math.Random.randomFloat64() * 30000.0))
 
 ///
 /// 起動後にリクエストごとに使う物の束。

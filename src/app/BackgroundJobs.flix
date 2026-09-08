@@ -37,13 +37,46 @@ mod BackgroundJobs {
     ///
     /// 止まらずに回す。失敗はログに出して次の周へ。停止が始まったら抜ける。周ごとに Log を sink で入れ直す（spawn の中なので Main の handler は届かない）。
     ///
-    pub def runForever(pool: Pool, state: State, sink: Log.Sink): Unit \ IO =
+    pub def runForever(pool: Pool, state: State, heal: Option[SelfHeal.Watch], sink: Log.Sink): Unit \ IO =
         if (Ref.get(state#stopping)) Log.runWith(sink, () -> Log.info("jobs stopping", Log.Fields.empty()))
         else {
-            Log.runWith(sink, () -> round(pool, state));
+            Log.runWith(sink, () -> { round(pool, state); healCheck(pool, state, heal) });
             Thread.sleep(intervalMs());
-            runForever(pool, state, sink)
+            runForever(pool, state, heal, sink)
         }
+
+    ///
+    /// プールが壊れたまま戻らないかを見張り、決まったら自分で終わる。CMS_SELF_HEAL=off なら見張らない。
+    ///
+    /// WhyNot: 外部トリガー（POST /jobs/tick）の tick に入れないのは、リクエストの中でプロセスを終わらせる事になり、
+    /// 呼んだ側には接続断としか見えないため。周期の周だけが判断する。
+    ///
+    def healCheck(pool: Pool, state: State, heal: Option[SelfHeal.Watch]): Unit \ {IO, Log} = match heal {
+        case None        => ()
+        case Some(watch) => match SelfHeal.observe(watch, pool) {
+            case SelfHeal.Decision.Keep         => ()
+            case SelfHeal.Decision.Exit(reason) => exitForHeal(pool, state, reason)
+        }
+    }
+
+    ///
+    /// 停止と同じ drain をしてから終了コード 3 で終わる。コンテナ（restart)が同じ物を組み直す。
+    ///
+    /// WhyNot: 終了コードを 0 にしないのは、正常な停止（SIGTERM）と区別が付かなくなるため。
+    /// 3 は `-XX:+ExitOnOutOfMemoryError` の JVM が使う番号と同じで、どちらも「壊れたので落ちた」を意味する。
+    ///
+    def exitForHeal(pool: Pool, state: State, reason: String): Unit \ {IO, Log} =
+        let stats = Pool.stats(pool);
+        Log.Fields.empty()
+            |> Log.Fields.str("reason", reason)
+            |> Log.Fields.int("db.pool.active", Int32.toInt64(stats#active))
+            |> Log.Fields.int("db.pool.idle", Int32.toInt64(stats#idle))
+            |> Log.Fields.int("db.pool.waiting", Int32.toInt64(stats#waiting))
+            |> Log.Fields.int("db.pool.total", Int32.toInt64(stats#total))
+            |> Log.Fields.int("db.pool.max", Int32.toInt64(stats#max))
+            |> Log.error("self-heal: exiting");
+        shutdown(state);
+        System.exit(3)
 
     /// 1 周。失敗は Error の行にする（1 周に 1 行ずつ）。
     def round(pool: Pool, state: State): Unit \ {IO, Log} =
