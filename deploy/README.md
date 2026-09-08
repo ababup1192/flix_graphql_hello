@@ -115,7 +115,7 @@ Origin ヘッダが付いていて `CMS_CORS_ORIGINS` に無ければ 403（無�
 `/health` の `jobs` にワーカーの最終実行時刻（`lastTickAt`）と、待ち・失敗の件数（`pendingSchedules` / `failedSchedules` / `pendingDeliveries` / `failedDeliveries`。数えられなければ -1）が出る。
 外形監視で `lastTickAt` が古ければワーカーが止まっている。`failedDeliveries` が増えていれば受け手が落ちている。仕事 1 件ごとに `{"message":"job delivered","job.kind":"webhook","job.id":...,"job.outcome":"delivered","detail":"HTTP 200",...}` の 1 行 JSON もログに出る（`job.id` は `X-Cms-Delivery` と同じ）。
 
-SIGTERM / SIGINT を受けると、新しい仕事を拾うのをやめ、実行中の 1 周が終わるまで（最長 `CMS_JOBS_DRAIN_SECONDS`。既定 15 秒）待ってから終わる。compose の `stop_grace_period` はそれより長くする。
+SIGTERM / SIGINT を受けると、`shutting down` の行を出し、新しい仕事を拾うのをやめ、実行中の 1 周が終わるまで（最長 `CMS_JOBS_DRAIN_SECONDS`。既定 15 秒）待って `jobs drained` を出してから終わる。compose の `stop_grace_period` はそれより長くする。
 
 保険として、外の cron から同じ処理を呼べる（`CMS_JOBS_TOKEN` を設定した時だけ）。同時に呼ばれても二重にはならない。
 

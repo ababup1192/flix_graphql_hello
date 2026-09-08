@@ -86,13 +86,21 @@ mod BackgroundJobs {
     pub def installShutdownHook(state: State, sink: Log.Sink): Unit \ IO =
         let onSignal = new SignalHandler {
             def handle(_this: SignalHandler, _signal: Signal): Unit \ IO = {
-                Ref.put(true, state#stopping);
-                Log.runWith(sink, () -> drain(state, System.currentTimeMillis() + state#drainMs));
+                Log.runWith(sink, () -> shutdown(state));
                 System.exit(0)
             }
         };
         discard Signal.handle(new Signal("TERM"), onSignal);
         discard Signal.handle(new Signal("INT"), onSignal)
+
+    ///
+    /// 停止の入口。`shutting down` を 1 行出してから新しい周を止め、実行中の 1 周が終わるまで（上限あり）待つ。
+    /// 行を先に出すのは、止めた事が行から分かるようにするため（`jobs stopping` は周の頭でしか判定せず、待っている間は出ない）。
+    ///
+    pub def shutdown(state: State): Unit \ {IO, Log} =
+        Log.info("shutting down", Log.Fields.empty());
+        Ref.put(true, state#stopping);
+        drain(state, System.currentTimeMillis() + state#drainMs)
 
     /// 実行中の 1 周が終わるか、期限が来るまで待つ。
     def drain(state: State, deadline: Int64): Unit \ {IO, Log} =

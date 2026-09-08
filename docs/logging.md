@@ -66,7 +66,7 @@
 |---|---|
 | error | 5xx、handle の例外、Webhook の最後の失敗、予約公開の失敗、リゾルバの DB の失敗（INTERNAL）、ワーカーの 1 周の失敗 |
 | warn | 401 / 403、知らない鍵・死んだ PAT（HTTP は 200 でも `credential.kind: invalid` か `graphql.error_codes` に `UNAUTHENTICATED`）、限界の 503、Webhook の再試行、jobs off、所有者で DB に繋ぐ |
-| info | 2xx / 4xx のリクエストの行（404 / 400 はユーザーの正常な失敗。MCP の tools/call もこの行）、job の done / delivered、起動 |
+| info | 2xx / 4xx のリクエストの行（404 / 400 はユーザーの正常な失敗。MCP の tools/call もこの行）、job の done / delivered、起動（`listening`）、停止（SIGTERM / SIGINT の `shutting down` → `jobs drained`） |
 | debug | `/health` の 2xx（外形監視で 1 日 1.4k 行。集計を汚さない） |
 | fatal | 起動の失敗（この後 exit 1）、OutOfMemoryError |
 
@@ -80,6 +80,7 @@
   同じ属性（と検証に落ちた印）は Context の `observe` でリクエストの行にも戻す（Ref を閉じ込めた関数の値。Java のコールバックの中から effect は届かない）
 - ワーカー: `BackgroundJobs.runForever` が周ごとに入れ直す。外部トリガー `POST /jobs/tick` はリクエストの span の中で出る
 - 起動: `main` が全体を包む。`CMS_MODE=import-microcms` のまとめは Log でなく stdout の平文（コマンドの出力）
+- 停止: SIGTERM / SIGINT の handler（`BackgroundJobs.shutdown`）が `shutting down` を出してから新しい周を止め、実行中の 1 周を待って `jobs drained`（上限を超えれば warn の `jobs drain timed out`）
 
 ## Loki
 
