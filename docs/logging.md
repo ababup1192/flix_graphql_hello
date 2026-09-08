@@ -43,7 +43,7 @@
 | `exception.type` | string | Error の行 | `Log.exception` |
 | `exception.message` | string | Error の行 | 200 字。`Detail:` 以降は落とす（PG が行の値を入れるため） |
 | `exception.stacktrace` | string | Error の行 | Flix の frame だけ 8 つ |
-| `error.code` | string | 業務エラーの行、リゾルバの失敗の行、4xx のリクエストの行、MCP の error の行 | 業務エラーは GraphQL の `extensions.code` と同じ文字列。4xx は短い固定の語（`no_route` / `method_not_allowed` / `unsupported_media_type` / `bad_json` / `bad_request` / `jobs_token` / `no_project` / `unavailable`、MCP の `origin` / `protocol_version` / `preview_token` / `unauthenticated`）。MCP の tools/call が isError なら content の `code` |
+| `error.code` | string | 業務エラーの行、リゾルバの失敗の行、4xx のリクエストの行、MCP の error の行 | 業務エラーと認証の断り（MCP の 401）は GraphQL の `extensions.code` と同じ綴り（`UNAUTHENTICATED` / `REQUIRES_LOGIN` / `FORBIDDEN`）。4xx は短い固定の語（`no_route` / `method_not_allowed` / `unsupported_media_type` / `bad_json` / `bad_request` / `jobs_token` / `no_project` / `unavailable`、MCP の `origin` / `protocol_version` / `preview_token`）。MCP の tools/call が isError なら content の `code` |
 | `error.message` | string | 起動の失敗、ワーカーの失敗、リゾルバの失敗、4xx のリクエストの行、繋がらなかった Webhook の行 | 人が読む文。4xx は応答本文と同じ文、Webhook は「接続できませんでした: java.net.ConnectException」のような文 |
 | `error.kind` | string | リゾルバの失敗の行 | DB の失敗の種類（sqlfx の TransientDbErr の名前 `deadlock` / `timeout` / `connectionLost` と、失敗した SQL の後の COMMIT が弾かれた `rollback`）。再試行で枯渇した物は最後の失敗の種類。「DB が落ちた」と「DB が遅い」を読み分ける。制約違反などには付かない |
 | `db.retries` | int | リクエストの行 | 一時的な失敗で呼び直した回数。1 以上の時だけ。リクエストの中の Tx 全部の和 |

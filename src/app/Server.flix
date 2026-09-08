@@ -262,7 +262,7 @@ mod Server {
         else match (McpServer.protocolVersionOf(request#headers), routeRequest#credential, routeRequest#auth) {
             case (Err(version), _, _)                => Err(rejected(400, Nil, "protocol_version", "MCP-Protocol-Version '${version}' には対応していません（${List.join(" / ", McpServer.supportedProtocolVersions())}）"))
             case (Ok(_), Credential.Preview(_), _)   => Err(rejected(400, Nil, "preview_token", "プレビュートークンはこの経路では受け付けません（API キーか PAT で）"))
-            case (Ok(_), _, Err(rejection))          => Err(rejected(401, ("WWW-Authenticate", "Bearer error=\"invalid_token\"") :: Nil, "unauthenticated", Rejection.message(rejection)))
+            case (Ok(_), _, Err(rejection))          => Err((jsonResponse(401, ("WWW-Authenticate", "Bearer error=\"invalid_token\"") :: Nil, McpServer.errorBody(Value.Null, McpServer.invalidRequestCode(), Rejection.message(rejection))), Log.Fields.empty() |> LogFields.rejectedAuth(rejection)))
             case (Ok(_), _, Ok(found))               => Ok(found#actor)
         }
 

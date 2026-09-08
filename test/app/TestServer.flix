@@ -166,8 +166,8 @@ mod TestServer {
             ((("Origin", "https://evil.example.com/path?q=1") :: json, Credential.ApiKey("cms_x"), Ok({ actor = key, log = Map.empty() })), Err((403, Some("origin"), Some("https://evil.example.com")))),
             ((("MCP-Protocol-Version", "2099-01-01") :: json, Credential.ApiKey("cms_x"), Ok({ actor = key, log = Map.empty() })),      Err((400, Some("protocol_version"), None))),
             ((json, Credential.Preview("pv_x"), Ok(Authentication.anonymous())),                                                       Err((400, Some("preview_token"), None))),
-            ((json, Credential.PersonalToken("cmspat_x"), Err(Rejection.DeadToken(PatRejection.Revoked))),                              Err((401, Some("unauthenticated"), None))),
-            ((json, Credential.Invalid("JWT は無し"), Err(Rejection.Invalid("JWT は無し"))),                                             Err((401, Some("unauthenticated"), None))),
+            ((json, Credential.PersonalToken("cmspat_x"), Err(Rejection.DeadToken(PatRejection.Revoked))),                              Err((401, Some("UNAUTHENTICATED"), None))),
+            ((json, Credential.Invalid("JWT は無し"), Err(Rejection.Invalid("JWT は無し"))),                                             Err((401, Some("UNAUTHENTICATED"), None))),
             ((("Origin", "https://admin.example.com") :: json, Credential.ApiKey("cms_x"), Ok({ actor = key, log = Map.empty() })),     Ok(key)),
             ((json, Credential.Missing, Ok(Authentication.anonymous())),                                                               Ok(Actor.Anonymous))
         };

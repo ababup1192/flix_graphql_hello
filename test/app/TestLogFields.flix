@@ -99,6 +99,20 @@ mod TestLogFields {
             expected = List#{("credential.kind", Value.Str("invalid"))},
             Fields.empty() |> Fields.str("credential.kind", "api-key") |> LogFields.rejectedCredential |> Map.toList)
 
+    /// 認証に落ちた 401 の行の error.code は GraphQL の extensions.code と同じ綴り（小文字の unauthenticated ではない）。
+    @Test
+    def testRejectedAuthTable(): Unit \ Assert =
+        let cases = List#{
+            (Rejection.Invalid("JWT は無し"),                 ("UNAUTHENTICATED", "認証に失敗しました: JWT は無し")),
+            (Rejection.DeadToken(PatRejection.Revoked),     ("UNAUTHENTICATED", "認証に失敗しました: PAT は失効しています")),
+            (Rejection.NotForAccount("API キー"),           ("REQUIRES_LOGIN", "Account API は API キーでは使えません。ログインしてください")),
+            (Rejection.PrivateProject,                      ("UNAUTHENTICATED", "このプロジェクトは非公開です。API キーを X-Api-Key で渡してください")),
+            (Rejection.NotMember,                           ("FORBIDDEN", "このプロジェクトのメンバーではありません"))
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(match (_, (code, message)) -> List#{("error.code", Value.Str(code)), ("error.message", Value.Str(message))}),
+            cases |> List.map(match (rejection, _) -> Fields.empty() |> LogFields.rejectedAuth(rejection) |> Map.toList))
+
     // ---- 4xx の理由と MCP ----
 
     /// 4xx の理由は error.code と error.message。

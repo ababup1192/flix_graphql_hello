@@ -57,6 +57,12 @@ mod LogFields {
         fields |> Fields.str("credential.kind", "invalid")
 
     ///
+    /// 認証に落ちた理由（Rejection）を 401 の行に。error.code は GraphQL の extensions.code と同じ綴り（UNAUTHENTICATED など）、error.message は応答の文。
+    ///
+    pub def rejectedAuth(found: Rejection, fields: Fields): Fields =
+        fields |> rejection(ErrorCode.text(Rejection.code(found)), Rejection.message(found))
+
+    ///
     /// 応答の行。ステータス・所要時間・ボディの大きさ。
     ///
     pub def response(status: Int32, elapsedMs: Int64, requestBytes: Int64, responseBytes: Int64, fields: Fields): Fields =
