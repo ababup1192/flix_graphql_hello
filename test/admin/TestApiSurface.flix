@@ -58,14 +58,16 @@ mod TestApiSurface {
                 "IssuedWebhook: webhook secret" ::
                 "Me: id email name roles permissions organizations projects" ::
                 "Member: userId email name role" ::
-                "Mutation: createContentType updateContentType deleteContentType addField updateField removeField reorderFields createEntry updateEntry deleteEntry publishEntry unpublishEntry saveVersion restoreVersion createUploadUrl confirmAsset updateAsset deleteAsset createPreviewToken schedulePublish scheduleUnpublish cancelSchedule updateProjectVisibility inviteMember cancelInvitation changeMemberRole removeMember createApiKey revokeApiKey createWebhook updateWebhook deleteWebhook redeliverWebhook" ::
+                "Mutation: createContentType updateContentType deleteContentType addField updateField removeField reorderFields createEntry updateEntry deleteEntry publishEntry publishMany unpublishEntry saveVersion restoreVersion createUploadUrl confirmAsset updateAsset deleteAsset createPreviewToken schedulePublish scheduleUnpublish cancelSchedule updateProjectVisibility inviteMember cancelInvitation changeMemberRole removeMember createApiKey revokeApiKey createWebhook updateWebhook deleteWebhook redeliverWebhook" ::
                 "Organization: id name" ::
                 "OrganizationMembership: organization role" ::
                 "PreviewToken: token entryId expiresAt url" ::
                 "Project: id slug name visibility" ::
                 "ProjectMembership: project role" ::
+                "PublishPlan: ok steps violations" ::
+                "PublishPlanStep: entry reason report" ::
                 "PublishReport: ok violations unpublishedDependencies" ::
-                "Query: contentTypes contentType entries entry assets asset publishCheck impact viewer me members invitations apiKeys webhooks webhookDeliveries schedules" ::
+                "Query: contentTypes contentType entries entry assets asset publishCheck impact publishPlan viewer me members invitations apiKeys webhooks webhookDeliveries schedules" ::
                 "Referrer: entry via stage" ::
                 "Schedule: id entryId action runAt withDependencies status requestedBy lastError overdue createdAt doneAt" ::
                 "Upload: asset uploadUrl expiresInSeconds" ::

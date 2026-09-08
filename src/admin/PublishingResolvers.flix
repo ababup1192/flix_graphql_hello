@@ -24,6 +24,34 @@ mod PublishReportResolvers {
 
 }
 
+mod PublishPlanStepResolvers {
+
+    /// type PublishPlanStep のリゾルバ一式
+    pub def resolvers(): GeneratedAdmin.PublishPlanStepResolvers[AdminEff] =
+        {
+            entry  = (_context, source) -> Ok(source#entry),
+            reason = (_context, source) -> Ok(AdminMapping.planReasonToGql(source#reason)),
+            report = (_context, source) -> Ok(source#report)
+        }
+
+}
+
+mod PublishPlanResolvers {
+
+    /// type PublishPlan のリゾルバ一式
+    pub def resolvers(): GeneratedAdmin.PublishPlanResolvers[AdminEff] =
+        {
+            ok         = (_context, source) -> Ok(isOk(source)),
+            steps      = (_context, source) -> Ok(source#steps),
+            violations = (_context, source) -> Ok(source#violations)
+        }
+
+    /// 計画そのものの違反が無く、全ての step の report も通る。ラムダの中に入れ子の計算を書かないための切り出し（VerifyError）。
+    def isOk(plan: PublishPlan): Bool =
+        List.isEmpty(plan#violations) and List.forAll(step -> List.isEmpty(step#report#violations), plan#steps)
+
+}
+
 mod ReferrerResolvers {
 
     /// type Referrer のリゾルバ一式

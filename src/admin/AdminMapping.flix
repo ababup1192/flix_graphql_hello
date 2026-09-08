@@ -197,6 +197,12 @@ mod AdminMapping {
     ///
     /// 中身の段階（draft / published の行）を GraphQL の enum に。
     ///
+    /// 公開計画の理由 → GraphQL の enum
+    pub def planReasonToGql(reason: PlanReason): GeneratedAdmin.PlanReason = match reason {
+        case PlanReason.Requested  => GeneratedAdmin.PlanReason.Requested
+        case PlanReason.Dependency => GeneratedAdmin.PlanReason.Dependency
+    }
+
     pub def contentStageToGql(stage: Stage): GeneratedAdmin.ContentStage = match stage {
         case Stage.Draft     => GeneratedAdmin.ContentStage.Draft
         case Stage.Published => GeneratedAdmin.ContentStage.Published

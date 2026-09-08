@@ -52,6 +52,14 @@ mod AdminQueryResolvers {
     pub def impact(): GeneratedAdmin.QueryImpactResolver[AdminEff] =
         (_context, id, action) -> Ok(ContentEntries.impact(AdminMapping.entryId("id", id), AdminMapping.impactActionOf(action)))
 
+    /// Query.publishPlan（まとめて dry-run）。withDependencies の既定は true
+    pub def publishPlan(): GeneratedAdmin.QueryPublishPlanResolver[AdminEff] =
+        (_context, ids, withDependencies) -> Ok(planFor(ids, withDependencies))
+
+    /// ids を読んで計画を作る。ラムダの中で effect を使わないための切り出し（VerifyError）。
+    def planFor(ids: List[Id], withDependencies: Option[Bool]): PublishPlan \ DbRead + CmsErr + Tenant + Session =
+        ContentEntries.publishPlan(ids |> List.map(AdminMapping.entryId("ids")), withDependencies |> Option.getWithDefault(true))
+
     /// Query.viewer。今の主体をそのまま見せる（DB は引かない）
     pub def viewer(): GeneratedAdmin.QueryViewerResolver[AdminEff] =
         _context -> Ok(currentViewer())
@@ -90,6 +98,6 @@ mod AdminQueryResolvers {
     /// type Query のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.QueryResolvers[AdminEff] =
         { contentTypes = contentTypes(), contentType = contentType(), entries = entries(), entry = entry(), assets = assets(), asset = asset(),
-          publishCheck = publishCheck(), impact = impact(), viewer = viewer(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries(), schedules = schedules() }
+          publishCheck = publishCheck(), impact = impact(), publishPlan = publishPlan(), viewer = viewer(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries(), schedules = schedules() }
 
 }

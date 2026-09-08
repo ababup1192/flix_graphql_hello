@@ -210,6 +210,52 @@ mod ContentEntries {
             unpublishedDependencies = pending |> List.filterMap(lookup)
         }
 
+    // ---- 公開計画 ----
+
+    ///
+    /// 公開計画（dry-run）。ids と（withDependencies なら）未公開の参照先を依存が先の順に並べ、1 つずつの publishReport を付ける。書き込まない。
+    /// 無い id は notFound。
+    ///
+    pub def publishPlan(ids: List[EntryId], withDependencies: Bool): PublishPlan \ DbRead + CmsErr + Tenant + Session =
+        Session.require(Permission.ReadDraft);
+        planOf(ids, withDependencies)
+
+    ///
+    /// 計画を作り、通るならその順で全部公開する。1 つでも通らなければ invalid で、何も公開しない（呼ぶ側の Tx が全部戻す）。
+    /// 違反の path は entry id を頭に付ける（"b1.fields.title"）。
+    ///
+    pub def publishMany(ids: List[EntryId], author: String, withDependencies: Bool): List[Entry] \ Db + CmsErr + IdGen + Tenant + Session =
+        Session.require(Permission.PublishEntries);
+        let plan = planOf(ids, withDependencies);
+        CmsErr.raiseIfAny(plan#violations ::: (plan#steps |> List.flatMap(step -> step#report#violations |> List.map(prefixed(step#entry#id)))));
+        // 計画の順なら参照先は先に公開済みなので、1 件ずつの publish（withDependencies 無し）で通る
+        plan#steps |> List.map(step -> publish(step#entry#id, author, false))
+
+    /// 違反の path に entry id を付ける。
+    def prefixed(id: EntryId, violation: Violation): Violation =
+        let Violation.Violation(path, message) = violation;
+        Violation.Violation("${EntryId.text(id)}.${path}", message)
+
+    /// 計画の本体。entry ごとの dry-run を集め（withDependencies なら未公開の参照先も辿る）、順は PublishOrder が決める。権限は呼ぶ側が見る。
+    def planOf(ids: List[EntryId], withDependencies: Bool): PublishPlan \ DbRead + CmsErr + Tenant + Session =
+        let reports = collectReports(withDependencies, Map.empty(), ids);
+        let dependencies = reports |> Map.map(match (_, report) -> report#unpublishedDependencies |> List.map(dependency -> dependency#id));
+        let ordered = PublishOrder.plan(ids, withDependencies, dependencies);
+        {
+            steps = ordered#steps |> List.filterMap(match (id, reason) -> Map.get(id, reports) |> Option.map(match (entry, report) -> { entry = entry, reason = reason, report = report })),
+            violations = ordered#violations
+        }
+
+    /// ids の entry ごとの dry-run を seen に足す。withDependencies なら未公開の参照先も辿る（見た物は 2 度引かない）。
+    def collectReports(withDependencies: Bool, seen: Map[EntryId, (Entry, PublishReport)], ids: List[EntryId]): Map[EntryId, (Entry, PublishReport)] \ DbRead + CmsErr + Tenant + Session =
+        List.foldLeft((acc, id) -> if (Map.memberOf(id, acc)) acc else {
+            let existing = load(id);
+            let owner = ContentTypes.get(existing#typeId);
+            let report = reportOf(false, owner, existing, EntryValidation.prune(owner#fields, existing#data));
+            let next = Map.insert(id, (existing, report), acc);
+            if (withDependencies) collectReports(withDependencies, next, report#unpublishedDependencies |> List.map(dependency -> dependency#id)) else next
+        }, seen, ids)
+
     ///
     /// 操作の影響。取り下げ・削除で壊れる参照元（公開の中身。削除なら下書きも）と、公開で一緒に動く未公開の参照先（再帰）。
     ///
