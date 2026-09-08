@@ -16,6 +16,7 @@
 mod HttpServer {
     import java.io.BufferedInputStream
     import java.io.ByteArrayOutputStream
+    import java.io.IOException
     import java.io.InputStream
     import java.io.OutputStreamWriter
     import java.io.PrintWriter
@@ -26,7 +27,6 @@ mod HttpServer {
     import java.net.ServerSocket
     import java.net.Socket
     import java.net.SocketTimeoutException
-    import java.time.Instant
     import java.util.concurrent.Semaphore
 
     ///
@@ -92,19 +92,31 @@ mod HttpServer {
         { active = listener#config#maxConnections - listener#limiter.availablePermits(), max = listener#config#maxConnections }
 
     ///
+    /// 1 リクエスト（または読めなかった・書けなかった接続）の結果。listen の onServed に渡す。
+    ///
+    /// - method / path: リクエスト行の物。path はクエリ文字列と制御文字を落とした後。読めなかった時は "-"
+    /// - status: 返したステータスコード
+    /// - elapsedMs: 読み始めてから書き終わるまでの所要時間（ミリ秒）
+    /// - requestBytes / responseBytes: ボディの UTF-8 のバイト数
+    /// - failure: handle が投げた例外、ソケットの例外、書けなかった時の例外。正常なら None
+    ///
+    pub type alias Served = {
+        method = String, path = String, status = Int32, elapsedMs = Int64,
+        requestBytes = Int64, responseBytes = Int64, failure = Option[Throwable] }
+
+    ///
     /// Listener で待ち受け、接続ごとにスレッドを起こして handle に渡す。戻らない。
-    /// ログは 1 本のチャネルに集めて logger スレッドが順に表示する。
+    /// 1 リクエストごと（読めない・書けない・503 の reject も含む）に onServed を呼ぶ。
     ///
     /// WhyNot: handle のエフェクトを多相にしないのは、spawn に渡す式は IO 以外の
     /// algebraic effect を残せないため。Graphql などは呼び出し側が剥がしてから渡す。
     ///
-    pub def listen(listener: Listener, handle: HttpRequest -> HttpResponse \ IO): Unit \ {IO, Chan, NonDet} =
-        region rc {
-            let (sender, receiver) = Channel.buffered(1024);
-            spawn logger(receiver) @ rc;
-            println("listening on http://${listener#config#bind |> Option.getWithDefault("0.0.0.0")}:${listener#port}/");
-            acceptLoop(listener, sender, handle)
-        }
+    /// WhyNot: ログの行をここで作らないのは、http がログの形（Log）を知ると依存の向きが逆になるため。Served の値を渡し、
+    /// 行にするのは呼び出し側（Main）。
+    ///
+    pub def listen(listener: Listener, onServed: Served -> Unit \ IO, handle: HttpRequest -> HttpResponse \ IO): Unit \ IO =
+        println("listening on http://${listener#config#bind |> Option.getWithDefault("0.0.0.0")}:${listener#port}/");
+        acceptLoop(listener, onServed, handle)
 
     ///
     /// accept を繰り返し、空き枠があれば serve のスレッドを起こし、無ければ 503 を書いて閉じる。
@@ -113,15 +125,15 @@ mod HttpServer {
     /// WhyNot: 空きが無い時に accept しないで backlog に溜めないのは、クライアントが理由の読めないまま待たされ、
     /// 前段（Caddy）のタイムアウトで 502 になるため。503 と Retry-After なら「混んでいる」と伝わる。
     ///
-    pub def acceptLoop(listener: Listener, log: Sender[String], handle: HttpRequest -> HttpResponse \ IO): Unit \ {IO, Chan} =
+    pub def acceptLoop(listener: Listener, onServed: Served -> Unit \ IO, handle: HttpRequest -> HttpResponse \ IO): Unit \ IO =
         region rc {
             def loop() = match accept(listener#server) {
                 case None         => ()
                 case Some(socket) =>
                     if (listener#limiter.tryAcquire()) {
-                        spawn serveThenRelease(socket, listener#limiter, log, listener#config, handle) @ rc
+                        spawn serveThenRelease(socket, listener#limiter, onServed, listener#config, handle) @ rc
                     } else {
-                        reject(socket, log)
+                        reject(socket, onServed)
                     };
                     loop()
             };
@@ -141,36 +153,55 @@ mod HttpServer {
     ///
     /// 空き枠が無い接続に 503 と Retry-After: 1 を書いて閉じる。handle は呼ばない。
     ///
-    def reject(socket: Socket, log: Sender[String]): Unit \ {IO, Chan} =
+    def reject(socket: Socket, onServed: Served -> Unit \ IO): Unit \ IO =
+        let started = System.currentTimeMillis();
         try {
             let writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
-            Channel.send(logLine("-", "-", 503, 0i64), log);
-            write(writer, Http.Connection.Close, { status = 503, headers = ("Retry-After", "1") :: Nil, body = "" }, log);
+            let wrote = write(writer, Http.Connection.Close, { status = 503, headers = ("Retry-After", "1") :: Nil, body = "" });
+            onServed(unreadable(503, started, writeFailure(wrote)));
             socket.close()
         } catch {
             case e: Throwable =>
-                report(e, log);
+                report(e, started, onServed);
                 socket.close()
         }
 
     ///
-    /// Throwable をログに流す。JVM 自体が壊れている物（OutOfMemoryError）はログした上で再送出する。
+    /// 読めなかった・書けなかった接続の Served。method / path は "-"。
+    ///
+    def unreadable(status: Int32, started: Int64, failure: Option[Throwable]): Served \ IO =
+        { method = "-", path = "-", status = status, elapsedMs = System.currentTimeMillis() - started, requestBytes = 0i64, responseBytes = 0i64, failure = failure }
+
+    ///
+    /// 書けなかった時の failure。
+    ///
+    def writeFailure(wrote: Bool): Option[Throwable] \ IO =
+        if (wrote) None else Some(checked_cast(new IOException("write failed")))
+
+    ///
+    /// ソケットの例外を 500 の Served として onServed に流す。JVM 自体が壊れている物（OutOfMemoryError）は流した上で再送出する。
     ///
     /// WhyNot: Exception でなく Throwable で受けるのは、Error（リゾルバの VerifyError、深い再帰の StackOverflowError）が
     /// Exception の catch を素通りし、スレッドが黙って死んでソケットも閉じないため。
     ///
-    def report(error: Throwable, log: Sender[String]): Unit \ {IO, Chan} =
-        Channel.send("error: ${JvmErrors.describe(error)}", log);
+    def report(error: Throwable, started: Int64, onServed: Served -> Unit \ IO): Unit \ IO =
+        onServed(unreadable(500, started, Some(error)));
+        rethrowIfFatal(error)
+
+    ///
+    /// JVM 自体が壊れている物（OutOfMemoryError）は再送出する。
+    ///
+    def rethrowIfFatal(error: Throwable): Unit \ IO =
         if (JvmErrors.isFatal(error)) throw error else ()
 
     ///
     /// serve の後に必ず枠を返す。serve が例外で抜けても返す。
     ///
-    def serveThenRelease(socket: Socket, limiter: Semaphore, log: Sender[String], config: ListenConfig, handle: HttpRequest -> HttpResponse \ IO): Unit \ {IO, Chan} =
+    def serveThenRelease(socket: Socket, limiter: Semaphore, onServed: Served -> Unit \ IO, config: ListenConfig, handle: HttpRequest -> HttpResponse \ IO): Unit \ IO =
         try {
-            serve(socket, log, config, handle)
+            serve(socket, onServed, config, handle)
         } catch {
-            case e: Throwable => report(e, log)
+            case e: Throwable => report(e, System.currentTimeMillis(), onServed)
         };
         limiter.release()
 
@@ -179,23 +210,23 @@ mod HttpServer {
     /// リクエストが読めなければ 400、ヘッダが多すぎる・長すぎれば 431、
     /// Content-Length が上限を超えていれば 413、handle が例外を投げれば 500 を返す。
     ///
-    /// WhyNot: 例外を握りつぶさず catch してログへ流すのは、spawn したスレッドで例外が
+    /// WhyNot: 例外を握りつぶさず catch して onServed へ流すのは、spawn したスレッドで例外が
     /// 起きても親には何も伝わらず、ソケットも閉じられないまま黙って消えるため。
     ///
     /// WhyNot: 書き出しを既定の文字コードに任せないのは、Content-Length を UTF-8 の
     /// バイト数で数えているので、エンコードも UTF-8 に固定しないと食い違うため。
     ///
-    def serve(socket: Socket, log: Sender[String], config: ListenConfig, handle: HttpRequest -> HttpResponse \ IO): Unit \ {IO, Chan} =
+    def serve(socket: Socket, onServed: Served -> Unit \ IO, config: ListenConfig, handle: HttpRequest -> HttpResponse \ IO): Unit \ IO =
         try {
             let writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
             let input: InputStream = checked_cast(new BufferedInputStream(socket.getInputStream()));
-            serveLoop(socket, input, writer, log, config, handle, 1);
+            serveLoop(socket, input, writer, onServed, config, handle, 1);
             // WhyNot: close を serveLoop の try の中に置かないのは、応答を書き終えた後の close の失敗で catch に入り、閉じかけの
             // ソケットへ 500 をもう一度書いてしまうため
             socket.close()
         } catch {
             case e: Throwable =>
-                report(e, log);
+                report(e, System.currentTimeMillis(), onServed);
                 socket.close()
         }
 
@@ -207,35 +238,55 @@ mod HttpServer {
     /// クライアントが 1 本のスレッドを永久に塞いでしまうため。keep-alive の待ちを別の値にするのは、
     /// 1 回目の「来ない」は短く切り、2 回目以降は少し待ちたいため。
     ///
-    /// WhyNot: handle の例外を IOException に絞らず Throwable で受けるのは、handle の中で起きる RuntimeException も
-    /// Error（VerifyError）も同じ理由で消えるため。writer を try の外で先に作るのは、catch の中から 500 を書き戻すため。
+    /// WhyNot: 読み取りの例外を IOException に絞らず Throwable で受けるのは、Error（VerifyError）も同じ理由で消えるため。
+    /// writer を try の外で先に作るのは、catch の中から 500 を書き戻すため。
     ///
-    def serveLoop(socket: Socket, input: InputStream, writer: PrintWriter, log: Sender[String], config: ListenConfig, handle: HttpRequest -> HttpResponse \ IO, served: Int32): Unit \ {IO, Chan} =
+    def serveLoop(socket: Socket, input: InputStream, writer: PrintWriter, onServed: Served -> Unit \ IO, config: ListenConfig, handle: HttpRequest -> HttpResponse \ IO, served: Int32): Unit \ IO =
         socket.setSoTimeout(if (served == 1) config#readTimeoutMs else config#idleTimeoutMs);
         if (awaitRequest(input)) {
+            let started = System.currentTimeMillis();
             let connection = try {
-                let started = System.currentTimeMillis();
-                let (method, path, response, next) = match readRequest(input) {
-                    case Ok(request) =>
-                        let response = handle(request);
-                        (request#method, request#path, response, Http.shouldKeepAlive(request, response#status, served))
-                    case Err(status) => ("-", "-", { status = status, headers = Nil, body = "" }, Http.Connection.Close)
-                };
-                Channel.send(logLine(method, path, response#status, System.currentTimeMillis() - started), log);
-                write(writer, next, response, log);
-                next
+                match readRequest(input) {
+                    case Ok(request) => respond(writer, request, started, onServed, handle, served)
+                    case Err(status) =>
+                        let wrote = write(writer, Http.Connection.Close, { status = status, headers = Nil, body = "" });
+                        onServed(unreadable(status, started, writeFailure(wrote)));
+                        Http.Connection.Close
+                }
             } catch {
                 case e: Throwable =>
-                    report(e, log);
-                    write(writer, Http.Connection.Close, { status = 500, headers = Nil, body = "" }, log);
+                    report(e, started, onServed);
+                    discard write(writer, Http.Connection.Close, { status = 500, headers = Nil, body = "" });
                     Http.Connection.Close
             };
             match connection {
-                case Http.Connection.KeepAlive => serveLoop(socket, input, writer, log, config, handle, served + 1)
+                case Http.Connection.KeepAlive => serveLoop(socket, input, writer, onServed, config, handle, served + 1)
                 case Http.Connection.Close     => ()
             }
         } else
             ()
+
+    ///
+    /// 読めたリクエストを handle に渡して応答を書き、Served を onServed に流す。handle が投げれば 500 で閉じる。
+    ///
+    /// WhyNot: handle の例外を Exception に絞らず Throwable で受けるのは、handle の中で起きる RuntimeException も
+    /// Error（VerifyError）も同じ理由で消えるため。OutOfMemoryError は onServed に流した後で再送出する。
+    ///
+    def respond(writer: PrintWriter, request: HttpRequest, started: Int64, onServed: Served -> Unit \ IO, handle: HttpRequest -> HttpResponse \ IO, served: Int32): Http.Connection \ IO =
+        let (response, next, failure) = try {
+            let response = handle(request);
+            (response, Http.shouldKeepAlive(request, response#status, served), None)
+        } catch {
+            case e: Throwable => ({ status = 500, headers = Nil, body = "" }, Http.Connection.Close, Some(e))
+        };
+        let wrote = write(writer, next, response);
+        onServed({
+            method = request#method, path = sanitizePath(request#path), status = response#status,
+            elapsedMs = System.currentTimeMillis() - started,
+            requestBytes = Int32.toInt64(Http.utf8Length(request#body)), responseBytes = Int32.toInt64(Http.utf8Length(response#body)),
+            failure = match failure { case Some(_) => failure case None => writeFailure(wrote) } });
+        Option.forEach(rethrowIfFatal, failure);
+        next
 
     ///
     /// 次のリクエストの先頭 1 バイトが来るまで待つ。来れば true（バイトは戻す）。EOF かタイムアウトなら false。
@@ -257,35 +308,45 @@ mod HttpServer {
         }
 
     ///
-    /// レスポンスを書き出して flush する。
+    /// レスポンスを書き出して flush する。書けたら true。
     ///
     /// WhyNot: 書き出しの失敗を例外で受けないのは、PrintWriter が IOException を
-    /// 内部で握りつぶして checkError() に残す作りのため。書いたあとに checkError() を見て
-    /// ログへ流す。
+    /// 内部で握りつぶして checkError() に残す作りのため。書いたあとに checkError() を見る。
     ///
-    def write(writer: PrintWriter, connection: Http.Connection, response: HttpResponse, log: Sender[String]): Unit \ {IO, Chan} =
+    def write(writer: PrintWriter, connection: Http.Connection, response: HttpResponse): Bool \ IO =
         writer.print(Http.render(connection, response));
         writer.flush();
-        if (writer.checkError())
-            Channel.send("error: write failed", log)
-        else
-            ()
+        not writer.checkError()
 
     ///
-    /// リクエスト 1 本のログ。1 行 1 JSON（time / method / path / status / ms）。ログ基盤（Loki 等）が `| json` で引ける形。
+    /// ログに出す形のパス。クエリ文字列と制御文字を落とす。
     ///
     /// WhyNot: パスをそのまま出さないのは、改行などの制御文字が入っていると偽のログ行を作れてしまうため（log injection）。
     /// JSON の escape で改行は割れないが、端末のエスケープシーケンスは通るので制御文字ごと落とす。
     /// クエリ文字列を落とすのは、プレビューのトークンや GET の query がログ基盤に残らないようにするため。
     ///
-    pub def logLine(method: String, path: String, status: Int32, elapsedMs: Int64): String \ IO =
-        JsonValue.toJsonString(Value.Obj(Map#{
-            "time" => Value.Str(Instant.now().toString()),
-            "method" => Value.Str(method),
-            "path" => Value.Str(path |> withoutQuery |> String.replaceMatches(regex = "\\p{Cntrl}", to = "")),
-            "status" => Value.Int(status),
-            "ms" => Value.Int(Int64.clampToInt32(min = 0, max = Int32.maxValue(), elapsedMs))
-        }))
+    pub def sanitizePath(path: String): String =
+        path |> withoutQuery |> String.replaceMatches(regex = "\\p{Cntrl}", to = "")
+
+    ///
+    /// Served を 1 行 JSON にする（time / method / path / status / ms / requestBytes / responseBytes、失敗があれば error）。
+    /// time は呼び出し側が渡す（ISO 8601）。ログ基盤（Loki 等）が `| json` で引ける形。
+    ///
+    pub def logLine(time: String, served: Served): String \ IO =
+        let base = Map#{
+            "time" => Value.Str(time),
+            "method" => Value.Str(served#method),
+            "path" => Value.Str(served#path),
+            "status" => Value.Int(served#status),
+            "ms" => Value.Int(Int64.clampToInt32(min = 0, max = Int32.maxValue(), served#elapsedMs)),
+            "requestBytes" => Value.Int(Int64.clampToInt32(min = 0, max = Int32.maxValue(), served#requestBytes)),
+            "responseBytes" => Value.Int(Int64.clampToInt32(min = 0, max = Int32.maxValue(), served#responseBytes))
+        };
+        let fields = match served#failure {
+            case Some(error) => Map.insert("error", Value.Str(JvmErrors.describe(error)), base)
+            case None        => base
+        };
+        JsonValue.toJsonString(Value.Obj(fields))
 
     /// `?` より後ろを落とす。
     def withoutQuery(path: String): String =
@@ -385,12 +446,5 @@ mod HttpServer {
             loop(byteCount);
             out.toString("UTF-8")
         }
-
-    ///
-    /// ログを 1 本のチャネルに集約して順に表示する。
-    ///
-    def logger(receiver: Receiver[String]): Unit \ {IO, Chan, NonDet} =
-        def loop() = { println(Channel.recv(receiver)); loop() };
-        loop()
 
 }

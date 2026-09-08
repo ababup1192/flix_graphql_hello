@@ -37,17 +37,44 @@ mod TestHttpListener {
         throw new VerifyError("stack map")
 
     ///
-    /// サーバを立てて body を回し、終わったら止める。
+    /// サーバを立てて body を回し、終わったら止める。Served は onServed に流す。
     ///
-    def withServer(listenConfig: HttpServer.ListenConfig, handle: HttpRequest -> HttpResponse \ IO, body: HttpServer.Listener -> a \ IO): a \ {IO, Chan} =
+    def withServerObserved(listenConfig: HttpServer.ListenConfig, onServed: HttpServer.Served -> Unit \ IO, handle: HttpRequest -> HttpResponse \ IO, body: HttpServer.Listener -> a \ IO): a \ IO =
         region rc {
             let listener = HttpServer.open(listenConfig);
-            let (sender, _) = Channel.buffered(4096);
-            spawn HttpServer.acceptLoop(listener, sender, handle) @ rc;
+            spawn HttpServer.acceptLoop(listener, onServed, handle) @ rc;
             let result = body(listener);
             HttpServer.close(listener);
             result
         }
+
+    ///
+    /// サーバを立てて body を回し、終わったら止める。Served は見ない。
+    ///
+    def withServer(listenConfig: HttpServer.ListenConfig, handle: HttpRequest -> HttpResponse \ IO, body: HttpServer.Listener -> a \ IO): a \ IO =
+        withServerObserved(listenConfig, _ -> (), handle, body)
+
+    ///
+    /// Served を比べられる形に: (method, path, status, requestBytes, responseBytes, failure のクラス名)。
+    ///
+    def servedTuple(served: HttpServer.Served): (String, String, Int32, Int64, Int64, Option[String]) \ IO =
+        (served#method, served#path, served#status, served#requestBytes, served#responseBytes,
+         served#failure |> Option.map(error -> error.getClass().getName()))
+
+    ///
+    /// Served を Static の Ref に積む関数（spawn の中から呼ばれる）。
+    ///
+    def collectServed(sink: Ref[List[HttpServer.Served], Static], served: HttpServer.Served): Unit \ IO =
+        Ref.put(served :: Ref.get(sink), sink)
+
+    ///
+    /// 積んだ Served が count 個になるまで待つ（最長 2 秒）。古い順に返す。
+    ///
+    def awaitServed(sink: Ref[List[HttpServer.Served], Static], count: Int32): List[HttpServer.Served] \ IO =
+        def loop(remaining) =
+            if (List.length(Ref.get(sink)) >= count or remaining <= 0) Ref.get(sink) |> List.reverse
+            else { Thread.sleep(20i64); loop(remaining - 1) };
+        loop(100)
 
     ///
     /// クライアント側の socket。
@@ -129,7 +156,7 @@ mod TestHttpListener {
     ///   a を閉じる → d → 200
     ///
     @Test
-    def testMaxConnectionsRejectsWith503(): Unit \ {Assert, IO, Chan} =
+    def testMaxConnectionsRejectsWith503(): Unit \ {Assert, IO} =
         let outcome = withServer(config(2), request -> echoPath(request), listener -> {
             let a = connect(listener);
             let b = connect(listener);
@@ -150,7 +177,7 @@ mod TestHttpListener {
 
     /// handle が例外を投げた接続でも枠が返る。上限 1 で 500 の後に、次の接続も 503 ではなく 500 になる。
     @Test
-    def testMaxConnectionsReleasedAfterHandlerException(): Unit \ {Assert, IO, Chan} =
+    def testMaxConnectionsReleasedAfterHandlerException(): Unit \ {Assert, IO} =
         let outcome = withServer(config(1), request -> explode(request), listener -> {
             let first = connect(listener);
             let (firstStatus, firstConnection, _) = get(first, "/boom", "");
@@ -165,7 +192,7 @@ mod TestHttpListener {
 
     /// handle が Error（VerifyError）を投げても 500 が返って接続が閉じ、枠が返る。上限 1 で次の接続も 503 ではなく 500 になる。
     @Test
-    def testMaxConnectionsReleasedAfterHandlerError(): Unit \ {Assert, IO, Chan} =
+    def testMaxConnectionsReleasedAfterHandlerError(): Unit \ {Assert, IO} =
         let outcome = withServer(config(1), request -> explodeWithError(request), listener -> {
             let first = connect(listener);
             let (firstStatus, firstConnection, _) = get(first, "/boom", "");
@@ -183,7 +210,7 @@ mod TestHttpListener {
 
     /// 1 本の socket で 3 リクエストを順に送ると、3 応答が順に返り、どれも Connection: keep-alive。
     @Test
-    def testKeepAliveServesRequestsInOrder(): Unit \ {Assert, IO, Chan} =
+    def testKeepAliveServesRequestsInOrder(): Unit \ {Assert, IO} =
         let outcome = withServer(config(4), request -> echoPath(request), listener -> {
             let client = connect(listener);
             let responses = List#{"/one", "/two", "/three"} |> List.map(path -> get(client, path, ""));
@@ -196,7 +223,7 @@ mod TestHttpListener {
 
     /// Connection: close を付けた要求には Connection: close で応え、その後サーバが閉じる。
     @Test
-    def testKeepAliveStopsOnConnectionClose(): Unit \ {Assert, IO, Chan} =
+    def testKeepAliveStopsOnConnectionClose(): Unit \ {Assert, IO} =
         let outcome = withServer(config(4), request -> echoPath(request), listener -> {
             let client = connect(listener);
             let (status, connection, _) = get(client, "/last", "Connection: close\r\n");
@@ -208,7 +235,7 @@ mod TestHttpListener {
 
     /// HTTP/1.0 は 1 回で閉じる。
     @Test
-    def testKeepAliveNotForHttp10(): Unit \ {Assert, IO, Chan} =
+    def testKeepAliveNotForHttp10(): Unit \ {Assert, IO} =
         let outcome = withServer(config(4), request -> echoPath(request), listener -> {
             let client = connect(listener);
             send(client, "GET /old HTTP/1.0\r\nHost: x\r\n\r\n");
@@ -221,7 +248,7 @@ mod TestHttpListener {
 
     /// 400 の後は閉じる（ストリームの位置が信用できない）。
     @Test
-    def testKeepAliveStopsAfterBadRequest(): Unit \ {Assert, IO, Chan} =
+    def testKeepAliveStopsAfterBadRequest(): Unit \ {Assert, IO} =
         let outcome = withServer(config(4), request -> echoPath(request), listener -> {
             let client = connect(listener);
             send(client, "nonsense\r\n\r\n");
@@ -234,7 +261,7 @@ mod TestHttpListener {
 
     /// idle（次のリクエストが来ない）が続くとサーバが閉じる。idle を 200 ミリ秒にして待つ。
     @Test
-    def testKeepAliveClosesAfterIdleTimeout(): Unit \ {Assert, IO, Chan} =
+    def testKeepAliveClosesAfterIdleTimeout(): Unit \ {Assert, IO} =
         let outcome = withServer({ idleTimeoutMs = 200 | config(4) }, request -> echoPath(request), listener -> {
             let client = connect(listener);
             let (status, connection, _) = get(client, "/first", "");
@@ -246,7 +273,7 @@ mod TestHttpListener {
 
     /// 1 接続で 100 回まで。100 回目の応答は Connection: close で、その前の 99 回は keep-alive。
     @Test
-    def testKeepAliveStopsAtMaxRequests(): Unit \ {Assert, IO, Chan} =
+    def testKeepAliveStopsAtMaxRequests(): Unit \ {Assert, IO} =
         let outcome = withServer(config(4), request -> echoPath(request), listener -> {
             let client = connect(listener);
             let connections = List.range(0, Http.maxRequestsPerConnection()) |> List.map(_ -> get(client, "/n", "") |> (match (_, connection, _) -> connection));
@@ -255,5 +282,60 @@ mod TestHttpListener {
             (List.count(connection -> connection == Some("keep-alive"), connections), List.last(connections), closed)
         });
         Assert.assertEq(expected = (Http.maxRequestsPerConnection() - 1, Some(Some("close")), true), outcome)
+
+    // ---- onServed ----
+
+    /// 200 の Served: method と path（クエリは落ちる）、ボディのバイト数、failure 無し。
+    @Test
+    def testServedForOk(): Unit \ {Assert, IO} =
+        let sink = Ref.fresh(Static, Nil);
+        let served = withServerObserved(config(4), served -> collectServed(sink, served), request -> echoPath(request), listener -> {
+            let client = connect(listener);
+            send(client, "POST /echo?token=secret HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\n日");
+            discard readResponse(client);
+            client#socket.close();
+            awaitServed(sink, 1)
+        });
+        Assert.assertEq(expected = List#{("POST", "/echo", 200, 3i64, 20i64, None)}, served |> List.map(servedTuple))
+
+    /// 読めないリクエストの Served: method / path は "-"、status は 400、failure 無し。
+    @Test
+    def testServedForBadRequest(): Unit \ {Assert, IO} =
+        let sink = Ref.fresh(Static, Nil);
+        let served = withServerObserved(config(4), served -> collectServed(sink, served), request -> echoPath(request), listener -> {
+            let client = connect(listener);
+            send(client, "nonsense\r\n\r\n");
+            discard readResponse(client);
+            client#socket.close();
+            awaitServed(sink, 1)
+        });
+        Assert.assertEq(expected = List#{("-", "-", 400, 0i64, 0i64, None)}, served |> List.map(servedTuple))
+
+    /// handle が Error（VerifyError）を投げた Served: method / path は残り、status は 500、failure にその例外。
+    @Test
+    def testServedForHandlerError(): Unit \ {Assert, IO} =
+        let sink = Ref.fresh(Static, Nil);
+        let served = withServerObserved(config(4), served -> collectServed(sink, served), request -> explodeWithError(request), listener -> {
+            let client = connect(listener);
+            discard get(client, "/boom", "");
+            client#socket.close();
+            awaitServed(sink, 1)
+        });
+        Assert.assertEq(expected = List#{("GET", "/boom", 500, 0i64, 0i64, Some("java.lang.VerifyError"))}, served |> List.map(servedTuple))
+
+    /// 上限を超えた接続の Served: 503、method / path は "-"。
+    @Test
+    def testServedForRejected(): Unit \ {Assert, IO} =
+        let sink = Ref.fresh(Static, Nil);
+        let served = withServerObserved(config(1), served -> collectServed(sink, served), request -> echoPath(request), listener -> {
+            let a = connect(listener);
+            discard waitForActive(listener, 1);
+            let b = connect(listener);
+            discard readResponse(b);
+            a#socket.close();
+            b#socket.close();
+            awaitServed(sink, 1)
+        });
+        Assert.assertEq(expected = List#{("-", "-", 503, 0i64, 0i64, None)}, served |> List.map(servedTuple))
 
 }

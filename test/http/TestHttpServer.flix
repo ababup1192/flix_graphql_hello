@@ -4,6 +4,7 @@
 mod TestHttpServer {
     import java.io.ByteArrayInputStream
     import java.io.InputStream
+    import java.lang.RuntimeException
     import java.nio.charset.StandardCharsets
 
     ///
@@ -154,18 +155,39 @@ mod TestHttpServer {
         Assert.assertEq(expected = Err(431),
             HttpServer.readRequest(inputOf("POST /graphql HTTP/1.1\r\nX-Long: " + repeatA(8192) + "\r\n\r\n")) |> Result.map(toTuple))
 
+    // ---- sanitizePath / logLine ----
 
-    /// リクエストのログは 1 行 1 JSON。パスの制御文字（改行など）とクエリ文字列（トークンが入りうる）は落ち、time は ISO 8601 の UTC。
+    /// ログに出すパスは、クエリ文字列（トークンが入りうる）と制御文字（改行・エスケープシーケンス）が落ちる。
     @Test
-    def testHttpServerLogLineIsJson(): Unit \ {IO, Assert} =
-        let line = HttpServer.logLine("GET", "/health\n{\"fake\":1}\u001b[31m?token=secret", 200, 12i64);
-        let parsed = JsonValue.parse(line) |> Result.map(value -> match value {
-            case Value.Obj(fields) => (Map.get("method", fields), Map.get("path", fields), Map.get("status", fields), Map.get("ms", fields),
-                                       Map.get("time", fields) |> Option.map(time -> match time { case Value.Str(text) => String.endsWith(suffix = "Z", text) case _ => false }))
-            case _ => (None, None, None, None, None)
-        });
+    def testSanitizePathTable(): Unit \ Assert =
+        let cases = List#{
+            ("/health",                                       "/health"),
+            ("/graphql?token=secret",                         "/graphql"),
+            ("/a?x=1?y=2",                                    "/a"),
+            ("/health\n{\"fake\":1}\u001b[31m?token=secret",  "/health{\"fake\":1}[31m"),
+            ("",                                              "")
+        };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (path, _) -> HttpServer.sanitizePath(path)))
+
+    /// 正常な Served。
+    def servedOk(): HttpServer.Served =
+        { method = "GET", path = "/health", status = 200, elapsedMs = 12i64, requestBytes = 0i64, responseBytes = 34i64, failure = None }
+
+    /// Served のログは 1 行 1 JSON。time は渡した物、失敗が無ければ error のキーは無い。
+    @Test
+    def testLogLineIsJson(): Unit \ {IO, Assert} =
         Assert.assertEq(
-            expected = Ok((Some(Value.Str("GET")), Some(Value.Str("/health{\"fake\":1}[31m")), Some(Value.Int(200)), Some(Value.Int(12)), Some(true))),
-            parsed)
+            expected = Ok(Value.Obj(Map#{
+                "time" => Value.Str("2026-09-08T00:00:00.000Z"), "method" => Value.Str("GET"), "path" => Value.Str("/health"),
+                "status" => Value.Int(200), "ms" => Value.Int(12), "requestBytes" => Value.Int(0), "responseBytes" => Value.Int(34)})),
+            JsonValue.parse(HttpServer.logLine("2026-09-08T00:00:00.000Z", servedOk())))
+
+    /// failure があれば error に例外の文言（message、null ならクラス名）が付く。
+    @Test
+    def testLogLineHasErrorOnFailure(): Unit \ {IO, Assert} =
+        let failed: HttpServer.Served = { status = 500, failure = Some(checked_cast(new RuntimeException("boom"))) | servedOk() };
+        Assert.assertEq(
+            expected = Ok((Value.Int(500), Value.Str("boom"))),
+            JsonValue.parse(HttpServer.logLine("t", failed)) |> Result.map(value -> (Value.field("status", value), Value.field("error", value))))
 
 }

@@ -1,3 +1,5 @@
+import java.lang.System
+
 ///
 /// 起動。SDL と生成物の一致、PostgreSQL の接続、migrations の適用済みを確かめ、管理 API（/admin/graphql）と
 /// コンテンツ API（/graphql。型の定義から実行時に組み、定義が変われば組み直す）、Account API（/account/graphql。プロジェクトを選ぶ前の操作）を 8080 番で待つ。
@@ -12,7 +14,7 @@
 /// CMS_MODE=import-microcms（サーバを立てず、CMS_IMPORT_DIR の microCMS のスキーマを写してダミーの entry を CMS_IMPORT_COUNT 件ずつ積んで終わる）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
 /// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health に出す版。省略時は dev）、CMS_MAX_CONNECTIONS（HTTP の同時接続の上限。超えた接続は 503。既定 256）
 ///
-def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
+def main(): Unit \ {IO, Fs.FileRead, Sys.Exit, Sys.Env} =
     let started = forM (
         _           <- checkGenerated(GeneratedCheck.admin());
         _           <- checkGenerated(GeneratedCheck.account());
@@ -63,7 +65,7 @@ def main(): Unit \ {IO, Chan, NonDet, Fs.FileRead, Sys.Exit, Sys.Env} =
                 pool = pool, deps = deps, jwks = jwks, baseDomain = baseDomain, defaultProject = defaultProject,
                 accountEngine = accountEngine, adminEngines = adminEngines, engineCache = engineCache,
                 config = config, routes = Server.routes(config, Health.ofPool(pool, jobs, listener)) |> Router.withProjectPrefix };
-            HttpServer.listen(listener, request -> dispatch(runtime, request))
+            HttpServer.listen(listener, served -> println(HttpServer.logLine(Log.timeText(System.currentTimeMillis()), served)), request -> dispatch(runtime, request))
             }
     }
 
