@@ -8,6 +8,7 @@ mod TestHttpListener {
     import java.io.OutputStream
     import java.lang.Thread
     import java.net.Socket
+    import java.lang.VerifyError
     import java.nio.charset.StandardCharsets
 
     ///
@@ -28,6 +29,12 @@ mod TestHttpListener {
     def explode(request: HttpRequest): HttpResponse =
         let path: String = request#path;
         { status = 200, headers = Nil, body = path.substring(100, 200) }
+
+    ///
+    /// 必ず Error（Exception でない Throwable。リゾルバの VerifyError と同じ）を投げるハンドラ。
+    ///
+    def explodeWithError(_request: HttpRequest): HttpResponse \ IO =
+        throw new VerifyError("stack map")
 
     ///
     /// サーバを立てて body を回し、終わったら止める。
@@ -155,6 +162,22 @@ mod TestHttpListener {
             (firstStatus, firstConnection, released, secondStatus)
         });
         Assert.assertEq(expected = (500, Some("close"), true, 500), outcome)
+
+    /// handle が Error（VerifyError）を投げても 500 が返って接続が閉じ、枠が返る。上限 1 で次の接続も 503 ではなく 500 になる。
+    @Test
+    def testMaxConnectionsReleasedAfterHandlerError(): Unit \ {Assert, IO, Chan} =
+        let outcome = withServer(config(1), request -> explodeWithError(request), listener -> {
+            let first = connect(listener);
+            let (firstStatus, firstConnection, _) = get(first, "/boom", "");
+            let closedAfter = isClosed(first);
+            first#socket.close();
+            let released = waitForActive(listener, 0);
+            let second = connect(listener);
+            let (secondStatus, _, _) = get(second, "/boom", "");
+            second#socket.close();
+            (firstStatus, firstConnection, closedAfter, released, secondStatus)
+        });
+        Assert.assertEq(expected = (500, Some("close"), true, true, 500), outcome)
 
     // ---- keep-alive ----
 

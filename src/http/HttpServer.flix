@@ -21,6 +21,7 @@ mod HttpServer {
     import java.io.PrintWriter
     import java.lang.Exception
     import java.lang.System
+    import java.lang.Throwable
     import java.net.InetAddress
     import java.net.ServerSocket
     import java.net.Socket
@@ -147,10 +148,20 @@ mod HttpServer {
             write(writer, Http.Connection.Close, { status = 503, headers = ("Retry-After", "1") :: Nil, body = "" }, log);
             socket.close()
         } catch {
-            case e: Exception =>
-                Channel.send("error: ${e.getMessage()}", log);
+            case e: Throwable =>
+                report(e, log);
                 socket.close()
         }
+
+    ///
+    /// Throwable をログに流す。JVM 自体が壊れている物（OutOfMemoryError）はログした上で再送出する。
+    ///
+    /// WhyNot: Exception でなく Throwable で受けるのは、Error（リゾルバの VerifyError、深い再帰の StackOverflowError）が
+    /// Exception の catch を素通りし、スレッドが黙って死んでソケットも閉じないため。
+    ///
+    def report(error: Throwable, log: Sender[String]): Unit \ {IO, Chan} =
+        Channel.send("error: ${JvmErrors.describe(error)}", log);
+        if (JvmErrors.isFatal(error)) throw error else ()
 
     ///
     /// serve の後に必ず枠を返す。serve が例外で抜けても返す。
@@ -159,7 +170,7 @@ mod HttpServer {
         try {
             serve(socket, log, config, handle)
         } catch {
-            case e: Exception => Channel.send("error: ${e.getMessage()}", log)
+            case e: Throwable => report(e, log)
         };
         limiter.release()
 
@@ -183,8 +194,8 @@ mod HttpServer {
             // ソケットへ 500 をもう一度書いてしまうため
             socket.close()
         } catch {
-            case e: Exception =>
-                Channel.send("error: ${e.getMessage()}", log);
+            case e: Throwable =>
+                report(e, log);
                 socket.close()
         }
 
@@ -196,8 +207,8 @@ mod HttpServer {
     /// クライアントが 1 本のスレッドを永久に塞いでしまうため。keep-alive の待ちを別の値にするのは、
     /// 1 回目の「来ない」は短く切り、2 回目以降は少し待ちたいため。
     ///
-    /// WhyNot: handle の例外を IOException に絞らず Exception で受けるのは、handle の中で起きる RuntimeException も
-    /// 同じ理由で消えるため。writer を try の外で先に作るのは、catch の中から 500 を書き戻すため。
+    /// WhyNot: handle の例外を IOException に絞らず Throwable で受けるのは、handle の中で起きる RuntimeException も
+    /// Error（VerifyError）も同じ理由で消えるため。writer を try の外で先に作るのは、catch の中から 500 を書き戻すため。
     ///
     def serveLoop(socket: Socket, input: InputStream, writer: PrintWriter, log: Sender[String], config: ListenConfig, handle: HttpRequest -> HttpResponse \ IO, served: Int32): Unit \ {IO, Chan} =
         socket.setSoTimeout(if (served == 1) config#readTimeoutMs else config#idleTimeoutMs);
@@ -214,8 +225,8 @@ mod HttpServer {
                 write(writer, next, response, log);
                 next
             } catch {
-                case e: Exception =>
-                    Channel.send("error: ${e.getMessage()}", log);
+                case e: Throwable =>
+                    report(e, log);
                     write(writer, Http.Connection.Close, { status = 500, headers = Nil, body = "" }, log);
                     Http.Connection.Close
             };

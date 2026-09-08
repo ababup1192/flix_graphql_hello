@@ -25,7 +25,7 @@ FROM eclipse-temurin:21-jre
 ARG CMS_VERSION=dev
 ENV CMS_VERSION=${CMS_VERSION} \
     CMS_MIGRATE=apply \
-    JAVA_OPTS="-Xss32m -XX:MaxRAMPercentage=70"
+    JAVA_OPTS="-Xss32m -XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError"
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /build/flix_graphql_hello/artifact/flix_graphql_hello.jar ./cms.jar

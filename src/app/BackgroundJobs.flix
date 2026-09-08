@@ -7,6 +7,7 @@ mod BackgroundJobs {
 
     import java.lang.System
     import java.lang.Thread
+    import java.lang.Throwable
     import sun.misc.Signal
     import sun.misc.SignalHandler
 
@@ -39,9 +40,26 @@ mod BackgroundJobs {
     pub def runForever(pool: Pool, state: State): Unit \ IO =
         if (Ref.get(state#stopping)) println("jobs: 停止します")
         else {
-            tick(pool, state) |> List.forEach(message -> println("jobs: ${message}"));
+            guarded(() -> tick(pool, state)) |> List.forEach(message -> println("jobs: ${message}"));
+            Ref.put(false, state#inTick);
             Thread.sleep(intervalMs());
             runForever(pool, state)
+        }
+
+    ///
+    /// 1 周を JVM の例外から守る。Throwable が飛んだら失敗の説明にして返し、次の周へ進める。
+    /// JVM 自体が壊れている物（OutOfMemoryError）はログした上で再送出する。
+    ///
+    /// WhyNot: tick の中の DbRunner に任せないのは、Tx の外（Scheduler / Dispatcher の Java interop や、リゾルバと同じ VerifyError）で
+    /// 飛んだ Error は Exception の catch を素通りし、ワーカーのスレッドだけが黙って死んでプロセスは生き残るため。
+    ///
+    pub def guarded(thunk: Unit -> List[String] \ ef): List[String] \ ef + IO =
+        try {
+            thunk()
+        } catch {
+            case e: Throwable =>
+                if (JvmErrors.isFatal(e)) { println("jobs: 致命的な例外: ${JvmErrors.describe(e)}"); throw e }
+                else List#{"1 周の途中で例外: ${JvmErrors.describe(e)}"}
         }
 
     ///
