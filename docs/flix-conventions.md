@@ -128,7 +128,7 @@ Flix 0.75.3 では、`try / catch` が拾えるかどうかが `run … with han
 | 形 | 拾えるか |
 |---|---|
 | `try { run { op; throw } }`（handler が try の内側。何段でも） | 拾える |
-| `run { try { op; throw } }`（try の直下から外の handler へ op。間に run 無し） | 拾える（`DbRunner.guarded` の形） |
+| `run { try { op; throw } }`（try の直下から外の handler へ op。間に run 無し） | 拾える（`Db.guard` の形） |
 | `run { try { run { op }; throw } }`（外へ op を通した run を抜けてから throw） | 拾える |
 | `run { try { run { op; throw } } }`（外へ op を通した run の**中**で throw） | **素通り** |
 | `run { try { op } } with handler { def op = throw }`（handler の本体が投げ、handler は try の外） | **素通り** |
@@ -137,7 +137,7 @@ Flix 0.75.3 では、`try / catch` が拾えるかどうかが `run … with han
 網を置く時は次のどちらかにする:
 
 - **handler を try の内側に入れる**（`BackgroundJobs.guarded` が Log を sink で入れ直す形）
-- **一番内側の handler の直下に try を置き、その中に run を置かない**（`DbRunner.guarded`、`BackgroundJobs.guardedPart`）
+- **一番内側の handler の直下に try を置き、その中に run を置かない**（`Db.guard`、`BackgroundJobs.guardedPart`）
 
 catch の腕には effect の op を書かない（JVM の VerifyError）。腕は値を返すだけにして、ログや raise は catch を抜けてから。
 

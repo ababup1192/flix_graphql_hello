@@ -9,7 +9,7 @@ authors     = ["abab <ababup1192@gmail.com>"]
 # sqlfx 本体（Db / Q.Fragment / Time / Uuid）。生成器と migrate の CLI は入っていないので flix_db 側の main で動かす。
 # WhyNot: security を unrestricted にするのは、sqlfx が pgjdbc と HikariCP を Maven 依存として持ち、Java を呼ぶ依存は
 # 利用側が明示的に許可しないと Flix が読まないため（既定の plain は Java interop を禁じる）
-"github:ababup1192/sqlfx" = { version = "0.4.0", security = "unrestricted" }
+"github:ababup1192/sqlfx" = { version = "0.4.1", security = "unrestricted" }
 
 [mvn-dependencies]
 "com.graphql-java:graphql-java" = "22.3"

@@ -10,37 +10,17 @@
 ///
 mod DbRunner {
 
-    import java.lang.Throwable
-
     use DbError.DbFailure
     use CmsErr.CmsFailure
 
     ///
-    /// JVM の例外（リゾルバの VerifyError、Java interop の例外）を DbErr に変えて、withLazyTx に ROLLBACK と接続の返却をさせる。
-    /// JVM 自体が壊れている物（OutOfMemoryError）はそのまま再送出する。
+    /// JVM の例外の網は sqlfx の `Db.guard`（fatal は再送出、それ以外は DbErr.other）。ここでは置く位置だけを決める。
     ///
-    /// WhyNot: sqlfx 0.4.0 の withLazyTx が最内側で catch する事に任せないのは、その catch の内側に `run … with handler`
+    /// WhyNot: sqlfx の withLazyTx が最内側で catch する事に任せないのは、その catch の内側に `run … with handler`
     /// （CmsErr.runWithResult / Session.runWith）が入ると、その中で飛んだ例外が catch を素通りするため（2026-09-08 に 0.3.1 と
-    /// 0.4.0 の両方で実測。effect の操作を外の handler へ投げるだけなら catch は効く）。handler より内側に置く必要があるので、
-    /// transact は CmsErr の内側で、Runner は Session の内側で f を直に包む（`Session.runWith(actor, () -> DbRunner.guarded(f))`）。
+    /// 0.4.0 の両方で実測。effect の操作を外の handler へ投げるだけなら catch は効く）。一番内側の handler の直下に置く必要があるので、
+    /// transact は CmsErr の内側で、Runner は Session の内側で f を直に包む（`Session.runWith(actor, () -> Db.guard(f))`）。
     ///
-    /// WhyNot: catch の腕で `DbErr.other` を直に呼ばないのは、effect の操作を catch の腕に書くと JVM の VerifyError になるため。
-    /// 腕は値だけ返し、raise は catch を抜けてから。
-    ///
-    pub def guarded(thunk: Unit -> a \ ef): a \ ef + IO + DbErr =
-        match attempt(thunk) {
-            case Ok(value)  => value
-            case Err(error) => if (JvmErrors.isFatal(error)) throw error else DbErr.other("exception: ${JvmErrors.describe(error)}")
-        }
-
-    /// thunk を走らせ、Throwable を値にする。
-    def attempt(thunk: Unit -> a \ ef): Result[Throwable, a] \ ef =
-        try {
-            Ok(thunk())
-        } catch {
-            case error: Throwable => Err(error)
-        }
-
     ///
     /// 再試行の待ち方。3 回、200 ms から 2 倍、2 秒で頭打ち、full jitter。
     ///
@@ -103,7 +83,7 @@ mod DbRunner {
         let counter = Ref.fresh(Static, 0);
         notePool(observe, pool);
         let outcome = retryWith(counter, () -> {
-            let inTx = () -> CmsErr.runWithResult(() -> guarded(thunk));
+            let inTx = () -> CmsErr.runWithResult(() -> Db.guard(thunk));
             match projectId {
                 case Some(found) => TenantTx.withLazyTxResult(pool, found, inTx)
                 case None        => Pool.withLazyTxResult(pool, inTx)

@@ -1,9 +1,9 @@
 ///
 /// Flix 0.75.3 の try / catch と `run … with handler` の入れ子で、中で飛んだ JVM の例外がどこで受かるか（実測の表）。
-/// DbRunner.guarded / BackgroundJobs.guarded / HttpServer の網はこの表を前提に置いてある。
+/// Db.guard / BackgroundJobs.guarded / HttpServer の網はこの表を前提に置いてある。
 ///
 ///   受かる:   try { run { op(内側の handler へ); throw } }                       … handler が try の内側なら何段でも
-///   受かる:   run { try { op(外側の handler へ); throw } }                       … try の直下から外へ op を投げるだけ（guarded の形）
+///   受かる:   run { try { op(外側の handler へ); throw } }                       … try の直下から外へ op を投げるだけ（Db.guard の形）
 ///   受かる:   run { try { run { op(外側へ) }; throw } }                          … 外へ op を通した run を抜けた後の throw
 ///   素通り:   run { try { run { op(外側へ); throw } } }                          … 外へ op を通した run の**中**で throw
 ///   素通り:   run { try { op } } with handler { def op = throw }                 … handler の本体が投げ、handler は try の外
@@ -38,7 +38,7 @@ mod TestJvmCatchNesting {
             } with Log.withFields(Log.Fields.empty())
               with Log.runWith(Log.Sink.silent())))
 
-    /// try の直下から外側の handler へ op を投げてから throw（DbRunner.guarded の形）。受かる。
+    /// try の直下から外側の handler へ op を投げてから throw（Db.guard の形）。受かる。
     @Test
     def testOpToOuterHandlerDirectlyUnderTryCatches(): Unit \ {Assert, IO} =
         Assert.assertEq(expected = Err("caught"),
