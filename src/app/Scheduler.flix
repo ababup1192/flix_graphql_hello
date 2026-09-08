@@ -17,8 +17,9 @@ mod Scheduler {
     ///
     /// 1 件実行して結果を書く。
     ///
-    def runOne(pool: Pool, claimed: { id = String, projectId = Int64, entryId = String, action = String, withDependencies = Bool }): Result[String, Unit] \ {IO, Log} =
+    def runOne(pool: Pool, claimed: { id = String, projectId = Int64, projectSlug = String, entryId = String, action = String, withDependencies = Bool }): Result[String, Unit] \ {IO, Log} =
         let projectId = ProjectId.ProjectId(claimed#projectId);
+        let labels = Log.Fields.empty() |> Log.Fields.str("project", claimed#projectSlug) |> Log.Fields.str("id", claimed#entryId);
         let outcome = match (EntryId.parse(claimed#entryId), ScheduleAction.parse(claimed#action)) {
             case (Some(entryId), Some(action)) =>
                 Tenant.runWith(projectId, () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() ->
@@ -32,8 +33,8 @@ mod Scheduler {
         };
         match outcome {
             case Err(failure)     => Err("予約を実行できません: ${failure}")
-            case Ok(Ok(()))       => { JobLog.write({ kind = JobLog.JobKind.Schedule, id = claimed#id, outcome = JobLog.JobOutcome.Done, detail = "${claimed#action} ${claimed#entryId}" }, Log.Fields.empty() |> Log.Fields.str("id", claimed#entryId)); record(pool, projectId, () -> discard SchedulesQueries.markScheduleDone({ id = claimed#id, projectId = claimed#projectId })) }
-            case Ok(Err((message, fields))) => { JobLog.write({ kind = JobLog.JobKind.Schedule, id = claimed#id, outcome = JobLog.JobOutcome.Failed, detail = message }, fields); record(pool, projectId, () -> discard SchedulesQueries.markScheduleFailed({ id = claimed#id, projectId = claimed#projectId, lastError = message })) }
+            case Ok(Ok(()))       => { JobLog.write({ kind = JobLog.JobKind.Schedule, id = claimed#id, outcome = JobLog.JobOutcome.Done, detail = "${claimed#action} ${claimed#entryId}" }, labels); record(pool, projectId, () -> discard SchedulesQueries.markScheduleDone({ id = claimed#id, projectId = claimed#projectId })) }
+            case Ok(Err((message, fields))) => { JobLog.write({ kind = JobLog.JobKind.Schedule, id = claimed#id, outcome = JobLog.JobOutcome.Failed, detail = message }, labels |> Log.Fields.merge(fields)); record(pool, projectId, () -> discard SchedulesQueries.markScheduleFailed({ id = claimed#id, projectId = claimed#projectId, lastError = message })) }
         }
 
     def record(pool: Pool, projectId: ProjectId, write: Unit -> Unit \ DbWrite): Result[String, Unit] \ IO =

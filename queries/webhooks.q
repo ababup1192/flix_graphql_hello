@@ -15,9 +15,9 @@ query findWebhookByPublicId(publicId: String, projectId: Int64) -> one {
     SELECT id, public_id, name, url, events, active, created_at FROM webhooks WHERE public_id = :publicId AND project_id = :projectId
 }
 
-// 配信する時に url と secret を引く
+// 配信する時に url と secret を引く。public_id はログの行（webhook.id）に出す
 query findWebhookForDelivery(id: Int64, projectId: Int64) -> one {
-    SELECT id, url, secret, active FROM webhooks WHERE id = :id AND project_id = :projectId
+    SELECT id, public_id, url, secret, active FROM webhooks WHERE id = :id AND project_id = :projectId
 }
 
 // この出来事を受ける有効な Webhook
@@ -57,9 +57,11 @@ query resetDelivery(id: String, projectId: Int64) -> exec {
 
 // unscoped: dispatcher はプロジェクトを跨いで送る番の物を拾い、1 件ずつそのプロジェクトの印で送る。複数台でも同じ行を二重に拾わない（SKIP LOCKED）
 // 同じ Webhook 宛は id（ULID = 積んだ順）で直列にする: それより古い物が未完（pending / sending）なら拾わない。順序が要る受け手が並べ直さずに済む
+// プロジェクト slug はログの行（project）に出す。projects に RLS は無いので印無しで引ける（webhooks には RLS があるので public_id は findWebhookForDelivery で）
 query claimDueDeliveries(limit: Int64) -> many {
-    UPDATE webhook_deliveries SET status = 'sending', attempts = attempts + 1, claimed_at = now()
-    WHERE id IN (
+    UPDATE webhook_deliveries AS w SET status = 'sending', attempts = attempts + 1, claimed_at = now()
+    FROM projects AS p
+    WHERE p.id = w.project_id AND w.id IN (
         SELECT d.id FROM webhook_deliveries AS d
         WHERE d.status = 'pending' AND d.next_attempt_at <= now()
           AND NOT EXISTS (
@@ -68,7 +70,7 @@ query claimDueDeliveries(limit: Int64) -> many {
           )
         ORDER BY d.id LIMIT :limit FOR UPDATE OF d SKIP LOCKED
     )
-    RETURNING id, project_id, webhook_id, event, payload, attempts, created_at
+    RETURNING w.id, w.project_id, p.slug AS project_slug, w.webhook_id, w.event, w.payload, w.attempts, w.created_at
 }
 
 // unscoped: 送っている最中に落ちた行の回復。受け手には届いているかもしれないので、受け手は X-Cms-Delivery で重複を見分ける

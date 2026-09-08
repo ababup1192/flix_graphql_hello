@@ -29,11 +29,11 @@
 | `cf.ray` | string | リクエストの span | Cloudflare の `CF-Ray` があれば |
 | `http.request.method` | string | リクエストの span | |
 | `url.path` | string | リクエストの span | クエリ文字列と制御文字を落とした後 |
-| `http.response.status_code` | int | リクエストの行、Webhook の行 | |
+| `http.response.status_code` | int | リクエストの行、Webhook の行 | Webhook は応答があった物だけ（繋がらなかった物は `error.message`。0 は出さない） |
 | `duration_ms` | int | リクエストの行 | ソケットの読み書きを含まない |
 | `http.request.body.size` | int | リクエストの行 | UTF-8 のバイト数 |
 | `http.response.body.size` | int | リクエストの行 | UTF-8 のバイト数 |
-| `project` | string | リクエストの行、リゾルバの中の行 | プロジェクト slug（パス・Host・既定） |
+| `project` | string | リクエストの行、リゾルバの中の行、ワーカーの行 | プロジェクト slug（パス・Host・既定。ワーカーは拾った行の project_id から） |
 | `credential.kind` | string | リクエストの行、リゾルバの中の行 | `jwt` / `api-key` / `pat` / `preview` / `anonymous` / `invalid`。ヘッダから読んだ種類。Runner が知らない鍵・合わないプレビュートークン・死んだ PAT を `invalid` に上書きする |
 | `user.id` | string | リクエストの行、リゾルバの中の行 | 本人の public_id（email は出さない） |
 | `api_key.name` | string | リクエストの行、リゾルバの中の行 | 鍵の名前（鍵は出さない） |
@@ -44,14 +44,15 @@
 | `exception.message` | string | Error の行 | 200 字。`Detail:` 以降は落とす（PG が行の値を入れるため） |
 | `exception.stacktrace` | string | Error の行 | Flix の frame だけ 8 つ |
 | `error.code` | string | 業務エラーの行、リゾルバの失敗の行、4xx のリクエストの行、MCP の error の行 | 業務エラーは GraphQL の `extensions.code` と同じ文字列。4xx は短い固定の語（`no_route` / `method_not_allowed` / `unsupported_media_type` / `bad_json` / `bad_request` / `jobs_token` / `no_project` / `unavailable`、MCP の `origin` / `protocol_version` / `preview_token` / `unauthenticated`）。MCP の tools/call が isError なら content の `code` |
-| `error.message` | string | 起動の失敗、ワーカーの失敗、リゾルバの失敗、4xx のリクエストの行 | 人が読む文。4xx は応答本文と同じ文 |
+| `error.message` | string | 起動の失敗、ワーカーの失敗、リゾルバの失敗、4xx のリクエストの行、繋がらなかった Webhook の行 | 人が読む文。4xx は応答本文と同じ文、Webhook は「接続できませんでした: java.net.ConnectException」のような文 |
 | `origin` | string | 403 のリクエストの行（MCP） | 断った `Origin` の scheme + host（パスやクエリは無い） |
 | `entity` | string | 業務エラーの行 | `extensions.entity` と同じ |
 | `id` | string | 業務エラーの行、予約公開の行、MCP のリクエストの行、プレビューの span | entry の id など。連番は出さない。MCP は引数の id、無ければ結果の id（create_entry で作った物） |
 | `job.kind` | string | ワーカーの行 | `schedule` / `webhook` |
 | `job.id` | string | ワーカーの行 | 予約の id、配信の ULID（`X-Cms-Delivery` と同じ。受け手のログと突き合わせる相関 id） |
 | `job.outcome` | string | ワーカーの行 | `done` / `failed` / `retry` / `delivered` |
-| `detail` | string | ワーカーの行 | `publish e_x`、`HTTP 500 …` など |
+| `detail` | string | ワーカーの行 | `publish e_x`、`HTTP 500`、`接続できませんでした: …` など |
+| `webhook.id` | string | Webhook の行 | Webhook の public_id（管理 API の `Webhook.id`）。消えた Webhook の行には無い |
 | `mcp.tool` | string | リクエストの行（`POST /mcp` の tools/call） | ツール名。引数は残さない。MCP の行は別に出さない（1 リクエスト 1 行） |
 | `mcp.outcome` | string | リクエストの行（`POST /mcp` の tools/call） | `ok` / `error`（isError。理由は `error.code`） |
 | `server.address` | string | 起動の行 | bind したアドレス |

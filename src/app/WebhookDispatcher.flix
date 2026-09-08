@@ -38,12 +38,13 @@ mod WebhookDispatcher {
     ///
     /// 1 件送って結果を書く。
     ///
-    def deliverOne(pool: Pool, claimed: { id = String, projectId = Int64, webhookId = Int64, event = String, payload = Util.Json.Json, attempts = Int32, createdAt = Timestamp.Timestamp }): Result[String, Unit] \ {IO, Http, Log} =
+    def deliverOne(pool: Pool, claimed: { id = String, projectId = Int64, projectSlug = String, webhookId = Int64, event = String, payload = Util.Json.Json, attempts = Int32, createdAt = Timestamp.Timestamp }): Result[String, Unit] \ {IO, Http, Log} =
         let projectId = ProjectId.ProjectId(claimed#projectId);
+        let projectLabel = Log.Fields.empty() |> Log.Fields.str("project", claimed#projectSlug);
         let target = DbRunner.retrying(() -> TenantTx.withLazyTx(pool, projectId, () -> WebhooksQueries.findWebhookForDelivery({ id = claimed#webhookId, projectId = claimed#projectId })))
             |> Result.mapErr(failure -> "Webhook を引けません: ${failure}");
         Result.flatMap(found -> match found {
-            case None => record(pool, claimed, projectId, Err((0, "Webhook が消えています")))
+            case None => record(pool, claimed, projectId, projectLabel, Err((0, "Webhook が消えています")))
             case Some(webhook) => {
                 // 積んだ時刻を本文にも入れる（受け手が本文だけ保存しても時刻が残る）
                 let body = Util.Json.toCompactString(withAt(claimed#createdAt, claimed#payload));
@@ -57,11 +58,32 @@ mod WebhookDispatcher {
                     |> HttpRequest.withTimeout(Time.Duration.seconds(10));
                 let outcome = match Net.Http.send(request) {
                     case Ok(response) => if (HttpResponse.isSuccess(response)) Ok(HttpResponse.status(response)) else Err((HttpResponse.status(response), "HTTP ${HttpResponse.status(response)}"))
-                    case Err(error)   => Err((0, "${error}"))
+                    case Err(error)   => Err((0, describeSendError(error)))
                 };
-                record(pool, claimed, projectId, outcome)
+                record(pool, claimed, projectId, projectLabel |> Log.Fields.str("webhook.id", webhook#publicId), outcome)
             }
         }, target)
+
+    ///
+    /// 送れなかった理由の人向けの文。last_error とログの error.message に入れる。
+    ///
+    pub def describeSendError(error: IoError.IoError): String = match error {
+        case IoError.IoError(IoError.ErrorKind.ConnectionFailed, detail) => "接続できませんでした: ${detail}"
+        case IoError.IoError(IoError.ErrorKind.UnknownHost, detail)      => "ホストが見つかりません: ${detail}"
+        case IoError.IoError(IoError.ErrorKind.Timeout, detail)          => "応答がありませんでした（タイムアウト）: ${detail}"
+        case IoError.IoError(kind, detail)                               => "送れませんでした（${kind}）: ${detail}"
+    }
+
+    ///
+    /// 結果の属性。届いた・HTTP で断られた物は http.response.status_code、繋がらなかった物（status 0）は error.message。
+    ///
+    /// WhyNot: 繋がらなかった物に status_code 0 を付けないのは、集計に 0 が混ざり「HTTP の応答があった」と読めてしまうため。
+    ///
+    pub def outcomeFields(outcome: Result[(Int32, String), Int32], fields: Log.Fields): Log.Fields = match outcome {
+        case Ok(status)            => fields |> Log.Fields.int("http.response.status_code", Int32.toInt64(status))
+        case Err((0, reason))      => fields |> Log.Fields.str("error.message", reason)
+        case Err((status, _))      => fields |> Log.Fields.int("http.response.status_code", Int32.toInt64(status))
+    }
 
     /// payload に "at"（ISO 8601）を足す。オブジェクトでなければそのまま。
     def withAt(at: Timestamp.Timestamp, payload: Util.Json.Json): Util.Json.Json = match payload {
@@ -70,9 +92,9 @@ mod WebhookDispatcher {
     }
 
     ///
-    /// 結果を書く。失敗は回数に応じて次の時刻を置き、使い切れば failed。
+    /// 結果を書く。失敗は回数に応じて次の時刻を置き、使い切れば failed。labels はログの行に付ける project / webhook.id。
     ///
-    def record(pool: Pool, claimed: { id = String, attempts = Int32 | r }, projectId: ProjectId, outcome: Result[(Int32, String), Int32]): Result[String, Unit] \ {IO, Log} =
+    def record(pool: Pool, claimed: { id = String, attempts = Int32 | r }, projectId: ProjectId, labels: Log.Fields, outcome: Result[(Int32, String), Int32]): Result[String, Unit] \ {IO, Log} =
         let write = () -> match outcome {
             case Ok(status) => discard WebhooksQueries.markDelivered({ id = claimed#id, projectId = ProjectId.toInt64(projectId), lastStatus = status })
             case Err((status, reason)) => match retryDelaySeconds(claimed#attempts) {
@@ -81,8 +103,8 @@ mod WebhookDispatcher {
             }
         };
         match outcome {
-            case Ok(status)            => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = JobLog.JobOutcome.Delivered, detail = "HTTP ${status}" }, Log.Fields.empty() |> Log.Fields.int("http.response.status_code", Int32.toInt64(status)))
-            case Err((status, reason)) => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = if (Option.isEmpty(retryDelaySeconds(claimed#attempts))) JobLog.JobOutcome.Failed else JobLog.JobOutcome.RetryLater, detail = "HTTP ${status} ${reason}" }, Log.Fields.empty() |> Log.Fields.int("http.response.status_code", Int32.toInt64(status)))
+            case Ok(status)       => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = JobLog.JobOutcome.Delivered, detail = "HTTP ${status}" }, labels |> outcomeFields(outcome))
+            case Err((_, reason)) => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = if (Option.isEmpty(retryDelaySeconds(claimed#attempts))) JobLog.JobOutcome.Failed else JobLog.JobOutcome.RetryLater, detail = reason }, labels |> outcomeFields(outcome))
         };
         DbRunner.retrying(() -> TenantTx.withLazyTx(pool, projectId, write)) |> Result.mapErr(failure -> "配信の結果を書けません: ${failure}")
 

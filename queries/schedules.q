@@ -30,13 +30,15 @@ query listSchedulesOfEntry(projectId: Int64, entryId: String, limit: Int64) -> m
 }
 
 // unscoped: Scheduler はプロジェクトを跨いで時刻の来た物を拾い、1 件ずつそのプロジェクトの印で実行する（SKIP LOCKED で二重に拾わない）
+// プロジェクト slug はログの行（project）に出す。projects に RLS は無いので印無しで引ける
 query claimDueSchedules(limit: Int64) -> many {
-    UPDATE scheduled_actions SET status = 'running', claimed_at = now()
-    WHERE id IN (
+    UPDATE scheduled_actions AS s SET status = 'running', claimed_at = now()
+    FROM projects AS p
+    WHERE p.id = s.project_id AND s.id IN (
         SELECT id FROM scheduled_actions WHERE status = 'pending' AND run_at <= now()
         ORDER BY run_at LIMIT :limit FOR UPDATE SKIP LOCKED
     )
-    RETURNING id, project_id, entry_id, action, with_dependencies
+    RETURNING s.id, s.project_id, p.slug AS project_slug, s.entry_id, s.action, s.with_dependencies
 }
 
 // unscoped: 実行中に落ちた行の回復。拾ってから staleMinutes 分たっても終わっていなければ pending に戻す（公開は冪等なので再実行してよい）

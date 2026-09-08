@@ -7,7 +7,7 @@ mod WebhooksQueries {
     ///
     /// 生成元 webhooks.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -1164326182
+    pub def sourceHash(): Int32 = -1110609775
 
     ///
     /// insertWebhook の 1 行。
@@ -78,21 +78,22 @@ mod WebhooksQueries {
     ///
     /// findWebhookForDelivery の 1 行。
     ///
-    pub type alias FindWebhookForDeliveryRow = { id = Int64, url = String, secret = String, active = Bool }
+    pub type alias FindWebhookForDeliveryRow = { id = Int64, publicId = String, url = String, secret = String, active = Bool }
 
     def findWebhookForDeliveryDecoder(): Decoder[FindWebhookForDeliveryRow] =
         forA (
             id <- Decoder.int64("id");
+            publicId <- Decoder.str("public_id");
             url <- Decoder.str("url");
             secret <- Decoder.str("secret");
             active <- Decoder.bool("active")
-        ) yield { id = id, url = url, secret = secret, active = active }
+        ) yield { id = id, publicId = publicId, url = url, secret = secret, active = active }
 
     ///
-    /// findWebhookForDelivery: SELECT id, url, secret, active FROM webhooks WHERE id = $1 AND project_id = $2
+    /// findWebhookForDelivery: SELECT id, public_id, url, secret, active FROM webhooks WHERE id = $1 AND project_id = $2
     ///
     pub def findWebhookForDelivery(args: { id = Int64, projectId = Int64 }): Option[FindWebhookForDeliveryRow] \ DbRead =
-        let sql = "SELECT id, url, secret, active FROM webhooks WHERE id = $1 AND project_id = $2";
+        let sql = "SELECT id, public_id, url, secret, active FROM webhooks WHERE id = $1 AND project_id = $2";
         let params = List#{SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findWebhookForDeliveryDecoder(), sql, params))
 
@@ -201,24 +202,25 @@ mod WebhooksQueries {
     ///
     /// claimDueDeliveries の 1 行。
     ///
-    pub type alias ClaimDueDeliveriesRow = { id = String, projectId = Int64, webhookId = Int64, event = String, payload = Util.Json.Json, attempts = Int32, createdAt = Timestamp.Timestamp }
+    pub type alias ClaimDueDeliveriesRow = { id = String, projectId = Int64, projectSlug = String, webhookId = Int64, event = String, payload = Util.Json.Json, attempts = Int32, createdAt = Timestamp.Timestamp }
 
     def claimDueDeliveriesDecoder(): Decoder[ClaimDueDeliveriesRow] =
         forA (
             id <- Decoder.str("id");
             projectId <- Decoder.int64("project_id");
+            projectSlug <- Decoder.str("project_slug");
             webhookId <- Decoder.int64("webhook_id");
             event <- Decoder.str("event");
             payload <- Decoder.json("payload");
             attempts <- Decoder.int32("attempts");
             createdAt <- Decoder.timestamp("created_at")
-        ) yield { id = id, projectId = projectId, webhookId = webhookId, event = event, payload = payload, attempts = attempts, createdAt = createdAt }
+        ) yield { id = id, projectId = projectId, projectSlug = projectSlug, webhookId = webhookId, event = event, payload = payload, attempts = attempts, createdAt = createdAt }
 
     ///
-    /// claimDueDeliveries: UPDATE webhook_deliveries SET status = 'sending', attempts = attempts + 1, claimed_at = now() WHERE id IN ( SELECT d.id FROM webhook_deliveries AS d WHERE d.status = 'pending' AND d.next_attempt_at <= now() AND NOT EXISTS ( SELECT 1 FROM webhook_deliveries AS e WHERE e.webhook_id = d.webhook_id AND e.id < d.id AND e.status IN ('pending', 'sending') ) ORDER BY d.id LIMIT $1 FOR UPDATE OF d SKIP LOCKED ) RETURNING id, project_id, webhook_id, event, payload, attempts, created_at
+    /// claimDueDeliveries: UPDATE webhook_deliveries AS w SET status = 'sending', attempts = attempts + 1, claimed_at = now() FROM projects AS p WHERE p.id = w.project_id AND w.id IN ( SELECT d.id FROM webhook_deliveries AS d WHERE d.status = 'pending' AND d.next_attempt_at <= now() AND NOT EXISTS ( SELECT 1 FROM webhook_deliveries AS e WHERE e.webhook_id = d.webhook_id AND e.id < d.id AND e.status IN ('pending', 'sending') ) ORDER BY d.id LIMIT $1 FOR UPDATE OF d SKIP LOCKED ) RETURNING w.id, w.project_id, p.slug AS project_slug, w.webhook_id, w.event, w.payload, w.attempts, w.created_at
     ///
     pub def claimDueDeliveries(limit: Int64): List[ClaimDueDeliveriesRow] \ DbWrite =
-        let sql = "UPDATE webhook_deliveries SET status = 'sending', attempts = attempts + 1, claimed_at = now()\n    WHERE id IN (\n        SELECT d.id FROM webhook_deliveries AS d\n        WHERE d.status = 'pending' AND d.next_attempt_at <= now()\n          AND NOT EXISTS (\n              SELECT 1 FROM webhook_deliveries AS e\n              WHERE e.webhook_id = d.webhook_id AND e.id < d.id AND e.status IN ('pending', 'sending')\n          )\n        ORDER BY d.id LIMIT $1 FOR UPDATE OF d SKIP LOCKED\n    )\n    RETURNING id, project_id, webhook_id, event, payload, attempts, created_at";
+        let sql = "UPDATE webhook_deliveries AS w SET status = 'sending', attempts = attempts + 1, claimed_at = now()\n    FROM projects AS p\n    WHERE p.id = w.project_id AND w.id IN (\n        SELECT d.id FROM webhook_deliveries AS d\n        WHERE d.status = 'pending' AND d.next_attempt_at <= now()\n          AND NOT EXISTS (\n              SELECT 1 FROM webhook_deliveries AS e\n              WHERE e.webhook_id = d.webhook_id AND e.id < d.id AND e.status IN ('pending', 'sending')\n          )\n        ORDER BY d.id LIMIT $1 FOR UPDATE OF d SKIP LOCKED\n    )\n    RETURNING w.id, w.project_id, p.slug AS project_slug, w.webhook_id, w.event, w.payload, w.attempts, w.created_at";
         let params = List#{SqlValue.Int64(limit)};
         RawSql.runWithAllow(() -> Sql.executeReturningAs(claimDueDeliveriesDecoder(), sql, params))
 
