@@ -71,14 +71,19 @@ mod BackgroundJobs {
     ///
     /// プールが壊れたまま戻らないかを見張り、決まったら自分で終わる。CMS_SELF_HEAL=off なら見張らない。
     ///
-    /// WhyNot: 外部トリガー（POST /jobs/tick）の tick に入れないのは、リクエストの中でプロセスを終わらせる事になり、
-    /// 呼んだ側には接続断としか見えないため。周期の周だけが判断する。
+    /// 見張りのスレッドと /health の 2 つの経路から呼ぶ。Exit が決まったら、どちらから来ても同じ drain と exit 3 の道に入る（印で 1 回だけ）。
     ///
-    def healCheck(pool: Pool, state: State, heal: Option[SelfHeal.Watch]): Unit \ {IO, Log} = match heal {
+    /// WhyNot: 見張りのスレッドだけが判断する形にしないのは、そのスレッドが OOM で死ぬと自己回復が永久に無効になるため。
+    /// リクエストのスレッドは OOM の後も生きている側で、Docker の HEALTHCHECK が /health を叩く限り判断が進む。
+    ///
+    /// WhyNot: 外部トリガー（POST /jobs/tick）の tick に入れないのは、仕事を回すだけの口が理由でプロセスが終わると、
+    /// 呼んだ側には接続断としか見えないため。/health は死活を答える口なので、そこで終わりが決まるのは筋が通る。
+    ///
+    pub def healCheck(pool: Pool, state: State, heal: Option[SelfHeal.Watch]): Unit \ {IO, Log} = match heal {
         case None        => ()
-        case Some(watch) => match SelfHeal.observe(watch, pool) {
+        case Some(watch) => match SelfHeal.step(watch, pool) {
             case SelfHeal.Decision.Keep         => ()
-            case SelfHeal.Decision.Exit(reason) => exitForHeal(pool, state, reason)
+            case SelfHeal.Decision.Exit(reason) => if (SelfHeal.claimExit(watch)) exitForHeal(pool, state, reason) else ()
         }
     }
 

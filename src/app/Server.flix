@@ -116,8 +116,13 @@ mod Server {
     ///
     /// GET /health。DB に届けば {"status": "ok", "version": "...", "jobs": {"lastTickAt": ...}, "connections": {"active": 1, "max": 256}, "pool": {"active": 1, ...}}、届かなければ 503 で理由を付ける。
     /// connections は HTTP の接続、pool は DB の接続プール（別の物）。
+    /// 先に自己回復の判断を 1 回進める（プールが壊れたまま戻らないと決まれば、この中でプロセスが終わる）。
+    ///
+    /// WhyNot: 判断を見張りのスレッドだけに任せないのは、そのスレッドが OOM で死ぬと自己回復が永久に無効になるため。
+    /// リクエストのスレッドは OOM の後も生きている側で、Docker の HEALTHCHECK が叩く限りここで判断が進む。
     ///
     def healthRoute(version: String, health: Health[ef], _routeRequest: RouteRequest): HttpResponse \ ef =
+        (health#heal)();
         let summary = (health#jobsSummary)();
         let connected = (health#connections)();
         let stats = (health#poolStats)();
@@ -131,9 +136,10 @@ mod Server {
             "failedSchedules" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedSchedules)),
             "pendingDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#pendingDeliveries)),
             "failedDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedDeliveries)) });
+        let base = Map#{ "version" => Value.Str(version), "jobs" => jobs, "connections" => connections, "pool" => pool };
         match (health#checkDb)() {
-            case Ok(())       => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str(version), "jobs" => jobs, "connections" => connections, "pool" => pool })) }
-            case Err(message) => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str(version), "db" => Value.Str(message), "jobs" => jobs, "connections" => connections, "pool" => pool })) }
+            case Ok(())       => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map.insert("status", Value.Str("ok"), base))) }
+            case Err(message) => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(base |> Map.insert("status", Value.Str("error")) |> Map.insert("db", Value.Str(message)))) }
         }
 
     ///

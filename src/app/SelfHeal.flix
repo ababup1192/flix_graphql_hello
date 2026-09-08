@@ -103,8 +103,12 @@ mod SelfHeal {
     /// - startedAt: プロセスが起動した時刻（UNIX ミリ秒）
     /// - connection: プールを通さない接続を 1 本開くための接続情報
     /// - seen: 直近の観測（古い順。窓の外は捨てる）
+    /// - exiting: 終わりの道に入った印
     ///
-    pub type alias Watch = { settings = Settings, startedAt = Int64, connection = Jdbc.ConnectionConfig, seen = Ref[List[Observation], Static] }
+    /// WhyNot: exiting を持つのは、step を呼ぶ経路が 2 つ（見張りのスレッドと /health のリクエストのスレッド）あり、
+    /// 同じ Exit で drain と System.exit が二重に走らないようにするため。
+    ///
+    pub type alias Watch = { settings = Settings, startedAt = Int64, connection = Jdbc.ConnectionConfig, seen = Ref[List[Observation], Static], exiting = Ref[Bool, Static] }
 
     ///
     /// 覚えておく観測の数。2 秒ごとなので 300 個で 10 分。minUnhealthyMs（既定 90 秒）より十分に長い。
@@ -112,12 +116,22 @@ mod SelfHeal {
     def windowSize(): Int32 = 300
 
     pub def createWatch(settings: Settings, startedAt: Int64, connection: Jdbc.ConnectionConfig): Watch \ IO =
-        { settings = settings, startedAt = startedAt, connection = connection, seen = Ref.fresh(Static, Nil) }
+        { settings = settings, startedAt = startedAt, connection = connection, seen = Ref.fresh(Static, Nil), exiting = Ref.fresh(Static, false) }
 
     ///
-    /// 1 周ぶん観測して決める。プール経由の ping が通っている間は新しい接続を開かない。
+    /// 終わりの道を 1 回だけ通す。まだ誰も通っていなければ印を置いて true。
     ///
-    pub def observe(watch: Watch, pool: Pool): Decision \ IO =
+    pub def claimExit(watch: Watch): Bool \ IO =
+        if (Ref.get(watch#exiting)) false else { Ref.put(true, watch#exiting); true }
+
+    ///
+    /// 呼ばれた時に 1 回ぶん観測して決める。プール経由の ping が通っている間は新しい接続を開かない。
+    /// 判断は観測の列（それぞれが `at` を持つ）だけで決まるので、呼ばれる間隔が一定でなくても minUnhealthyMs の判定は変わらない。
+    ///
+    /// WhyNot: 見張りのスレッドからしか呼ばないようにしないのは、そのスレッドが OOM で死ぬと自己回復が永久に無効になるため
+    /// （実験 3 回目の S5 で 2 回とも再現）。リクエストのスレッドは OOM の後も生きているので、/health からも同じ step を進める。
+    ///
+    pub def step(watch: Watch, pool: Pool): Decision \ IO =
         let pingOk = Result.isOk(Health.ping(pool));
         let seen = { at = System.currentTimeMillis(), pingOk = pingOk, freshOk = not pingOk and freshOk(watch#connection), stats = Pool.stats(pool) };
         let window = (Ref.get(watch#seen) ::: seen :: Nil) |> keepLast(windowSize());

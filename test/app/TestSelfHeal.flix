@@ -51,6 +51,40 @@ mod TestSelfHeal {
             expected = cases |> List.map(snd),
             cases |> List.map(match ((config, startedAt, seen), _) -> SelfHeal.decide(config, startedAt, seen)))
 
+    /// 秒で観測を並べる（全部 DB に届かず、プールを通さない接続では届く）。
+    def unhealthyAt(seconds: List[Int64]): List[Observation] =
+        seconds |> List.map(second -> { at = second * 1000i64, pingOk = false, freshOk = true, stats = stats() })
+
+    ///
+    /// 判断は観測の列（それぞれの at）だけで決まる。見張りのスレッドと /health の 2 経路から交互に呼ばれて
+    /// 間隔が不規則になっても、同じ時間幅の失敗なら同じ結果になる。
+    ///
+    @Test
+    def testDecideDependsOnlyOnObservationsTable(): Unit \ Assert =
+        let healthy = observations(300i64, 50, true, false);
+        let exit = Decision.Exit("DB の接続プールから 100000 ms 続けて届かず、プールを通さない新しい接続では届いている");
+        let cases = List#{
+            // 2 秒ごと（見張りのスレッドだけ）
+            (unhealthyFor(100i64, true), exit),
+            // 交互に呼ばれて 1 秒・2.5 秒・10 秒・70 秒と間隔がばらついた
+            (healthy ::: unhealthyAt(List#{400i64, 401i64, 403i64, 413i64, 483i64, 500i64}), exit),
+            // /health だけが 10 秒ごとに呼んだ（粒度が粗くても幅で決まる）
+            (healthy ::: unhealthyAt(List#{400i64, 410i64, 420i64, 500i64}), exit),
+            // 幅が足りない（80 秒）
+            (healthy ::: unhealthyAt(List#{400i64, 410i64, 480i64}), Decision.Keep)
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd),
+            cases |> List.map(match (seen, _) -> SelfHeal.decide(settings(), 0i64, seen)))
+
+    /// 終わりの道は 1 回だけ通る（2 経路から同じ Exit が出ても drain と exit が二重に走らない）。
+    @Test
+    def testClaimExitOnce(): Unit \ {Assert, IO} =
+        let watch = SelfHeal.createWatch(settings(), 0i64, { url = "jdbc:none", user = "u", password = "p" });
+        Assert.assertEq(
+            expected = List#{true, false, false},
+            List.range(0, 3) |> List.map(_ -> SelfHeal.claimExit(watch)))
+
     /// CMS_SELF_HEAL=off なら見張らない。秒数は CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（無い・数字でない・0 以下なら既定の 90 秒）。
     @Test
     def testSettingsFromTable(): Unit \ Assert =

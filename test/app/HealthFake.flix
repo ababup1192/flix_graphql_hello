@@ -17,9 +17,10 @@ mod HealthFake {
 
     ///
     /// checkDb が常に Ok を返す。ワーカーは 1 度も回っていない事にし、runJobs は何もせず空を返す。
+    /// 自己回復の判断は何もしない。
     ///
     pub def ok(): Health[{}] =
-        { checkDb = _ -> Ok(()), jobsSummary = _ -> idle(), runJobs = _ -> Nil, connections = _ -> busy(), poolStats = _ -> pool() }
+        { checkDb = _ -> Ok(()), jobsSummary = _ -> idle(), runJobs = _ -> Nil, connections = _ -> busy(), poolStats = _ -> pool(), heal = _ -> () }
 
     ///
     /// checkDb が常に message の Err を返す。
