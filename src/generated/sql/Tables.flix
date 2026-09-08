@@ -136,6 +136,63 @@ mod AssetsTable {
 }
 
 ///
+/// cdn_purges テーブル。enum は断片 DSL の型に付ける印、関数は列。
+///
+mod CdnPurgesTable {
+
+    use SqlValue.SqlValue
+
+    pub enum CdnPurgesTable {
+        case CdnPurgesTable
+    }
+
+    pub def id(): Fragment.Col[CdnPurgesTable, String, Fragment.NotNull] = Fragment.Col.Col("id", SqlValue.Str)
+    pub def projectId(): Fragment.Col[CdnPurgesTable, Int64, Fragment.NotNull] = Fragment.Col.Col("project_id", SqlValue.Int64)
+    pub def contentVersion(): Fragment.Col[CdnPurgesTable, Int64, Fragment.NotNull] = Fragment.Col.Col("content_version", SqlValue.Int64)
+    pub def status(): Fragment.Col[CdnPurgesTable, String, Fragment.NotNull] = Fragment.Col.Col("status", SqlValue.Str)
+    pub def attempts(): Fragment.Col[CdnPurgesTable, Int32, Fragment.NotNull] = Fragment.Col.Col("attempts", SqlValue.Int32)
+    pub def nextAttemptAt(): Fragment.Col[CdnPurgesTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("next_attempt_at", SqlValue.ofTimestamp)
+    pub def claimedAt(): Fragment.Col[CdnPurgesTable, Timestamp.Timestamp, Fragment.Nullable] = Fragment.Col.Col("claimed_at", SqlValue.ofTimestamp)
+    pub def lastStatus(): Fragment.Col[CdnPurgesTable, Int32, Fragment.NotNull] = Fragment.Col.Col("last_status", SqlValue.Int32)
+    pub def lastError(): Fragment.Col[CdnPurgesTable, String, Fragment.NotNull] = Fragment.Col.Col("last_error", SqlValue.Str)
+    pub def createdAt(): Fragment.Col[CdnPurgesTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("created_at", SqlValue.ofTimestamp)
+    pub def deliveredAt(): Fragment.Col[CdnPurgesTable, Timestamp.Timestamp, Fragment.Nullable] = Fragment.Col.Col("delivered_at", SqlValue.ofTimestamp)
+
+    ///
+    /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
+    ///
+    pub enum Constraint with Eq, Order, ToString {
+        /// cdn_purges_status_check (check)
+        case StatusCheck
+        /// cdn_purges_project_id_fkey (foreign key)
+        case ProjectIdFkey
+    }
+
+    ///
+    /// このテーブルへの書き込みを、制約違反を `translate` で翻訳しながら実行する。
+    /// translate は thunk と同じ型の値を返すか、業務エラーのエフェクトを投げる。翻訳しない case は `raiseConstraint`。
+    /// enum に無い名前の違反と、制約違反以外の DbErr はそのまま上へ。Tx の外で呼ぶ（違反で abort した Tx に COMMIT を出さない）。
+    ///
+    pub def onConstraint(translate: Constraint -> a \ ef1, thunk: Unit -> a \ ef2): a \ ef1 + ef2 + {TransientDbErr, DbErr} =
+        DbError.onConstraintWith(constraintOf, translate, thunk)
+
+    ///
+    /// 翻訳しない制約を元の DbErr に戻す。`onConstraint` に渡す関数の中で使う。
+    ///
+    pub def raiseConstraint(constraint: Constraint): a \ DbErr = match constraint {
+        case Constraint.StatusCheck => DbErr.checkViolation("cdn_purges_status_check")
+        case Constraint.ProjectIdFkey => DbErr.foreignKeyViolation("cdn_purges_project_id_fkey")
+    }
+
+    def constraintOf(name: String): Option[Constraint] = match name {
+        case "cdn_purges_status_check" => Some(Constraint.StatusCheck)
+        case "cdn_purges_project_id_fkey" => Some(Constraint.ProjectIdFkey)
+        case _ => None
+    }
+
+}
+
+///
 /// content_fields テーブル。enum は断片 DSL の型に付ける印、関数は列。
 ///
 mod ContentFieldsTable {
@@ -801,6 +858,7 @@ mod ProjectsTable {
     pub def visibility(): Fragment.Col[ProjectsTable, String, Fragment.NotNull] = Fragment.Col.Col("visibility", SqlValue.Str)
     pub def publicId(): Fragment.Col[ProjectsTable, String, Fragment.NotNull] = Fragment.Col.Col("public_id", SqlValue.Str)
     pub def contentVersion(): Fragment.Col[ProjectsTable, Int64, Fragment.NotNull] = Fragment.Col.Col("content_version", SqlValue.Int64)
+    pub def purgedVersion(): Fragment.Col[ProjectsTable, Int64, Fragment.NotNull] = Fragment.Col.Col("purged_version", SqlValue.Int64)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。

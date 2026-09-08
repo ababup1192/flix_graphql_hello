@@ -10,6 +10,7 @@ mod JobLog {
     pub enum JobKind with Eq, ToString {
         case Schedule
         case Webhook
+        case CdnPurge
     }
 
     /// 結果。job.outcome の値は Loki の集計が見るので固定。
@@ -23,6 +24,7 @@ mod JobLog {
     def kindText(kind: JobKind): String = match kind {
         case JobKind.Schedule => "schedule"
         case JobKind.Webhook  => "webhook"
+        case JobKind.CdnPurge => "cdn_purge"
     }
 
     def outcomeText(outcome: JobOutcome): String = match outcome {

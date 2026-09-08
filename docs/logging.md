@@ -60,7 +60,7 @@
 | `origin` | string | 403 のリクエストの行（MCP） | 断った `Origin` の scheme + host（パスやクエリは無い） |
 | `entity` | string | 業務エラーの行 | `extensions.entity` と同じ |
 | `id` | string | 業務エラーの行、予約公開の行、MCP のリクエストの行、プレビューの span | entry の id など。連番は出さない。MCP は引数の id、無ければ結果の id（create_entry で作った物） |
-| `job.kind` | string | ワーカーの行 | `schedule` / `webhook` |
+| `job.kind` | string | ワーカーの行 | `schedule` / `webhook` / `cdn_purge` |
 | `job.id` | string | ワーカーの行 | 予約の id、配信の ULID（`X-Cms-Delivery` と同じ。受け手のログと突き合わせる相関 id） |
 | `job.outcome` | string | ワーカーの行 | `done` / `failed` / `retry` / `delivered` |
 | `detail` | string | ワーカーの行 | `publish e_x`、`HTTP 500`、`接続できませんでした: …` など |

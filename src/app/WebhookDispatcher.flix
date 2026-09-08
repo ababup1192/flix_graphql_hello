@@ -72,7 +72,7 @@ mod WebhookDispatcher {
     ///
     /// 送った結果を record の形に。2xx は Ok(status)、それ以外の応答は Err(status, "HTTP status")、繋がらなかった物は Err(0, 理由)。
     ///
-    def toOutcome(sent: Result[IoError.IoError, HttpResponse]): Result[(Int32, String), Int32] = match sent {
+    pub def toOutcome(sent: Result[IoError.IoError, HttpResponse]): Result[(Int32, String), Int32] = match sent {
         case Ok(response) => if (HttpResponse.isSuccess(response)) Ok(HttpResponse.status(response)) else Err((HttpResponse.status(response), "HTTP ${HttpResponse.status(response)}"))
         case Err(error)   => Err((0, describeSendError(error)))
     }

@@ -31,14 +31,15 @@ mod BackgroundJobs {
     /// - stopping: 停止が始まった。新しいtickを始めない
     /// - inTick: 1 tickの途中
     /// - drainMs: 停止時に実行中の 1 tickを待つ上限（ミリ秒。CMS_JOBS_DRAIN_SECONDS）
+    /// - purge: CDN の purge の送り先（CMS_CDN_PURGE_URL / CMS_CDN_PURGE_TOKEN）。None なら purge は積まない・送らない
     ///
     /// WhyNot: lastWatch を /health からの step で更新しないのは、この値が指すのは「watchのスレッドが生きているか」で、
     /// リクエストのスレッドが進めた事を混ぜると、死んだスレッドを生きていると読ませてしまうため。
     ///
-    pub type alias State = { lastTick = Ref[Option[Int64], Static], lastWatch = Ref[Option[Int64], Static], stopping = Ref[Bool, Static], inTick = Ref[Bool, Static], drainMs = Int64 }
+    pub type alias State = { lastTick = Ref[Option[Int64], Static], lastWatch = Ref[Option[Int64], Static], stopping = Ref[Bool, Static], inTick = Ref[Bool, Static], drainMs = Int64, purge = Option[PurgeTarget] }
 
-    pub def createState(drainSeconds: Int64): State \ IO =
-        { lastTick = Ref.fresh(Static, None), lastWatch = Ref.fresh(Static, None), stopping = Ref.fresh(Static, false), inTick = Ref.fresh(Static, false), drainMs = drainSeconds * 1000i64 }
+    pub def createState(drainSeconds: Int64, purge: Option[PurgeTarget]): State \ IO =
+        { lastTick = Ref.fresh(Static, None), lastWatch = Ref.fresh(Static, None), stopping = Ref.fresh(Static, false), inTick = Ref.fresh(Static, false), drainMs = drainSeconds * 1000i64, purge = purge }
 
     ///
     /// 止まらずに回す。失敗はログに出して次のtickへ。停止が始まったら抜ける。tickごとに Log を sink で入れ直す（spawn の中なので Main の handler は届かない）。
@@ -209,7 +210,8 @@ mod BackgroundJobs {
         else { Thread.sleep(100i64); drain(state, deadline) }
 
     ///
-    /// 回復 → 予約公開 → Webhook の順に 1 tickする。失敗した所の説明を返す（空なら全部通った）。停止中なら何もしない。
+    /// 回復 → 予約公開 → Webhook → CDN の purge の順に 1 tickする。失敗した所の説明を返す（空なら全部通った）。停止中なら何もしない。
+    /// purge は送り先がある時だけ: 版が進んだプロジェクトの分を積んでから送る（予約公開が進めた版も同じ tick で拾う）。
     ///
     pub def tick(pool: Pool, state: State): List[String] \ {IO, Log} =
         if (Ref.get(state#stopping)) Nil
@@ -220,19 +222,32 @@ mod BackgroundJobs {
             let recovered = DbRunner.withTx(pool, None, () -> {
                     discard SchedulesQueries.recoverStuckSchedules(staleMinutes());
                     discard WebhooksQueries.recoverStuckDeliveries(staleMinutes());
+                    discard CdnPurgesQueries.recoverStuckPurges(staleMinutes());
                     discard SchedulesQueries.purgeOldSchedules(keepDays());
-                    discard WebhooksQueries.purgeOldDeliveries(keepDays())
+                    discard WebhooksQueries.purgeOldDeliveries(keepDays());
+                    discard CdnPurgesQueries.purgeOldPurges(keepDays())
                 }) |> Result.mapErr(failure -> "回復と掃除ができません: ${failure}");
             // 予約公開と Webhook の配信。部分ごとに JVM の例外を catch し、片方が落ちても残りは進める
             let scheduled = guardedPart("予約公開", () -> Scheduler.tick(pool));
             let delivered = Net.Http.runWithIO(() -> guardedPart("Webhook", () -> WebhookDispatcher.tick(pool)));
+            let purged = purgeTick(pool, state#purge);
             // lastTick（heartbeat）を更新し、inTick フラグを下ろす
             Ref.put(Some(System.currentTimeMillis()), state#lastTick);
             Ref.put(false, state#inTick);
             // 失敗した部分の説明だけを集める
-            List#{ recovered |> Result.map(_ -> ()), scheduled |> Result.map(_ -> ()), delivered |> Result.map(_ -> ()) }
+            List#{ recovered |> Result.map(_ -> ()), scheduled |> Result.map(_ -> ()), delivered |> Result.map(_ -> ()), purged |> Result.map(_ -> ()) }
                 |> List.filterMap(outcome -> match outcome { case Ok(()) => None case Err(message) => Some(message) })
         }
+
+    ///
+    /// CDN の purge の部分。送り先が無ければ何もしない。積む → 送る。
+    ///
+    def purgeTick(pool: Pool, purge: Option[PurgeTarget]): Result[String, Int32] \ {IO, Log} = match purge {
+        case None         => Ok(0)
+        case Some(target) =>
+            guardedPart("CDN purge", () -> CdnPurge.enqueue(pool))
+                |> Result.flatMap(_ -> Net.Http.runWithIO(() -> guardedPart("CDN purge", () -> CdnPurge.tick(pool, target))))
+    }
 
     ///
     /// /health 用のまとめ。最終実行時刻と、待ち・失敗の件数。
