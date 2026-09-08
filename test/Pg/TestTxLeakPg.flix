@@ -27,6 +27,18 @@ mod TestTxLeakPg {
         Pool.close(pool);
         Assert.assertEq(expected = (Err(ApplicationFailure.Domain(CmsErr.CmsFailure.NotFound(Entity.Entry, "x"))), Ok(1)), (first, second))
 
+    /// BEGIN の直後に流す onBegin（TenantTx が RLS の印を置く所と同じ経路）が JVM の例外を投げても、接続が返る（sqlfx 0.4.2 から）。
+    @Test
+    def testPgExceptionInOnBeginReturnsConnection(): Unit \ {IO, Assert} =
+        let pool = singlePool();
+        let first = DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Pool.withLazyTxAfterBegin(pool,
+            () -> { discard Sql.fetch("SELECT 1", Nil); if (Integer.parseInt("boom") == 0) () else () },
+            () -> Sql.fetch("SELECT 1", Nil) |> List.length)))
+            |> Result.mapErr(failure -> String.contains(substr = "boom", "${failure}"));
+        let second = borrowAgain(pool);
+        Pool.close(pool);
+        Assert.assertEq(expected = (Err(true), Ok(1)), (first, second))
+
     /// DB の失敗（無い表を叩く = DbErr）は再実行しない失敗として返り、ROLLBACK されて接続が返る。
     @Test
     def testPgDbErrInsideTxReturnsConnection(): Unit \ {IO, Assert} =

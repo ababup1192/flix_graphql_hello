@@ -175,7 +175,7 @@ mod TestLogFields {
         };
         Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (failure, _) -> Fields.empty() |> LogFields.failure(failure) |> Map.toList))
 
-    /// DB の失敗の種類。TransientDbErr の 3 つだけ名前が付き、再試行で枯渇した物は最後の失敗の種類。制約違反などは None。
+    /// DB の失敗の種類。TransientDbErr の 3 つと COMMIT が弾かれた rollback に名前が付き、再試行で枯渇した物は最後の失敗の種類。制約違反などは None。
     @Test
     def testDbErrorKindTable(): Unit \ Assert =
         let cases = List#{
@@ -187,7 +187,7 @@ mod TestLogFields {
             (Failure.Permanent(DbErrorKind.Transient(TransientKind.Deadlock)),                                Some("deadlock")),
             (Failure.Permanent(DbErrorKind.UniqueViolation("entries_pkey")),                                  None),
             (Failure.Permanent(DbErrorKind.SchemaMismatch("no column")),                                      None),
-            (Failure.Permanent(DbErrorKind.Rollback),                                                         None),
+            (Failure.Permanent(DbErrorKind.Rollback),                                                         Some("rollback")),
             (Failure.Permanent(DbErrorKind.Other("")),                                                        None)
         };
         Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (failure, _) -> LogFields.dbErrorKind(failure)))

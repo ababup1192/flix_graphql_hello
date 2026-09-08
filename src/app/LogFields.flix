@@ -193,9 +193,9 @@ mod LogFields {
     // ---- DB の失敗 ----
 
     ///
-    /// DB の失敗の種類。sqlfx の TransientDbErr の名前（`deadlock` / `timeout` / `connectionLost`）だけを返し、
-    /// それ以外（制約違反・schemaMismatch など）は None。再試行で枯渇した物は最後の失敗の種類を返す。
-    /// 「DB が落ちた（connectionLost）」と「DB が遅い（timeout）」をログで読み分けるためのキー。
+    /// DB の失敗の種類。sqlfx の TransientDbErr の名前（`deadlock` / `timeout` / `connectionLost`）と、失敗した SQL の後の COMMIT が
+    /// 弾かれた `rollback`（sqlfx 0.4.2 から。aborted な Tx の COMMIT は Ok にならない）を返し、それ以外（制約違反・schemaMismatch など）は None。
+    /// 再試行で枯渇した物は最後の失敗の種類を返す。「DB が落ちた（connectionLost）」と「DB が遅い（timeout）」をログで読み分けるためのキー。
     ///
     /// WhyNot: `DbError.describe` の文言を読まないのは、sqlfx が文言を変えた時にキーの値が黙って消えるため。
     /// 値の綴りはここで決める（docs/logging.md の一覧と同じ）。
@@ -204,6 +204,7 @@ mod LogFields {
         case Failure.Transient(transient)                              => Some(transientName(transient))
         case Failure.Permanent(DbErrorKind.Transient(transient))       => Some(transientName(transient))
         case Failure.Permanent(DbErrorKind.RetryExhausted(last, _))    => Some(transientName(last))
+        case Failure.Permanent(DbErrorKind.Rollback)                   => Some("rollback")
         case Failure.Permanent(_)                                      => None
     }
 
