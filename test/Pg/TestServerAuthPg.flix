@@ -18,7 +18,7 @@ mod TestServerAuthPg {
 
     /// 管理 API のエンジンでリクエストを処理し、(status, body の JSON) を返す。認証は Main.runRoute と同じく handle の前に 1 回。
     def handle(pool: Pool, engine: Graphql.Engine, request: HttpRequest): (Int32, Value) \ IO =
-        let config = { cors = Cors.none(), version = "test", jobsToken = None, cacheMaxAge = None };
+        let config = { version = "test" | Server.defaultConfig() };
         let credential = credentialOf(request);
         let auth = PgTestSupport.authenticate(pool, Engine.Admin, credential);
         let response = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handle(config, HealthFake.ok(), credential, auth, request)));

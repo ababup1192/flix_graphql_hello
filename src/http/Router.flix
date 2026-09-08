@@ -90,8 +90,9 @@ pub enum Engine with Eq, Order, ToString {
 /// - params: パターンの Param の名前 → 生の文字列。型付きの id は handler の入口で parse する
 /// - credential: ヘッダから読んだ Credential。middleware（Credentials.wrap）が入れる。キャッシュの可否と MCP のプレビュートークンの断りが見る
 /// - auth: 認証の結果（認証済みユーザーか、断る理由）。エンジンのある行では Main.runRoute がプロジェクトと同じ Tx で決めて入れる
+/// - contentVersion: プロジェクトの版（content_version）。コンテンツ API の匿名の GET だけ Main.runRoute が認証と同じ Tx で読んで入れる（ETag 用）。それ以外は None
 ///
-pub type alias RouteRequest = { request = HttpRequest, params = Map[String, String], credential = Credential, auth = Result[Rejection, Authenticated] }
+pub type alias RouteRequest = { request = HttpRequest, params = Map[String, String], credential = Credential, auth = Result[Rejection, Authenticated], contentVersion = Option[Int64] }
 
 ///
 /// 1 ルートの処理。

@@ -38,7 +38,7 @@ mod TestRouter {
 
     /// 一致した行の handler を呼んだボディ。
     def bodyOf(matched: Match[ef]): String \ ef = match matched {
-        case Match.Found(found, params) => (found#handle)({ request = { version = "HTTP/1.1", method = "GET", path = "/", headers = Nil, body = "" }, params = params, credential = Credential.Missing, auth = Ok(Authentication.anonymous()) })#body
+        case Match.Found(found, params) => (found#handle)({ request = { version = "HTTP/1.1", method = "GET", path = "/", headers = Nil, body = "" }, params = params, credential = Credential.Missing, auth = Ok(Authentication.anonymous()), contentVersion = None })#body
         case _                          => bug!("一致していません")
     }
 
@@ -142,7 +142,7 @@ mod TestRouter {
     /// withParams はパスの params を足し、同じ名前はパスが勝つ。
     @Test
     def testRouterWithParams(): Unit \ Assert =
-        let routeRequest = { request = { version = "HTTP/1.1", method = "GET", path = "/", headers = Nil, body = "" }, params = Map#{ "projectSlug" => "from-host", "other" => "x" }, credential = Credential.Missing, auth = Ok(Authentication.anonymous()) };
+        let routeRequest = { request = { version = "HTTP/1.1", method = "GET", path = "/", headers = Nil, body = "" }, params = Map#{ "projectSlug" => "from-host", "other" => "x" }, credential = Credential.Missing, auth = Ok(Authentication.anonymous()), contentVersion = None };
         Assert.assertEq(expected = Map#{ "projectSlug" => "shop", "other" => "x", "entryId" => "e1" },
             Router.withParams(Map#{ "projectSlug" => "shop", "entryId" => "e1" }, routeRequest)#params)
 

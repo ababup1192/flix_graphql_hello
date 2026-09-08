@@ -42,7 +42,7 @@ mod TestServer {
     ///
     /// 管理画面のオリジンだけ許す設定。
     ///
-    def adminConfig(): ServerConfig = { cors = { allowedOrigins = "https://admin.example.com" :: Nil }, version = "dev", jobsToken = None, cacheMaxAge = None }
+    def adminConfig(): ServerConfig = { cors = { allowedOrigins = "https://admin.example.com" :: Nil } | Server.defaultConfig() }
 
     ///
     /// runWithEcho が data に入れて返す形。variables が無いリクエストは空の Obj、operationName が無ければ Null。
@@ -156,7 +156,7 @@ mod TestServer {
     def testServerMcpPrecheckTable(): Unit \ Assert =
         let json = ("Content-Type", "application/json") :: Nil;
         let key = Actor.ApiKey("ci", ApiKeyScope.Read);
-        let routeRequest = (headers, credential, auth) -> { request = requestOf("POST", "/mcp", headers, "{}"), params = Map.empty(), credential = credential, auth = auth };
+        let routeRequest = (headers, credential, auth) -> { request = requestOf("POST", "/mcp", headers, "{}"), params = Map.empty(), credential = credential, auth = auth, contentVersion = None };
         let summarize = outcome -> match outcome {
             case Ok(actor)               => Ok(actor)
             case Err((response, fields)) => Err((response#status, Map.get("error.code", fields) |> Option.flatMap(Value.asStr), Map.get("origin", fields) |> Option.flatMap(Value.asStr)))
@@ -201,16 +201,69 @@ mod TestServer {
              get("/graphql")#status,
              get("/graphql?query=mutation%20%7B%20x%20%7D")#status))
 
-    /// 身元無しで cacheMaxAge があれば public のキャッシュ、鍵付きや cacheMaxAge 無しなら no-store。Vary は常に付く。
+    /// 身元無しで秒数の設定があれば public のキャッシュ、鍵付きや設定無しなら no-store。Vary は常に付く。
     @Test
     def testServerGetCacheControl(): Unit \ Assert =
-        let cached = { cacheMaxAge = Some(60) | Server.defaultConfig() };
+        let cached = { cache = Some(CacheHeaders.defaultPolicy()) | Server.defaultConfig() };
         let headerOf = (config, credential) -> GraphqlFake.runWithEcho(() ->
             serve(config, HealthFake.ok(), credential, { version = "HTTP/1.1", method = "GET", path = "/graphql?query=%7B%20x%20%7D", headers = Nil, body = "" }))#headers
             |> Http.findHeader("Cache-Control");
         Assert.assertEq(
-            expected = (Some("public, max-age=60, s-maxage=60, stale-while-revalidate=60"), Some("private, no-store"), Some("private, no-store")),
+            expected = (Some("public, s-maxage=10, max-age=0, stale-while-revalidate=60"), Some("private, no-store"), Some("private, no-store")),
             (headerOf(cached, Credential.Missing), headerOf(cached, Credential.ApiKey("cms_x")), headerOf(Server.defaultConfig(), Credential.Missing)))
+
+    ///
+    /// GET /graphql に版を渡した時の (status, ETag, cache.status, 本文が空か):
+    ///   匿名・版あり・If-None-Match 無し          → 200、ETag 付き、miss
+    ///   匿名・版あり・If-None-Match が合う        → 304、同じ ETag、hit、本文無し
+    ///   匿名・版あり・If-None-Match が古い版      → 200、新しい ETag、miss
+    ///   匿名・版あり・If-None-Match が * → 304
+    ///   鍵付き・版あり                            → 200、ETag 無し、bypass
+    ///   匿名・版無し                              → 200、ETag 無し、miss
+    ///
+    @Test
+    def testServerGetEtagTable(): Unit \ Assert =
+        let etag7 = CacheHeaders.etagOf(7i64, { queryText = "{ x }", variables = Map.empty(), operationName = None });
+        let etag6 = CacheHeaders.etagOf(6i64, { queryText = "{ x }", variables = Map.empty(), operationName = None });
+        let get = headers -> { version = "HTTP/1.1", method = "GET", path = "/graphql?query=%7B%20x%20%7D", headers = headers, body = "" };
+        let call = (credential, version, headers) -> {
+            let (response, fields) = fst(Log.runWithList(() -> Observe.collect(() ->
+                Server.handleWithVersion(Server.defaultConfig(), HealthFake.ok(), credential, Ok(Authentication.anonymous()), version, get(headers)))));
+            (response#status, Http.findHeader("ETag", response#headers), Map.get("cache.status", fields) |> Option.flatMap(Value.asStr), String.isEmpty(response#body))
+        };
+        let cases = List#{
+            ((Credential.Missing, Some(7i64), Nil),                              (200, Some(etag7), Some("miss"), false)),
+            ((Credential.Missing, Some(7i64), ("If-None-Match", etag7) :: Nil),  (304, Some(etag7), Some("hit"), true)),
+            ((Credential.Missing, Some(7i64), ("If-None-Match", etag6) :: Nil),  (200, Some(etag7), Some("miss"), false)),
+            ((Credential.Missing, Some(7i64), ("If-None-Match", "*") :: Nil),    (304, Some(etag7), Some("hit"), true)),
+            ((Credential.ApiKey("cms_x"), Some(7i64), Nil),                      (200, None, Some("bypass"), false)),
+            ((Credential.Missing, None, Nil),                                    (200, None, Some("miss"), false))
+        };
+        Assert.assertEq(expected = cases |> List.map(snd),
+            GraphqlFake.runWithEcho(() -> cases |> List.map(match ((credential, version, headers), _) -> call(credential, version, headers))))
+
+    /// errors のある応答は no-store で ETag も付けない（失敗を CDN に溜めない）。
+    @Test
+    def testServerGetErrorsNotCached(): Unit \ Assert =
+        let error = Value.Obj(Map#{ "message" => Value.Str("boom") });
+        let response = GraphqlFake.runWithFixedResponse({ data = Value.Null, errors = error :: Nil }, () ->
+            ServerTestKit.quietly(() -> Server.handleWithVersion({ cache = Some(CacheHeaders.defaultPolicy()) | Server.defaultConfig() }, HealthFake.ok(), Credential.Missing, Ok(Authentication.anonymous()), Some(7i64),
+                { version = "HTTP/1.1", method = "GET", path = "/graphql?query=%7B%20x%20%7D", headers = Nil, body = "" })));
+        Assert.assertEq(expected = (200, Some("private, no-store"), None),
+            (response#status, Http.findHeader("Cache-Control", response#headers), Http.findHeader("ETag", response#headers)))
+
+    /// 版が要るのはコンテンツ API の GET で鍵もトークンも無い時だけ。
+    @Test
+    def testServerWantsContentVersionTable(): Unit \ Assert =
+        let routeRequest = (method, credential) -> { request = requestOf(method, "/graphql", Nil, ""), params = Map.empty(), credential = credential, auth = Ok(Authentication.anonymous()), contentVersion = None };
+        let cases = List#{
+            ((Engine.Content, "GET",  Credential.Missing),         true),
+            ((Engine.Content, "POST", Credential.Missing),         false),
+            ((Engine.Content, "GET",  Credential.ApiKey("cms_x")), false),
+            ((Engine.Admin,   "GET",  Credential.Missing),         false)
+        };
+        Assert.assertEq(expected = cases |> List.map(snd),
+            cases |> List.map(match ((engine, method, credential), _) -> Server.wantsContentVersion(engine, routeRequest(method, credential))))
 
     /// 読むだけかの判定: 無名・query・fragment 付きは読む、mutation / subscription は書く。文字列とコメントの中の語は見ない。
     @Test
@@ -352,7 +405,7 @@ mod TestServer {
         let slugOf = (baseDomain, path, host) -> Observe.ignore(() ->
             Server.wrapProjectFromHost(baseDomain, Server.dispatch(table, (_, routeRequest) ->
                 { status = 200, headers = Nil, body = Map.get(Router.projectSlugParam(), routeRequest#params) |> Option.getWithDefault("") }))
-                ({ request = { version = "HTTP/1.1", method = "GET", path = path, headers = ("Host", host) :: Nil, body = "" }, params = Map.empty(), credential = Credential.Missing, auth = Ok(Authentication.anonymous()) })#body);
+                ({ request = { version = "HTTP/1.1", method = "GET", path = path, headers = ("Host", host) :: Nil, body = "" }, params = Map.empty(), credential = Credential.Missing, auth = Ok(Authentication.anonymous()), contentVersion = None })#body);
         Assert.assertEq(expected = ("shop", "business", ""),
             (slugOf(Some("example.com"), "/p/shop/graphql", "consumer.example.com"),
              slugOf(Some("example.com"), "/admin/graphql", "business.example.com"),

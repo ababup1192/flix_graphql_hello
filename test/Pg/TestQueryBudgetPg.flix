@@ -25,8 +25,11 @@ mod TestQueryBudgetPg {
         discard ContentTypes.addField(blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
         List.range(0, authorCount()) |> List.forEach(a -> {
             let author = ContentEntries.create(profiles#id, None, CmsTestKit.entryData(List#{("name", Json.JString("a${a}"))}));
-            List.range(0, entryCount() / authorCount()) |> List.forEach(n ->
-                discard ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("t${a}-${n}")), ("profile", Json.JString(EntryId.text(author#id)))})))
+            List.range(0, entryCount() / authorCount()) |> List.forEach(n -> {
+                let blog = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("t${a}-${n}")), ("profile", Json.JString(EntryId.text(author#id)))}));
+                // 匿名のコンテンツ API（公開中しか読めない）で 50 件が引けるように公開しておく（参照先の profile も一緒に）
+                discard ContentEntries.publish(blog#id, "seed", true)
+            })
         })
 
     /// 管理 API: entries 50 件 × 10 フィールド。
@@ -36,6 +39,26 @@ mod TestQueryBudgetPg {
     /// コンテンツ API: blogs 50 件と参照先の profile。
     def contentListQuery(): String =
         "{ blogs(stage: DRAFT, first: ${entryCount()}) { totalCount nodes { id title profile { id name } } } }"
+
+    /// コンテンツ API（匿名。公開中）: blogs 50 件と参照先の profile。
+    def publishedListQuery(): String =
+        "{ blogs(first: ${entryCount()}) { totalCount nodes { id title profile { id name } } } }"
+
+    ///
+    /// 匿名のコンテンツ API の GET を Main.runRoute と同じ形で測る: 認証と版の読み取りの Tx（304 ならここで終わる）と、
+    /// 実行する時（200）はそれに問い合わせの分を足した物。(304 の属性, 200 の属性と先頭の errors[].message)。
+    ///
+    def measureAnonymous(pool: Pool, engine: Graphql.Engine, queryText: String): ((Log.Fields, Option[String]), (Log.Fields, Option[String])) \ IO =
+        let observed = Ref.fresh(Static, Log.Fields.empty());
+        let observe = fields -> Ref.put(LogFields.mergeCounts(fields, Ref.get(observed)), observed);
+        let (auth, _) = PgTestSupport.locateAnonymousObserved(pool, observe);
+        let notModified = (Ref.get(observed), None);
+        match auth {
+            case Err(rejection) => (notModified, (Ref.get(observed), Some(Rejection.message(rejection))))
+            case Ok(found)      =>
+                let response = Graphql.executeWith(engine, GraphqlTestKit.queryOnly(queryText), { observe = observe | PgTestSupport.contextFor(found#actor, queryText) });
+                (notModified, (Ref.get(observed), GraphqlTestKit.firstMessage(response)))
+        }
 
     /// この Credential で認証してから問い合わせ、認証の Tx と Runner が observe に戻した属性（合算）と先頭の errors[].message を返す。
     /// Context は Main と同じ形（読むだけの文書には先読みの写し）。
@@ -56,11 +79,13 @@ mod TestQueryBudgetPg {
         (name, count("db.statements"), count("db.transactions"), message)
 
     ///
-    /// 4 つの query の SQL の数と Tx の数が上限の中に収まり、エラーは無い。
+    /// 6 つの query の SQL の数と Tx の数が上限の中に収まり、エラーは無い。
     ///   (a) JWT で entries 50 件 × 10 フィールド            実測 12 / 504（認証 7 + 一覧 2 + 版 1 + 型 2。Tx は認証 1 + フィールド 503）
     ///   (b) JWT で contentTypes { name }                     実測 9 / 4（認証 7 本 + 印 + 一覧 1 本。Tx は認証 1 + 一覧 1 + name 2）
     ///   (c) API キー（EDITOR の WRITE）で (a) の一覧          実測 7 / 504
     ///   (d) API キーでコンテンツ API の blogs 50 件と参照先   実測 5 / 254（認証 2 + 一覧 2 + 参照先 1。参照先は Linked から）
+    ///   (e) 匿名のコンテンツ API の GET が 304 で終わる道      認証（印 + 公開範囲 1）+ 版 1 の Tx 1 つ。GraphQL は実行しない
+    ///   (f) 匿名のコンテンツ API の GET が 200（blogs 50 件）  (e) + 一覧と参照先
     ///
     @Test
     def testPgQueryBudget(): Unit \ {IO, Assert} =
@@ -71,11 +96,14 @@ mod TestQueryBudgetPg {
             let ask = PgTestSupport.askOwner(api);
             let typeId = GraphqlTestKit.stringAt(List#{"contentType", "id"}, ask("{ contentType(apiId: \"blogs\") { id } }"));
             let key = Credential.ApiKey(GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, ask("mutation { createApiKey(name: \"ci\", scope: WRITE, role: EDITOR) { key } }")));
+            let (notModified, executed) = measureAnonymous(api#pool, content, publishedListQuery());
             List#{
                 (budget("jwt entries 50x10", measure(api#pool, Engine.Admin, admin, owner, listQuery(typeId))), (16, 510)),
                 (budget("jwt contentTypes name", measure(api#pool, Engine.Admin, admin, owner, "{ contentTypes { name } }")), (12, 5)),
                 (budget("api-key entries 50x10", measure(api#pool, Engine.Admin, admin, key, listQuery(typeId))), (12, 510)),
-                (budget("api-key content blogs 50 + profile", measure(api#pool, Engine.Content, content, key, contentListQuery())), (8, 260))
+                (budget("api-key content blogs 50 + profile", measure(api#pool, Engine.Content, content, key, contentListQuery())), (8, 260)),
+                (budget("anonymous content GET 304", notModified), (4, 1)),
+                (budget("anonymous content GET 200 blogs 50 + profile", executed), (8, 260))
             }
         });
         List.forEach(match ((name, statements, transactions, _), _) -> println("query budget: ${name}: db.statements=${statements} db.transactions=${transactions}"), budgets);

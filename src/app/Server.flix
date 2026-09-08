@@ -4,9 +4,9 @@
 /// - cors: 許すオリジン
 /// - version: /health に出す版（イメージの git の sha など）
 /// - jobsToken: POST /jobs/tick（外部トリガー）を許す X-Jobs-Token の値。None なら閉じる
-/// - cacheMaxAge: コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数（CDN 用）。None なら no-store
+/// - cache: コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数（CDN 用）。None なら no-store
 ///
-pub type alias ServerConfig = { cors = CorsConfig, version = String, jobsToken = Option[String], cacheMaxAge = Option[Int32] }
+pub type alias ServerConfig = { cors = CorsConfig, version = String, jobsToken = Option[String], cache = Option[CachePolicy] }
 
 ///
 /// HTTP リクエストを GraphQL の実行と死活監視に橋渡しするルーティング。ルートは `routes` の表で持つ。
@@ -17,21 +17,21 @@ mod Server {
     ///
     /// CORS 無しの設定。テストと、同一オリジンだけで使うとき。
     ///
-    pub def defaultConfig(): ServerConfig = { cors = Cors.none(), version = "dev", jobsToken = None, cacheMaxAge = None }
+    pub def defaultConfig(): ServerConfig = { cors = Cors.none(), version = "dev", jobsToken = None, cache = None }
 
     ///
     /// ルート表。行を足す時はここに 1 行と、TestServer の `describe` の一覧に 1 行。
     /// `/p/{projectSlug}/...` は書かず、`Router.withProjectPrefix` が Account 以外を複製する。
     ///
     /// - POST /graphql, /admin/graphql, /account/graphql: ボディ {"query": "...", "variables": {...}, "operationName": "..."} を実行して {"data": ..., "errors": [...]} を返す
-    /// - GET /graphql, /admin/graphql ?query=...&variables=...&operationName=...: query だけ（mutation は 405）。コンテンツ API は身元無しなら Cache-Control で CDN に乗せられる
+    /// - GET /graphql, /admin/graphql ?query=...&variables=...&operationName=...: query だけ（mutation は 405）。コンテンツ API は身元無しなら Cache-Control と ETag で CDN に乗せられ、If-None-Match が合えば 304
     /// - GET /health: DB に届けば 200、届かなければ 503。jobs にワーカーの最終実行時刻と待ち・失敗の件数（数えられなければ -1）
     /// - POST /jobs/tick: 外部トリガー。X-Jobs-Token が設定と一致すればワーカーを 1 tick回す（無ければ 404）
     /// - POST /mcp: MCP サーバ（JSON-RPC。tools だけ）。管理 API のエンジンへの GraphQL クライアントとして動く
     ///
     pub def routes(config: ServerConfig, health: Health[ef]): List[Route[{Graphql, Log, Observe, ef}]] =
         Router.route(Method.Post, "/graphql",         Some(Engine.Content), widen(executeBody)) ::
-        Router.route(Method.Get,  "/graphql",         Some(Engine.Content), widen(executeQueryString(config#cacheMaxAge))) ::
+        Router.route(Method.Get,  "/graphql",         Some(Engine.Content), widen(executeQueryString(config#cache))) ::
         Router.route(Method.Post, "/admin/graphql",   Some(Engine.Admin),   widen(executeBody)) ::
         Router.route(Method.Get,  "/admin/graphql",   Some(Engine.Admin),   widen(executeQueryString(None))) ::
         Router.route(Method.Post, "/account/graphql", Some(Engine.Account), widen(executeBody)) ::
@@ -52,9 +52,22 @@ mod Server {
     /// 4xx の理由（error.code / error.message）は Observe に積む。
     ///
     pub def handle(config: ServerConfig, health: Health[ef], credential: Credential, auth: Result[Rejection, Authenticated], request: HttpRequest): HttpResponse \ {Graphql, Log, Observe, ef} =
+        handleWithVersion(config, health, credential, auth, None, request)
+
+    ///
+    /// `handle` に加えて、プロジェクトの版（コンテンツ API の匿名の GET の ETag に入れる物）も呼ぶ側が読んで渡す。
+    ///
+    pub def handleWithVersion(config: ServerConfig, health: Health[ef], credential: Credential, auth: Result[Rejection, Authenticated], contentVersion: Option[Int64], request: HttpRequest): HttpResponse \ {Graphql, Log, Observe, ef} =
         let table = routes(config, health) |> Router.withProjectPrefix;
         let pipeline = Cors.wrap(config#cors, Router.allowedMethods(table), dispatch(table, (found, routeRequest) -> (found#handle)(routeRequest)));
-        pipeline({ request = request, params = Map.empty(), credential = credential, auth = auth })
+        pipeline({ request = request, params = Map.empty(), credential = credential, auth = auth, contentVersion = contentVersion })
+
+    ///
+    /// この行でプロジェクトの版が要るか。コンテンツ API の GET で、鍵もトークンも無い時だけ（ETag を付け、If-None-Match と比べる）。
+    /// Main.runRoute が認証と同じ Tx で 1 本読むかを決めるのに使う。
+    ///
+    pub def wantsContentVersion(engine: Engine, routeRequest: RouteRequest): Bool =
+        engine == Engine.Content and routeRequest#request#method == "GET" and routeRequest#credential == Credential.Missing
 
     ///
     /// 表で振り分ける handler。一致した行は found に渡す（Main はここで engine を見てエンジンを入れる）。
@@ -309,22 +322,46 @@ mod Server {
     ///
     /// GET のクエリ文字列を実行する。query が無ければ 400、mutation / subscription なら 405（GET は読むだけ）。
     /// Credential 無し（鍵もトークンも無い）で errors が無ければ Cache-Control を public にして CDN に乗せ、それ以外は no-store。
+    /// 版（contentVersion）があれば weak な ETag を付け、If-None-Match が合えば GraphQL を実行せずに 304（本文無し）。
+    /// リクエストの行には cache.status（hit = 304 / miss = 200 / bypass = 鍵やトークン付き）を積む。
     ///
     /// WhyNot: Credential 付きの応答をキャッシュしないのは、鍵ごとに違う中身（下書き、非公開プロジェクト）が共有キャッシュから他人に出るため。
     /// Vary で鍵のヘッダを指しても、鍵の値ごとに溜まる事自体を避ける。
     ///
-    def executeQueryString(cacheMaxAge: Option[Int32], routeRequest: RouteRequest): HttpResponse \ {Graphql, Observe} =
-        let credential = routeRequest#credential;
-        // クエリ文字列の形の失敗は 400、mutation は 405、認証に落ちていれば errors[] の 1 件（キャッシュ不可）、通れば実行
+    def executeQueryString(cache: Option[CachePolicy], routeRequest: RouteRequest): HttpResponse \ {Graphql, Observe} =
+        // クエリ文字列の形の失敗は 400、mutation は 405、認証に落ちていれば errors[] の 1 件（キャッシュ不可）、通れば ETag を見て 304 か実行
         match (parseQueryParams(Http.parseQueryString(routeRequest#request#path)), routeRequest#auth) {
             case (Err(message), _) => reject(400, Nil, "bad_request", message)
             case (Ok(graphqlRequest), _) if not isReadOnly(graphqlRequest#queryText) => reject(405, ("Allow", "POST") :: Nil, "method_not_allowed", "GET は query だけです。mutation は POST で送ってください")
             case (Ok(_), Err(rejection)) => rejectGraphql(rejection) |> withNoStore
-            case (Ok(graphqlRequest), Ok(found)) => {
-                    let response = Graphql.execute(graphqlRequest, Context.withActor(found#actor));
-                    { status = 200, headers = ("Cache-Control", cacheControlOf(cacheMaxAge, credential, response)) :: varyHeader() :: Nil, body = JsonValue.toJsonString(toValue(response)) }
-                }
+            case (Ok(graphqlRequest), Ok(found)) => respondQuery(cache, routeRequest, graphqlRequest, found#actor)
         }
+
+    ///
+    /// 認証を通った GET の応答。匿名で版があれば ETag を組み、If-None-Match が合えば 304、合わなければ実行して 200（ETag 付き）。
+    /// 鍵やトークン付きは ETag 無しで実行し、no-store。
+    ///
+    def respondQuery(cache: Option[CachePolicy], routeRequest: RouteRequest, graphqlRequest: GraphqlRequest, actor: Actor): HttpResponse \ {Graphql, Observe} =
+        let credential = routeRequest#credential;
+        // ETag は匿名で版が読めた時だけ（Main.runRoute が読む。Credential 付きなら None）
+        let etag = routeRequest#contentVersion |> Option.filter(_ -> credential == Credential.Missing) |> Option.map(version -> CacheHeaders.etagOf(version, graphqlRequest));
+        match etag {
+            case Some(tag) if CacheHeaders.matches(Http.findHeader("If-None-Match", routeRequest#request#headers), tag) => {
+                noteCache("hit");
+                { status = 304, headers = ("ETag", tag) :: ("Cache-Control", publicOrNoStore(cache)) :: varyHeader() :: Nil, body = "" }
+            }
+            case _ => {
+                let response = Graphql.execute(graphqlRequest, Context.withActor(actor));
+                noteCache(if (credential == Credential.Missing) "miss" else "bypass");
+                // errors があれば no-store で ETag も付けない（失敗を CDN に溜めない）
+                let etagHeaders = etag |> Option.filter(_ -> List.isEmpty(response#errors)) |> Option.map(tag -> ("ETag", tag)) |> Option.toList;
+                { status = 200, headers = ("Cache-Control", cacheControlOf(cache, credential, response)) :: varyHeader() :: etagHeaders, body = JsonValue.toJsonString(toValue(response)) }
+            }
+        }
+
+    /// リクエストの行に cache.status を積む。
+    def noteCache(status: String): Unit \ Observe =
+        Observe.note(Log.Fields.empty() |> Log.Fields.str("cache.status", status))
 
     ///
     /// GET のクエリ文字列（query / variables / operationName）を GraphqlRequest に読む。空の値は無い物と同じ。
@@ -339,17 +376,18 @@ mod Server {
         ) yield { queryText = queryText, variables = variables, operationName = Map.get("operationName", params) |> Option.filter(text -> not String.isEmpty(text)) }
 
     ///
-    /// GET の応答に付ける Cache-Control。Credential 無しで errors が無く、cacheMaxAge があれば public（CDN に乗せる）、それ以外は no-store。
+    /// GET の応答に付ける Cache-Control。Credential 無しで errors が無く、秒数の設定があれば public（CDN に乗せる）、それ以外は no-store。
     ///
-    def cacheControlOf(cacheMaxAge: Option[Int32], credential: Credential, response: GraphqlResponse): String =
-        match cacheMaxAge |> Option.filter(_ -> credential == Credential.Missing and List.isEmpty(response#errors)) {
-            case Some(seconds) => "public, max-age=${seconds}, s-maxage=${seconds}, stale-while-revalidate=${seconds}"
-            case None          => "private, no-store"
-        }
+    def cacheControlOf(cache: Option[CachePolicy], credential: Credential, response: GraphqlResponse): String =
+        publicOrNoStore(cache |> Option.filter(_ -> credential == Credential.Missing and List.isEmpty(response#errors)))
+
+    /// 秒数の設定があれば public、無ければ no-store。
+    def publicOrNoStore(cache: Option[CachePolicy]): String =
+        cache |> Option.map(CacheHeaders.cacheControl) |> Option.getWithDefault(CacheHeaders.noStore())
 
     /// 認証に落ちた GET の応答はキャッシュさせない。
     def withNoStore(response: HttpResponse): HttpResponse =
-        { headers = ("Cache-Control", "private, no-store") :: varyHeader() :: response#headers | response }
+        { headers = ("Cache-Control", CacheHeaders.noStore()) :: varyHeader() :: response#headers | response }
 
     def varyHeader(): (String, String) = ("Vary", "X-Api-Key, X-Preview-Token, Authorization")
 

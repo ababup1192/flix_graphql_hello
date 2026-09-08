@@ -219,6 +219,20 @@ mod PgTestSupport {
             |> sqlOrBug
 
     ///
+    /// Main.runRoute の locate と同じ形で、匿名のコンテンツ API のリクエストを既定のプロジェクトで認証し、同じ Tx でプロジェクトの版を読む
+    /// （コンテンツ API の GET の ETag 用）。この Tx が戻す属性（SQL の数）は observe に。DB の失敗はテストの前提が壊れている。
+    ///
+    pub def locateAnonymousObserved(pool: Pool, observe: Log.Fields -> Unit \ IO): (Result[Rejection, Authenticated], Option[Int64]) \ IO =
+        let scope = Some(ProjectId.default());
+        IdGen.runWithRandom(() -> Time.Clock.runWithIO(() ->
+            DbRunner.withTxObserved(pool, None, observe, () -> {
+                TenantTx.stampTx(scope, Actor.Anonymous);
+                let auth = Authentication.resolve(deps(), Engine.Content, scope, Credential.Missing);
+                (auth, Some(Tenant.runWith(ProjectId.default(), Projects.contentVersion)))
+            })))
+            |> sqlOrBug
+
+    ///
     /// 認証をリクエストに 1 回。既定のプロジェクト（Account はプロジェクト無し）。
     ///
     pub def authenticate(pool: Pool, engine: Engine, credential: Credential): Result[Rejection, Authenticated] \ IO =

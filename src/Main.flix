@@ -14,7 +14,7 @@ import java.lang.Throwable
 /// CMS_DB_MAX_CONNECTIONS（接続プールの上限。既定 10）、CMS_DB_BORROW_TIMEOUT_SECONDS（接続を借りるのを待つ上限。既定 2）、ASSET_*（StorageConfig。省略時は asset 無し）、
 /// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_BASE_DOMAIN（`{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。省略時は /p/ だけ）、
 /// CMS_DEFAULT_PROJECT（プロジェクト slug 無しの時のプロジェクト slug。省略時は default、空ならプロジェクト slug 無しは 404）、CMS_SIGNUP（open / closed）、
-/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（自己回復の停止で実行中の仕事を待つ秒数。既定 15）、CMS_SHUTDOWN_TIMEOUT_SECONDS（SIGTERM で HTTP の接続と仕事を待つ秒数。既定 20。超えたら終了コード 2）、CMS_SELF_HEAL（on / off。プールが壊れたまま戻らない時に自分で終わる。既定 on）、CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（既定 90）、CMS_SELF_HEAL_WARMUP_SECONDS（起動から見送る秒数。既定 300）、CMS_SELF_HEAL_JITTER_SECONDS（複数台が同時に終わらないための上乗せの上限。既定 10）、CMS_CACHE_MAX_AGE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 60、0 で no-store）、
+/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（自己回復の停止で実行中の仕事を待つ秒数。既定 15）、CMS_SHUTDOWN_TIMEOUT_SECONDS（SIGTERM で HTTP の接続と仕事を待つ秒数。既定 20。超えたら終了コード 2）、CMS_SELF_HEAL（on / off。プールが壊れたまま戻らない時に自分で終わる。既定 on）、CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（既定 90）、CMS_SELF_HEAL_WARMUP_SECONDS（起動から見送る秒数。既定 300）、CMS_SELF_HEAL_JITTER_SECONDS（複数台が同時に終わらないための上乗せの上限。既定 10）、CMS_CACHE_S_MAXAGE / CMS_CACHE_MAX_AGE / CMS_CACHE_STALE_WHILE_REVALIDATE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 10 / 0 / 60、s-maxage と max-age が両方 0 なら no-store）、
 /// CMS_MODE=import-microcms（サーバを立てず、CMS_IMPORT_DIR の microCMS のスキーマを写してダミーの entry を CMS_IMPORT_COUNT 件ずつ積んで終わる）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
 /// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health とログの version に出す版。省略時は dev）、CMS_MAX_CONNECTIONS（HTTP の同時接続の上限。超えた接続は 503。既定 256）、
 /// CMS_LOG_LEVEL（trace / debug / info / warn / error / fatal。これより軽い行は出さない。既定 info）
@@ -66,7 +66,7 @@ def start(version: String, sink: Log.Sink): Unit \ {IO, Fs.FileRead, Sys.Exit, S
 /// - auth: ログインの検証（CMS_AUTH）
 /// - defaultProject: CMS_DEFAULT_PROJECT の生の値（省略なら default、空なら無し）
 /// - defaultProjectSlug: 同じ物をログに出す形（既定 default。空なら None）
-/// - server: ルート表に渡す物（CORS / version / CMS_JOBS_TOKEN / CMS_CACHE_MAX_AGE）
+/// - server: ルート表に渡す物（CORS / version / CMS_JOBS_TOKEN / CMS_CACHE_*）
 /// - baseDomain: CMS_BASE_DOMAIN（Host でプロジェクトを選ぶ。空なら None）
 /// - jobsOn: CMS_JOBS が off でない
 /// - jobsDrainSeconds: CMS_JOBS_DRAIN_SECONDS
@@ -98,7 +98,7 @@ def readConfig(version: String): Result[String, EnvConfig] \ {IO, Sys.Env} =
         let app = DbConfig.appFromEnv(owner);
         let db = app |> Option.getWithDefault(owner);
         let defaultProject = Sys.Env.getVar("CMS_DEFAULT_PROJECT");
-        let cacheMaxAge = Sys.Env.getVar("CMS_CACHE_MAX_AGE") |> Option.flatMap(Int32.fromString) |> Option.getWithDefault(60);
+        let cache = CacheHeaders.policyOf(Sys.Env.getVar("CMS_CACHE_S_MAXAGE"), Sys.Env.getVar("CMS_CACHE_MAX_AGE"), Sys.Env.getVar("CMS_CACHE_STALE_WHILE_REVALIDATE"));
         { version = version, mode = Sys.Env.getVar("CMS_MODE"), migrate = Sys.Env.getVar("CMS_MIGRATE"),
           owner = owner, app = app, db = db, pool = DbConfig.poolFromEnv(db), borrowTimeoutMs = DbConfig.borrowTimeoutMsFromEnv(),
           storage = storage, auth = auth,
@@ -107,7 +107,7 @@ def readConfig(version: String): Result[String, EnvConfig] \ {IO, Sys.Env} =
           server = { cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins },
                      version = version,
                      jobsToken = Sys.Env.getVar("CMS_JOBS_TOKEN") |> Option.filter(text -> not String.isEmpty(text)),
-                     cacheMaxAge = if (cacheMaxAge > 0) Some(cacheMaxAge) else None },
+                     cache = cache },
           baseDomain = Sys.Env.getVar("CMS_BASE_DOMAIN") |> Option.filter(text -> not String.isEmpty(text)),
           jobsOn = Sys.Env.getVar("CMS_JOBS") |> Option.getWithDefault("on") != "off",
           jobsDrainSeconds = Sys.Env.getVar("CMS_JOBS_DRAIN_SECONDS") |> Option.flatMap(Int64.fromString) |> Option.getWithDefault(15i64),
@@ -284,7 +284,7 @@ def serveRequest(runtime: Runtime, requestId: String, span: Log.Fields, request:
             |> Cors.wrap(runtime#config#cors, Router.allowedMethods(runtime#routes))
             |> RequestId.wrap(requestId);
     // 実行。Route が Observe に積む属性は extra に入る
-    let response = Observe.runWithRef(extra, () -> pipeline({ request = request, params = Map.empty(), credential = Credential.Missing, auth = Ok(Authentication.anonymous()) }));
+    let response = Observe.runWithRef(extra, () -> pipeline({ request = request, params = Map.empty(), credential = Credential.Missing, auth = Ok(Authentication.anonymous()), contentVersion = None }));
     // リクエストの行を 1 つ出す（status / 所要時間 / 重さ + extra）
     let fields = Ref.get(extra)
         |> LogFields.response(response#status, System.currentTimeMillis() - startedAt, Int32.toInt64(Http.utf8Length(request#body)), Int32.toInt64(Http.utf8Length(response#body)));
@@ -339,18 +339,18 @@ def runRoute(runtime: Runtime, span: Log.Fields, extra: Ref[Log.Fields, Static],
         // エンジンの要らない行（/health、/jobs/tick）。認証もしない
         case None         => Graphql.runWithoutEngine(() -> (found#handle)(routeRequest))
         case Some(engine) =>
-            // プロジェクトを決めて、同じ Tx で認証する
-            match locate(runtime, engine, projectSlug, routeRequest#credential, observeInto(extra)) {
+            // プロジェクトを決めて、同じ Tx で認証する（コンテンツ API の匿名の GET なら ETag 用の版も同じ Tx で読む）
+            match locate(runtime, engine, projectSlug, routeRequest#credential, Server.wantsContentVersion(engine, routeRequest), observeInto(extra)) {
                 case Err(message)              => unavailable(message)
                 case Ok(None)                  => { let message = "プロジェクト '${projectSlug |> Option.getWithDefault("")}' がありません"; Observe.note(Log.Fields.empty() |> LogFields.rejection("no_project", message)); Server.notFound(message) }
-                case Ok(Some((scope, auth)))   => {
+                case Ok(Some(located))         => {
                     // 認証の属性をリクエストの行と、リゾルバに渡す span に足す
-                    let authFields = Authentication.logFields(auth);
+                    let authFields = Authentication.logFields(located#auth);
                     Ref.put(Ref.get(extra) |> Log.Fields.merge(authFields), extra);
                     let contextFields = span |> Log.Fields.merge(routeFields) |> Log.Fields.merge(authFields);
                     // 行の engine に合うエンジンを入れて handler を実行する
-                    match engineOf(runtime, engine, scope) {
-                        case Ok(built)    => runObserved(built, contextFields, extra, () -> (found#handle)({ auth = auth | routeRequest }))
+                    match engineOf(runtime, engine, located#scope) {
+                        case Ok(built)    => runObserved(built, contextFields, extra, () -> (found#handle)({ auth = located#auth, contentVersion = located#contentVersion | routeRequest }))
                         case Err(message) => unavailable(message)
                     }
                 }
@@ -358,23 +358,44 @@ def runRoute(runtime: Runtime, span: Log.Fields, extra: Ref[Log.Fields, Static],
     }
 
 ///
+/// プロジェクトを決めて認証した結果。
+///
+/// - scope: エンジンが見るプロジェクト（Account は None）
+/// - auth: 認証の結果
+/// - contentVersion: プロジェクトの版。wantsVersion で認証が通った時だけ（コンテンツ API の匿名の GET の ETag 用）
+///
+type alias Located = { scope = Option[ProjectId], auth = Result[Rejection, Authenticated], contentVersion = Option[Int64] }
+
+///
 /// プロジェクトを決めて、同じ Tx で認証する。Account はプロジェクトを見ない（scope は None）。
 /// Content / Admin はパスか Host のプロジェクト slug（形が違うか無ければ Ok(None) = 404）、無ければ既定プロジェクト（Ok(None) なら 404）。
-/// プロジェクトが決まったらその RLS の印を置いてから認証する。Err は DB の失敗（503）。
+/// プロジェクトが決まったらその RLS の印を置いてから認証する。wantsVersion なら認証が通った後に同じ Tx でプロジェクトの版を 1 本読む。Err は DB の失敗（503）。
 ///
 /// WhyNot: プロジェクトの解決と認証を別の Tx にしないのは、/p/ と Host の経路で Tx が 2 つになり、接続の借り直しが 1 回増えるため。
-/// 既定プロジェクトの経路は SQL 無しでプロジェクトが決まるので、認証の Tx が 1 つ増えるだけ。
+/// 既定プロジェクトの経路は SQL 無しでプロジェクトが決まるので、認証の Tx が 1 つ増えるだけ。版もここで読めば 304 の道は Tx 1 つで済む。
 ///
 /// WhyNot: IdGen / Clock の handler を withTx の内側に入れないのは、handler の内側で飛んだ JVM の例外が Db.guard を素通りするため（docs/flix-conventions.md）。
 ///
-def locate(runtime: Runtime, engine: Engine, projectSlug: Option[String], credential: Credential, observe: Log.Fields -> Unit \ IO): Result[String, Option[(Option[ProjectId], Result[Rejection, Authenticated])]] \ IO =
+def locate(runtime: Runtime, engine: Engine, projectSlug: Option[String], credential: Credential, wantsVersion: Bool, observe: Log.Fields -> Unit \ IO): Result[String, Option[Located]] \ IO =
     IdGen.runWithRandom(() -> Time.Clock.runWithIO(() ->
         DbRunner.withTxObserved(runtime#pool, None, observe, () ->
             match scopeOf(engine, runtime#defaultProject, projectSlug) {
                 case None        => None
-                case Some(scope) => { TenantTx.stampTx(scope, Actor.Anonymous); Some((scope, Authentication.resolve(runtime#deps, engine, scope, credential))) }
+                case Some(scope) => {
+                    TenantTx.stampTx(scope, Actor.Anonymous);
+                    let auth = Authentication.resolve(runtime#deps, engine, scope, credential);
+                    Some({ scope = scope, auth = auth, contentVersion = contentVersionOf(scope, wantsVersion and Result.isOk(auth)) })
+                }
             })))
         |> Result.mapErr(DbRunner.failureMessage)
+
+///
+/// プロジェクトの版。要る時（コンテンツ API の匿名の GET で認証が通った）だけ 1 本読む。
+///
+def contentVersionOf(scope: Option[ProjectId], wanted: Bool): Option[Int64] \ DbRead = match scope {
+    case Some(projectId) if wanted => Some(Tenant.runWith(projectId, Projects.contentVersion))
+    case _                         => None
+}
 
 ///
 /// エンジンが見るプロジェクト。Account は無し（Some(None)）。Content / Admin はプロジェクト slug から引き、無ければ None（404）。

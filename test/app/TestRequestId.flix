@@ -48,7 +48,7 @@ mod TestRequestId {
     @Test
     def testWrapAddsResponseHeader(): Unit \ Assert =
         let next = _ -> ({ status = 404, headers = ("Allow", "POST") :: Nil, body = "" }: HttpResponse);
-        let response = RequestId.wrap("rid", next)({ request = { version = "HTTP/1.1", method = "GET", path = "/x", headers = Nil, body = "" }, params = Map.empty(), credential = Credential.Missing, auth = Ok(Authentication.anonymous()) });
+        let response = RequestId.wrap("rid", next)({ request = { version = "HTTP/1.1", method = "GET", path = "/x", headers = Nil, body = "" }, params = Map.empty(), credential = Credential.Missing, auth = Ok(Authentication.anonymous()), contentVersion = None });
         Assert.assertEq(expected = (404, ("X-Request-Id", "rid") :: ("Allow", "POST") :: Nil), (response#status, response#headers))
 
 }

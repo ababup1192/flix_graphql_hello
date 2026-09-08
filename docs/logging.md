@@ -65,6 +65,7 @@
 | `job.outcome` | string | ワーカーの行 | `done` / `failed` / `retry` / `delivered` |
 | `detail` | string | ワーカーの行 | `publish e_x`、`HTTP 500`、`接続できませんでした: …` など |
 | `webhook.id` | string | Webhook の行 | Webhook の public_id（管理 API の `Webhook.id`）。消えた Webhook の行には無い |
+| `cache.status` | string | リクエストの行（コンテンツ API の `GET /graphql` で認証が通った物） | `hit`（If-None-Match が ETag に合って 304。GraphQL は実行しない）/ `miss`（匿名で 200）/ `bypass`（鍵やトークン付き。no-store） |
 | `mcp.tool` | string | リクエストの行（`POST /mcp` の tools/call） | ツール名。引数は残さない。MCP の行は別に出さない（1 リクエスト 1 行） |
 | `mcp.outcome` | string | リクエストの行（`POST /mcp` の tools/call） | `ok` / `error`（isError。理由は `error.code`） |
 | `server.address` | string | 起動の行 | bind したアドレス |

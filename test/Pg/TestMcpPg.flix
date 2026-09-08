@@ -12,7 +12,7 @@ mod TestMcpPg {
 
     /// 管理画面のオリジンだけ許す設定。
     def config(): ServerConfig =
-        { cors = { allowedOrigins = "https://admin.example.com" :: Nil }, version = "test", jobsToken = None, cacheMaxAge = None }
+        { cors = { allowedOrigins = "https://admin.example.com" :: Nil }, version = "test" | Server.defaultConfig() }
 
     /// POST /mcp。
     def post(headers: List[(String, String)], body: String): HttpRequest =
