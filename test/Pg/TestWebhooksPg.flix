@@ -26,7 +26,7 @@ mod TestWebhooksPg {
 
     ///
     /// 型を作る（schema.changed）→ フィールド（schema.changed）→ entry を公開（entry.published）→ 取り下げ（entry.unpublished）で 4 件積まれ、新しい順に並ぶ。
-    /// 同じ Webhook 宛は古い順に 1 件ずつなので、相手が 500 なら最古の 1 件だけ attempts 1 で pending に戻り、残りは待つ。次の周では 0 件。
+    /// 同じ Webhook 宛は古い順に 1 件ずつなので、相手が 500 なら最古の 1 件だけ attempts 1 で pending に戻り、残りは待つ。次の tick では 0 件。
     /// 最古を redeliver して 200 なら、同じ tick で 4 件が順に送られ delivered。最後に送られたのは最新の entry.unpublished。
     /// 送ったリクエストには出来事・配信 id・署名が付き、署名は secret から同じ計算で照合できる。
     ///

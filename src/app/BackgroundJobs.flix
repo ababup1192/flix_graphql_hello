@@ -159,7 +159,7 @@ mod BackgroundJobs {
     pub def guarded(sink: Log.Sink, thunk: Unit -> List[String] \ ef): List[String] \ (ef - Log) + IO =
         match attempt(() -> Log.runWith(sink, thunk)) {
             case Ok(messages)     => messages
-            case Err(Ok(message)) => List#{"1 周の途中で例外: ${message}"}
+            case Err(Ok(message)) => List#{"tick の途中で例外: ${message}"}
             case Err(Err(fatal))  => { Log.runWith(sink, () -> Log.Fields.empty() |> Log.exception(fatal) |> Log.fatal("jobs fatal")); throw fatal }
         }
 

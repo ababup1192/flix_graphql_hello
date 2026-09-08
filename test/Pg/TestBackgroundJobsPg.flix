@@ -1,5 +1,5 @@
 ///
-/// バックグラウンドワーカーの 1 周（BackgroundJobs.tick）の回復と掃除を実 PostgreSQL で見る。
+/// バックグラウンドワーカーの 1 tick（BackgroundJobs.tick）の回復と掃除を実 PostgreSQL で見る。
 /// 行の時刻は生 SQL で過去にずらす（時刻を差し込む口が無いため）。
 ///
 mod TestBackgroundJobsPg {
@@ -73,7 +73,7 @@ mod TestBackgroundJobsPg {
         Assert.assertEq(expected = (Nil, true, true, (1i64, 0i64, 1i64, 1i64, true)), outcome)
 
     ///
-    /// 送っている最中に落ちた配信（sending のまま claimed_at が古い）は tick の回復で pending に戻り、同じ周の dispatcher が送り直す
+    /// 送っている最中に落ちた配信（sending のまま claimed_at が古い）は tick の回復で pending に戻り、同じ tick の dispatcher が送り直す
     /// （相手に届かないので attempts が進んで再試行待ち）。拾ったばかりの sending は触らない。
     ///
     ///   d1: sending / attempts 1 / 1 時間前に拾った → 回復 → 送る → pending / attempts 2

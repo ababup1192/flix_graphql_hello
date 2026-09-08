@@ -1,15 +1,15 @@
 ///
-/// BackgroundJobs.guarded: 1 周（tick）が JVM の例外で飛んでもワーカーが死なず、失敗の説明として次の周へ進める。
+/// BackgroundJobs.guarded: 1 tickが JVM の例外で飛んでもワーカーが死なず、失敗の説明として次の tick へ進める。
 /// BackgroundJobs.guardedPart: 予約公開・Webhook の部分が飛んでも、その部分の失敗として残りへ進める。
-/// BackgroundJobs.guardedWatch: 見張りの 1 周が飛んでも Error の行を出して次の周へ進める。
+/// BackgroundJobs.guardedWatch: watch の 1 tickが飛んでも Error の行を出して次の tick へ進める。
 /// BackgroundJobs.shutdown: 停止の行を出してから止める。
-/// BackgroundJobs.nextWaitMs: 1 周が長くても次の周までの間隔が設定どおりになる。
+/// BackgroundJobs.nextWaitMs: 1 tick が長くても次の tickまでの間隔が設定どおりになる。
 ///
 mod TestBackgroundJobs {
 
     import java.lang.VerifyError
 
-    /// 停止は `shutting down` を先に出し、周の途中でなければすぐ `jobs drained`。その後は新しい周を始めない（stopping）。
+    /// 停止は `shutting down` を先に出し、tick の途中でなければすぐ `jobs drained`。その後は新しい tick を始めない（stopping）。
     @Test
     def testShutdownLogsThenStops(): Unit \ {Assert, IO} =
         let state = BackgroundJobs.createState(1i64, None);
@@ -18,7 +18,7 @@ mod TestBackgroundJobs {
             expected = (List#{(Log.Severity.Info, "shutting down"), (Log.Severity.Info, "jobs drained")}, true),
             (records |> List.map(record -> (record#severity, record#message)), Ref.get(state#stopping)))
 
-    /// 普通の周は結果をそのまま返す。
+    /// 普通の tick は結果をそのまま返す。
     @Test
     def testGuardedPassesThrough(): Unit \ {Assert, IO} =
         Assert.assertEq(expected = List#{"a"}, BackgroundJobs.guarded(Log.Sink.silent(), () -> List#{"a"}))
@@ -27,7 +27,7 @@ mod TestBackgroundJobs {
     @Test
     def testGuardedTurnsErrorIntoMessage(): Unit \ {Assert, IO} =
         Assert.assertEq(
-            expected = List#{"1 周の途中で例外: stack map"},
+            expected = List#{"tick の途中で例外: stack map"},
             BackgroundJobs.guarded(Log.Sink.silent(), () -> { discard throw new VerifyError("stack map"); List#{"unreachable"} }))
 
     /// tick の中の run（Net.Http.runWithIO と同じ形）から Log の行を出した後、その run の中で例外が飛んでも受かる。
@@ -35,7 +35,7 @@ mod TestBackgroundJobs {
     @Test
     def testGuardedCatchesInsideInnerRunAfterLog(): Unit \ {Assert, IO} =
         Assert.assertEq(
-            expected = List#{"1 周の途中で例外: after log"},
+            expected = List#{"tick の途中で例外: after log"},
             BackgroundJobs.guarded(Log.Sink.silent(), () -> Tenant.runWith(ProjectId.default(), () -> {
                 Log.info("x", Log.Fields.empty());
                 discard throw new VerifyError("after log");
