@@ -3,7 +3,7 @@
 /// 本番は ofPool（プール・ワーカー・Listener を閉じ込める）、テストは固定の答えを返す値を入れる。
 ///
 /// - checkDb: DB に届くか。届かなければ理由を Err に入れる
-/// - jobsSummary: バックグラウンドワーカーのまとめ（最終実行時刻と待ち・失敗の件数）
+/// - jobsSummary: バックグラウンドワーカーのまとめ（最終実行時刻と待ち・失敗の件数）。checkDb の結果を渡し、届いていない時は件数を数えない（-1）
 /// - runJobs: 外部トリガーから 1 tick回す。失敗した所の説明（空なら全部通った）
 /// - connections: HTTP の同時接続の今の数と上限
 /// - poolStats: DB の接続プールの数字（HTTP の接続数とは別）
@@ -16,7 +16,7 @@
 ///
 pub type alias Health[ef: Eff] = {
     checkDb     = Unit -> Result[String, Unit] \ ef,
-    jobsSummary = Unit -> BackgroundJobs.Summary \ ef,
+    jobsSummary = Result[String, Unit] -> BackgroundJobs.Summary \ ef,
     runJobs     = Unit -> List[String] \ ef,
     connections = Unit -> HttpServer.Connections \ ef,
     poolStats   = Unit -> Pool.PoolStats \ ef,
@@ -103,7 +103,7 @@ mod Health {
     pub def ofPool(pool: Pool, jobs: BackgroundJobs.State, listener: HttpServer.Listener,
                    startedAt: Int64, jobsOn: Bool, heal: Option[SelfHeal.Watch], borrowTimeoutMs: Int32): Health[{IO, Log}] =
         { checkDb     = _ -> pingWithin(pool, borrowTimeoutMs),
-          jobsSummary = _ -> BackgroundJobs.summary(pool, jobs),
+          jobsSummary = db -> BackgroundJobs.summary(pool, jobs, Result.isOk(db)),
           runJobs     = _ -> BackgroundJobs.tick(pool, jobs),
           connections = _ -> HttpServer.connections(listener),
           poolStats   = _ -> Pool.stats(pool),

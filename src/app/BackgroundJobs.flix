@@ -256,11 +256,26 @@ mod BackgroundJobs {
     ///
     pub type alias Summary = { lastTickAt = Option[String], pendingSchedules = Int64, failedSchedules = Int64, pendingDeliveries = Int64, failedDeliveries = Int64 }
 
-    pub def summary(pool: Pool, state: State): Summary \ IO =
-        let counts = DbRunner.withTx(pool, None, () -> (SchedulesQueries.countSchedules(), WebhooksQueries.countDeliveries()));
-        let lastTickAt = Ref.get(state#lastTick) |> Option.map(millis -> Timestamp.toIso8601(Timestamp.fromEpochMillis(millis)));
+    ///
+    /// ワーカーのまとめ。dbReachable（/health の ping の結果）が false なら件数の SQL を出さず -1 にする。
+    ///
+    /// WhyNot: DB に届かない時も件数を引きに行かないのは、withTx の再試行（借り待ち 2 秒 × 3）で /health が ping の分に加えて
+    /// 6 秒以上返らなくなるため（2026-09-08 の実機 E2E で 8.4 秒。README は 2 秒 + 新しい接続 1 本と書いている）。ping が落ちた直後に
+    /// 件数だけ引けても意味が無い。
+    ///
+    pub def summary(pool: Pool, state: State, dbReachable: Bool): Summary \ IO =
+        let counts =
+            if (dbReachable) DbRunner.withTx(pool, None, () -> (SchedulesQueries.countSchedules(), WebhooksQueries.countDeliveries())) |> Result.toOption
+            else None;
+        summaryOf(Ref.get(state#lastTick), counts)
+
+    ///
+    /// 件数の行（予約と配信）を Summary に。無ければ（数えられなかった・数えなかった）件数は -1。
+    ///
+    pub def summaryOf(lastTick: Option[Int64], counts: Option[(Option[SchedulesQueries.CountSchedulesRow], Option[WebhooksQueries.CountDeliveriesRow])]): Summary =
+        let lastTickAt = lastTick |> Option.map(millis -> Timestamp.toIso8601(Timestamp.fromEpochMillis(millis)));
         match counts {
-            case Ok((Some(schedules), Some(deliveries))) =>
+            case Some((Some(schedules), Some(deliveries))) =>
                 { lastTickAt = lastTickAt, pendingSchedules = schedules#pending |> Option.getWithDefault(0i64), failedSchedules = schedules#failed |> Option.getWithDefault(0i64),
                   pendingDeliveries = deliveries#pending |> Option.getWithDefault(0i64), failedDeliveries = deliveries#failed |> Option.getWithDefault(0i64) }
             case _ => { lastTickAt = lastTickAt, pendingSchedules = -1i64, failedSchedules = -1i64, pendingDeliveries = -1i64, failedDeliveries = -1i64 }

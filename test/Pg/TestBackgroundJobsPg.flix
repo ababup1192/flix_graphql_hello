@@ -64,7 +64,7 @@ mod TestBackgroundJobsPg {
             touch("UPDATE webhook_deliveries SET status = 'failed', created_at = now() - interval '10 days' WHERE id = $1", d3);
             let jobs = BackgroundJobs.createState(15i64, None, OutboundHttp.newClient());
             let failures = ServerTestKit.quietly(() -> BackgroundJobs.tick(pool, jobs));
-            let summary = BackgroundJobs.summary(pool, jobs);
+            let summary = BackgroundJobs.summary(pool, jobs, true);
             (failures,
              scheduleIds(pool) == List#{s2, s3},
              deliveryIds(pool, webhookId) == List#{d2, d3},

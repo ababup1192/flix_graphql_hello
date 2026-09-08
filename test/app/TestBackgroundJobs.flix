@@ -60,6 +60,22 @@ mod TestBackgroundJobs {
             expected = List#{(Log.Severity.Info, "ping", false), (Log.Severity.Error, "watch failed", true)},
             Ref.get(records) |> List.reverse |> List.map(record -> (record#severity, record#message, Map.memberOf("error.message", record#fields))))
 
+    /// /health の jobs のまとめ: 件数の行がそろえば数字（無い値は 0）、数えなかった・数えられなかった（DB に届かない）なら -1。lastTickAt は ISO 8601。
+    @Test
+    def testSummaryOfTable(): Unit \ Assert =
+        let counted = Some((Some({ pending = Some(2i64), failed = None }), Some({ pending = None, failed = Some(1i64) })));
+        let cases = List#{
+            ((Some(0i64), counted), (Some("1970-01-01T00:00:00Z"), 2i64, 0i64, 0i64, 1i64)),
+            ((None, None),          (None, -1i64, -1i64, -1i64, -1i64)),
+            ((None, Some((None, None))), (None, -1i64, -1i64, -1i64, -1i64))
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd),
+            cases |> List.map(match ((lastTick, counts), _) -> {
+                let summary = BackgroundJobs.summaryOf(lastTick, counts);
+                (summary#lastTickAt, summary#pendingSchedules, summary#failedSchedules, summary#pendingDeliveries, summary#failedDeliveries)
+            }))
+
     /// 2 秒の周期で、1 周に掛かった時間を引いた分だけ待つ。周期を超えた周（DB が詰まった時）の後は待たない。
     @Test
     def testNextWaitMsTable(): Unit \ Assert =

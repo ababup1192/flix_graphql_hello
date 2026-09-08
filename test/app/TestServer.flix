@@ -311,12 +311,12 @@ mod TestServer {
                  handle({ version = "HTTP/1.1", method = "GET", path = "/health?probe=1", headers = Nil, body = "" })#status)
             }))
 
-    /// DB に届かなければ 503 で、理由を db に入れる。
+    /// DB に届かなければ 503 で、理由を db に入れる。件数は数えない（-1）ので、jobsSummary には checkDb の結果がそのまま渡る。
     @Test
     def testServerHealthFailure(): Unit \ Assert =
         let response = GraphqlFake.runWithEcho(() ->
             serve(Server.defaultConfig(), HealthFake.failing("connection refused"), Credential.Missing, { version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" }));
-        Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }), "pool" => Value.Obj(Map#{ "active" => Value.Int(1), "idle" => Value.Int(2), "waiting" => Value.Int(0), "total" => Value.Int(3), "max" => Value.Int(10) }) }))),
+        Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(-1), "failedSchedules" => Value.Int(-1), "pendingDeliveries" => Value.Int(-1), "failedDeliveries" => Value.Int(-1) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }), "pool" => Value.Obj(Map#{ "active" => Value.Int(1), "idle" => Value.Int(2), "waiting" => Value.Int(0), "total" => Value.Int(3), "max" => Value.Int(10) }) }))),
             (response#status, JsonValue.parse(response#body)))
 
     /// DB に届いても仕事の tick が止まっていれば 503 で、reason に止まった tick を入れる。

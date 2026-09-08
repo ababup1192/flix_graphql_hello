@@ -24,10 +24,10 @@ mod HealthFake {
           stall = _ -> None, heal = _ -> () }
 
     ///
-    /// checkDb が常に message の Err を返す。
+    /// checkDb が常に message の Err を返す。jobsSummary は checkDb の結果をそのまま受けた印に、届いていなければ件数を -1 にする（本物と同じ形）。
     ///
     pub def failing(message: String): Health[{}] =
-        { checkDb = _ -> Err(message) | ok() }
+        { checkDb = _ -> Err(message), jobsSummary = db -> if (Result.isOk(db)) idle() else BackgroundJobs.summaryOf(None, None) | ok() }
 
     ///
     /// DB には届くが、仕事の tick が止まっている。

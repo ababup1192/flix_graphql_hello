@@ -304,6 +304,7 @@ OOM で JVM 自身が落ちる時（`-XX:+ExitOnOutOfMemoryError`）の最後の
 
 **`/health` は DB が落ちている時に `CMS_DB_BORROW_TIMEOUT_SECONDS` ぶん（既定 2 秒）＋ プールを通さない接続を 1 本試すぶんだけ返らない。**
 ping は 1 回だけ打ち、その結果を自己回復の判断と応答の両方で使う（2 回打っていた頃は倍の 10 秒級だった）。
+ping が落ちた時は `jobs` の件数も数えない（`-1`。数えに行くと再試行の借り待ちで 6 秒以上足され、2026-09-08 の実機 E2E では 8.4 秒だった）。
 接続を借りる所で待つので、ping の前に `SET LOCAL statement_timeout` を置いても効かない。もっと短くしたいなら `CMS_DB_BORROW_TIMEOUT_SECONDS=1` にする。
 `/health` の ping は呼び出しごとの上限（`Pool.withConnectionTimeout`）で切るので、プールが満杯で他のリクエストが借り待ちの列に並んでいても、その列の後ろで待ち続ける事は無い（上限で `timeout` の 503）。
 Dockerfile の `HEALTHCHECK --timeout=3s` には収まらない事があるので、余裕を見るなら `--timeout` を伸ばす。

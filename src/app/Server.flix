@@ -148,8 +148,8 @@ mod Server {
         Option.forEach(found -> Observe.note(Log.Fields.empty() |> Log.Fields.int(Health.stallKey(found), Health.stallMs(found))), stall);
         // 503 にする理由（DB に届かない・止まった tick）をリクエストの行にも
         Option.forEach(reason -> Observe.note(Log.Fields.empty() |> Log.Fields.str("reason", reason)), healthReason(db, stall));
-        // 本文に出す値（ワーカーのまとめ・HTTP の接続数・DB のプール）を読む
-        let summary = (health#jobsSummary)();
+        // 本文に出す値（ワーカーのまとめ・HTTP の接続数・DB のプール）を読む。DB に届いていなければ件数は数えない
+        let summary = (health#jobsSummary)(db);
         let connected = (health#connections)();
         let stats = (health#poolStats)();
         // status と理由を足して応答にする
