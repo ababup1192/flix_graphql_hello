@@ -145,21 +145,19 @@ def dispatch(runtime: Runtime, request: HttpRequest): HttpResponse \ IO =
 /// 所要時間はソケットの読み書きを含まない。
 ///
 def serveRequest(runtime: Runtime, requestId: String, span: Log.Fields, request: HttpRequest): HttpResponse \ {IO, Log} =
-    region rc {
-        let extra = Ref.fresh(rc, Log.Fields.empty());
-        let startedAt = System.currentTimeMillis();
-        let pipeline =
-            RequestId.wrap(requestId,
-                Cors.wrap(runtime#config#cors, Router.allowedMethods(runtime#routes),
-                    Server.wrapProjectFromHost(runtime#baseDomain,
-                        Credentials.wrap(tokenHeaderOf(runtime#deps#auth), verifierOf(runtime#deps#auth, runtime#jwks),
-                            Server.dispatch(runtime#routes, (found, routeRequest) -> runRoute(runtime, span, extra, found, routeRequest))))));
-        let response = pipeline({ request = request, params = Map.empty(), credential = Credential.Missing });
-        let fields = Ref.get(extra)
-            |> LogFields.response(response#status, System.currentTimeMillis() - startedAt, Int32.toInt64(Http.utf8Length(request#body)), Int32.toInt64(Http.utf8Length(response#body)));
-        Log.emit({ severity = LogFields.responseSeverity(request#path, response#status, false), message = "request", fields = fields });
-        response
-    }
+    let extra = Ref.fresh(Static, Log.Fields.empty());
+    let startedAt = System.currentTimeMillis();
+    let pipeline =
+        RequestId.wrap(requestId,
+            Cors.wrap(runtime#config#cors, Router.allowedMethods(runtime#routes),
+                Server.wrapProjectFromHost(runtime#baseDomain,
+                    Credentials.wrap(tokenHeaderOf(runtime#deps#auth), verifierOf(runtime#deps#auth, runtime#jwks),
+                        Server.dispatch(runtime#routes, (found, routeRequest) -> runRoute(runtime, span, extra, found, routeRequest))))));
+    let response = pipeline({ request = request, params = Map.empty(), credential = Credential.Missing });
+    let fields = Ref.get(extra)
+        |> LogFields.response(response#status, System.currentTimeMillis() - startedAt, Int32.toInt64(Http.utf8Length(request#body)), Int32.toInt64(Http.utf8Length(response#body)));
+    Log.emit({ severity = LogFields.responseSeverity(request#path, response#status, false, fields), message = "request", fields = fields });
+    response
 
 ///
 /// HttpServer が見た結果のうち、serveRequest が行を出せなかった物（handle が投げた・読めなかった 400 / 413 / 431・503 の reject・書けなかった）を出す。
@@ -182,7 +180,7 @@ def emitServed(served: HttpServer.Served): Unit \ {IO, Log} =
         case Some(error) => Log.exception(error, base)
         case None        => base
     };
-    Log.emit({ severity = LogFields.responseSeverity(served#path, served#status, Option.nonEmpty(served#failure)), message = "request", fields = fields })
+    Log.emit({ severity = LogFields.responseSeverity(served#path, served#status, Option.nonEmpty(served#failure), base), message = "request", fields = fields })
 
 ///
 /// 一致した行を実行する。engine が None ならエンジン無し、Account ならプロジェクトを見ない。
@@ -192,7 +190,7 @@ def emitServed(served: HttpServer.Served): Unit \ {IO, Log} =
 /// WhyNot: エンジンの要らない道（/health、/jobs/tick）でエンジンを組まないのは、型定義が壊れた時に死活監視まで 503 になり、
 /// プロジェクトの SELECT が余分に走るため。
 ///
-def runRoute(runtime: Runtime, span: Log.Fields, extra: Ref[Log.Fields, r], found: Route[{Graphql, Log, Time.Clock.Clock, IO}], routeRequest: RouteRequest): HttpResponse \ {IO, Log, r} =
+def runRoute(runtime: Runtime, span: Log.Fields, extra: Ref[Log.Fields, Static], found: Route[{Graphql, Log, Time.Clock.Clock, IO}], routeRequest: RouteRequest): HttpResponse \ {IO, Log} =
     let projectSlug = Map.get(Router.projectSlugParam(), routeRequest#params);
     let routeFields = Log.Fields.empty()
         |> Log.Fields.str("credential.kind", LogFields.credentialKind(routeRequest#credential))
@@ -216,14 +214,19 @@ def runRoute(runtime: Runtime, span: Log.Fields, extra: Ref[Log.Fields, r], foun
 
 ///
 /// エンジンで Graphql effect を本物の実行にし、時計を入れる。実行ごとに Context に span を入れ（Runner がリゾルバの中の行に付ける）、
-/// 操作の名前と種類、errors[] の code を extra に積む（リクエストの行に乗る）。
+/// 操作の名前と種類、errors[] の code を extra に積む（リクエストの行に乗る）。Runner が決めた身元の属性（user.id / api_key.name、
+/// 検証に落ちた印）は Context の observe で extra に戻す。Runner の側が勝つ（Map.union は左が勝つ）ので、ヘッダから読んだ credential.kind を上書きできる。
 ///
-def runObserved(engine: Graphql.Engine, contextFields: Log.Fields, extra: Ref[Log.Fields, r], thunk: Unit -> HttpResponse \ {Graphql, Log, Time.Clock.Clock, IO}): HttpResponse \ {IO, Log, r} =
+/// WhyNot: observe を effect にしないのは、Runner は graphql-java の Java コールバックの中で動き、effect はそこを越えられないため。
+/// Ref を閉じ込めたラムダは値なので越えられる。
+///
+def runObserved(engine: Graphql.Engine, contextFields: Log.Fields, extra: Ref[Log.Fields, Static], thunk: Unit -> HttpResponse \ {Graphql, Log, Time.Clock.Clock, IO}): HttpResponse \ {IO, Log} =
     run {
         withClock(thunk)
     } with handler Graphql {
         def execute(request, context, resume) = {
-            let response = Graphql.executeWith(engine, request, { log = contextFields | context });
+            let observe = fields -> Ref.put(Map.union(fields, Ref.get(extra)), extra);
+            let response = Graphql.executeWith(engine, request, { log = contextFields, observe = observe | context });
             Ref.put(Ref.get(extra) |> LogFields.graphql(request, response), extra);
             resume(response)
         }

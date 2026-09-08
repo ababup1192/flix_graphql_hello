@@ -2,10 +2,13 @@
 /// リクエストの身元（Credential）から主体（Actor）を決める。Runner が Tx の中で呼ぶ（初回ログインの users の作成と招待の受け入れが同じ Tx に入る）。
 ///
 /// - Bearer: 検証済みの本人（ログインの JWT）。初回なら users を作る
-/// - ApiKey: pepper があれば hash で引き、このプロジェクトの生きた鍵なら scope の主体。それ以外は Anonymous
+/// - ApiKey: pepper があれば hash で引き、このプロジェクトの生きた鍵なら scope の主体。それ以外は Anonymous（log に credential.kind = invalid の印）
 /// - PersonalToken: hash で引き、生きていれば本人（read なら読むだけ）。期限切れ・失効・知らない物は Err（黙って匿名にしない）
-/// - Preview: pepper があれば署名と期限とプロジェクトを確かめ、合えばその entry のプレビュー。それ以外は Anonymous
+/// - Preview: pepper があれば署名と期限とプロジェクトを確かめ、合えばその entry のプレビュー。それ以外は Anonymous（同じ印）
 /// - Missing / Invalid: Anonymous（Invalid は Runner が先に断る）
+///
+/// WhyNot: 知らない鍵を匿名に落としても 401 にしないのは、公開プロジェクトでは鍵が無くても読めるので API の振る舞いとしては匿名で正しいため。
+/// ログでは総当たりと区別が要るので、匿名に落とした理由を印で残す。
 ///
 mod RequestIdentity {
 
@@ -33,13 +36,13 @@ mod RequestIdentity {
         case Credential.ApiKey(raw) =>
             Ok(deps#auth#pepper |> Option.flatMap(pepper -> ApiKeys.resolve(pepper, raw, projectId, Time.Clock.now()))
                 |> Option.map(found -> { actor = Actor.ApiKey(found#name, found#scope), usage = Usage.ApiKeyRow(found#id, projectId), log = Log.Fields.empty() |> LogFields.apiKey(found#name) })
-                |> Option.getWithDefault(anonymous()))
+                |> Option.getWithDefault(rejected()))
         case Credential.PersonalToken(raw) =>
             resolvePersonalToken(deps, raw, (user, login) -> Accounts.actorFor(user, projectId, login))
         case Credential.Preview(raw) =>
             Ok(deps#auth#pepper |> Option.flatMap(pepper -> PreviewTokens.verify(pepper, raw, projectId, Time.Clock.now()))
                 |> Option.map(id -> { actor = Actor.Preview(id), usage = Usage.NotRecorded, log = Log.Fields.empty() |> Log.Fields.str("id", EntryId.text(id)) })
-                |> Option.getWithDefault(anonymous()))
+                |> Option.getWithDefault(rejected()))
         case Credential.Missing    => Ok(anonymous())
         case Credential.Invalid(_) => Ok(anonymous())
     }
@@ -93,5 +96,8 @@ mod RequestIdentity {
         }
 
     def anonymous(): Resolved = { actor = Actor.Anonymous, usage = Usage.NotRecorded, log = Log.Fields.empty() }
+
+    /// 付いていた鍵やトークンが知らない物・死んだ物だった時の匿名。ログに印を残す。
+    def rejected(): Resolved = { actor = Actor.Anonymous, usage = Usage.NotRecorded, log = LogFields.rejectedCredential(Log.Fields.empty()) }
 
 }

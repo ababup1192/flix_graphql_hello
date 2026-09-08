@@ -94,7 +94,8 @@ RICH_TEXT のフィールドは Markdown の文字列で書け、`get_entry` の
 
 業務エラー（FORBIDDEN / NOT_FOUND / CONFLICT / INVALID …）は全部 `tools/call` の result に `isError: true` で、`content[0].text` に
 [error-codes.md](../docs/design/error-codes.md) の `extensions`（code / message / violations / entity / id / expectedVersion / actualVersion）がそのまま JSON で入る。
-protocol error は JSON-RPC の -32700 / -32600 / -32601 / -32602 だけ。壊れたログインの JWT と死んだ PAT は HTTP 401（`WWW-Authenticate: Bearer error="invalid_token"`）、
+protocol error は JSON-RPC の -32700 / -32600 / -32601 / -32602 だけ。壊れたログインの JWT と死んだ PAT は `/mcp` では HTTP 401（`WWW-Authenticate: Bearer error="invalid_token"`。
+GraphQL の経路（`/admin/graphql` など）では 200 で `errors[].extensions.code` が `UNAUTHENTICATED`。どちらもログは warn）、
 Origin ヘッダが付いていて `CMS_CORS_ORIGINS` に無ければ 403（無ければ通す。CLI は Origin を付けない）、プレビュートークンは 400。
 `content[0].text` が 256 KB を超えたら本文だけ切って `structuredContent.truncated: true` が付く。
 `tools/call` は 1 行 JSON（`{"message":"mcp tools/call","mcp.tool":…,"mcp.outcome":"ok","id":…,"credential.kind":"api-key","duration_ms":…,"request.id":…}`）でログに出る。引数は残さない（キーは [docs/logging.md](../docs/logging.md)）。

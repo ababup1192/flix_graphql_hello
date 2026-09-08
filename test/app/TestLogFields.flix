@@ -65,23 +65,36 @@ mod TestLogFields {
             Fields.empty() |> LogFields.response(200, 12i64, 3i64, 34i64) |> Map.toList)
 
     /// 重さ: 2xx / 4xx は Info、401 / 403 / 503 は Warn、5xx と例外は Error、/health の 2xx だけ Debug（/p/x/health も）。
+    /// 200 でも credential.kind が invalid か graphql.error_codes に UNAUTHENTICATED があれば Warn（FORBIDDEN だけ・生きた鍵は Info）。
     @Test
     def testResponseSeverityTable(): Unit \ Assert =
+        let none = Fields.empty();
         let cases = List#{
-            (("/graphql", 200, false),      Severity.Info),
-            (("/graphql", 404, false),      Severity.Info),
-            (("/graphql", 400, false),      Severity.Info),
-            (("/admin/graphql", 401, false), Severity.Warn),
-            (("/admin/graphql", 403, false), Severity.Warn),
-            (("/graphql", 503, false),      Severity.Warn),
-            (("/graphql", 500, false),      Severity.Error),
-            (("/graphql", 200, true),       Severity.Error),
-            (("/health", 200, false),       Severity.Debug),
-            (("/p/shop/health", 200, false), Severity.Debug),
-            (("/health", 503, false),       Severity.Warn),
-            (("-", 400, false),             Severity.Info)
+            (("/graphql", 200, false, none),      Severity.Info),
+            (("/graphql", 404, false, none),      Severity.Info),
+            (("/graphql", 400, false, none),      Severity.Info),
+            (("/admin/graphql", 401, false, none), Severity.Warn),
+            (("/admin/graphql", 403, false, none), Severity.Warn),
+            (("/graphql", 503, false, none),      Severity.Warn),
+            (("/graphql", 500, false, none),      Severity.Error),
+            (("/graphql", 200, true, none),       Severity.Error),
+            (("/health", 200, false, none),       Severity.Debug),
+            (("/p/shop/health", 200, false, none), Severity.Debug),
+            (("/health", 503, false, none),       Severity.Warn),
+            (("-", 400, false, none),             Severity.Info),
+            (("/admin/graphql", 200, false, none |> Fields.str("credential.kind", "invalid")),                        Severity.Warn),
+            (("/admin/graphql", 200, false, none |> Fields.strs("graphql.error_codes", List#{"UNAUTHENTICATED"})),     Severity.Warn),
+            (("/admin/graphql", 200, false, none |> Fields.strs("graphql.error_codes", List#{"FORBIDDEN"})),           Severity.Info),
+            (("/admin/graphql", 200, false, none |> Fields.str("credential.kind", "api-key")),                        Severity.Info)
         };
-        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match ((path, status, failed), _) -> LogFields.responseSeverity(path, status, failed)))
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match ((path, status, failed, fields), _) -> LogFields.responseSeverity(path, status, failed, fields)))
+
+    /// 検証に落ちた印は credential.kind を invalid にする（ヘッダから読んだ種類を上書き）。
+    @Test
+    def testRejectedCredential(): Unit \ Assert =
+        Assert.assertEq(
+            expected = List#{("credential.kind", Value.Str("invalid"))},
+            Fields.empty() |> Fields.str("credential.kind", "api-key") |> LogFields.rejectedCredential |> Map.toList)
 
     // ---- GraphQL の境界 ----
 

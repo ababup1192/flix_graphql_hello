@@ -48,6 +48,12 @@ mod LogFields {
         fields |> Fields.str("api_key.name", name)
 
     ///
+    /// 付いていた鍵・トークンが検証に落ちた印。Runner が決めた後の身元の種類で、ヘッダから読んだ種類を上書きする。
+    ///
+    pub def rejectedCredential(fields: Fields): Fields =
+        fields |> Fields.str("credential.kind", "invalid")
+
+    ///
     /// 応答の行。ステータス・所要時間・ボディの大きさ。
     ///
     pub def response(status: Int32, elapsedMs: Int64, requestBytes: Int64, responseBytes: Int64, fields: Fields): Fields =
@@ -59,12 +65,23 @@ mod LogFields {
 
     ///
     /// リクエストの行の重さ。5xx か例外は Error、401 / 403 / 503 は Warn、/health の 2xx は Debug、それ以外は Info。
+    /// 認証に落ちた物（`credential.kind` が invalid、`graphql.error_codes` に UNAUTHENTICATED）は HTTP が 200 でも Warn。
     ///
-    pub def responseSeverity(path: String, status: Int32, failed: Bool): Severity =
+    pub def responseSeverity(path: String, status: Int32, failed: Bool, fields: Fields): Severity =
         if (failed or status >= 500 and status != 503) Severity.Error
         else if (status == 401 or status == 403 or status == 503) Severity.Warn
+        else if (authenticationFailed(fields)) Severity.Warn
         else if (status < 300 and String.endsWith(suffix = "/health", path)) Severity.Debug
         else Severity.Info
+
+    def authenticationFailed(fields: Fields): Bool =
+        Map.get("credential.kind", fields) |> Option.flatMap(Value.asStr) == Some("invalid")
+            or (Map.get("graphql.error_codes", fields) |> Option.map(codes -> hasCode("UNAUTHENTICATED", codes)) |> Option.getWithDefault(false))
+
+    def hasCode(code: String, codes: Value): Bool = match codes {
+        case Value.List(items) => List.exists(item -> Value.asStr(item) == Some(code), items)
+        case _                 => false
+    }
 
     // ---- GraphQL ----
 

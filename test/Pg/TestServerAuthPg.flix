@@ -63,6 +63,54 @@ mod TestServerAuthPg {
                 Some("認証に失敗しました: JWT は無し")),
             outcome)
 
+    /// Runner が Context の observe に戻した属性を集めて問い合わせる。戻り値は (observe に来た属性, errors[].code)。
+    def askObserved(engine: Graphql.Engine, credential: Credential, queryText: String): (Log.Fields, Option[String]) \ IO =
+        let observed = Ref.fresh(Static, Log.Fields.empty());
+        let context = { observe = fields -> Ref.put(Map.union(fields, Ref.get(observed)), observed) | Context.withCredential(credential) };
+        let response = Graphql.executeWith(engine, GraphqlTestKit.queryOnly(queryText), context);
+        (Ref.get(observed), GraphqlTestKit.firstErrorField("extensions", response) |> Value.field("code") |> Value.asStr)
+
+    ///
+    /// Runner が observe に戻す身元の属性と、それで決まるリクエストの行の重さ:
+    ///   知らない鍵                → credential.kind = invalid、200 でも Warn
+    ///   editor の鍵              → api_key.name = ci、Info
+    ///   死んだ PAT（失効）        → credential.kind = invalid、UNAUTHENTICATED、Warn
+    ///   owner（ログインの JWT） → user.id、Info
+    ///
+    @Test
+    def testPgRunnerObservesIdentityForRequestLog(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withPool(pool -> {
+            PgTestSupport.seed(() -> ());
+            let deps = PgTestSupport.deps();
+            let admin = AdminSchema.make(deps, AdminRunner.make(pool, deps, ProjectId.default()));
+            let account = AccountSchema.make(deps, AccountRunner.make(pool, deps));
+            let owner = PgTestSupport.askOwner(admin);
+            let accountOwner = PgTestSupport.askAs(account, PgTestSupport.ownerCredential());
+            let key = GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, owner("mutation { createApiKey(name: \"ci\", scope: WRITE, role: EDITOR) { key } }"));
+            let created = accountOwner("mutation { createPersonalAccessToken(name: \"cli\", scope: WRITE) { id token } }");
+            let patId = GraphqlTestKit.stringAt(List#{"createPersonalAccessToken", "id"}, created);
+            let pat = GraphqlTestKit.stringAt(List#{"createPersonalAccessToken", "token"}, created);
+            discard accountOwner("mutation { revokePersonalAccessToken(id: \"${patId}\") }");
+            let engine = GraphqlTestKit.engineOrBug(admin);
+            let ownerPublicId = GraphqlTestKit.stringAt(List#{"me", "id"}, owner("{ me { id } }"));
+            List#{Credential.ApiKey("cms_unknown"), Credential.ApiKey(key), Credential.PersonalToken(pat), PgTestSupport.ownerCredential()}
+                |> List.map(credential -> {
+                    let (fields, code) = askObserved(engine, credential, "{ me { id } }");
+                    let withCodes = fields |> Log.Fields.opt("graphql.error_codes", code);
+                    (Map.toList(fields), LogFields.responseSeverity("/admin/graphql", 200, false, withCodes))
+                })
+                |> (found -> (ownerPublicId, found))
+        });
+        let (ownerPublicId, found) = outcome;
+        Assert.assertEq(
+            expected = List#{
+                (List#{("credential.kind", Value.Str("invalid"))}, Log.Severity.Warn),
+                (List#{("api_key.name", Value.Str("ci"))},         Log.Severity.Info),
+                (List#{("credential.kind", Value.Str("invalid"))}, Log.Severity.Warn),
+                (List#{("user.id", Value.Str(ownerPublicId))},     Log.Severity.Info)
+            },
+            found)
+
     /// HTTP の応答の body の errors[0].message。errors が無ければ None。
     def firstErrorMessage(body: Value): Option[String] = match Value.field("errors", body) {
         case Value.List(first :: _) => Value.field("message", first) |> Value.asStr

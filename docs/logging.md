@@ -34,9 +34,9 @@
 | `http.request.body.size` | int | リクエストの行 | UTF-8 のバイト数 |
 | `http.response.body.size` | int | リクエストの行 | UTF-8 のバイト数 |
 | `project` | string | リクエストの行、リゾルバの中の行 | プロジェクト slug（パス・Host・既定） |
-| `credential.kind` | string | リクエストの行、MCP の行、リゾルバの中の行 | `jwt` / `api-key` / `pat` / `preview` / `anonymous` / `invalid` |
-| `user.id` | string | リゾルバの中の行 | 本人の public_id（email は出さない） |
-| `api_key.name` | string | リゾルバの中の行 | 鍵の名前（鍵は出さない） |
+| `credential.kind` | string | リクエストの行、MCP の行、リゾルバの中の行 | `jwt` / `api-key` / `pat` / `preview` / `anonymous` / `invalid`。ヘッダから読んだ種類。Runner が知らない鍵・合わないプレビュートークン・死んだ PAT を `invalid` に上書きする |
+| `user.id` | string | リクエストの行、リゾルバの中の行 | 本人の public_id（email は出さない） |
+| `api_key.name` | string | リクエストの行、リゾルバの中の行 | 鍵の名前（鍵は出さない） |
 | `graphql.operation.type` | string | リクエストの行 | `query` / `mutation` / `subscription` |
 | `graphql.operation.name` | string | リクエストの行 | operationName か文書の操作の名前。無ければ付かない |
 | `graphql.error_codes` | string[] | リクエストの行 | `errors[].extensions.code` の一覧（重複無し）。graphql-java の検証エラーは `classification`。業務エラーの率がこれで見える |
@@ -63,7 +63,7 @@
 | severity | 何を |
 |---|---|
 | error | 5xx、handle の例外、Webhook の最後の失敗、予約公開の失敗、リゾルバの DB の失敗（INTERNAL）、ワーカーの 1 周の失敗 |
-| warn | 401 / 403、限界の 503、Webhook の再試行、jobs off、所有者で DB に繋ぐ |
+| warn | 401 / 403、知らない鍵・死んだ PAT（HTTP は 200 でも `credential.kind: invalid` か `graphql.error_codes` に `UNAUTHENTICATED`）、限界の 503、Webhook の再試行、jobs off、所有者で DB に繋ぐ |
 | info | 2xx / 4xx のリクエストの行（404 / 400 はユーザーの正常な失敗）、job の done / delivered、MCP の tools/call、起動 |
 | debug | `/health` の 2xx（外形監視で 1 日 1.4k 行。集計を汚さない） |
 | fatal | 起動の失敗（この後 exit 1）、OutOfMemoryError |
@@ -74,7 +74,8 @@
 
 - リクエスト: 接続のスレッドの入口（`Main.dispatch`）で `Log.runWith(sink)` を入れ直し、`request.id` / `cf.ray` / method / path の span を張る。
   リクエストの行は処理の後に `Main.serveRequest` が出す。HttpServer が見た失敗（handle の例外、読めない 400 / 413 / 431、混雑の 503、書けなかった）は `onServed` から別に出る（request.id は無い）
-- リゾルバの中: Runner が `deps#log` で入れ直し（graphql-java の Java コールバックの中なので dispatch の handler は届かない）、Context の span に `user.id` / `api_key.name` を足す。今出るのは DB の失敗（`field failed`）だけ
+- リゾルバの中: Runner が `deps#log` で入れ直し（graphql-java の Java コールバックの中なので dispatch の handler は届かない）、Context の span に `user.id` / `api_key.name` を足す。今出るのは DB の失敗（`field failed`）だけ。
+  同じ属性（と検証に落ちた印）は Context の `observe` でリクエストの行にも戻す（Ref を閉じ込めた関数の値。Java のコールバックの中から effect は届かない）
 - ワーカー: `BackgroundJobs.runForever` が周ごとに入れ直す。外部トリガー `POST /jobs/tick` はリクエストの span の中で出る
 - 起動: `main` が全体を包む。`CMS_MODE=import-microcms` のまとめは Log でなく stdout の平文（コマンドの出力）
 

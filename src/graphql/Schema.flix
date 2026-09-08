@@ -2,8 +2,12 @@
 /// リクエスト単位の情報。すべてのリゾルバに第 1 引数として届く。
 /// credential はリクエストの身元。Runner が Tx の中で主体（Actor）に解決する。
 /// log はリクエストの span（request.id など）。Runner がリゾルバの中の行に付ける。入れるのは Graphql の handler を持つ側（Main）。
+/// observe は Runner が決めた事（user.id / api_key.name、鍵が知らない物だった印）をリクエストの行に戻す口。
 ///
-pub type alias Context = { credential = Credential, log = Log.Fields }
+/// WhyNot: 戻す口が関数の値なのは、リゾルバは graphql-java の Java コールバックの中で呼ばれて effect が外の handler に届かず、
+/// 戻り値は graphql-java がフィールドの値として使うため。値として持ち込んだ物にしか書けない。
+///
+pub type alias Context = { credential = Credential, log = Log.Fields, observe = Log.Fields -> Unit \ IO }
 
 ///
 /// リクエストが持ってきた身元。誰が確かめたかを区別する（Runner が DB の役割と突き合わせて主体にする）。
@@ -29,12 +33,12 @@ mod Context {
     ///
     /// 認証していない Context。JWT 検証を入れるまでは全リクエストがこれ。
     ///
-    pub def anonymous(): Context = { credential = Credential.Missing, log = Map.empty() }
+    pub def anonymous(): Context = { credential = Credential.Missing, log = Map.empty(), observe = _ -> () }
 
     ///
     /// 身元付きの context。
     ///
-    pub def withCredential(credential: Credential): Context = { credential = credential, log = Map.empty() }
+    pub def withCredential(credential: Credential): Context = { credential = credential, log = Map.empty(), observe = _ -> () }
 
 }
 

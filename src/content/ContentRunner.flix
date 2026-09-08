@@ -24,8 +24,8 @@ mod ContentRunner {
                 Tenant.runWith(projectId, () ->
                     Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () -> IdGen.runWithRandom(() ->
                         DbRunner.transact(pool, Some(projectId), () -> match RequestIdentity.resolveForProject(deps, projectId, context#credential) {
-                            case Err(rejection) => Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection)))
-                            case Ok(resolved)   => { guardVisibility(projectId, resolved#actor); Log.withFields(resolved#log, () -> Session.runWith(resolved#actor, () -> DbRunner.guarded(f))) }
+                            case Err(rejection) => { (context#observe)(LogFields.rejectedCredential(Log.Fields.empty())); Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection))) }
+                            case Ok(resolved)   => { (context#observe)(resolved#log); guardVisibility(projectId, resolved#actor); Log.withFields(resolved#log, () -> Session.runWith(resolved#actor, () -> DbRunner.guarded(f))) }
                         }))))));
             DbRunner.toFieldResult(LogFields.requestIdOf(context#log), outcome)
         } with Log.withFields(context#log)
