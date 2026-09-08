@@ -275,13 +275,14 @@ def dispatch(runtime: Runtime, request: HttpRequest): HttpResponse \ IO =
 def serveRequest(runtime: Runtime, requestId: String, span: Log.Fields, request: HttpRequest): HttpResponse \ {IO, Log} =
     let extra = Ref.fresh(Static, Log.Fields.empty());
     let startedAt = System.currentTimeMillis();
-    // middleware の連鎖。外から順に request id → CORS → Host のプロジェクト → Credential → ルート表
+    // middleware の連鎖。内側（ルート表）から外側へ積む。リクエストは下から上の順に通る:
+    // request id → CORS → Host のプロジェクト → Credential → ルート表
     let pipeline =
-        RequestId.wrap(requestId,
-            Cors.wrap(runtime#config#cors, Router.allowedMethods(runtime#routes),
-                Server.wrapProjectFromHost(runtime#baseDomain,
-                    Credentials.wrap(tokenHeaderOf(runtime#deps#auth), verifierOf(runtime#deps#auth, runtime#jwks),
-                        Server.dispatch(runtime#routes, (found, routeRequest) -> runRoute(runtime, span, extra, found, routeRequest))))));
+        Server.dispatch(runtime#routes, (found, routeRequest) -> runRoute(runtime, span, extra, found, routeRequest))
+            |> Credentials.wrap(tokenHeaderOf(runtime#deps#auth), verifierOf(runtime#deps#auth, runtime#jwks))
+            |> Server.wrapProjectFromHost(runtime#baseDomain)
+            |> Cors.wrap(runtime#config#cors, Router.allowedMethods(runtime#routes))
+            |> RequestId.wrap(requestId);
     // 実行。Route が Observe に積む属性は extra に入る
     let response = Observe.runWithRef(extra, () -> pipeline({ request = request, params = Map.empty(), credential = Credential.Missing, auth = Ok(Authentication.anonymous()) }));
     // リクエストの行を 1 つ出す（status / 所要時間 / 重さ + extra）
