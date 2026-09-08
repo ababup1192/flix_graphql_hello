@@ -11,7 +11,7 @@ import java.lang.System
 /// CMS_DB_MAX_CONNECTIONS（接続プールの上限。既定 10）、CMS_DB_BORROW_TIMEOUT_SECONDS（接続を借りるのを待つ上限。既定 2）、ASSET_*（StorageConfig。省略時は asset 無し）、
 /// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_BASE_DOMAIN（`{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。省略時は /p/ だけ）、
 /// CMS_DEFAULT_PROJECT（プロジェクト slug 無しの時のプロジェクト slug。省略時は default、空ならプロジェクト slug 無しは 404）、CMS_SIGNUP（open / closed）、
-/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（自己回復の停止で実行中の仕事を待つ秒数。既定 15）、CMS_SHUTDOWN_TIMEOUT_SECONDS（SIGTERM で HTTP の接続と仕事を待つ秒数。既定 20。超えたら終了コード 2）、CMS_SELF_HEAL（on / off。プールが壊れたまま戻らない時に自分で終わる。既定 on）、CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（既定 90）、CMS_SELF_HEAL_WARMUP_SECONDS（起動から見送る秒数。既定 300）、CMS_CACHE_MAX_AGE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 60、0 で no-store）、
+/// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（自己回復の停止で実行中の仕事を待つ秒数。既定 15）、CMS_SHUTDOWN_TIMEOUT_SECONDS（SIGTERM で HTTP の接続と仕事を待つ秒数。既定 20。超えたら終了コード 2）、CMS_SELF_HEAL（on / off。プールが壊れたまま戻らない時に自分で終わる。既定 on）、CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（既定 90）、CMS_SELF_HEAL_WARMUP_SECONDS（起動から見送る秒数。既定 300）、CMS_SELF_HEAL_JITTER_SECONDS（複数台が同時に終わらないための上乗せの上限。既定 10）、CMS_CACHE_MAX_AGE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 60、0 で no-store）、
 /// CMS_MODE=import-microcms（サーバを立てず、CMS_IMPORT_DIR の microCMS のスキーマを写してダミーの entry を CMS_IMPORT_COUNT 件ずつ積んで終わる）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
 /// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health とログの version に出す版。省略時は dev）、CMS_MAX_CONNECTIONS（HTTP の同時接続の上限。超えた接続は 503。既定 256）、
 /// CMS_LOG_LEVEL（trace / debug / info / warn / error / fatal。これより軽い行は出さない。既定 info）
@@ -125,14 +125,15 @@ def serve(version: String, sink: Log.Sink, started: Started): Unit \ {IO, Sys.En
 /// プールが壊れたまま戻らないかを見張る物。CMS_SELF_HEAL=off なら None（見張らない）。
 ///
 def healWatch(started: Started): Option[SelfHeal.Watch] \ {IO, Sys.Env} =
-    SelfHeal.fromEnv(healJitterMs())
+    SelfHeal.fromEnv(healJitterFraction())
         |> Option.map(settings -> SelfHeal.createWatch(settings, System.currentTimeMillis(), started#dbConnection))
 
 ///
-/// 複数台が同じ時刻に自分を終わらせないための上乗せ（0〜30 秒）。プロセスごとに 1 回だけ決める。
+/// 複数台が同じ時刻に自分を終わらせないための上乗せの割合（0.0〜1.0）。プロセスごとに 1 回だけ引く。
+/// 秒に直すのは SelfHeal（上限は CMS_SELF_HEAL_JITTER_SECONDS）。
 ///
-def healJitterMs(): Int64 \ IO =
-    Math.Random.runWithIO(() -> Float64.clampToInt64(min = 0i64, max = 30000i64, nanValue = 0i64, Math.Random.randomFloat64() * 30000.0))
+def healJitterFraction(): Float64 \ IO =
+    Math.Random.runWithIO(() -> Math.Random.randomFloat64())
 
 ///
 /// 起動後にリクエストごとに使う物の束。

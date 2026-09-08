@@ -98,7 +98,7 @@ mod TestSelfHeal {
         };
         Assert.assertEq(
             expected = cases |> List.map(snd),
-            cases |> List.map(match ((mode, seconds), _) -> SelfHeal.settingsFrom(mode, seconds, None, 0i64) |> Option.map(found -> found#minUnhealthyMs)))
+            cases |> List.map(match ((mode, seconds), _) -> SelfHeal.settingsFrom(mode, seconds, None, None, 0.0) |> Option.map(found -> found#minUnhealthyMs)))
 
     /// warmup は CMS_SELF_HEAL_WARMUP_SECONDS（無い・数字でない・0 以下なら既定の 300 秒）。
     @Test
@@ -112,6 +112,26 @@ mod TestSelfHeal {
         };
         Assert.assertEq(
             expected = cases |> List.map(snd),
-            cases |> List.map(match (warmup, _) -> SelfHeal.settingsFrom(None, None, warmup, 0i64) |> Option.map(found -> found#warmupMs)))
+            cases |> List.map(match (warmup, _) -> SelfHeal.settingsFrom(None, None, warmup, None, 0.0) |> Option.map(found -> found#warmupMs)))
+
+    ///
+    /// jitter は CMS_SELF_HEAL_JITTER_SECONDS（無い・数字でない・0 以下なら既定の 10 秒）を上限に、
+    /// 呼ぶ側の 0.0〜1.0 の乱数を掛けた値。範囲の外の乱数は 0 と上限に丸まる。
+    ///
+    @Test
+    def testJitterFromTable(): Unit \ Assert =
+        let cases = List#{
+            ((None, 0.0),         Some(0i64)),
+            ((None, 1.0),         Some(10000i64)),
+            ((None, 0.5),         Some(5000i64)),
+            ((Some("30"), 1.0),   Some(30000i64)),
+            ((Some("abc"), 1.0),  Some(10000i64)),
+            ((Some("0"), 1.0),    Some(10000i64)),
+            ((None, -1.0),        Some(0i64)),
+            ((None, 2.0),         Some(10000i64))
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd),
+            cases |> List.map(match ((jitter, fraction), _) -> SelfHeal.settingsFrom(None, None, None, jitter, fraction) |> Option.map(found -> found#jitterMs)))
 
 }

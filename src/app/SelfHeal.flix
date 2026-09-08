@@ -23,6 +23,9 @@ mod SelfHeal {
     /// - warmupMs: 起動からこれだけは見送る（起動直後の DB 待ちで終わらないため）
     /// - jitterMs: プロセスごとの上乗せ。複数台が同じ時刻に終わらないようにする
     ///
+    /// WhyNot: jitter の上限を minUnhealthyMs と同じ大きさにしないのは、上限のぶんだけ終わりが遅れるため。
+    /// 複数台が同じ時刻に終わらなければよく、minUnhealthyMs の半分もあれば散る。
+    ///
     pub type alias Settings = { minUnhealthyMs = Int64, warmupMs = Int64, jitterMs = Int64 }
 
     ///
@@ -49,27 +52,37 @@ mod SelfHeal {
     /// warmupMs の既定（秒）。
     pub def defaultWarmupSeconds(): Int64 = 300i64
 
+    /// jitter の上限の既定（秒）。
+    pub def defaultJitterSeconds(): Int64 = 10i64
+
     ///
     /// CMS_SELF_HEAL（on / off。既定 on）・CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（既定 90）・
-    /// CMS_SELF_HEAL_WARMUP_SECONDS（既定 300）から設定を組む。off なら None（見張らない）。数字でない・0 以下は既定の秒数。
+    /// CMS_SELF_HEAL_WARMUP_SECONDS（既定 300）・CMS_SELF_HEAL_JITTER_SECONDS（既定 10）から設定を組む。
+    /// off なら None（見張らない）。数字でない・0 以下は既定の秒数。
+    /// fraction は呼ぶ側が引いた 0.0〜1.0 の乱数で、jitter の上限に掛けてプロセスごとの上乗せにする。
     ///
-    pub def settingsFrom(mode: Option[String], seconds: Option[String], warmupSeconds: Option[String], jitterMs: Int64): Option[Settings] =
+    pub def settingsFrom(mode: Option[String], seconds: Option[String], warmupSeconds: Option[String],
+                         jitterSeconds: Option[String], fraction: Float64): Option[Settings] =
         if (mode == Some("off")) None
         else
             Some({ minUnhealthyMs = positiveSeconds(defaultMinUnhealthySeconds(), seconds) * 1000i64,
                    warmupMs = positiveSeconds(defaultWarmupSeconds(), warmupSeconds) * 1000i64,
-                   jitterMs = jitterMs })
+                   jitterMs = jitterOf(positiveSeconds(defaultJitterSeconds(), jitterSeconds), fraction) })
+
+    /// 上限（秒）と 0.0〜1.0 の乱数から上乗せ（ミリ秒）。範囲の外の乱数は 0 と上限に丸める。
+    def jitterOf(capSeconds: Int64, fraction: Float64): Int64 =
+        Float64.clampToInt64(min = 0i64, max = capSeconds * 1000i64, nanValue = 0i64, fraction * Int64.toFloat64(capSeconds) * 1000.0)
 
     /// 秒を読む。無い・数字でない・0 以下なら fallback。
     def positiveSeconds(fallback: Int64, raw: Option[String]): Int64 =
         raw |> Option.flatMap(Int64.fromString) |> Option.filter(value -> value > 0i64) |> Option.getWithDefault(fallback)
 
     ///
-    /// 環境変数から設定を組む。jitter は呼ぶ側が決めた上乗せ（プロセスごとに 1 回）。
+    /// 環境変数から設定を組む。fraction は呼ぶ側が引いた 0.0〜1.0 の乱数（プロセスごとに 1 回）。
     ///
-    pub def fromEnv(jitterMs: Int64): Option[Settings] \ Sys.Env =
+    pub def fromEnv(fraction: Float64): Option[Settings] \ Sys.Env =
         settingsFrom(Sys.Env.getVar("CMS_SELF_HEAL"), Sys.Env.getVar("CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS"),
-            Sys.Env.getVar("CMS_SELF_HEAL_WARMUP_SECONDS"), jitterMs)
+            Sys.Env.getVar("CMS_SELF_HEAL_WARMUP_SECONDS"), Sys.Env.getVar("CMS_SELF_HEAL_JITTER_SECONDS"), fraction)
 
     ///
     /// 観測の列（古い順）から決める。次の 4 つが全部そろった時だけ Exit。

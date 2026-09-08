@@ -259,7 +259,7 @@ OOM のような事故の後、プロセスは生きているのに接続プー�
 1. 起動から `CMS_SELF_HEAL_WARMUP_SECONDS`（既定 300 秒）経っている（起動直後の DB 待ちで落ちない）
 2. プール経由の ping が `CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS`（既定 90 秒）以上続けて失敗している
 3. その間に、**プールを通さない新しい接続**では DB に届いた（DB 自体が落ちている時は終わらない。終わっても直らないため）
-4. プロセスごとの jitter（0〜30 秒）も過ぎている（複数台が同じ時刻に落ちない）
+4. プロセスごとの jitter（0 秒から `CMS_SELF_HEAL_JITTER_SECONDS`。既定 10 秒）も過ぎている（複数台が同じ時刻に落ちない）
 
 終わる時は `{"severity":"error","message":"self-heal: exiting","reason":...,"db.pool.active":...}` を出し、停止（SIGTERM）と同じ drain をしてから**終了コード 3**。
 compose の `restart: unless-stopped` が起こし直す。`CMS_SELF_HEAL=off` で止められる。
@@ -320,6 +320,7 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_SELF_HEAL` | `on` / `off`。接続プールが壊れたまま戻らない時に自分で終わって再起動させる（下の「自己回復」） | on |
 | `CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS` | プール経由で DB に届かない状態がこれだけ続いたら終わる | 90 |
 | `CMS_SELF_HEAL_WARMUP_SECONDS` | 起動からこれだけは自己回復を見送る（起動直後の DB 待ちで落ちないため） | 300 |
+| `CMS_SELF_HEAL_JITTER_SECONDS` | 終わる時刻をプロセスごとにずらす上乗せの上限（0 秒からこの値の間で 1 回引く） | 10 |
 | `CMS_CACHE_MAX_AGE` | コンテンツ API の GET で、鍵もトークンも無い応答に付ける `Cache-Control` の秒数（CDN 用）。0 で no-store | 60 |
 | `CMS_MAX_CONNECTIONS` | HTTP の同時接続の上限。超えた接続は `503` と `Retry-After: 1` で断る（待ち行列は無い）。今の数は `/health` の `connections` | 256 |
 | `CMS_LOG_LEVEL` | ログの最低 severity（`debug` / `info` / `warn` / `error`）。`debug` で `/health` の行も出る | info |
