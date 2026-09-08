@@ -204,6 +204,7 @@ ASSET_PUBLIC_URL=https://assets.example.com
 |---|---|---|
 | `CMS_DSN` / `CMS_DB_USER` / `CMS_DB_PASSWORD` | PostgreSQL。表の所有者（migration に使う） | 必須 / cms / cms |
 | `CMS_DB_APP_USER` / `CMS_DB_APP_PASSWORD` | リクエストに使うロール。起動時に所有者が作り、表の読み書きだけ許す（RLS が効く）。PASSWORD が無ければ所有者で繋ぐ | cms_app / 無し |
+| `CMS_DB_TIMEOUT_SECONDS` | 接続ごとに DB 側で効かせる時間の上限（秒）。`idle_in_transaction_session_timeout` / `statement_timeout` / `lock_timeout` を同じ値にする（pgjdbc の `options` で接続時に付ける）。アプリの不具合で Tx が開いたままでも DB 側が切る。0 で無効。`CMS_DSN` に `options=` を書いた時はそちらが優先 | 30 |
 | `CMS_MIGRATE` | `apply`（起動時に当てる）か `check`（未適用なら起動しない） | イメージは apply、手元は check |
 | `CMS_CORS_ORIGINS` | 許すオリジン（カンマ区切り） | 無し |
 | `CMS_VERSION` | `/health` に出す版 | イメージのビルド時に git の sha |
@@ -221,4 +222,4 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_MAX_CONNECTIONS` | HTTP の同時接続の上限。超えた接続は `503` と `Retry-After: 1` で断る（待ち行列は無い）。今の数は `/health` の `connections` | 256 |
 | `CMS_BASE_DOMAIN` | `{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。無ければ `/p/{プロジェクト slug}/` だけ | 無し |
 | `CMS_API_KEY_PEPPER` / `CMS_API_KEY_PEPPER_ID` | API キーと PAT のハッシュ、プレビュートークンの署名に混ぜる秘密と版。無ければ鍵と PAT を発行できない | 無し / v1 |
-| `JAVA_OPTS` | JVM の引数 | `-Xss32m -XX:MaxRAMPercentage=70` |
+| `JAVA_OPTS` | JVM の引数。`ExitOnOutOfMemoryError` は OutOfMemoryError で（スレッド 1 本でなく）プロセスごと落として docker に再起動させる | `-Xss32m -XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError` |
