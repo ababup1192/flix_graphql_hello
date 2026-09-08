@@ -30,7 +30,7 @@ mod AdminRunner {
                             Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () ->
                                 DbRunner.transact(pool, Some(projectId), () -> match RequestIdentity.resolveForProject(deps, projectId, credential) {
                                     case Err(rejection) => Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection)))
-                                    case Ok(resolved)   => { RequestIdentity.touch(resolved); Session.runWith(resolved#actor, f) }
+                                    case Ok(resolved)   => { RequestIdentity.touch(resolved); Session.runWith(resolved#actor, () -> DbRunner.guarded(f)) }
                                 }))))));
                 DbRunner.toFieldResult(outcome)
         }

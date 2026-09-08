@@ -32,7 +32,7 @@ mod AccountRunner {
                     IdGen.runWithRandom(() -> Time.Clock.runWithIO(() ->
                         DbRunner.transact(pool, None, () -> match RequestIdentity.resolveForAccount(deps, credential) {
                             case Err(rejection) => Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection)))
-                            case Ok(resolved)   => { RequestIdentity.touch(resolved); Session.runWith(resolved#actor, f) }
+                            case Ok(resolved)   => { RequestIdentity.touch(resolved); Session.runWith(resolved#actor, () -> DbRunner.guarded(f)) }
                         })));
                 DbRunner.toFieldResult(outcome)
         }

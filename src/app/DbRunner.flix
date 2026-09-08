@@ -25,7 +25,11 @@ mod DbRunner {
     /// WhyNot: 例外をそのまま上へ通さないのは、withLazyTx に finally が無く、例外が通り抜けると Tx が開いたまま接続が漏れるため
     /// （test/Pg/TestTxLeakPg が見張る）。
     ///
-    def guarded(thunk: Unit -> a \ ef): a \ ef + IO + DbErr =
+    /// WhyNot: transact の中で 1 度包むだけで済ませないのは、この catch の内側で `run … with handler`（Session.runWith など）を
+    /// 入れると、その中で飛んだ例外は catch を素通りするため（2026-09-08 に実測。effect の操作を外の handler へ投げるだけなら catch は効く）。
+    /// Runner は主体を決めた後、f を直に包む（`Session.runWith(actor, () -> DbRunner.guarded(f))`）。
+    ///
+    pub def guarded(thunk: Unit -> a \ ef): a \ ef + IO + DbErr =
         try {
             thunk()
         } catch {

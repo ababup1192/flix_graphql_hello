@@ -38,6 +38,27 @@ mod TestTxLeakPg {
         Pool.close(pool);
         Assert.assertEq(expected = (Err(true), Ok(1)), (first, second))
 
+    /// Runner と同じ入れ子（IdGen / Tenant / Clock の handler が transact の外、Session が中、f を DbRunner.guarded で直に包む）で、
+    /// effect を使った後に JVM の例外（リゾルバの VerifyError と同じ経路）が飛んでも、DB の失敗として返り、接続が返る。
+    ///
+    /// WhyNot: transact の外側の catch に任せないのは、catch の内側に handler（Session.runWith）が入ると例外が catch を素通りするため（2026-09-08 に実測）。
+    @Test
+    def testPgExceptionAfterEffectsInsideRunnerNestingReturnsConnection(): Unit \ {IO, Assert} =
+        let pool = singlePool();
+        let first = RawSql.runWithAllow(() -> IdGen.runWithRandom(() -> Tenant.runWith(ProjectId.default(), () -> Time.Clock.runWithIO(() ->
+            DbRunner.transact(pool, None, () -> Session.runWith(Actor.System, () -> DbRunner.guarded(() -> {
+                discard Sql.fetch("SELECT 1", Nil);
+                discard IdGen.freshEntryId();
+                discard Tenant.current();
+                discard Time.Clock.now();
+                Session.require(Permission.ReadDraft);
+                Integer.parseInt("boom")
+            })))))))
+            |> Result.mapErr(failure -> String.contains(substr = "NumberFormatException", "${failure}"));
+        let second = borrowAgain(pool);
+        Pool.close(pool);
+        Assert.assertEq(expected = (Err(true), Ok(1)), (first, second))
+
     /// JVM の例外（Java interop が投げる NumberFormatException）が Tx の中で飛んでも、DB の失敗として返り、接続が返る。
     @Test
     def testPgExceptionInsideTxReturnsConnection(): Unit \ {IO, Assert} =
