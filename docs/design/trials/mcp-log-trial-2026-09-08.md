@@ -5,9 +5,9 @@ stdout に出た行を読んだ結果。`CMS_LOG_LEVEL=info`、`CMS_AUTH=dev`、
 
 ## 全体像
 
-- 起動から終了まで **231 行**、全部 JSON（`bin/flix run` が出すコンパイラの平文は `listening` より前だけ。本番の fat jar では出ない）
-- severity: **info 229 / warn 2 / error 0 / debug 0**。warn は Origin 違いの 403 と Webhook の再試行
-- message: `request` 141（200: 119、400: 7、405: 4、404: 4、202: 4、413: 1、403: 1）、`mcp tools/call` 88、`job done` 1、`job retry` 1、`listening` 1
+- 起動から終了まで **233 行**、全部 JSON（`bin/flix run` が出すコンパイラの平文は `listening` より前だけ。本番の fat jar では出ない）
+- severity: **info 229 / warn 4 / error 0 / debug 0**。warn は起動時の「CMS_DB_APP_PASSWORD が無いので所有者で繋ぐ」、Origin 違いの 403、Webhook の再試行 ×2
+- message: `request` 140（200: 119、400: 7、405: 4、404: 4、202: 4、413: 1、403: 1）、`mcp tools/call` 88、`job done` 1、`job retry` 2、`listening` 1、`jobs drained` 1、db の warn 1
 - `/health` は 1 行も出ていない（info では出ない。応答ヘッダの `X-Request-Id` は返る）
 - 出たキー: 一覧（`docs/logging.md`）に無い物は無し。`user.id` / `api_key.name` / `exception.*` / `error.code` / `entity` は今回 1 行も出ていない（リゾルバの中の行は DB の失敗だけなので）
 - MCP のツール別: create_entry 19 ok / 5 error、get_entry 12 / 1、publish 9 / 2、search_entries 7、impact 6、publish_check 5、update_entry 4 / 2、diff_entry 4、whoami 3、unpublish 2 / 1、preview_url 2、delete_entry 1 / 1、restore_version 1、list_types 1
