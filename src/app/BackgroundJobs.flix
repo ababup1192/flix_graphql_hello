@@ -1,8 +1,8 @@
 ///
 /// プロセス内のバックグラウンドワーカー。予約公開と Webhook の tick を定期的に回し、実行中に落ちた行の回復と古い記録の掃除もする。
 /// 同じ tick は外部トリガー（POST /jobs/tick）からも呼べる。どちらから呼ばれても DB のロック（SKIP LOCKED）で二重にはならない。
-/// 停止（SIGTERM）は shutdown hook で受け、新しい仕事を拾うのをやめて実行中の 1 周が終わるまで待つ。
-/// 自己回復の見張り（watchForever）は仕事の周とは別のスレッドで、自分の周期で回る。
+/// 停止（SIGTERM）は shutdown hook で受け、新しい仕事を拾うのをやめて実行中の 1 tickが終わるまで待つ。
+/// 自己回復のwatch（watchForever）は仕事のtickとは別のスレッドで、自分の周期で回る。
 ///
 mod BackgroundJobs {
 
@@ -13,7 +13,7 @@ mod BackgroundJobs {
     /// tick の間隔（ミリ秒）。
     pub def intervalMs(): Int64 = 2000i64
 
-    /// 自己回復の見張りの間隔（ミリ秒）。
+    /// 自己回復のwatchの間隔（ミリ秒）。
     pub def healIntervalMs(): Int64 = 2000i64
 
     /// 実行中のまま残った行を戻すまでの分。
@@ -26,13 +26,13 @@ mod BackgroundJobs {
     ///
     /// ワーカーの状態。/health と停止処理が読む。
     ///
-    /// - lastTick: 最後に 1 周が終わった時刻（UNIX ミリ秒）
-    /// - lastWatch: 見張りのスレッドが最後に 1 周を回した時刻（UNIX ミリ秒）
-    /// - stopping: 停止が始まった。新しい周を始めない
-    /// - inTick: 1 周の途中
-    /// - drainMs: 停止時に実行中の 1 周を待つ上限（ミリ秒。CMS_JOBS_DRAIN_SECONDS）
+    /// - lastTick: 最後に 1 tickが終わった時刻（UNIX ミリ秒）
+    /// - lastWatch: watchのスレッドが最後に 1 tickを回した時刻（UNIX ミリ秒）
+    /// - stopping: 停止が始まった。新しいtickを始めない
+    /// - inTick: 1 tickの途中
+    /// - drainMs: 停止時に実行中の 1 tickを待つ上限（ミリ秒。CMS_JOBS_DRAIN_SECONDS）
     ///
-    /// WhyNot: lastWatch を /health からの step で更新しないのは、この値が指すのは「見張りのスレッドが生きているか」で、
+    /// WhyNot: lastWatch を /health からの step で更新しないのは、この値が指すのは「watchのスレッドが生きているか」で、
     /// リクエストのスレッドが進めた事を混ぜると、死んだスレッドを生きていると読ませてしまうため。
     ///
     pub type alias State = { lastTick = Ref[Option[Int64], Static], lastWatch = Ref[Option[Int64], Static], stopping = Ref[Bool, Static], inTick = Ref[Bool, Static], drainMs = Int64 }
@@ -41,7 +41,7 @@ mod BackgroundJobs {
         { lastTick = Ref.fresh(Static, None), lastWatch = Ref.fresh(Static, None), stopping = Ref.fresh(Static, false), inTick = Ref.fresh(Static, false), drainMs = drainSeconds * 1000i64 }
 
     ///
-    /// 止まらずに回す。失敗はログに出して次の周へ。停止が始まったら抜ける。周ごとに Log を sink で入れ直す（spawn の中なので Main の handler は届かない）。
+    /// 止まらずに回す。失敗はログに出して次のtickへ。停止が始まったら抜ける。tickごとに Log を sink で入れ直す（spawn の中なので Main の handler は届かない）。
     ///
     pub def runForever(pool: Pool, state: State, sink: Log.Sink): Unit \ IO =
         // 停止が始まっていれば 1 行出して抜ける（stopping フラグはラウンドの先頭でだけ見る）
@@ -54,10 +54,10 @@ mod BackgroundJobs {
         }
 
     ///
-    /// 自己回復の見張りだけを healIntervalMs ごとに回す。停止が始まったら抜ける。
+    /// 自己回復のwatchだけを healIntervalMs ごとに回す。停止が始まったら抜ける。
     ///
-    /// WhyNot: 仕事の周（runForever）に相乗りしないのは、DB が止まっている間は 1 周が tick の待ちぶんだけ伸び、
-    /// 観測の粒度が設定より粗くなるため（実験 2 回目で 2 秒のはずが約 17 秒だった）。見張りは別スレッドで自分の周期を持つ。
+    /// WhyNot: 仕事のtick（runForever）に相乗りしないのは、DB が止まっている間は 1 tickが tick の待ちぶんだけ伸び、
+    /// 観測の粒度が設定より粗くなるため（実験 2 回目で 2 秒のはずが約 17 秒だった）。watchは別スレッドで自分の周期を持つ。
     ///
     pub def watchForever(pool: Pool, state: State, heal: Option[SelfHeal.Watch], sink: Log.Sink): Unit \ IO =
         if (Ref.get(state#stopping)) ()
@@ -73,10 +73,10 @@ mod BackgroundJobs {
         }
 
     ///
-    /// 見張りの 1 周を JVM の例外から守る。Throwable が飛んだら Error の行にして次の周へ進める。
+    /// watchの 1 tickを JVM の例外から守る。Throwable が飛んだら Error の行にして次のtickへ進める。
     /// JVM 自体が壊れている物（OutOfMemoryError）はログした上で再送出する。
     ///
-    /// WhyNot: 見張りに網を掛けないままにしないのは、ping や Pool.stats が投げると見張りのスレッドだけが黙って死に、
+    /// WhyNot: watchに網を掛けないままにしないのは、ping や Pool.stats が投げるとwatchのスレッドだけが黙って死に、
     /// /health が `watch stalled` を返すまで 30 秒は誰にも分からないため。
     ///
     pub def guardedWatch(sink: Log.Sink, thunk: Unit -> Unit \ ef): Unit \ (ef - Log) + IO =
@@ -87,17 +87,17 @@ mod BackgroundJobs {
         }
 
     ///
-    /// 次の周まで待つミリ秒。1 周に掛かった時間を間隔から引く。間隔を超えていたら 0（待たずに次へ）。
+    /// 次のtickまで待つミリ秒。1 tickに掛かった時間を間隔から引く。間隔を超えていたら 0（待たずに次へ）。
     ///
     pub def nextWaitMs(intervalMs: Int64, elapsedMs: Int64): Int64 =
         if (elapsedMs >= intervalMs) 0i64 else intervalMs - elapsedMs
 
     ///
-    /// プールが壊れたまま戻らないかを見張り、決まったら自分で終わる。CMS_SELF_HEAL=off なら見張らない。
+    /// プールが壊れたまま戻らないかをwatch、決まったら自分で終わる。CMS_SELF_HEAL=off なら見張らない。
     ///
-    /// 見張りのスレッドと /health の 2 つの経路から呼ぶ。Exit が決まったら、どちらから来ても同じ drain と exit 3 の道に入る（印で 1 回だけ）。
+    /// watchのスレッドと /health の 2 つの経路から呼ぶ。Exit が決まったら、どちらから来ても同じ drain と exit 3 の道に入る（印で 1 回だけ）。
     ///
-    /// WhyNot: 見張りのスレッドだけが判断する形にしないのは、そのスレッドが OOM で死ぬと自己回復が永久に無効になるため。
+    /// WhyNot: watchのスレッドだけが判断する形にしないのは、そのスレッドが OOM で死ぬと自己回復が永久に無効になるため。
     /// リクエストのスレッドは OOM の後も生きている側で、Docker の HEALTHCHECK が /health を叩く限り判断が進む。
     ///
     /// WhyNot: 外部トリガー（POST /jobs/tick）の tick に入れないのは、仕事を回すだけの口が理由でプロセスが終わると、
@@ -132,7 +132,7 @@ mod BackgroundJobs {
         shutdown(state);
         System.exit(3)
 
-    /// 1 周。失敗は Error の行にする（1 周に 1 行ずつ）。
+    /// 1 tick。失敗は Error の行にする（1 tickに 1 行ずつ）。
     def round(pool: Pool, state: State, sink: Log.Sink): Unit \ IO =
         // tick を JVM の例外の catch の中で回し、失敗の説明を集める
         let messages = guarded(sink, () -> tick(pool, state));
@@ -142,7 +142,7 @@ mod BackgroundJobs {
         Ref.put(false, state#inTick)
 
     ///
-    /// 1 周を JVM の例外から守る。Throwable が飛んだら失敗の説明にして返し、次の周へ進める。
+    /// 1 tickを JVM の例外から守る。Throwable が飛んだら失敗の説明にして返し、次のtickへ進める。
     /// JVM 自体が壊れている物（OutOfMemoryError）はログした上で再送出する。Log は sink で try の内側に入れる。
     ///
     /// WhyNot: tick の中の DbRunner に任せないのは、Tx の外（Scheduler / Dispatcher の Java interop や、リゾルバと同じ VerifyError）で
@@ -188,8 +188,8 @@ mod BackgroundJobs {
         }
 
     ///
-    /// 仕事だけの停止。`shutting down` を 1 行出してから新しい周を止め、実行中の 1 周が終わるまで（上限あり）待つ。
-    /// 行を先に出すのは、止めた事が行から分かるようにするため（`jobs stopping` は周の頭でしか判定せず、待っている間は出ない）。
+    /// 仕事だけの停止。`shutting down` を 1 行出してから新しいtickを止め、実行中の 1 tickが終わるまで（上限あり）待つ。
+    /// 行を先に出すのは、止めた事が行から分かるようにするため（`jobs stopping` はtickの頭でしか判定せず、待っている間は出ない）。
     /// SIGTERM の停止は HTTP も待つので `Shutdown.stop` を使う。ここは自己回復（exit 3）の道。
     ///
     pub def shutdown(state: State): Unit \ {IO, Log} =
@@ -198,7 +198,7 @@ mod BackgroundJobs {
         discard drain(state, System.currentTimeMillis() + state#drainMs)
 
     ///
-    /// 実行中の 1 周が終わるか、期限が来るまで待つ。終わっていれば true。
+    /// 実行中の 1 tickが終わるか、期限が来るまで待つ。終わっていれば true。
     ///
     /// WhyNot: 待たずに落ちても回復（claimed_at）で拾い直せるが、Webhook はその間に届いていて二重になりうる。
     /// 数秒待つだけで通常のデプロイではそれが無くなる。
@@ -209,7 +209,7 @@ mod BackgroundJobs {
         else { Thread.sleep(100i64); drain(state, deadline) }
 
     ///
-    /// 回復 → 予約公開 → Webhook の順に 1 周する。失敗した所の説明を返す（空なら全部通った）。停止中なら何もしない。
+    /// 回復 → 予約公開 → Webhook の順に 1 tickする。失敗した所の説明を返す（空なら全部通った）。停止中なら何もしない。
     ///
     pub def tick(pool: Pool, state: State): List[String] \ {IO, Log} =
         if (Ref.get(state#stopping)) Nil

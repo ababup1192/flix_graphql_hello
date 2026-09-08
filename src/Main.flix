@@ -175,13 +175,13 @@ def serve(config: EnvConfig, sink: Log.Sink, started: Started): Unit \ {IO, Sys.
     // リクエストごとに使う物: JWKS のキャッシュ、コンテンツ API のエンジンの置き場
     let jwks = TokenVerifier.createCache();
     let engineCache = ContentEngine.create(deps);
-    // ワーカーの状態と、プールが壊れたまま戻らないかの見張り
+    // ワーカーの状態と、プールが壊れたまま戻らないかのwatch
     let jobs = BackgroundJobs.createState(config#jobsDrainSeconds);
     let heal = healWatch(config);
     region rc {
     // 予約公開と Webhook の配信はプロセス内のワーカーで回す。積むのはリクエストの Tx（outbox）、拾って実行するのはここ
     if (config#jobsOn) spawn BackgroundJobs.runForever(started#pool, jobs, sink) @ rc else Log.warn("jobs off (CMS_JOBS=off): POST /jobs/tick か別の worker で回してください", Log.Fields.empty());
-    // WhyNot: CMS_JOBS=off の時に見張りを止めないのは、接続プールが壊れる事は仕事を回すかどうかと関係が無いため
+    // WhyNot: CMS_JOBS=off の時にwatchを止めないのは、接続プールが壊れる事は仕事を回すかどうかと関係が無いため
     spawn BackgroundJobs.watchForever(started#pool, jobs, heal, sink) @ rc;
     // HTTP を開き、SIGTERM / SIGINT の停止（listen を閉じる → 接続を待つ → 仕事の drain）を組む
     let bind = bindAddress(deps#auth);

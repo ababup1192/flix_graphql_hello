@@ -4,10 +4,10 @@
 ///
 /// - checkDb: DB に届くか。届かなければ理由を Err に入れる
 /// - jobsSummary: バックグラウンドワーカーのまとめ（最終実行時刻と待ち・失敗の件数）
-/// - runJobs: 外部トリガーから 1 周回す。失敗した所の説明（空なら全部通った）
+/// - runJobs: 外部トリガーから 1 tick回す。失敗した所の説明（空なら全部通った）
 /// - connections: HTTP の同時接続の今の数と上限
 /// - poolStats: DB の接続プールの数字（HTTP の接続数とは別）
-/// - stall: 仕事の周か見張りの周が止まっていれば、その理由（止まっていなければ None）
+/// - stall: 仕事のtickかwatchのtickが止まっていれば、その理由（止まっていなければ None）
 /// - heal: checkDb の結果を渡して自己回復の判断を 1 回進める（Exit が決まればこの中でプロセスが終わる）
 ///
 /// WhyNot: effect にしないのは、入力（プール・ワーカー・Listener）が起動時に固定で、読む所が Server の直下なので
@@ -29,7 +29,7 @@ mod Health {
     import java.lang.System
 
     ///
-    /// 止まっている周。持っている値は、最後に回ってからの経過（ミリ秒）。
+    /// 止まっているtick。持っている値は、最後に回ってからの経過（ミリ秒）。
     ///
     pub enum Stall with Eq, ToString {
         case Jobs(Int64)
@@ -55,13 +55,13 @@ mod Health {
     }
 
     ///
-    /// 周が生きているかを見るための値。
+    /// tickが生きているかを見るための値。
     ///
     /// - now: 今（UNIX ミリ秒）
-    /// - startedAt: プロセスが起動した時刻。まだ 1 度も回っていない周はここからの経過で見る
+    /// - startedAt: プロセスが起動した時刻。まだ 1 度も回っていないtickはここからの経過で見る
     /// - jobsOn: プロセス内のワーカーを回す設定か（CMS_JOBS）
-    /// - jobsIntervalMs / watchIntervalMs: それぞれの周の間隔
-    /// - lastTickAt / lastWatchAt: それぞれの周が最後に回った時刻
+    /// - jobsIntervalMs / watchIntervalMs: それぞれのtickの間隔
+    /// - lastTickAt / lastWatchAt: それぞれのtickが最後に回った時刻
     ///
     pub type alias Liveness = {
         now = Int64, startedAt = Int64, jobsOn = Bool,
@@ -70,7 +70,7 @@ mod Health {
     }
 
     ///
-    /// 止まっている周があれば返す。仕事の周を先に見る。CMS_JOBS=off の時は仕事の周を見ない。
+    /// 止まっているtickがあれば返す。仕事のtickを先に見る。CMS_JOBS=off の時は仕事のtickを見ない。
     ///
     pub def stalled(live: Liveness): Option[Stall] =
         let jobs = if (live#jobsOn) elapsedOver(live, live#jobsIntervalMs, live#lastTickAt) |> Option.map(Stall.Jobs) else None;
@@ -83,17 +83,17 @@ mod Health {
         if (elapsed > stallLimitMs(intervalMs)) Some(elapsed) else None
 
     ///
-    /// 周が止まったと見なすまでの長さ（ミリ秒）。間隔の 3 倍。ただし 30 秒は待つ。
+    /// tickが止まったと見なすまでの長さ（ミリ秒）。間隔の 3 倍。ただし 30 秒は待つ。
     ///
-    /// WhyNot: 間隔の 3 倍だけにしないのは、既定の 2 秒では上限が 6 秒になり、DB が遅い時の 1 周（借り待ちの再試行で 10 秒級）で
-    /// 止まっていない周まで 503 になるため。実験 3 回目で見えた停止は 3 分続いていて、30 秒でも十分に捕まる。
+    /// WhyNot: 間隔の 3 倍だけにしないのは、既定の 2 秒では上限が 6 秒になり、DB が遅い時の 1 tick（借り待ちの再試行で 10 秒級）で
+    /// 止まっていないtickまで 503 になるため。実験 3 回目で見えた停止は 3 分続いていて、30 秒でも十分に捕まる。
     ///
     pub def stallLimitMs(intervalMs: Int64): Int64 =
         Int64.max(intervalMs * 3i64, 30000i64)
 
     ///
     /// プールとワーカーと Listener の状態で答える。runJobs は仕事の行（Log）を出す。
-    /// startedAt はプロセスが起動した時刻、jobsOn は CMS_JOBS、heal は自己回復の見張り（CMS_SELF_HEAL=off なら None）、
+    /// startedAt はプロセスが起動した時刻、jobsOn は CMS_JOBS、heal は自己回復のwatch（CMS_SELF_HEAL=off なら None）、
     /// borrowTimeoutMs は checkDb が接続を借りるのを待つ上限（CMS_DB_BORROW_TIMEOUT_SECONDS）。
     ///
     /// WhyNot: checkDb にプールの borrowTimeoutMs をそのまま使わせないのは、Hikari の借り待ちは満杯の時に他のリクエストの
@@ -110,7 +110,7 @@ mod Health {
           stall       = _ -> stalled(liveness(jobs, startedAt, jobsOn)),
           heal        = db -> BackgroundJobs.healCheck(pool, jobs, heal, Result.isOk(db)) }
 
-    /// 今の周の生死を読む。
+    /// 今のtickの生死を読む。
     def liveness(jobs: BackgroundJobs.State, startedAt: Int64, jobsOn: Bool): Liveness \ IO =
         { now = System.currentTimeMillis(), startedAt = startedAt, jobsOn = jobsOn,
           jobsIntervalMs = BackgroundJobs.intervalMs(), lastTickAt = Ref.get(jobs#lastTick),
@@ -125,7 +125,7 @@ mod Health {
 
     ///
     /// `ping` に、この呼び出しだけの借り待ちの上限を付けた形。上限までに借りられなければ `timeout` の Err。
-    /// /health が使う（起動時の確認と自己回復の見張りは `ping`）。
+    /// /health が使う（起動時の確認と自己回復のwatchは `ping`）。
     ///
     pub def pingWithin(pool: Pool, borrowTimeoutMs: Int32): Result[String, Unit] \ IO =
         DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Pool.withConnectionTimeout(pool, borrowTimeoutMs, _ -> discard Sql.fetch("SELECT 1", Nil))))

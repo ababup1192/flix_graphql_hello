@@ -17,7 +17,7 @@ mod SelfHeal {
     import java.lang.System
 
     ///
-    /// 見張りの設定。
+    /// watchの設定。
     ///
     /// - minUnhealthyMs: プール経由で届かない状態がこれだけ続いたら終わりを考える
     /// - warmupMs: 起動からこれだけは見送る（起動直後の DB 待ちで終わらないため）
@@ -29,7 +29,7 @@ mod SelfHeal {
     pub type alias Settings = { minUnhealthyMs = Int64, warmupMs = Int64, jitterMs = Int64 }
 
     ///
-    /// 1 周ぶんの観測。
+    /// 1 tickぶんの観測。
     ///
     /// - at: 観測した時刻（UNIX ミリ秒）
     /// - pingOk: プールから借りた接続で SELECT 1 が通ったか
@@ -39,7 +39,7 @@ mod SelfHeal {
     pub type alias Observation = { at = Int64, pingOk = Bool, freshOk = Bool, stats = Pool.PoolStats }
 
     ///
-    /// 見張りの結果。Exit は理由（ログの reason に出す）を持つ。
+    /// watchの結果。Exit は理由（ログの reason に出す）を持つ。
     ///
     pub enum Decision with Eq, ToString {
         case Keep
@@ -110,7 +110,7 @@ mod SelfHeal {
         observations |> List.reverse |> List.takeWhile(seen -> not seen#pingOk) |> List.reverse
 
     ///
-    /// 見張りの持ち物。observe が 1 周ごとに観測を積む。
+    /// watchの持ち物。observe が 1 tickごとに観測を積む。
     ///
     /// - settings: 判断の設定
     /// - startedAt: プロセスが起動した時刻（UNIX ミリ秒）
@@ -118,7 +118,7 @@ mod SelfHeal {
     /// - seen: 直近の観測（古い順。窓の外は捨てる）
     /// - exiting: 終わりの道に入った印
     ///
-    /// WhyNot: exiting を持つのは、step を呼ぶ経路が 2 つ（見張りのスレッドと /health のリクエストのスレッド）あり、
+    /// WhyNot: exiting を持つのは、step を呼ぶ経路が 2 つ（watchのスレッドと /health のリクエストのスレッド）あり、
     /// 同じ Exit で drain と System.exit が二重に走らないようにするため。
     ///
     pub type alias Watch = { settings = Settings, startedAt = Int64, connection = Jdbc.ConnectionConfig, seen = Ref[List[Observation], Static], exiting = Ref[Bool, Static] }
@@ -138,7 +138,7 @@ mod SelfHeal {
         if (Ref.get(watch#exiting)) false else { Ref.put(true, watch#exiting); true }
 
     ///
-    /// プール経由の ping の結果から 1 周ぶんの観測を作る。ping が通っている間は新しい接続を開かない。
+    /// プール経由の ping の結果から 1 tickぶんの観測を作る。ping が通っている間は新しい接続を開かない。
     ///
     /// WhyNot: ここで ping を打たないのは、/health が同じ ping を checkDb でも打っていて、DB が落ちている間は
     /// 借り待ちの分だけ応答が倍に伸びるため（実験 4 回目の対照 4 で 10.3 秒）。ping は呼ぶ側が 1 回打ってその結果を渡す。
@@ -150,7 +150,7 @@ mod SelfHeal {
     /// 観測を 1 つ積んで決める。
     /// 判断は観測の列（それぞれが `at` を持つ）だけで決まるので、呼ばれる間隔が一定でなくても minUnhealthyMs の判定は変わらない。
     ///
-    /// WhyNot: 見張りのスレッドからしか呼ばないようにしないのは、そのスレッドが OOM で死ぬと自己回復が永久に無効になるため
+    /// WhyNot: watchのスレッドからしか呼ばないようにしないのは、そのスレッドが OOM で死ぬと自己回復が永久に無効になるため
     /// （実験 3 回目の S5 で 2 回とも再現）。リクエストのスレッドは OOM の後も生きているので、/health からも同じ step を進める。
     ///
     pub def step(watch: Watch, seen: Observation): Decision \ IO =

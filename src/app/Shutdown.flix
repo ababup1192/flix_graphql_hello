@@ -1,7 +1,7 @@
 ///
 /// SIGTERM / SIGINT を受けた時の停止の順番と終了コード。
 ///
-/// listen を閉じて新しい接続を受けるのをやめ、処理中の接続が引けるのを待ち、仕事の 1 周を待つ。
+/// listen を閉じて新しい接続を受けるのをやめ、処理中の接続が引けるのを待ち、仕事の 1 tickを待つ。
 /// 全部間に合えば 0、どれかが待ち切れなければ `shutdown timed out` を出して 2 で終わる。
 ///
 /// WhyNot: listen を閉じる前に接続を待たないのは、待っている間も新しい接続を受け続けて終わらないため。
@@ -28,7 +28,7 @@ mod Shutdown {
     /// 待ち切れなかった物。
     ///
     /// - connections: まだ閉じていない HTTP の接続の数
-    /// - inTick: 仕事の 1 周がまだ途中か
+    /// - inTick: 仕事の 1 tickがまだ途中か
     ///
     pub type alias Remaining = { connections = Int32, inTick = Bool }
 

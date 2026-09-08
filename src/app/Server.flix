@@ -26,7 +26,7 @@ mod Server {
     /// - POST /graphql, /admin/graphql, /account/graphql: ボディ {"query": "...", "variables": {...}, "operationName": "..."} を実行して {"data": ..., "errors": [...]} を返す
     /// - GET /graphql, /admin/graphql ?query=...&variables=...&operationName=...: query だけ（mutation は 405）。コンテンツ API は身元無しなら Cache-Control で CDN に乗せられる
     /// - GET /health: DB に届けば 200、届かなければ 503。jobs にワーカーの最終実行時刻と待ち・失敗の件数（数えられなければ -1）
-    /// - POST /jobs/tick: 外部トリガー。X-Jobs-Token が設定と一致すればワーカーを 1 周回す（無ければ 404）
+    /// - POST /jobs/tick: 外部トリガー。X-Jobs-Token が設定と一致すればワーカーを 1 tick回す（無ければ 404）
     /// - POST /mcp: MCP サーバ（JSON-RPC。tools だけ）。管理 API のエンジンへの GraphQL クライアントとして動く
     ///
     pub def routes(config: ServerConfig, health: Health[ef]): List[Route[{Graphql, Log, Observe, ef}]] =
@@ -116,14 +116,14 @@ mod Server {
 
     ///
     /// GET /health。DB に届けば {"status": "ok", "version": "...", "jobs": {"lastTickAt": ...}, "connections": {"active": 1, "max": 256}, "pool": {"active": 1, ...}}、届かなければ 503 で理由を付ける。
-    /// DB に届いても、仕事の周か見張りの周が止まっていれば 503 で reason（`jobs stalled` / `watch stalled`）を付ける。
+    /// DB に届いても、仕事のtickかwatchのtickが止まっていれば 503 で reason（`jobs stalled` / `watch stalled`）を付ける。
     /// connections は HTTP の接続、pool は DB の接続プール（別の物）。
     /// 最初に DB へ 1 回だけ届くかを見て、その結果で自己回復の判断を 1 回進める（プールが壊れたまま戻らないと決まれば、この中でプロセスが終わる）。
     ///
     /// WhyNot: 自己回復と checkDb で別々に ping を打たないのは、DB が落ちている間は 1 回が接続の借り待ちで数秒掛かり、
     /// 2 回打つと /health の応答がその倍になるため（実験 4 回目の対照 4 で 10.3 秒）。
     ///
-    /// WhyNot: 判断を見張りのスレッドだけに任せないのは、そのスレッドが OOM で死ぬと自己回復が永久に無効になるため。
+    /// WhyNot: 判断をwatchのスレッドだけに任せないのは、そのスレッドが OOM で死ぬと自己回復が永久に無効になるため。
     /// リクエストのスレッドは OOM の後も生きている側で、Docker の HEALTHCHECK が叩く限りここで判断が進む。
     ///
     def healthRoute(version: String, health: Health[ef], _routeRequest: RouteRequest): HttpResponse \ {Observe, ef} =
@@ -168,7 +168,7 @@ mod Server {
         }
 
     ///
-    /// POST /jobs/tick。トークンが設定されていなければ 404（存在を見せない）、違えば 403、合えば 1 周回して失敗の説明を返す。
+    /// POST /jobs/tick。トークンが設定されていなければ 404（存在を見せない）、違えば 403、合えば 1 tick回して失敗の説明を返す。
     ///
     def jobsTick(jobsToken: Option[String], health: Health[ef], routeRequest: RouteRequest): HttpResponse \ {Observe, ef} =
         let given = Http.findHeader("X-Jobs-Token", routeRequest#request#headers);
