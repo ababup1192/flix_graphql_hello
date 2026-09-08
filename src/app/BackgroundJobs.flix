@@ -46,7 +46,7 @@ mod BackgroundJobs {
     pub def runForever(pool: Pool, state: State, sink: Log.Sink): Unit \ IO =
         if (Ref.get(state#stopping)) Log.runWith(sink, () -> Log.info("jobs stopping", Log.Fields.empty()))
         else {
-            Log.runWith(sink, () -> round(pool, state));
+            round(pool, state, sink);
             Thread.sleep(intervalMs());
             runForever(pool, state, sink)
         }
@@ -62,9 +62,23 @@ mod BackgroundJobs {
         else {
             let startedAt = System.currentTimeMillis();
             Ref.put(Some(startedAt), state#lastWatch);
-            Log.runWith(sink, () -> healCheck(pool, state, heal, Result.isOk(Health.ping(pool))));
+            guardedWatch(sink, () -> healCheck(pool, state, heal, Result.isOk(Health.ping(pool))));
             Thread.sleep(nextWaitMs(healIntervalMs(), System.currentTimeMillis() - startedAt));
             watchForever(pool, state, heal, sink)
+        }
+
+    ///
+    /// 見張りの 1 周を JVM の例外から守る。Throwable が飛んだら Error の行にして次の周へ進める。
+    /// JVM 自体が壊れている物（OutOfMemoryError）はログした上で再送出する。
+    ///
+    /// WhyNot: 見張りに網を掛けないままにしないのは、ping や Pool.stats が投げると見張りのスレッドだけが黙って死に、
+    /// /health が `watch stalled` を返すまで 30 秒は誰にも分からないため。
+    ///
+    pub def guardedWatch(sink: Log.Sink, thunk: Unit -> Unit \ ef): Unit \ (ef - Log) + IO =
+        match attempt(() -> Log.runWith(sink, thunk)) {
+            case Ok(())           => ()
+            case Err(Ok(message)) => Log.runWith(sink, () -> Log.Fields.empty() |> Log.Fields.str("error.message", message) |> Log.error("watch failed"))
+            case Err(Err(fatal))  => { Log.runWith(sink, () -> Log.Fields.empty() |> Log.exception(fatal) |> Log.fatal("watch fatal")); throw fatal }
         }
 
     ///
@@ -114,34 +128,55 @@ mod BackgroundJobs {
         System.exit(3)
 
     /// 1 周。失敗は Error の行にする（1 周に 1 行ずつ）。
-    def round(pool: Pool, state: State): Unit \ {IO, Log} =
-        guarded(() -> tick(pool, state)) |> List.forEach(message -> Log.Fields.empty() |> Log.Fields.str("error.message", message) |> Log.error("jobs tick failed"));
+    def round(pool: Pool, state: State, sink: Log.Sink): Unit \ IO =
+        let messages = guarded(sink, () -> tick(pool, state));
+        Log.runWith(sink, () -> List.forEach(message -> Log.Fields.empty() |> Log.Fields.str("error.message", message) |> Log.error("jobs tick failed"), messages));
         Ref.put(false, state#inTick)
 
     ///
     /// 1 周を JVM の例外から守る。Throwable が飛んだら失敗の説明にして返し、次の周へ進める。
-    /// JVM 自体が壊れている物（OutOfMemoryError）はログした上で再送出する。
+    /// JVM 自体が壊れている物（OutOfMemoryError）はログした上で再送出する。Log は sink で try の内側に入れる。
     ///
     /// WhyNot: tick の中の DbRunner に任せないのは、Tx の外（Scheduler / Dispatcher の Java interop や、リゾルバと同じ VerifyError）で
     /// 飛んだ Error は Exception の catch を素通りし、ワーカーのスレッドだけが黙って死んでプロセスは生き残るため。
     ///
+    /// WhyNot: Log の handler を try の外（runForever）に置いたまま Log を effect で受けないのは、tick の中の run
+    /// （Net.Http.runWithIO など）から Log の op が try を越えて外の handler へ出ると、その run の中で飛んだ例外を
+    /// この catch が拾えなくなるため（2026-09-08 に実測。test/app/TestJvmCatchNesting）。handler が try の内側なら拾える。
+    ///
     /// WhyNot: catch の中で Log を呼ばないのは、effect の操作を catch の腕に書くと JVM の VerifyError になるため（2026-09-08 に実測）。
     /// catch は値（Result）を返すだけにして、ログと再送出は外でする。
     ///
-    pub def guarded(thunk: Unit -> List[String] \ ef): List[String] \ ef + IO + Log =
-        match attempt(thunk) {
-            case Ok(messages) => messages
-            case Err(fatal)   => { Log.Fields.empty() |> Log.exception(fatal) |> Log.fatal("jobs fatal"); throw fatal }
+    pub def guarded(sink: Log.Sink, thunk: Unit -> List[String] \ ef): List[String] \ (ef - Log) + IO =
+        match attempt(() -> Log.runWith(sink, thunk)) {
+            case Ok(messages)     => messages
+            case Err(Ok(message)) => List#{"1 周の途中で例外: ${message}"}
+            case Err(Err(fatal))  => { Log.runWith(sink, () -> Log.Fields.empty() |> Log.exception(fatal) |> Log.fatal("jobs fatal")); throw fatal }
         }
 
-    /// 1 周を回し、Throwable は値にする。致命的な物（OutOfMemoryError）は Err、それ以外は失敗の説明。
-    def attempt(thunk: Unit -> List[String] \ ef): Result[Throwable, List[String]] \ ef + IO =
+    ///
+    /// 仕事の 1 部分（予約公開・Webhook）を JVM の例外から守る。飛んだら label 付きの失敗の説明にして、残りの部分へ進める。
+    /// JVM 自体が壊れている物（OutOfMemoryError）はそのまま再送出する（外の guarded がログする）。
+    ///
+    /// WhyNot: 外の guarded だけに任せないのは、外部トリガー（POST /jobs/tick）はリクエストの Log の handler の下で tick を呼び、
+    /// そこでは handler を try の内側に入れられない（リクエストの span を失う）ため。部分ごとの網は handler の入れ子に
+    /// 依らず効く（Log の op が越えるのは try の直下で、間に run が無い）。
+    ///
+    pub def guardedPart(label: String, thunk: Unit -> Result[String, Int32] \ ef): Result[String, Int32] \ ef + IO =
+        match attempt(thunk) {
+            case Ok(outcome)      => outcome
+            case Err(Ok(message)) => Err("${label}の途中で例外: ${message}")
+            case Err(Err(fatal))  => throw fatal
+        }
+
+    /// thunk を走らせ、Throwable を値にする。致命的な物（OutOfMemoryError）は Err(Err)、それ以外は Err(Ok(説明))。
+    def attempt(thunk: Unit -> a \ ef): Result[Result[Throwable, String], a] \ ef + IO =
         try {
             Ok(thunk())
         } catch {
             case e: Throwable =>
-                if (JvmErrors.isFatal(e)) Err(e)
-                else Ok(List#{"1 周の途中で例外: ${JvmErrors.describe(e)}"})
+                if (JvmErrors.isFatal(e)) Err(Err(e))
+                else Err(Ok(JvmErrors.describe(e)))
         }
 
     ///
@@ -178,8 +213,8 @@ mod BackgroundJobs {
                     discard SchedulesQueries.purgeOldSchedules(keepDays());
                     discard WebhooksQueries.purgeOldDeliveries(keepDays())
                 })) |> Result.mapErr(failure -> "回復と掃除ができません: ${failure}");
-            let scheduled = Scheduler.tick(pool);
-            let delivered = Net.Http.runWithIO(() -> WebhookDispatcher.tick(pool));
+            let scheduled = guardedPart("予約公開", () -> Scheduler.tick(pool));
+            let delivered = Net.Http.runWithIO(() -> guardedPart("Webhook", () -> WebhookDispatcher.tick(pool)));
             Ref.put(Some(System.currentTimeMillis()), state#lastTick);
             Ref.put(false, state#inTick);
             List#{ recovered |> Result.map(_ -> ()), scheduled |> Result.map(_ -> ()), delivered |> Result.map(_ -> ()) }

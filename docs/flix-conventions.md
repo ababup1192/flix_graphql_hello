@@ -121,6 +121,26 @@ N はゲームが決める。エンジンは N を知らない（今のテンプ
 alias とドメインの署名は `+` 形（`Db + CmsErr + Tenant`）、`run` の引き算と多相の集合リテラルは `{}` 形（`ef - {Db, CmsErr}`、`Route[{Graphql, ef}]`）。
 `DbRead` は `DbErr` を含むので `DbRead + DbErr` と書かない。
 
+## JVM の例外の網（try / catch）は handler の入れ子を見て置く
+
+Flix 0.75.3 では、`try / catch` が拾えるかどうかが `run … with handler` との位置関係で決まる（2026-09-08 に実測。表は `test/app/TestJvmCatchNesting.flix`）。
+
+| 形 | 拾えるか |
+|---|---|
+| `try { run { op; throw } }`（handler が try の内側。何段でも） | 拾える |
+| `run { try { op; throw } }`（try の直下から外の handler へ op。間に run 無し） | 拾える（`DbRunner.guarded` の形） |
+| `run { try { run { op }; throw } }`（外へ op を通した run を抜けてから throw） | 拾える |
+| `run { try { run { op; throw } } }`（外へ op を通した run の**中**で throw） | **素通り** |
+| `run { try { op } } with handler { def op = throw }`（handler の本体が投げ、handler は try の外） | **素通り** |
+
+素通りした例外は、その handler より外側にある catch（`HttpServer.respond` など）か、スレッドの先頭まで飛ぶ。
+網を置く時は次のどちらかにする:
+
+- **handler を try の内側に入れる**（`BackgroundJobs.guarded` が Log を sink で入れ直す形）
+- **一番内側の handler の直下に try を置き、その中に run を置かない**（`DbRunner.guarded`、`BackgroundJobs.guardedPart`）
+
+catch の腕には effect の op を書かない（JVM の VerifyError）。腕は値を返すだけにして、ログや raise は catch を抜けてから。
+
 ## GraphQL のリゾルバのラムダに effect を使う式を直に書かない
 
 Flix 0.75.3 は、リゾルバのラムダの中に effect（`Time.Clock.Clock` など）を呼ぶ式を直に書くと、
