@@ -5,16 +5,23 @@ mod AdminQueryResolvers {
 
     /// Query.contentTypes
     pub def contentTypes(): GeneratedAdmin.QueryContentTypesResolver[AdminEff] =
-        _context -> Ok(ContentTypes.list())
+        _context -> Ok(listTypes())
+
+    def listTypes(): List[ContentType] \ DbRead + CmsErr + Tenant + Session = ContentTypes.list(Session.grant())
 
     /// Query.contentType。id か apiId のどちらかで引く。両方無ければエラー
     pub def contentType(): GeneratedAdmin.QueryContentTypeResolver[AdminEff] =
         (_context, id, apiId) -> match (id, apiId) {
             case (Some(_), Some(_)) => Err(GraphqlErrors.invalid("apiId", "id か apiId のどちらか一方にしてください"))
-            case (Some(given), _)   => Ok(ContentTypes.find(AdminMapping.typeId("id", given)))
-            case (None, Some(text)) => Ok(ApiId.parse(text) |> Option.flatMap(ContentTypes.findByApiId))
+            case (Some(given), _)   => Ok(findType(given))
+            case (None, Some(text)) => Ok(findTypeByApiId(text))
             case (None, None)       => Err(GraphqlErrors.invalid("id", "id か apiId を指定してください"))
         }
+
+    def findType(id: Id): Option[ContentType] \ DbRead + CmsErr + Tenant + Session = ContentTypes.find(Session.grant(), AdminMapping.typeId("id", id))
+
+    def findTypeByApiId(text: String): Option[ContentType] \ DbRead + CmsErr + Tenant + Session =
+        ApiId.parse(text) |> Option.flatMap(apiId -> ContentTypes.findByApiId(Session.grant(), apiId))
 
     /// Query.entries。first は 0 〜 200 に丸める
     pub def entries(): GeneratedAdmin.QueryEntriesResolver[AdminEff] =
@@ -37,12 +44,16 @@ mod AdminQueryResolvers {
     pub def assets(): GeneratedAdmin.QueryAssetsResolver[AdminEff] =
         (_context, first, skip) -> {
             let (limit, offset) = EntryPage.clamp(50, first, skip);
-            Ok(Assets.list(limit, offset))
+            Ok(listAssets(limit, offset))
         }
+
+    def listAssets(first: Int32, skip: Int32): AssetPage \ DbRead + CmsErr + Tenant + Session = Assets.list(Session.grant(), first, skip)
 
     /// Query.asset
     pub def asset(): GeneratedAdmin.QueryAssetResolver[AdminEff] =
-        (_context, id) -> Ok(Assets.find(AdminMapping.assetId("id", id)))
+        (_context, id) -> Ok(findAsset(id))
+
+    def findAsset(id: Id): Option[Asset] \ DbRead + CmsErr + Tenant + Session = Assets.find(Session.grant(), AdminMapping.assetId("id", id))
 
     /// Query.publishCheck（dry-run）
     pub def publishCheck(): GeneratedAdmin.QueryPublishCheckResolver[AdminEff] =

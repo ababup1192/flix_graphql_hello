@@ -9,10 +9,10 @@ mod TestContentApiPg {
     /// blogs（title / views / tags）に 3 件。まだ公開は無いので DRAFT で引く。
     ///
     def seed(): Unit \ Db + CmsErr + IdGen + Tenant + Session =
-        let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-        discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-        discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("views", FieldKind.Number, FieldConfig.empty()));
-        discard ContentTypes.addField(blogs#id, { many = true | CmsTestKit.fieldDraft("tags", FieldKind.Text, FieldConfig.empty()) });
+        let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+        discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+        discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("views", FieldKind.Number, FieldConfig.empty()));
+        discard ContentTypes.addField(Session.grant(), blogs#id, { many = true | CmsTestKit.fieldDraft("tags", FieldKind.Text, FieldConfig.empty()) });
         discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString("Flix で GraphQL")), ("views", CmsTestKit.intJson(10)), ("tags", Json.JArray(Vector#{Json.JString("flix")}))}));
         discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b2")), CmsTestKit.entryData(List#{("title", Json.JString("Elm の話")), ("views", CmsTestKit.intJson(30))}));
         discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b3")), CmsTestKit.entryData(List#{("title", Json.JString("flix と PostgreSQL")), ("views", CmsTestKit.intJson(20))}))
@@ -74,19 +74,19 @@ mod TestContentApiPg {
         let outcome = PgTestSupport.withContentApiAndPool(seed, (pool, ask) -> {
             let before = ask("{ blog(id: \"b1\", stage: DRAFT) { excerpt } }") |> snd |> GraphqlTestKit.isValidationError;
             let added = PgTestSupport.mutate(pool, () -> {
-                let blogs = ContentTypes.findByApiId(CmsTestKit.apiId("blogs")) |> CmsErr.orNotFound(Entity.ContentType, "blogs");
-                discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("excerpt", FieldKind.TextArea, FieldConfig.empty()))
+                let blogs = ContentTypes.findByApiId(Session.grant(), CmsTestKit.apiId("blogs")) |> CmsErr.orNotFound(Entity.ContentType, "blogs");
+                discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("excerpt", FieldKind.TextArea, FieldConfig.empty()))
             });
             let after = ask("{ blog(id: \"b1\", stage: DRAFT) { excerpt } }") |> fst;
             let askTags = () -> ask("{ tags(stage: DRAFT) { totalCount } }") |> (found -> (fst(found), snd(found) |> GraphqlTestKit.isValidationError));
             let noTags = askTags();
             let tagsCreated = PgTestSupport.mutate(pool, () -> {
-                let tags = ContentTypes.create(CmsTestKit.typeDraft("tags", "タグ"));
-                discard ContentTypes.addField(tags#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
+                let tags = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("tags", "タグ"));
+                discard ContentTypes.addField(Session.grant(), tags#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
                 tags#id
             });
             let withTags = askTags();
-            let tagsDeleted = tagsCreated |> Result.map(tagsId -> PgTestSupport.mutate(pool, () -> ContentTypes.delete(tagsId)));
+            let tagsDeleted = tagsCreated |> Result.map(tagsId -> PgTestSupport.mutate(pool, () -> ContentTypes.delete(Session.grant(), tagsId)));
             let withoutTags = askTags();
             (before, added, after, noTags, withTags, tagsDeleted, withoutTags)
         });

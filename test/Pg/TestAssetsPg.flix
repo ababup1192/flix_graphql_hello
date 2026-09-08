@@ -16,17 +16,17 @@ mod TestAssetsPg {
     @Test
     def testPgAssetUploadRoundTrip(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"asset001"}, () -> {
-            let upload = Assets.createUpload({ fileName = "photo x.png", mime = "image/png", size = 5i64 });
-            let beforeConfirm = CmsTestKit.failureMessage(() -> Assets.confirm(upload#asset#id, { width = None, height = None, alt = None }));
+            let upload = Assets.createUpload(Session.grant(), { fileName = "photo x.png", mime = "image/png", size = 5i64 });
+            let beforeConfirm = CmsTestKit.failureMessage(() -> Assets.confirm(Session.grant(), upload#asset#id, { width = None, height = None, alt = None }));
             let putStatus = PgTestSupport.putTo(upload#uploadUrl, "image/png", "hello");
-            let ready = Assets.confirm(upload#asset#id, { width = Some(10), height = Some(20), alt = Some("写真") });
-            let listed = Assets.list(10, 0);
-            Assets.delete(upload#asset#id);
+            let ready = Assets.confirm(Session.grant(), upload#asset#id, { width = Some(10), height = Some(20), alt = Some("写真") });
+            let listed = Assets.list(Session.grant(), 10, 0);
+            Assets.delete(Session.grant(), upload#asset#id);
             (upload#asset#status, upload#asset#key, upload#expiresInSeconds,
              beforeConfirm, putStatus,
              (ready#status, ready#size, ready#width, ready#height, ready#alt),
              (List.length(listed#assets), listed#totalCount),
-             Assets.find(upload#asset#id) |> Option.isEmpty,
+             Assets.find(Session.grant(), upload#asset#id) |> Option.isEmpty,
              ObjectStore.head(upload#asset#key))
         }));
         Assert.assertEq(
@@ -58,16 +58,16 @@ mod TestAssetsPg {
     ///
     def seedPublished(): (Result[String, Unit], Result[String, Int32], Result[String, Unit]) \ Db + CmsErr + Tenant + ObjectStore + IO + Session =
         CmsTestKit.withIds(List#{"asset010"}, () -> {
-            let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("cover", FieldKind.Asset, FieldConfig.empty()));
-            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("body", FieldKind.RichText, FieldConfig.empty()));
-            let upload = Assets.createUpload({ fileName = "cover.png", mime = "image/png", size = 5i64 });
+            let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+            discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("cover", FieldKind.Asset, FieldConfig.empty()));
+            discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("body", FieldKind.RichText, FieldConfig.empty()));
+            let upload = Assets.createUpload(Session.grant(), { fileName = "cover.png", mime = "image/png", size = 5i64 });
             let entry = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("cover", Json.JString("asset010")), ("body", sampleDoc())}));
             let beforeReady = CmsTestKit.failureMessage(() -> ContentEntries.publish(entry#id, "tester", false));
             let putStatus = PgTestSupport.putTo(upload#uploadUrl, "image/png", "hello");
-            discard Assets.confirm(upload#asset#id, { width = Some(640), height = Some(480), alt = None });
+            discard Assets.confirm(Session.grant(), upload#asset#id, { width = Some(640), height = Some(480), alt = None });
             discard ContentEntries.publish(entry#id, "tester", false);
-            (beforeReady, putStatus, CmsTestKit.failureMessage(() -> Assets.delete(upload#asset#id)))
+            (beforeReady, putStatus, CmsTestKit.failureMessage(() -> Assets.delete(Session.grant(), upload#asset#id)))
         })
 
     /// pending の asset を指す entry は公開できず、ready になれば公開でき、使われている asset は消せない。
@@ -102,7 +102,7 @@ mod TestAssetsPg {
     @Test
     def testPgUploadRejectsWrongContentType(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"asset002"}, () -> {
-            let upload = Assets.createUpload({ fileName = "doc.pdf", mime = "application/pdf", size = 5i64 });
+            let upload = Assets.createUpload(Session.grant(), { fileName = "doc.pdf", mime = "application/pdf", size = 5i64 });
             PgTestSupport.putTo(upload#uploadUrl, "image/png", "hello")
         }));
         Assert.assertEq(expected = Ok(Ok(Ok(403))), result)
@@ -111,11 +111,11 @@ mod TestAssetsPg {
     @Test
     def testPgAssetIsolation(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"asset003"}, () -> {
-            let upload = Assets.createUpload({ fileName = "a.png", mime = "image/png", size = 5i64 });
+            let upload = Assets.createUpload(Session.grant(), { fileName = "a.png", mime = "image/png", size = 5i64 });
             let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
             PgTestSupport.asProject(shop, () ->
-                (Assets.find(upload#asset#id) |> Option.isEmpty,
-                 CmsTestKit.failureMessage(() -> Assets.delete(upload#asset#id))))
+                (Assets.find(Session.grant(), upload#asset#id) |> Option.isEmpty,
+                 CmsTestKit.failureMessage(() -> Assets.delete(Session.grant(), upload#asset#id))))
         }));
         Assert.assertEq(expected = Ok(Ok((true, Err("asset 'asset003' が見つかりません")))), result)
 

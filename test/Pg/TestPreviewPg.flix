@@ -12,8 +12,8 @@ mod TestPreviewPg {
     @Test
     def testPgPreviewTokenReadsOnlyItsEntry(): Unit \ {IO, Assert} =
         let seed = () -> CmsTestKit.withIds(List#{"e1", "e2"}, () -> {
-            let blogs = ContentTypes.create({ previewUrl = Some("https://site.example/preview/{id}") | CmsTestKit.typeDraft("blogs", "記事") });
-            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+            let blogs = ContentTypes.create(Session.grant(), { previewUrl = Some("https://site.example/preview/{id}") | CmsTestKit.typeDraft("blogs", "記事") });
+            discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             let first = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("draft one"))}));
             discard ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("draft two"))}));
             PreviewTokens.issue(PgTestSupport.pepper(), first#id, { ttlSeconds = 3600i64, nowMillis = farFuture() })
@@ -49,7 +49,7 @@ mod TestPreviewPg {
     @Test
     def testPgPreviewTokenViaAdminApi(): Unit \ {IO, Assert} =
         let (issued, tooLong) = PgTestSupport.withAdminApi(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
-            let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
+            let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
             discard ContentEntries.create(blogs#id, None, CmsTestKit.entryData(Nil))
         }), (api, _) -> {
             let ask = PgTestSupport.askOwner(api);

@@ -9,15 +9,15 @@ mod TestReferencesPg {
     /// profiles（name）と blogs（title: required / category: select / profile: reference / tags: reference many）を作る。
     ///
     def typesWithReferences(): (TypeId, TypeId, TypeId) \ Db + CmsErr + IdGen + Tenant + Session =
-        let profiles = ContentTypes.create(CmsTestKit.typeDraft("profiles", "書き手"));
-        discard ContentTypes.addField(profiles#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
-        let tags = ContentTypes.create(CmsTestKit.typeDraft("tags", "タグ"));
-        discard ContentTypes.addField(tags#id, CmsTestKit.fieldDraft("label", FieldKind.Text, FieldConfig.empty()));
-        let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-        discard ContentTypes.addField(blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
-        discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("category", FieldKind.Select, { options = List#{"KNOWLEDGE", "NEWS"} | FieldConfig.empty() }));
-        discard ContentTypes.addField(blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
-        discard ContentTypes.addField(blogs#id, { target = Some(tags#id), many = true | CmsTestKit.fieldDraft("tags", FieldKind.Reference, FieldConfig.empty()) });
+        let profiles = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("profiles", "書き手"));
+        discard ContentTypes.addField(Session.grant(), profiles#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
+        let tags = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("tags", "タグ"));
+        discard ContentTypes.addField(Session.grant(), tags#id, CmsTestKit.fieldDraft("label", FieldKind.Text, FieldConfig.empty()));
+        let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+        discard ContentTypes.addField(Session.grant(), blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
+        discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("category", FieldKind.Select, { options = List#{"KNOWLEDGE", "NEWS"} | FieldConfig.empty() }));
+        discard ContentTypes.addField(Session.grant(), blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
+        discard ContentTypes.addField(Session.grant(), blogs#id, { target = Some(tags#id), many = true | CmsTestKit.fieldDraft("tags", FieldKind.Reference, FieldConfig.empty()) });
         (profiles#id, blogs#id, tags#id)
 
     /// reference には型の存在と参照先が要り、select は選択肢の中だけ通る。
@@ -25,9 +25,9 @@ mod TestReferencesPg {
     def testPgReferenceRules(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"r1"}, () -> {
             let (_, blogs, _) = typesWithReferences();
-            let noTarget = CmsTestKit.failureMessage(() -> ContentTypes.addField(blogs, CmsTestKit.fieldDraft("author", FieldKind.Reference, FieldConfig.empty())));
-            let missingType = CmsTestKit.failureMessage(() -> ContentTypes.addField(blogs, { target = Some(TypeId.TypeId(999i64)) | CmsTestKit.fieldDraft("author", FieldKind.Reference, FieldConfig.empty()) }));
-            let badOptions = CmsTestKit.failureMessage(() -> ContentTypes.addField(blogs, CmsTestKit.fieldDraft("kind", FieldKind.Select, { options = List#{"bad-value"} | FieldConfig.empty() })));
+            let noTarget = CmsTestKit.failureMessage(() -> ContentTypes.addField(Session.grant(), blogs, CmsTestKit.fieldDraft("author", FieldKind.Reference, FieldConfig.empty())));
+            let missingType = CmsTestKit.failureMessage(() -> ContentTypes.addField(Session.grant(), blogs, { target = Some(TypeId.TypeId(999i64)) | CmsTestKit.fieldDraft("author", FieldKind.Reference, FieldConfig.empty()) }));
+            let badOptions = CmsTestKit.failureMessage(() -> ContentTypes.addField(Session.grant(), blogs, CmsTestKit.fieldDraft("kind", FieldKind.Select, { options = List#{"bad-value"} | FieldConfig.empty() })));
             let badValue = CmsTestKit.failureMessage(() -> ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("x")), ("category", Json.JString("OTHER")), ("profile", Json.JString("not valid!"))})));
             (noTarget, missingType, badOptions, badValue)
         }));
@@ -42,11 +42,11 @@ mod TestReferencesPg {
     def testPgDeleteReferencedType(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
             let (profiles, blogs, _) = typesWithReferences();
-            let blocked = CmsTestKit.failureMessage(() -> ContentTypes.delete(profiles));
+            let blocked = CmsTestKit.failureMessage(() -> ContentTypes.delete(Session.grant(), profiles));
             let profileField = ContentTypes.get(blogs) |> (owner -> owner#fields |> List.find(field -> ApiId.text(field#apiId) == "profile"));
-            Option.forEach(field -> ContentTypes.removeField(field#id), profileField);
-            ContentTypes.delete(profiles);
-            (blocked, ContentTypes.find(profiles) |> Option.isEmpty)
+            Option.forEach(field -> ContentTypes.removeField(Session.grant(), field#id), profileField);
+            ContentTypes.delete(Session.grant(), profiles);
+            (blocked, ContentTypes.find(Session.grant(), profiles) |> Option.isEmpty)
         });
         Assert.assertEq(expected = Ok(Ok((Err("id: 他の型の REFERENCE のフィールド 1 本が参照先にしています。先にそのフィールドを消してください"), true))), result)
 

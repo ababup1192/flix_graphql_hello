@@ -1,6 +1,7 @@
 ///
 /// content type とフィールドの定義を読み書きするユースケース。生成された ContentTypesQueries / ContentFieldsQueries を並べる層。
 /// 型に `\ DbRead` か `\ Db + CmsErr` が出る。読み書きは全部 Tenant のプロジェクトに閉じる（他のプロジェクトの id を渡しても notFound）。名前の規則は Naming、行と値の変換は ContentTypeRows、木の操作は FieldTree。
+/// pub の入口は権限の証明（`Granted[ReadDraft]` / `Granted[ManageTypes]`。`Session.grant()` で作る）を最初の引数で受け、自分では判定しない。
 ///
 /// WhyNot: 一意制約の違反を onConstraint で翻訳しないのは、Runner が Mutation 全体を 1 つの Tx に包んでいて、
 /// 違反で abort した Tx の中では翻訳しても COMMIT が失敗するため。同じ Tx の中で先に読んで検査するので、
@@ -13,8 +14,7 @@ mod ContentTypes {
     ///
     /// 全 content type。apiId 順、フィールド付き。SQL は 2 本。
     ///
-    pub def list(): List[ContentType] \ DbRead + Tenant + CmsErr + Session =
-        Session.require(Permission.ReadDraft);
+    pub def list(_proof: Granted[ReadDraft]): List[ContentType] \ DbRead + Tenant =
         listAll()
 
     /// 全 content type。権限は見ない（ユースケースの内部で使う）。
@@ -26,8 +26,7 @@ mod ContentTypes {
     ///
     /// id で 1 つ。無ければ None。
     ///
-    pub def find(id: TypeId): Option[ContentType] \ DbRead + Tenant + CmsErr + Session =
-        Session.require(Permission.ReadDraft);
+    pub def find(_proof: Granted[ReadDraft], id: TypeId): Option[ContentType] \ DbRead + Tenant =
         lookup(id)
 
     /// id で 1 つ。権限は見ない（ユースケースの内部で使う）。
@@ -37,16 +36,23 @@ mod ContentTypes {
     ///
     /// apiId で 1 つ。無ければ None。
     ///
-    pub def findByApiId(apiId: ApiId): Option[ContentType] \ DbRead + Tenant + CmsErr + Session =
-        Session.require(Permission.ReadDraft);
+    pub def findByApiId(_proof: Granted[ReadDraft], apiId: ApiId): Option[ContentType] \ DbRead + Tenant =
         ContentTypesQueries.findContentTypeByApiId({ projectId = Tenant.currentId(), apiId = ApiId.text(apiId) }) |> Option.map(row -> ContentTypeRows.toContentType(row, fieldsOf(ContentTypeRows.typeIdOf(row))))
 
     ///
     /// id で 1 つ。無ければ notFound。
     ///
-    pub def get(id: TypeId): ContentType \ DbRead + CmsErr + Tenant + Session =
-        Session.require(Permission.ReadDraft);
+    pub def fetch(_proof: Granted[ReadDraft], id: TypeId): ContentType \ DbRead + CmsErr + Tenant =
         load(id)
+
+    ///
+    /// id で 1 つ。無ければ notFound。証明を自分で作る形。
+    ///
+    /// WhyNot: fetch に寄せないのは、ContentEntries / PreviewTokens がまだ Session.require の形で、証明を持っていないため。
+    /// それらが Granted に移ったら消して fetch を get に戻す。
+    ///
+    pub def get(id: TypeId): ContentType \ DbRead + CmsErr + Tenant + Session =
+        fetch(Session.grant(), id)
 
     /// id で 1 つ。無ければ notFound。権限は見ない（ユースケースの内部で使う）。
     def load(id: TypeId): ContentType \ DbRead + CmsErr + Tenant =
@@ -55,9 +61,14 @@ mod ContentTypes {
     ///
     /// フィールド 1 つ（children 付き）。無ければ notFound。
     ///
-    pub def getField(id: FieldId): FieldDef \ DbRead + CmsErr + Tenant + Session =
-        Session.require(Permission.ReadDraft);
+    pub def fetchField(_proof: Granted[ReadDraft], id: FieldId): FieldDef \ DbRead + CmsErr + Tenant =
         loadField(id)
+
+    ///
+    /// フィールド 1 つ。無ければ notFound。証明を自分で作る形（get と同じ理由で、ContentEntries が移るまで）。
+    ///
+    pub def getField(id: FieldId): FieldDef \ DbRead + CmsErr + Tenant + Session =
+        fetchField(Session.grant(), id)
 
     /// フィールド 1 つ。無ければ notFound。権限は見ない（ユースケースの内部で使う）。
     def loadField(id: FieldId): FieldDef \ DbRead + CmsErr + Tenant =
@@ -69,8 +80,7 @@ mod ContentTypes {
     ///
     /// content type を作る。singular / plural を省けば apiId から導く。名前の規則に合わなければ invalid。
     ///
-    pub def create(draft: ContentTypeDraft): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
-        Session.require(Permission.ManageTypes);
+    pub def create(_proof: Granted[ManageTypes], draft: ContentTypeDraft): ContentType \ Db + CmsErr + IdGen + Tenant =
         // 名前を揃える。singular / plural が無ければ apiId から導く
         let names = buildTypeNames(draft);
         let derived = Option.isEmpty(draft#singular) and Option.isEmpty(draft#plural);
@@ -108,8 +118,7 @@ mod ContentTypes {
     ///
     /// content type を直す。触った項目だけ UPDATE に出る。名前を変えるなら規則を検査する。
     ///
-    pub def update(id: TypeId, changes: ContentTypeChanges): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
-        Session.require(Permission.ManageTypes);
+    pub def update(_proof: Granted[ManageTypes], id: TypeId, changes: ContentTypeChanges): ContentType \ Db + CmsErr + IdGen + Tenant =
         let existing = load(id);
         // 変えた後の名前（触っていない項目は今の物）
         let names = {
@@ -129,8 +138,7 @@ mod ContentTypes {
     /// content type をフィールドごと消す。無ければ notFound。entry が残っていれば、他の型から参照されていれば invalid。
     /// ゴミ箱の entry は型と一緒に消す（残すと型が消せない）。
     ///
-    pub def delete(id: TypeId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
-        Session.require(Permission.ManageTypes);
+    pub def delete(_proof: Granted[ManageTypes], id: TypeId): Unit \ Db + CmsErr + IdGen + Tenant =
         let existing = load(id);
         let remaining = EntriesQueries.countEntriesOfType({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() }) |> Rows.total;
         let referrers = ContentFieldsQueries.countFieldsTargeting({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() }) |> Rows.total;
@@ -146,8 +154,7 @@ mod ContentTypes {
     ///
     /// フィールドを末尾に足す。apiId の規則と config の組み合わせを検査する。parent があればその子（object の子か blocks の variant）になる。
     ///
-    pub def addField(typeId: TypeId, draft: FieldDraft): FieldDef \ Db + CmsErr + IdGen + Tenant + Session =
-        Session.require(Permission.ManageTypes);
+    pub def addField(_proof: Granted[ManageTypes], typeId: TypeId, draft: FieldDraft): FieldDef \ Db + CmsErr + IdGen + Tenant =
         let owner = load(typeId);
         let parent = draft#parent |> Option.map(parentId -> FieldTree.find(parentId, owner#fields) |> CmsErr.orNotFound(Entity.Field, "${parentId}"));
         CmsErr.raiseIfAny(validateDraft(takenApiIds(owner#fields, None), parent, draft) ::: targetTypeExists(draft#target) ::: fieldTypeNameViolations(owner, draft));
@@ -164,8 +171,7 @@ mod ContentTypes {
     ///
     /// フィールドを直す。触った項目だけ UPDATE に出る。config は丸ごと置き換える。
     ///
-    pub def updateField(id: FieldId, changes: FieldChanges): FieldDef \ Db + CmsErr + IdGen + Tenant + Session =
-        Session.require(Permission.ManageTypes);
+    pub def updateField(_proof: Granted[ManageTypes], id: FieldId, changes: FieldChanges): FieldDef \ Db + CmsErr + IdGen + Tenant =
         let existing = loadField(id);
         let taken = takenApiIds(fieldsOf(existing#typeId), Some(id));
         let config = changes#config |> Option.getWithDefault(existing#config);
@@ -179,8 +185,7 @@ mod ContentTypes {
     ///
     /// フィールドを消す。無ければ notFound。
     ///
-    pub def removeField(id: FieldId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
-        Session.require(Permission.ManageTypes);
+    pub def removeField(_proof: Granted[ManageTypes], id: FieldId): Unit \ Db + CmsErr + IdGen + Tenant =
         let existing = loadField(id);
         discard ContentFieldsQueries.deleteField({ id = FieldId.toInt64(id), projectId = Tenant.currentId() });
         touch(existing#typeId)
@@ -188,8 +193,7 @@ mod ContentTypes {
     ///
     /// ids の順に並べ直す。最上位のフィールドを過不足なく渡さなければ invalid。object / blocks の子は対象外。
     ///
-    pub def reorderFields(typeId: TypeId, ids: List[FieldId]): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
-        Session.require(Permission.ManageTypes);
+    pub def reorderFields(_proof: Granted[ManageTypes], typeId: TypeId, ids: List[FieldId]): ContentType \ Db + CmsErr + IdGen + Tenant =
         let owner = load(typeId);
         let current = owner#fields |> List.map(field -> field#id) |> List.toSet;
         let sameSet = List.length(ids) == Set.size(current) and List.toSet(ids) == current;

@@ -30,8 +30,7 @@ mod Projects {
     ///
     /// 今のプロジェクトの公開範囲を変える。owner だけ。
     ///
-    pub def updateVisibility(visibility: Visibility): Project \ Db + CmsErr + Tenant + Session =
-        Session.require(Permission.ManageProject);
+    pub def updateVisibility(_proof: Granted[ManageProject], visibility: Visibility): Project \ Db + CmsErr + Tenant =
         discard AuthQueries.updateProjectVisibility({ projectId = Tenant.currentId(), visibility = Visibility.text(visibility) });
         find(Tenant.current()) |> CmsErr.orNotFound(Entity.Organization, "${Tenant.current()}")
 

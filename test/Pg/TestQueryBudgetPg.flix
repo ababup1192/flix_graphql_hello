@@ -19,11 +19,11 @@ mod TestQueryBudgetPg {
 
     /// profiles 型（name）に書き手 5 人、blogs 型（title / profile: profiles への参照）に entry 50 件。
     def seed(): Unit \ Db + CmsErr + IdGen + Tenant + Session =
-        let profiles = ContentTypes.create(CmsTestKit.typeDraft("profiles", "書き手"));
-        discard ContentTypes.addField(profiles#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
-        let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-        discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-        discard ContentTypes.addField(blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
+        let profiles = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("profiles", "書き手"));
+        discard ContentTypes.addField(Session.grant(), profiles#id, CmsTestKit.fieldDraft("name", FieldKind.Text, FieldConfig.empty()));
+        let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+        discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+        discard ContentTypes.addField(Session.grant(), blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
         List.range(0, authorCount()) |> List.forEach(a -> {
             let author = ContentEntries.create(profiles#id, None, CmsTestKit.entryData(List#{("name", Json.JString("a${a}"))}));
             List.range(0, entryCount() / authorCount()) |> List.forEach(n ->

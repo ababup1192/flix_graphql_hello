@@ -45,10 +45,10 @@ mod TestAuthPg {
             let viewer = Accounts.resolveUser(bootstrap(), principal("u-v", "viewer@test.dev"));
             let writer = Accounts.resolveUser(bootstrap(), principal("u-w", "writer@test.dev"));
             let editor = Accounts.resolveUser(bootstrap(), principal("u-e", "editor@test.dev"));
-            let blogs = PgTestSupport.asOwner(() -> ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事")));
-            discard PgTestSupport.asOwner(() -> ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty())));
-            let viewerCreatesType = PgTestSupport.runAs(viewer, () -> CmsTestKit.failureMessage(() -> ContentTypes.create(CmsTestKit.typeDraft("x", "x"))));
-            let viewerReads = PgTestSupport.runAs(viewer, () -> List.length(ContentTypes.list()));
+            let blogs = PgTestSupport.asOwner(() -> ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事")));
+            discard PgTestSupport.asOwner(() -> ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty())));
+            let viewerCreatesType = PgTestSupport.runAs(viewer, () -> CmsTestKit.failureMessage(() -> ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("x", "x"))));
+            let viewerReads = PgTestSupport.runAs(viewer, () -> List.length(ContentTypes.list(Session.grant())));
             let entry = PgTestSupport.runAs(writer, () -> ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi"))})));
             let writerPublishes = PgTestSupport.runAs(writer, () -> CmsTestKit.failureMessage(() -> ContentEntries.publish(entry#id, "writer", false)));
             let editorPublishes = PgTestSupport.runAs(editor, () -> ContentEntries.publish(entry#id, "editor", false))#stage;
@@ -128,8 +128,8 @@ mod TestAuthPg {
     def testPgContentApiVisibility(): Unit \ {IO, Assert} =
         let pepper = PgTestSupport.pepper();
         let seed = () -> CmsTestKit.withIds(List#{"e1", "k1"}, () -> {
-            let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+            let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+            discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             let entry = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("e1")), CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
             discard ContentEntries.publish(entry#id, "tester", false);
             PgTestSupport.asOwner(() -> ApiKeys.create(pepper, readKey("site"), 0i64))#key
@@ -168,8 +168,8 @@ mod TestAuthPg {
     @Test
     def testPgContentApiTreatsBrokenJwtAsAnonymous(): Unit \ {IO, Assert} =
         let seed = () -> CmsTestKit.withIds(List#{"e1"}, () -> {
-            let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+            let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+            discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             let entry = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("e1")), CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
             ContentEntries.publish(entry#id, "tester", false)
         });

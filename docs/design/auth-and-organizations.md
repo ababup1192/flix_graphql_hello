@@ -229,3 +229,33 @@ Schema の `Field.erase` が全フィールドを Runner で包むので、Runne
 - 失敗は層ごとに 1 種類: 認証は `Rejection`、ドメインは `CmsFailure`、DB は `DbFailure`。Tx の境界（`DbRunner.transact`）は `ApplicationFailure`（`Infrastructure` / `Domain`）で返し、`toFieldResult` / `GraphqlErrors` / `LogFields` は平らな match で写す。ドメインは UNAUTHENTICATED を出せない
 - Unit of Work は**ルートフィールドごとの Tx のまま**（変えない）。1 リクエストに mutation を並べても互いに独立で、2 つ目が業務エラーでも 1 つ目は COMMIT されている。まとめたい操作は 1 つの mutation にする（`TestAdminMutationsPg.testPgRootFieldsAreIndependentTransactions`）
 - 数は `db.statements` / `db.transactions`（docs/logging.md）で見え、`TestQueryBudgetPg` が上限で見張る。実測: JWT で entries 50 件 × 10 フィールドが 3723 → 209 本（認証 1 回）→ 12 本（版と型の先読み。`Preloaded`）、`contentTypes { name }` が 16 → 9 本（認証 1 回分）、API キーの一覧が 1208 → 204 → 7 本、コンテンツ API の一覧 50 件 + 参照先が API キーで 5 本
+
+## 権限の証明（Granted）（2026-09-08 追記。第 1 段を実装済み）
+
+「DB に触る pub のユースケースは中で `Session.require(permission)` を呼ぶ」は約束で、守られているかは `scripts/check-session.sh` が名前の一覧で見張っていた。
+権限の証明を値にして引数で渡す形に変え、呼び忘れをコンパイルエラーにする。
+
+### 形
+
+- `Granted[p]`（`src/cms/model/Granted.flix`）は権限の証明。p は印の型（`ReadDraft` / `WriteEntries` / `PublishEntries` / `ManageTypes` / `ManageAssets` / `ManageMembers` / `ManageApiKeys` / `ManageProject`。`Permission` の腕と 1 対 1 の空の enum）で、値は持たない（phantom）
+- 作れるのは `Session.grant(): Granted[p] \ Session + CmsErr with Perm[p]` と、対象付きの `Session.grantOn(resource)` だけ。中は今までの `Session.require` / `requireOn` で、通らなければ forbidden。p は渡す先の引数の型から決まる（`ContentTypes.create(Session.grant(), draft)`）
+- 印の型 → 実行時の `Permission` は trait `Perm[p] { def permission(proof: Granted[p]): Permission }` の instance（権限ごとに関数を増やさない）
+- ユースケースの pub の入口は `pub def create(_proof: Granted[ManageTypes], draft: ContentTypeDraft): ContentType \ Db + CmsErr + IdGen + Tenant` のように最初の引数で証明を受け、`Session` を持たず、自分では判定しない。呼ぶ側（src/admin のリゾルバ、`ContentEngine.rebuild`、`MicrocmsImport`、テスト）が `Session.grant()` で作って渡す
+- リゾルバは「ラムダに effect を使う式を直に書かない」決まりに合わせ、`Session.grant()` を呼ぶ小さな関数（`createType(input)` など）に切り出してラムダからはそれを呼ぶ
+- `check-session.sh` は「Session も引数の `Granted[…]` も持たない DB の pub」を集める（allowlist は増やしていない）
+- 第 1 段で移したのは ContentTypes（list / find / findByApiId / fetch / fetchField / create / update / delete / addField / updateField / removeField / reorderFields）、Assets（createUpload / confirm / updateAlt / delete / holders / find / list）、Projects.updateVisibility の 20 本
+
+### Flix で書けた所と妥協した所
+
+- phantom の型引数（`pub enum Granted[_p]`）、空の enum を印の型にする事、trait の instance を印の型ごとに付ける事、`Session.grant()` の p を呼び出し先の引数の型から推論する事、はそのまま書けた
+- **コンストラクタを mod の外に出せない。** Flix の enum の case は型と同じ可視性で、case だけを隠せない。本体を `mod Session` の中の `pub enum Granted[_p](Seal)` にし、中身の `Seal` を非 pub の enum にして、作れるのを Session の中だけにした。署名で短く書くための alias `pub type alias Granted[p] = Session.Granted[p]` をトップに置く
+- **`Perm.permission(): Permission` のような証明を受けない trait の署名は書けない。** trait の署名には型変数 p が現れなければならず、p が phantom の Granted は値として渡す以外に p を決める手が無い。`permission(proof: Granted[p])` の形にした
+- `grantOn(resource)` の Granted は対象（entryId）を値で持たない。今の `requireOn` の呼び方（ContentEntries の draft の読みで 1 か所）は判定して通すだけなので、証明にも載せない。載せたくなったら `Granted` を `(Seal, Resource)` にする
+- `ContentTypes.get(id)` / `getField(id)` は Session 付きの形で残し、証明を受ける物を `fetch` / `fetchField` と呼ぶ。ContentEntries / PreviewTokens が Session.require の形のままで証明を持っていないため。第 2 段で消して `fetch` を `get` に戻す
+
+### 第 2 段（未着手）
+
+- 残りの全ユースケースを移す。`Session.require` は 37 か所: ContentEntries 18（`requireOn` 1 つ込み）、Webhooks 6、Members 6、ApiKeys 3（`requireInteractive` は別。証明にするなら `Granted[Interactive]` のような印を足す）、Schedules 3、PreviewTokens 1。`Session.require` / `requireOn` を消し、`Session.currentUser()` のような主体を読む物だけ Session を残す
+- `ContentTypes.get` / `getField` の Session 付きの形を消し、`fetch` / `fetchField` を `get` / `getField` に戻す
+- `scripts/check-session.sh` と `scripts/session-allowlist.txt` を廃止する。「DB に触る pub は証明を受ける」が型で守られ、受けない物（写し・outbox・認証と起動が呼ぶ物）は署名に `Granted` が無い事で読める
+- `scripts/cmserr-allowlist.txt`（`CmsErr.runWithResult` を呼べるファイル）にも同じ手を使う: Tx の境界だけが作れる印（Seal 付きの `TxBoundary` のような型）を `runWithResult` の引数にし、ユースケースの途中で呼べないようにする

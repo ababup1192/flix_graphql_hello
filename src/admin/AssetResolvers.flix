@@ -12,9 +12,12 @@ mod AssetResolvers {
             size      = (_context, source) -> Ok(AdminMapping.sizeToGql(source#size)),
             status    = (_context, source) -> Ok(AdminMapping.assetStatusToGql(source#status)),
             createdAt = (_context, source) -> Ok(Timestamp.toIso8601(source#createdAt)),
-            +usedBy   = (_context, source) -> Ok(Assets.holders(source#id) |> List.filterMap(ContentEntries.find))
+            +usedBy   = (_context, source) -> Ok(usedBy(source#id))
             | GeneratedAdmin.assetDefaults()
         }
+
+    def usedBy(id: AssetId): List[Entry] \ DbRead + CmsErr + Tenant + Session =
+        Assets.holders(Session.grant(), id) |> List.filterMap(ContentEntries.find)
 
 }
 

@@ -17,10 +17,10 @@ mod TestContentTypesPg {
     @Test
     def testPgCreateTypeAndFields(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
-            let blogs = ContentTypes.create(blogsDraft());
-            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, { maxLength = Some(120) | FieldConfig.empty() }));
-            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("body", FieldKind.TextArea, FieldConfig.empty()));
-            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = Some(CmsTestKit.apiId("title")) | FieldConfig.empty() }));
+            let blogs = ContentTypes.create(Session.grant(), blogsDraft());
+            discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, { maxLength = Some(120) | FieldConfig.empty() }));
+            discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("body", FieldKind.TextArea, FieldConfig.empty()));
+            discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = Some(CmsTestKit.apiId("title")) | FieldConfig.empty() }));
             let loaded = ContentTypes.get(blogs#id);
             (TypeName.text(loaded#singular), ApiId.text(loaded#plural), loaded#kind, loaded#previewUrl,
              loaded#fields |> List.map(field -> (ApiId.text(field#apiId), field#position, field#config#maxLength, field#config#sourceField |> Option.map(ApiId.text))))
@@ -32,12 +32,12 @@ mod TestContentTypesPg {
     @Test
     def testPgReorderAndDelete(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
-            let blogs = ContentTypes.create(blogsDraft());
-            let title = ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-            let body = ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("body", FieldKind.TextArea, FieldConfig.empty()));
-            let reordered = ContentTypes.reorderFields(blogs#id, List#{body#id, title#id}) |> (found -> found#fields |> List.map(field -> ApiId.text(field#apiId)));
-            ContentTypes.delete(blogs#id);
-            (reordered, ContentTypes.find(blogs#id) |> Option.isEmpty, ContentFieldsQueries.listAllFields(1i64) |> List.length)
+            let blogs = ContentTypes.create(Session.grant(), blogsDraft());
+            let title = ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+            let body = ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("body", FieldKind.TextArea, FieldConfig.empty()));
+            let reordered = ContentTypes.reorderFields(Session.grant(), blogs#id, List#{body#id, title#id}) |> (found -> found#fields |> List.map(field -> ApiId.text(field#apiId)));
+            ContentTypes.delete(Session.grant(), blogs#id);
+            (reordered, ContentTypes.find(Session.grant(), blogs#id) |> Option.isEmpty, ContentFieldsQueries.listAllFields(1i64) |> List.length)
         });
         Assert.assertEq(expected = Ok(Ok((List#{"body", "title"}, true, 0))), result)
 
@@ -45,10 +45,10 @@ mod TestContentTypesPg {
     @Test
     def testPgUpdateAndCollision(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
-            let blogs = ContentTypes.create(blogsDraft());
-            discard ContentTypes.create(CmsTestKit.typeDraft("tags", "タグ"));
-            let renamed = ContentTypes.update(blogs#id, { name = Some("ブログ記事"), singular = None, plural = None, previewUrl = None });
-            let collision = CmsErr.runWithResult(() -> ContentTypes.update(blogs#id, { name = None, singular = Some(CmsTestKit.typeName("Tag")), plural = None, previewUrl = None }));
+            let blogs = ContentTypes.create(Session.grant(), blogsDraft());
+            discard ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("tags", "タグ"));
+            let renamed = ContentTypes.update(Session.grant(), blogs#id, { name = Some("ブログ記事"), singular = None, plural = None, previewUrl = None });
+            let collision = CmsErr.runWithResult(() -> ContentTypes.update(Session.grant(), blogs#id, { name = None, singular = Some(CmsTestKit.typeName("Tag")), plural = None, previewUrl = None }));
             (renamed#name, TypeName.text(renamed#singular), collision |> Result.map(found -> TypeName.text(found#singular)))
         });
         Assert.assertEq(expected = Ok(Ok(("ブログ記事", "Blog", Err(CmsFailure.Invalid(List#{Violation.Violation("singular", "'Tag' は既に他の型が使っています")}))))), result)
@@ -57,7 +57,7 @@ mod TestContentTypesPg {
     @Test
     def testPgApiIdUniqueInDb(): Unit \ {IO, Assert} =
         let kind = PgTestSupport.withDb(() -> {
-            discard ContentTypes.create(blogsDraft());
+            discard ContentTypes.create(Session.grant(), blogsDraft());
             DbError.runWithKind(() -> ContentTypesQueries.insertContentType({ projectId = 1i64, apiId = "blogs", kind = "collection", name = "x", singular = "X", plural = "xs", previewUrl = "" }))
                 |> Result.map(Option.map(row -> row#id))
         });
@@ -93,8 +93,8 @@ mod TestContentTypesPg {
     @Test
     def testPgSingletonSingleEntry(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"s1", "s2"}, () -> {
-            let settings = ContentTypes.create({ kind = TypeKind.Singleton | CmsTestKit.typeDraft("settings", "サイト設定") });
-            discard ContentTypes.addField(settings#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+            let settings = ContentTypes.create(Session.grant(), { kind = TypeKind.Singleton | CmsTestKit.typeDraft("settings", "サイト設定") });
+            discard ContentTypes.addField(Session.grant(), settings#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
             discard ContentEntries.create(settings#id, None, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("a"))}));
             CmsTestKit.failureMessage(() -> ContentEntries.create(settings#id, None, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("b"))})))
         }));
@@ -103,7 +103,7 @@ mod TestContentTypesPg {
     /// apiId だけ渡して singular と plural が同じになる（status → Status / status）時、怒られるのは渡していない plural ではなく apiId。
     @Test
     def testPgDerivedNamesBlameApiId(): Unit \ {IO, Assert} =
-        let result = PgTestSupport.withDb(() -> CmsTestKit.failureMessage(() -> ContentTypes.create(CmsTestKit.typeDraft("status", "状態"))));
+        let result = PgTestSupport.withDb(() -> CmsTestKit.failureMessage(() -> ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("status", "状態"))));
         Assert.assertEq(expected = Ok(Ok(Err("apiId: apiId から導いた plural が使えません（singular と同じ名前は使えません（コンテンツ API の 1 件と一覧のクエリ名が衝突します））。singular か plural を指定してください"))), result)
 
     /// 他の型が生やす型名（BlogCategory）と同じ singular の型は作れず、既にある型名と重なる名前のフィールド（where → BlogWhere）も足せない。
@@ -111,11 +111,11 @@ mod TestContentTypesPg {
     @Test
     def testPgSchemaTypeNameCollisions(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> {
-            let blogs = ContentTypes.create(blogsDraft());
-            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("category", FieldKind.Select, { options = List#{"NEWS"} | FieldConfig.empty() }));
-            let typeClash = CmsTestKit.failureMessage(() -> ContentTypes.create({ singular = Some(CmsTestKit.typeName("BlogCategory")) | CmsTestKit.typeDraft("categories", "分類") }));
-            let fieldClash = CmsTestKit.failureMessage(() -> ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("where", FieldKind.Object, FieldConfig.empty())));
-            let plainField = CmsTestKit.messageOr(field -> ApiId.text(field#apiId), () -> ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("where", FieldKind.Text, FieldConfig.empty())));
+            let blogs = ContentTypes.create(Session.grant(), blogsDraft());
+            discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("category", FieldKind.Select, { options = List#{"NEWS"} | FieldConfig.empty() }));
+            let typeClash = CmsTestKit.failureMessage(() -> ContentTypes.create(Session.grant(), { singular = Some(CmsTestKit.typeName("BlogCategory")) | CmsTestKit.typeDraft("categories", "分類") }));
+            let fieldClash = CmsTestKit.failureMessage(() -> ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("where", FieldKind.Object, FieldConfig.empty())));
+            let plainField = CmsTestKit.messageOr(field -> ApiId.text(field#apiId), () -> ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("where", FieldKind.Text, FieldConfig.empty())));
             (typeClash, fieldClash, plainField)
         });
         Assert.assertEq(expected = Ok(Ok((
@@ -127,11 +127,11 @@ mod TestContentTypesPg {
     @Test
     def testPgRemovedFieldDoesNotBlockEntries(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"e1"}, () -> {
-            let blogs = ContentTypes.create(blogsDraft());
-            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-            let body = ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("body", FieldKind.TextArea, FieldConfig.empty()));
+            let blogs = ContentTypes.create(Session.grant(), blogsDraft());
+            discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+            let body = ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("body", FieldKind.TextArea, FieldConfig.empty()));
             let created = ContentEntries.create(blogs#id, None, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("a")), ("body", Util.Json.Json.JString("b"))}));
-            ContentTypes.removeField(body#id);
+            ContentTypes.removeField(Session.grant(), body#id);
             let updated = ContentEntries.update(created#id, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("c"))}), created#version);
             let published = ContentEntries.publish(updated#id, "tester", false);
             (Map.keysOf(updated#data) |> Set.toList |> List.map(ApiId.text), published#stage)

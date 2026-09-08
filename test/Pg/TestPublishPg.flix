@@ -13,10 +13,10 @@ mod TestPublishPg {
     /// blogs（title: required / slug: unique / views）を作って id を返す。
     ///
     def blogsForPublish(): TypeId \ Db + CmsErr + IdGen + Tenant + Session =
-        let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-        discard ContentTypes.addField(blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
-        discard ContentTypes.addField(blogs#id, { unique = true | CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = CmsTestKit.apiId("title") |> Some | FieldConfig.empty() }) });
-        discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("views", FieldKind.Number, FieldConfig.empty()));
+        let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+        discard ContentTypes.addField(Session.grant(), blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
+        discard ContentTypes.addField(Session.grant(), blogs#id, { unique = true | CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = CmsTestKit.apiId("title") |> Some | FieldConfig.empty() }) });
+        discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("views", FieldKind.Number, FieldConfig.empty()));
         blogs#id
 
     def titled(title: String, slug: String): EntryData =
@@ -263,18 +263,18 @@ mod TestPublishPg {
     @Test
     def testPgUniqueToggle(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"a", "c"}, () -> {
-            let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
-            discard ContentTypes.addField(blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
-            let slug = ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = CmsTestKit.apiId("title") |> Some | FieldConfig.empty() }));
+            let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+            discard ContentTypes.addField(Session.grant(), blogs#id, { required = true | CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()) });
+            let slug = ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = CmsTestKit.apiId("title") |> Some | FieldConfig.empty() }));
             let toggle = flag -> { name = None, required = None, unique = Some(flag), localized = None, config = None };
             let a = ContentEntries.create(blogs#id, None, titled("A", "same"));
             let c = ContentEntries.create(blogs#id, None, titled("C", "same"));
             discard ContentEntries.publish(a#id, "tester", false);
-            let turnedOn = ContentTypes.updateField(slug#id, toggle(true)) |> (field -> field#unique);
+            let turnedOn = ContentTypes.updateField(Session.grant(), slug#id, toggle(true)) |> (field -> field#unique);
             let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(c#id, "tester", false));
-            discard ContentTypes.updateField(slug#id, toggle(false));
+            discard ContentTypes.updateField(Session.grant(), slug#id, toggle(false));
             let freed = CmsTestKit.messageOr(entry -> entry#stage, () -> ContentEntries.publish(c#id, "tester", false));
-            let again = ContentTypes.updateField(slug#id, toggle(true)) |> (field -> field#unique);
+            let again = ContentTypes.updateField(Session.grant(), slug#id, toggle(true)) |> (field -> field#unique);
             (turnedOn, blocked, freed, again)
         }));
         Assert.assertEq(expected = Ok(Ok((true, Err("fields.slug: 'same' は公開中の entry 'a' が使っています"), Ok(Stage.Published), true))), result)
@@ -284,7 +284,7 @@ mod TestPublishPg {
     def testPgUnpublishDraftAndNumericUnique(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"n1", "n2"}, () -> {
             let blogs = blogsForPublish();
-            let codes = ContentTypes.addField(blogs, { unique = true | CmsTestKit.fieldDraft("code", FieldKind.Number, FieldConfig.empty()) });
+            let codes = ContentTypes.addField(Session.grant(), blogs, { unique = true | CmsTestKit.fieldDraft("code", FieldKind.Number, FieldConfig.empty()) });
             let first = ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("One")), ("slug", Json.JString("one")), ("code", CmsTestKit.floatJson(1.0))}));
             let second = ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("Two")), ("slug", Json.JString("two")), ("code", CmsTestKit.intJson(1))}));
             let untouched = ContentEntries.unpublish(first#id);
