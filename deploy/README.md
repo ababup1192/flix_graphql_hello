@@ -226,6 +226,18 @@ DB の失敗の行（`message: "field failed"`）には `error.kind` が付く�
 `connectionLost` は `/health` の `pool.total` が 0 に落ちる形と、`timeout` は `pool.waiting` が伸びる形と揃う。
 一時的な失敗で呼び直した時は、リクエストの行に `db.retries`（1〜2）が付く。
 
+#### 本数の目安
+
+読むだけの文書（mutation の無い GraphQL。コンテンツ API の GET も、管理画面の一覧も）は**実行の間 1 本を握る**（最初の SQL で借り、応答の直前に COMMIT して返す。応答の書き出しの間は握らない）。
+mutation を含む文書はフィールドごとに借りて返す。リクエストの行の `db.tx.held_ms` が握っていた時間で、本数の目安は
+
+```
+CMS_DB_MAX_CONNECTIONS ≒ 秒間リクエスト × db.tx.held_ms の平均 / 1000 + tick の 1〜2 本
+```
+
+VPS 1 台なら `CMS_DB_MAX_CONNECTIONS=20` で足りる（秒間 100 リクエスト × 50 ms = 5 本 + 仕事）。同時に DB を使うリクエストが本数を超えると、借りるのに `CMS_DB_BORROW_TIMEOUT_SECONDS`（2 秒）待って INTERNAL になり、`db.pool.waiting` が付く。
+リゾルバが Tx を握ったまま外部 I/O（asset の署名付き URL、JWKS）を待つと、`CMS_DB_TIMEOUT_SECONDS`（30 秒）の `idle_in_transaction_session_timeout` で DB 側が切り、そのリクエストは Broken（`db.tx.outcome: rolled_back`、`error.kind: connectionLost`）になる。
+
 `CMS_DB_LEAK_DETECTION_SECONDS` を入れると HikariCP が「借りたまま返らない接続」を見張るが、**警告の行は出ない**（cms は HikariCP の SLF4J を `slf4j-nop` で黙らせている。出すと Flix のテストが標準エラーで落ちるため）。
 気付き方は `/health` の `pool.active` が張り付く事の方で、しきい値の設定は将来 SLF4J の束縛を差し替えた時のために置いてある。
 
@@ -237,7 +249,8 @@ SIGTERM / SIGINT を受けると、この順で止まる。
 2. listen（待ち受けのソケット）を閉じる。新しい接続はここで受けなくなる（前段は他の台へ回す）
 3. 処理中の接続が全部閉じるのを待つ（最長 `CMS_SHUTDOWN_TIMEOUT_SECONDS`。既定 20 秒）
 4. 新しい仕事を拾うのをやめ、実行中の 1 周が終わるのを同じ期限まで待って `jobs drained`
-5. 全部間に合えば**終了コード 0**。どれかが間に合わなければ warn の `shutdown timed out`（`shutdown.connections` / `shutdown.in_tick` に何が残ったか）を出して**終了コード 2**
+5. 接続プールを閉じる（期限切れでも。握られたままの接続は Hikari が切る）
+6. 全部間に合えば**終了コード 0**。どれかが間に合わなければ warn の `shutdown timed out`（`shutdown.connections` / `shutdown.in_tick` に何が残ったか）を出して**終了コード 2**
 
 | 終了コード | 意味 |
 |---|---|
@@ -263,6 +276,7 @@ OOM のような事故の後、プロセスは生きているのに接続プー�
 1. 起動から `CMS_SELF_HEAL_WARMUP_SECONDS`（既定 300 秒）経っている（起動直後の DB 待ちで落ちない）
 2. プール経由の ping が `CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS`（既定 90 秒）以上続けて失敗している
 3. その間に、**プールを通さない新しい接続**では DB に届いた（DB 自体が落ちている時は終わらない。終わっても直らないため）
+3'. その間に、リクエストの Tx が **1 度も閉じていない**（閉じていれば接続は流れていて、ping が落ちるのはプールが満杯なだけ。読むだけの文書が実行の間 1 本を握る形では、混んでいるだけで ping が借り待ちの上限で落ちる）
 4. プロセスごとの jitter（0 秒から `CMS_SELF_HEAL_JITTER_SECONDS`。既定 10 秒）も過ぎている（複数台が同じ時刻に落ちない）
 
 終わる時は `{"severity":"error","message":"self-heal: exiting","reason":...,"db.pool.active":...}` を出し、停止（SIGTERM）と同じ drain をしてから**終了コード 3**。
@@ -312,7 +326,7 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_DB_APP_USER` / `CMS_DB_APP_PASSWORD` | リクエストに使うロール。起動時に所有者が作り、表の読み書きだけ許す（RLS が効く）。PASSWORD が無ければ所有者で繋ぐ | cms_app / 無し |
 | `CMS_DB_TIMEOUT_SECONDS` | 接続ごとに DB 側で効かせる時間の上限（秒）。`idle_in_transaction_session_timeout` / `statement_timeout` / `lock_timeout` を同じ値にする（pgjdbc の `options` で接続時に付ける）。アプリの不具合で Tx が開いたままでも DB 側が切る。0 で無効。`CMS_DSN` に `options=` を書いた時はそちらが優先 | 30 |
 | `CMS_DB_LEAK_DETECTION_SECONDS` | 借りたまま返らない接続を HikariCP が見張るまでの秒数。0 で無効。警告の行は出ない（`slf4j-nop`。上の「DB の接続プール」） | 0 |
-| `CMS_DB_MAX_CONNECTIONS` | 接続プールが同時に開く接続の上限。PostgreSQL の `max_connections` を台数で割った数より小さくする | 10 |
+| `CMS_DB_MAX_CONNECTIONS` | 接続プールが同時に開く接続の上限。PostgreSQL の `max_connections` を台数で割った数より小さくする。読むだけの文書は実行の間 1 本を握るので、目安は上の「本数の目安」 | 10 |
 | `CMS_DB_BORROW_TIMEOUT_SECONDS` | 接続を借りるのを待つ上限。DbRunner が 3 回まで再試行するので、1 リクエストの最悪はこの 3 倍 + backoff（0〜0.6 秒） | 2 |
 | `CMS_MIGRATE` | `apply`（起動時に当てる）か `check`（未適用なら起動しない） | イメージは apply、手元は check |
 | `CMS_CORS_ORIGINS` | 許すオリジン（カンマ区切り） | 無し |

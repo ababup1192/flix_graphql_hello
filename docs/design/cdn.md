@@ -49,15 +49,16 @@
 
 - GraphQL の Unit of Work はルートフィールドごとの Tx なので、1 リクエストに mutation を並べると版はフィールドごとに進む。途中で失敗しても、それまでに COMMIT された物の版は進んでいる（キャッシュは正しく外れる）
 - 版の +1 は `UPDATE projects` の行ロックを取る。同じプロジェクトの公開が並ぶと直列になるが、公開は元々 unique の advisory lock で直列なので増えない
-- 版の読み取り（GET）は認証の Tx で、Runner の Tx より前。読んだ版より新しい公開が GraphQL の実行までに COMMIT されると、古い版の ETag に新しい中身が乗る事がある。次の公開で版がもう 1 つ進むまでその ETag が返り続けるが、中身は新しい側なので古い物を見せる事は無い（逆の「新しい ETag に古い中身」は起きない）
+- 版の読み取り（GET）は認証の Tx で、リクエストの Tx（読むだけの文書の 1 リクエスト 1 Tx。REPEATABLE READ）より前。認証の Tx の COMMIT からリクエストの Tx の最初の SQL（snapshot）までの間に公開が COMMIT されると、古い版の ETag に新しい中身が乗る事がある。次の公開で版がもう 1 つ進むまでその ETag が返り続けるが、中身は新しい側なので古い物を見せる事は無い（逆の「新しい ETag に古い中身」は起きない）。文書の中では snapshot が 1 つなので、一覧と参照先が違う版から来る事は無い
+- 窓を消すには 200 の ETag をリクエストの Tx の最初で読み直した版で組めばよい（SQL +1。304 の判定は認証の Tx の版のまま）が、ETag を組むのは `Server.respondQuery`（GraphQL を実行する前に 304 を決め、実行の後に ETag を付ける）で、リクエストの Tx は `Graphql.execute` の handler（`Main.executeDocument`）の中にある。Route の handler に Tx を見せずにこの窓を閉じるには GraphqlResponse に版を載せる形が要るので、後続に回す（窓の向きは上の通り「古い ETag に新しい中身」だけ）
 
 ## 測った数（2026-09-08、`TestQueryBudgetPg`）
 
 | 道 | db.statements | db.transactions |
 |---|---|---|
 | 匿名の GET が 304 で終わる（RLS の印 + 公開範囲 + 版） | 3 | 1 |
-| 匿名の GET が 200（blogs 50 件 + 参照先。上の 1 Tx + 一覧 2 + 参照先 1） | 6 | 254 |
-| （比較）API キーのコンテンツ API で同じ一覧 | 5 | 254 |
+| 匿名の GET が 200（blogs 50 件 + 参照先。上の 1 Tx + 一覧 2 + 参照先 1） | 6 | 2（1 リクエスト 1 Tx の前は 254） |
+| （比較）API キーのコンテンツ API で同じ一覧 | 5 | 2（前は 254） |
 
 ## 関連
 
