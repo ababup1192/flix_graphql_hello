@@ -18,6 +18,7 @@ check:
 	bin/flix check
 	cd schemagen && ../bin/flix check
 	scripts/check-session.sh
+	scripts/check-log-keys.sh
 
 # 既定は DB 無しのテスト
 test: test-unit

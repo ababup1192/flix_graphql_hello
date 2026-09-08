@@ -174,6 +174,19 @@ mod Log {
             |> List.join(",")
             |> body -> "{${body}}"
 
+    ///
+    /// 設定の文字列（CMS_LOG_LEVEL など）から Severity。大文字小文字は問わない。知らない語は None。
+    ///
+    pub def parseSeverity(text: String): Option[Severity] = match String.toLowerCase(String.trim(text)) {
+        case "trace" => Some(Severity.Trace)
+        case "debug" => Some(Severity.Debug)
+        case "info"  => Some(Severity.Info)
+        case "warn"  => Some(Severity.Warn)
+        case "error" => Some(Severity.Error)
+        case "fatal" => Some(Severity.Fatal)
+        case _       => None
+    }
+
     /// severity の JSON の値。
     def severityText(severity: Severity): String = match severity {
         case Severity.Trace => "trace"

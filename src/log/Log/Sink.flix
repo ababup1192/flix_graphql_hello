@@ -18,6 +18,10 @@ mod Log.Sink {
     pub def enrich(fields: Log.Fields, next: Log.Sink): Log.Sink =
         record -> next({ severity = record#severity, message = record#message, fields = Map.union(record#fields, fields) })
 
+    /// 何も出さない。テストの Deps など、出力先の要らない所に。
+    pub def silent(): Log.Sink =
+        _ -> ()
+
     /// テスト用。行を Ref に積む（新しい物が先頭）。spawn の中から使える。
     pub def collect(sink: Ref[List[Log.Record], Static]): Log.Sink =
         record -> Ref.put(record :: Ref.get(sink), sink)

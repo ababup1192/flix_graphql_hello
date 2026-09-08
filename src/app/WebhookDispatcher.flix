@@ -23,10 +23,10 @@ mod WebhookDispatcher {
     /// 送る番の配信を拾って送る。送った数を返す。拾える物が無くなるか上限の回数まで繰り返す。
     /// テストは Http の handler を差し替えて相手の応答を作る。
     ///
-    pub def tick(pool: Pool): Result[String, Int32] \ {IO, Http} =
+    pub def tick(pool: Pool): Result[String, Int32] \ {IO, Http, Log} =
         rounds(pool, maxRounds(), 0)
 
-    def rounds(pool: Pool, remaining: Int32, sent: Int32): Result[String, Int32] \ {IO, Http} =
+    def rounds(pool: Pool, remaining: Int32, sent: Int32): Result[String, Int32] \ {IO, Http, Log} =
         if (remaining <= 0) Ok(sent)
         else
             DbRunner.retrying(() -> Pool.withLazyTx(pool, () -> WebhooksQueries.claimDueDeliveries(batchSize())))
@@ -38,7 +38,7 @@ mod WebhookDispatcher {
     ///
     /// 1 件送って結果を書く。
     ///
-    def deliverOne(pool: Pool, claimed: { id = String, projectId = Int64, webhookId = Int64, event = String, payload = Util.Json.Json, attempts = Int32, createdAt = Timestamp.Timestamp }): Result[String, Unit] \ {IO, Http} =
+    def deliverOne(pool: Pool, claimed: { id = String, projectId = Int64, webhookId = Int64, event = String, payload = Util.Json.Json, attempts = Int32, createdAt = Timestamp.Timestamp }): Result[String, Unit] \ {IO, Http, Log} =
         let projectId = ProjectId.ProjectId(claimed#projectId);
         let target = DbRunner.retrying(() -> TenantTx.withLazyTx(pool, projectId, () -> WebhooksQueries.findWebhookForDelivery({ id = claimed#webhookId, projectId = claimed#projectId })))
             |> Result.mapErr(failure -> "Webhook を引けません: ${failure}");
@@ -72,7 +72,7 @@ mod WebhookDispatcher {
     ///
     /// 結果を書く。失敗は回数に応じて次の時刻を置き、使い切れば failed。
     ///
-    def record(pool: Pool, claimed: { id = String, attempts = Int32 | r }, projectId: ProjectId, outcome: Result[(Int32, String), Int32]): Result[String, Unit] \ IO =
+    def record(pool: Pool, claimed: { id = String, attempts = Int32 | r }, projectId: ProjectId, outcome: Result[(Int32, String), Int32]): Result[String, Unit] \ {IO, Log} =
         let write = () -> match outcome {
             case Ok(status) => discard WebhooksQueries.markDelivered({ id = claimed#id, projectId = ProjectId.toInt64(projectId), lastStatus = status })
             case Err((status, reason)) => match retryDelaySeconds(claimed#attempts) {
@@ -81,8 +81,8 @@ mod WebhookDispatcher {
             }
         };
         match outcome {
-            case Ok(status)            => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = JobLog.JobOutcome.Delivered, detail = "HTTP ${status}" })
-            case Err((status, reason)) => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = if (Option.isEmpty(retryDelaySeconds(claimed#attempts))) JobLog.JobOutcome.Failed else JobLog.JobOutcome.RetryLater, detail = "HTTP ${status} ${reason}" })
+            case Ok(status)            => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = JobLog.JobOutcome.Delivered, detail = "HTTP ${status}" }, Log.Fields.empty() |> Log.Fields.int("http.response.status_code", Int32.toInt64(status)))
+            case Err((status, reason)) => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = if (Option.isEmpty(retryDelaySeconds(claimed#attempts))) JobLog.JobOutcome.Failed else JobLog.JobOutcome.RetryLater, detail = "HTTP ${status} ${reason}" }, Log.Fields.empty() |> Log.Fields.int("http.response.status_code", Int32.toInt64(status)))
         };
         DbRunner.retrying(() -> TenantTx.withLazyTx(pool, projectId, write)) |> Result.mapErr(failure -> "配信の結果を書けません: ${failure}")
 

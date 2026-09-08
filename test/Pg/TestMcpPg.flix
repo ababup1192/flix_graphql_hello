@@ -25,7 +25,7 @@ mod TestMcpPg {
 
     /// 管理 API のエンジンでリクエストを処理し、(status, body の JSON) を返す。
     def handle(engine: Graphql.Engine, credential: Credential, request: HttpRequest): (Int32, Value) \ IO =
-        let response = Graphql.runWithEngine(engine, () -> Server.handle(config(), HealthFake.ok(), credential, request));
+        let response = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handle(config(), HealthFake.ok(), credential, request)));
         (response#status, JsonValue.parse(response#body) |> Result.getWithDefault(Value.Null))
 
     /// ツールを 1 つ呼び、result.content[0].text を JSON に読んで (isError, text の JSON) にする。
@@ -200,11 +200,11 @@ mod TestMcpPg {
             let badOrigin = viaHeaders(post(("Origin", "https://evil.example.com") :: Nil, listBody));
             let noOrigin = viaHeaders(post(Nil, listBody));
             let goodOrigin = viaHeaders(post(("Origin", "https://admin.example.com") :: Nil, listBody));
-            let initialized = Graphql.runWithEngine(engine, () -> Server.handle(config(), HealthFake.ok(), Credential.Missing, post(Nil, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}")));
+            let initialized = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handle(config(), HealthFake.ok(), Credential.Missing, post(Nil, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}"))));
             let badVersion = viaHeaders(post(("MCP-Protocol-Version", "2099-01-01") :: Nil, listBody));
             let preview = viaHeaders(post(("X-Preview-Token", "pv_x") :: Nil, listBody));
             let get = viaHeaders({ version = "HTTP/1.1", method = "GET", path = "/mcp", headers = Nil, body = "" });
-            let badJwtHeader = Graphql.runWithEngine(engine, () -> Server.handle(config(), HealthFake.ok(), Credential.Invalid("JWT は無し"), post(Nil, listBody)))#headers |> Http.findHeader("WWW-Authenticate");
+            let badJwtHeader = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handle(config(), HealthFake.ok(), Credential.Invalid("JWT は無し"), post(Nil, listBody))))#headers |> Http.findHeader("WWW-Authenticate");
             (fst(badJwt), badJwtHeader, fst(deadPat), fst(badOrigin), fst(noOrigin), fst(goodOrigin), (initialized#status, initialized#body), fst(badVersion), fst(preview), fst(get))
         });
         Assert.assertEq(

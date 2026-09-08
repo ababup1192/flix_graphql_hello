@@ -8,7 +8,13 @@
 mod TestServer {
 
     def handle(request: HttpRequest): HttpResponse \ Graphql =
-        Server.handle(Server.defaultConfig(), HealthFake.ok(), Credential.Missing, request)
+        serve(Server.defaultConfig(), HealthFake.ok(), Credential.Missing, request)
+
+    ///
+    /// Server.handle をログ無し・時計 0 で呼ぶ（Route は Log と Time.Clock を持つ）。
+    ///
+    def serve(config: ServerConfig, health: Health[{}], credential: Credential, request: HttpRequest): HttpResponse \ Graphql =
+        ServerTestKit.quietly(() -> Server.handle(config, health, credential, request))
 
     ///
     /// POST /graphql に JSON ボディを載せたリクエスト。
@@ -132,7 +138,7 @@ mod TestServer {
     def testServerGetCacheControl(): Unit \ Assert =
         let cached = { cacheMaxAge = Some(60) | Server.defaultConfig() };
         let headerOf = (config, credential) -> GraphqlFake.runWithEcho(() ->
-            Server.handle(config, HealthFake.ok(), credential, { version = "HTTP/1.1", method = "GET", path = "/graphql?query=%7B%20x%20%7D", headers = Nil, body = "" }))#headers
+            serve(config, HealthFake.ok(), credential, { version = "HTTP/1.1", method = "GET", path = "/graphql?query=%7B%20x%20%7D", headers = Nil, body = "" }))#headers
             |> Http.findHeader("Cache-Control");
         Assert.assertEq(
             expected = (Some("public, max-age=60, s-maxage=60, stale-while-revalidate=60"), Some("private, no-store"), Some("private, no-store")),
@@ -188,7 +194,7 @@ mod TestServer {
     @Test
     def testServerHealthFailure(): Unit \ Assert =
         let response = GraphqlFake.runWithEcho(() ->
-            Server.handle(Server.defaultConfig(), HealthFake.failing("connection refused"), Credential.Missing, { version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" }));
+            serve(Server.defaultConfig(), HealthFake.failing("connection refused"), Credential.Missing, { version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" }));
         Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }) }))),
             (response#status, JsonValue.parse(response#body)))
 
@@ -204,13 +210,13 @@ mod TestServer {
     @Test
     def testServerCorsHeadersOnGraphql(): Unit \ Assert =
         Assert.assertEq(expected = ("Access-Control-Allow-Origin", "https://admin.example.com") :: ("Vary", "Origin") :: Nil,
-            GraphqlFake.runWithEcho(() -> Server.handle(adminConfig(), HealthFake.ok(), Credential.Missing, fromAdmin("POST", "/graphql")))#headers)
+            GraphqlFake.runWithEcho(() -> serve(adminConfig(), HealthFake.ok(), Credential.Missing, fromAdmin("POST", "/graphql")))#headers)
 
     /// preflight は 204 で、Graphql を呼ばずに返る（偽ハンドラの応答がボディに現れない）。
     /// Allow-Origin は 1 回だけ付く（preflight と withHeaders で二重にならない）。
     @Test
     def testServerPreflight(): Unit \ Assert =
-        let response = GraphqlFake.runWithEcho(() -> Server.handle(adminConfig(), HealthFake.ok(), Credential.Missing, fromAdmin("OPTIONS", "/graphql")));
+        let response = GraphqlFake.runWithEcho(() -> serve(adminConfig(), HealthFake.ok(), Credential.Missing, fromAdmin("OPTIONS", "/graphql")));
         Assert.assertEq(expected = (204, "", true, 1),
             (response#status, response#body,
              List.memberOf(("Access-Control-Allow-Methods", "POST, GET, OPTIONS"), response#headers),
@@ -226,7 +232,7 @@ mod TestServer {
     @Test
     def testServerPreflightOnlyOnKnownPaths(): Unit \ Assert =
         let responses = List#{"/graphql", "/health", "/p/shop/admin/graphql", "/nope"} |> List.map(path ->
-            GraphqlFake.runWithEcho(() -> Server.handle(adminConfig(), HealthFake.ok(), Credential.Missing, fromAdmin("OPTIONS", path))));
+            GraphqlFake.runWithEcho(() -> serve(adminConfig(), HealthFake.ok(), Credential.Missing, fromAdmin("OPTIONS", path))));
         Assert.assertEq(expected = (List#{204, 204, 204, 404}, List#{true, true, true, true}),
             (responses |> List.map(response -> response#status),
              responses |> List.map(response -> List.memberOf(("Access-Control-Allow-Origin", "https://admin.example.com"), response#headers))))
@@ -283,7 +289,7 @@ mod TestServer {
         let request = token -> { version = "HTTP/1.1", method = "POST", path = "/jobs/tick", headers = ("X-Jobs-Token", token) :: Nil, body = "" };
         let closed = Server.defaultConfig();
         let opened = { jobsToken = Some("secret") | Server.defaultConfig() };
-        let call = (config, token) -> GraphqlFake.runWithEcho(() -> Server.handle(config, HealthFake.ok(), Credential.Missing, request(token)));
+        let call = (config, token) -> GraphqlFake.runWithEcho(() -> serve(config, HealthFake.ok(), Credential.Missing, request(token)));
         Assert.assertEq(expected = (404, 403, 200, "{\"failures\":[],\"status\":\"ok\"}"),
             (call(closed, "secret")#status, call(opened, "wrong")#status, call(opened, "secret")#status, call(opened, "secret")#body))
 

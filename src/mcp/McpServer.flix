@@ -67,18 +67,6 @@ mod McpServer {
     pub def isOriginAllowed(config: CorsConfig, headers: List[(String, String)]): Bool =
         Http.findHeader("Origin", headers) |> Option.forAll(origin -> Cors.isAllowed(config, origin))
 
-    ///
-    /// ログに出す身元の種類。生の値は出さない。
-    ///
-    pub def credentialKind(credential: Credential): String = match credential {
-        case Credential.Bearer(_, _, _, _) => "bearer"
-        case Credential.ApiKey(_)          => "api-key"
-        case Credential.PersonalToken(_)   => "pat"
-        case Credential.Preview(_)         => "preview"
-        case Credential.Missing            => "anonymous"
-        case Credential.Invalid(_)         => "invalid"
-    }
-
     // ---- JSON-RPC ----
 
     ///

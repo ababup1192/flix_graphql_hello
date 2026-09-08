@@ -36,10 +36,10 @@ mod TestSchedulesPg {
                  Schedules.schedule(CmsTestKit.entryId("e2"), ScheduleAction.Publish, past(), false)#id,
                  Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Unpublish, future(), false)#id)
             }));
-            let firstTick = Scheduler.tick(pool);
+            let firstTick = ServerTestKit.quietly(() -> Scheduler.tick(pool));
             let afterPublish = (statusOf(pool, okId), statusOf(pool, badId), statusOf(pool, laterId), stageOf(pool, "e1"));
             let unpublishId = PgTestSupport.mutateOrBug(pool, () -> Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Unpublish, past(), false)#id);
-            let secondTick = Scheduler.tick(pool);
+            let secondTick = ServerTestKit.quietly(() -> Scheduler.tick(pool));
             (firstTick, afterPublish, statusOf(pool, laterId), secondTick, statusOf(pool, unpublishId), stageOf(pool, "e1"))
         });
         Assert.assertEq(
@@ -67,10 +67,10 @@ mod TestSchedulesPg {
             // 落ちた事にする: 新しい予約を running のまま 1 時間前に拾った形にする
             let stuckId = PgTestSupport.mutateOrBug(pool, () -> Schedules.schedule(CmsTestKit.entryId("e1"), ScheduleAction.Publish, past(), false)#id);
             discard PgTestSupport.executeSql("UPDATE scheduled_actions SET status = 'running', claimed_at = now() - interval '1 hour' WHERE id = $1", SqlValue.Str(stuckId) :: Nil);
-            let untouched = Scheduler.tick(pool);
+            let untouched = ServerTestKit.quietly(() -> Scheduler.tick(pool));
             let beforeRecovery = statusOf(pool, stuckId);
             let jobs = BackgroundJobs.createState(15i64);
-            let failures = BackgroundJobs.tick(pool, jobs);
+            let failures = ServerTestKit.quietly(() -> BackgroundJobs.tick(pool, jobs));
             (cancelled, cancelAgainRejected, untouched, beforeRecovery, failures, statusOf(pool, stuckId), stageOf(pool, "e1"), Option.nonEmpty(Ref.get(jobs#lastTick)))
         });
         Assert.assertEq(
@@ -99,7 +99,7 @@ mod TestSchedulesPg {
                 });
                 shop
             }));
-            let ticked = Scheduler.tick(pool);
+            let ticked = ServerTestKit.quietly(() -> Scheduler.tick(pool));
             let publishedCount = projectId -> PgTestSupport.countSql("SELECT count(*)::bigint AS total FROM webhook_deliveries WHERE project_id = $1 AND event = 'entry.published'", SqlValue.Int64(ProjectId.toInt64(projectId)) :: Nil);
             (ticked, publishedCount(shop), publishedCount(ProjectId.default()))
         });
@@ -116,7 +116,7 @@ mod TestSchedulesPg {
         });
         let outcome = PgTestSupport.withContentApiAndPool(seed, (pool, ask) -> {
             let before = ask("{ blog(id: \"e1\") { title } blogs { totalCount } }") |> fst;
-            let ticked = Scheduler.tick(pool);
+            let ticked = ServerTestKit.quietly(() -> Scheduler.tick(pool));
             (before, ticked, ask("{ blog(id: \"e1\") { title } blogs { totalCount } }") |> fst)
         });
         Assert.assertEq(
@@ -143,10 +143,10 @@ mod TestSchedulesPg {
                 discard ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("profile", Json.JString("p1"))}));
                 Schedules.schedule(CmsTestKit.entryId("b1"), ScheduleAction.Publish, past(), false)#id
             });
-            let aloneTick = Scheduler.tick(pool);
+            let aloneTick = ServerTestKit.quietly(() -> Scheduler.tick(pool));
             let alone = (statusOf(pool, aloneId), stageOf(pool, "b1"), stageOf(pool, "p1"));
             let togetherId = PgTestSupport.mutateOrBug(pool, () -> Schedules.schedule(CmsTestKit.entryId("b1"), ScheduleAction.Publish, past(), true)#id);
-            let togetherTick = Scheduler.tick(pool);
+            let togetherTick = ServerTestKit.quietly(() -> Scheduler.tick(pool));
             (aloneTick, alone, togetherTick, statusOf(pool, togetherId), stageOf(pool, "b1"), stageOf(pool, "p1"))
         });
         Assert.assertEq(

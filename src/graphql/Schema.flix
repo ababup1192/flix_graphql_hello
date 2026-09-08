@@ -1,8 +1,9 @@
 ///
 /// リクエスト単位の情報。すべてのリゾルバに第 1 引数として届く。
 /// credential はリクエストの身元。Runner が Tx の中で主体（Actor）に解決する。
+/// log はリクエストの span（request.id など）。Runner がリゾルバの中の行に付ける。入れるのは Graphql の handler を持つ側（Main）。
 ///
-pub type alias Context = { credential = Credential }
+pub type alias Context = { credential = Credential, log = Log.Fields }
 
 ///
 /// リクエストが持ってきた身元。誰が確かめたかを区別する（Runner が DB の役割と突き合わせて主体にする）。
@@ -28,12 +29,12 @@ mod Context {
     ///
     /// 認証していない Context。JWT 検証を入れるまでは全リクエストがこれ。
     ///
-    pub def anonymous(): Context = { credential = Credential.Missing }
+    pub def anonymous(): Context = { credential = Credential.Missing, log = Map.empty() }
 
     ///
     /// 身元付きの context。
     ///
-    pub def withCredential(credential: Credential): Context = { credential = credential }
+    pub def withCredential(credential: Credential): Context = { credential = credential, log = Map.empty() }
 
 }
 

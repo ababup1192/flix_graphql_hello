@@ -19,7 +19,7 @@ mod TestServerAuthPg {
     /// 管理 API のエンジンでリクエストを処理し、(status, body の JSON) を返す。
     def handle(engine: Graphql.Engine, request: HttpRequest): (Int32, Value) \ IO =
         let config = { cors = Cors.none(), version = "test", jobsToken = None, cacheMaxAge = None };
-        let response = Graphql.runWithEngine(engine, () -> Server.handle(config, HealthFake.ok(), credentialOf(request), request));
+        let response = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handle(config, HealthFake.ok(), credentialOf(request), request)));
         (response#status, JsonValue.parse(response#body) |> Result.getWithDefault(Value.Null))
 
     ///

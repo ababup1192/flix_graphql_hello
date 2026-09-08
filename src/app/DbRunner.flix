@@ -60,9 +60,13 @@ mod DbRunner {
 
     ///
     /// transact の結果を GraphQL のフィールドの結果に。DB の失敗と業務エラーは GraphqlErrors が写し、成功はリゾルバの戻りをそのまま。
+    /// DB の失敗（リゾルバの例外もここに来る）は Error の行を出し、requestId を INTERNAL の extensions に付ける。
     ///
-    pub def toFieldResult(outcome: Result[DbFailure, Result[CmsFailure, Result[FieldError, a]]]): Result[FieldError, a] = match outcome {
-        case Err(failure)     => Err(GraphqlErrors.fromDbFailure(failure))
+    pub def toFieldResult(requestId: Option[String], outcome: Result[DbFailure, Result[CmsFailure, Result[FieldError, a]]]): Result[FieldError, a] \ Log = match outcome {
+        case Err(failure)     => {
+            Log.Fields.empty() |> Log.Fields.str("error.code", ErrorCode.text(ErrorCode.Internal)) |> Log.Fields.str("error.message", failureMessage(failure)) |> Log.error("field failed");
+            Err(GraphqlErrors.fromDbFailure(requestId, failure))
+        }
         case Ok(Err(failure)) => Err(GraphqlErrors.toFieldError(failure))
         case Ok(Ok(result))   => result
     }

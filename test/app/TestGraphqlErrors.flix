@@ -75,4 +75,25 @@ mod TestGraphqlErrors {
             expected = Map#{ "code" => Value.Str("FORBIDDEN") },
             FieldError.extensions(GraphqlErrors.toFieldError(CmsFailure.Forbidden(Permission.ManageTypes))))
 
+    /// DB の失敗は INTERNAL。request id があれば extensions.requestId に入り（問い合わせとログを繋ぐ）、無ければ code だけ。
+    @Test
+    def testGraphqlErrorsInternalCarriesRequestId(): Unit \ Assert =
+        Assert.assertEq(
+            expected = (Map#{ "code" => Value.Str("INTERNAL"), "requestId" => Value.Str("01J9ZK3Q8R6S4T2V1W0X9Y8Z7A") }, Map#{ "code" => Value.Str("INTERNAL") }),
+            (FieldError.extensions(GraphqlErrors.fromDbFailure(Some("01J9ZK3Q8R6S4T2V1W0X9Y8Z7A"), DbError.DbFailure.Permanent("boom"))),
+             FieldError.extensions(GraphqlErrors.fromDbFailure(None, DbError.DbFailure.Permanent("boom")))))
+
+    /// toFieldResult は DB の失敗の時だけ Error の行を 1 つ出し（error.code は INTERNAL）、業務エラーと成功では出さない。
+    @Test
+    def testToFieldResultLogsOnlyDbFailure(): Unit \ Assert =
+        let outcomes: List[Result[DbError.DbFailure, Result[CmsFailure, Result[FieldError, Int32]]]] = List#{
+            Err(DbError.DbFailure.Transient("connection lost")),
+            Ok(Err(CmsFailure.NotFound(Entity.Entry, "e1"))),
+            Ok(Ok(Ok(1)))
+        };
+        let (results, lines) = Log.runWithList(() -> outcomes |> List.map(outcome -> DbRunner.toFieldResult(Some("rid"), outcome) |> Result.map(_ -> ()) |> Result.mapErr(FieldError.code)));
+        Assert.assertEq(
+            expected = (List#{ Err(ErrorCode.Internal), Err(ErrorCode.NotFound), Ok(()) }, List#{ (Log.Severity.Error, "field failed", Some(Value.Str("INTERNAL"))) }),
+            (results, lines |> List.map(line -> (line#severity, line#message, Map.get("error.code", line#fields)))))
+
 }

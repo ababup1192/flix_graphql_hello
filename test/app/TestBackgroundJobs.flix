@@ -8,13 +8,13 @@ mod TestBackgroundJobs {
     /// 普通の周は結果をそのまま返す。
     @Test
     def testGuardedPassesThrough(): Unit \ {Assert, IO} =
-        Assert.assertEq(expected = List#{"a"}, BackgroundJobs.guarded(() -> List#{"a"}))
+        Assert.assertEq(expected = List#{"a"}, ServerTestKit.quietly(() -> BackgroundJobs.guarded(() -> List#{"a"})))
 
     /// Error（VerifyError。リゾルバと同じ経路）が飛んだら、失敗の説明 1 件になる。
     @Test
     def testGuardedTurnsErrorIntoMessage(): Unit \ {Assert, IO} =
         Assert.assertEq(
             expected = List#{"1 周の途中で例外: stack map"},
-            BackgroundJobs.guarded(() -> { discard throw new VerifyError("stack map"); List#{"unreachable"} }))
+            ServerTestKit.quietly(() -> BackgroundJobs.guarded(() -> { discard throw new VerifyError("stack map"); List#{"unreachable"} })))
 
 }

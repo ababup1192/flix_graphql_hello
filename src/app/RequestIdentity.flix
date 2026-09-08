@@ -10,9 +10,9 @@
 mod RequestIdentity {
 
     ///
-    /// 決めた主体と、使用時刻を書く先。
+    /// 決めた主体と、使用時刻を書く先、ログの span に足す身元の属性（user.id / api_key.name。生の値と email は入れない）。
     ///
-    pub type alias Resolved = { actor = Actor, usage = Usage }
+    pub type alias Resolved = { actor = Actor, usage = Usage, log = Log.Fields }
 
     ///
     /// 使用時刻（last_used_at）を書く先。人（ログインの JWT）や匿名は書く物が無い。
@@ -28,16 +28,17 @@ mod RequestIdentity {
     ///
     pub def resolveForProject(deps: Deps, projectId: ProjectId, credential: Credential): Result[PatRejection, Resolved] \ Db + IdGen + Time.Clock.Clock = match credential {
         case Credential.Bearer(issuer, subject, email, name) =>
-            Ok({ actor = Accounts.actorFor(resolveUser(deps, issuer, subject, email, name), projectId, Login.Interactive), usage = Usage.NotRecorded })
+            let user = resolveUser(deps, issuer, subject, email, name);
+            Ok({ actor = Accounts.actorFor(user, projectId, Login.Interactive), usage = Usage.NotRecorded, log = Log.Fields.empty() |> LogFields.user(user) })
         case Credential.ApiKey(raw) =>
             Ok(deps#auth#pepper |> Option.flatMap(pepper -> ApiKeys.resolve(pepper, raw, projectId, Time.Clock.now()))
-                |> Option.map(found -> { actor = Actor.ApiKey(found#name, found#scope), usage = Usage.ApiKeyRow(found#id, projectId) })
+                |> Option.map(found -> { actor = Actor.ApiKey(found#name, found#scope), usage = Usage.ApiKeyRow(found#id, projectId), log = Log.Fields.empty() |> LogFields.apiKey(found#name) })
                 |> Option.getWithDefault(anonymous()))
         case Credential.PersonalToken(raw) =>
             resolvePersonalToken(deps, raw, (user, login) -> Accounts.actorFor(user, projectId, login))
         case Credential.Preview(raw) =>
             Ok(deps#auth#pepper |> Option.flatMap(pepper -> PreviewTokens.verify(pepper, raw, projectId, Time.Clock.now()))
-                |> Option.map(id -> { actor = Actor.Preview(id), usage = Usage.NotRecorded })
+                |> Option.map(id -> { actor = Actor.Preview(id), usage = Usage.NotRecorded, log = Log.Fields.empty() |> Log.Fields.str("id", EntryId.text(id)) })
                 |> Option.getWithDefault(anonymous()))
         case Credential.Missing    => Ok(anonymous())
         case Credential.Invalid(_) => Ok(anonymous())
@@ -48,7 +49,8 @@ mod RequestIdentity {
     ///
     pub def resolveForAccount(deps: Deps, credential: Credential): Result[PatRejection, Resolved] \ Db + IdGen + Time.Clock.Clock = match credential {
         case Credential.Bearer(issuer, subject, email, name) =>
-            Ok({ actor = Accounts.actorWithoutProject(resolveUser(deps, issuer, subject, email, name), Login.Interactive), usage = Usage.NotRecorded })
+            let user = resolveUser(deps, issuer, subject, email, name);
+            Ok({ actor = Accounts.actorWithoutProject(user, Login.Interactive), usage = Usage.NotRecorded, log = Log.Fields.empty() |> LogFields.user(user) })
         case Credential.PersonalToken(raw) => resolvePersonalToken(deps, raw, Accounts.actorWithoutProject)
         case Credential.ApiKey(_)          => Ok(anonymous())
         case Credential.Preview(_)         => Ok(anonymous())
@@ -85,11 +87,11 @@ mod RequestIdentity {
                 case Err(rejection) => Err(rejection)
                 case Ok(token)      => match Accounts.resolveUserById(token#userId) {
                     case None       => Err(PatRejection.Unknown)
-                    case Some(user) => Ok({ actor = actorFor(user, Login.PersonalToken(token#scope)), usage = Usage.PersonalTokenRow(token#id) })
+                    case Some(user) => Ok({ actor = actorFor(user, Login.PersonalToken(token#scope)), usage = Usage.PersonalTokenRow(token#id), log = Log.Fields.empty() |> LogFields.user(user) })
                 }
             }
         }
 
-    def anonymous(): Resolved = { actor = Actor.Anonymous, usage = Usage.NotRecorded }
+    def anonymous(): Resolved = { actor = Actor.Anonymous, usage = Usage.NotRecorded, log = Log.Fields.empty() }
 
 }

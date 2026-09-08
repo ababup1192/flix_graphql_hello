@@ -4,7 +4,7 @@ import java.lang.System
 /// 起動。SDL と生成物の一致、PostgreSQL の接続、migrations の適用済みを確かめ、管理 API（/admin/graphql）と
 /// コンテンツ API（/graphql。型の定義から実行時に組み、定義が変われば組み直す）、Account API（/account/graphql。プロジェクトを選ぶ前の操作）を 8080 番で待つ。
 /// パスの先頭に /p/{プロジェクト slug} を付けるとそのプロジェクト、無ければ既定プロジェクト（CMS_DEFAULT_PROJECT。空なら 404）。
-/// 起動に失敗したらメッセージを出して終了コード 1 で終わる。
+/// 起動に失敗したらメッセージを出して終了コード 1 で終わる。ログは 1 行 JSON（docs/logging.md）。
 ///
 /// 環境変数: CMS_DSN / CMS_DB_USER / CMS_DB_PASSWORD（DbConfig。表の所有者）、CMS_DB_APP_USER / CMS_DB_APP_PASSWORD（リクエスト用のロール。無ければ所有者で繋ぐ）、
 /// CMS_DB_TIMEOUT_SECONDS（接続ごとに DB 側で効かせる時間の上限。既定 30、0 で無効）、ASSET_*（StorageConfig。省略時は asset 無し）、
@@ -12,10 +12,47 @@ import java.lang.System
 /// CMS_DEFAULT_PROJECT（プロジェクト slug 無しの時のプロジェクト slug。省略時は default、空ならプロジェクト slug 無しは 404）、CMS_SIGNUP（open / closed）、
 /// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（停止時に実行中の仕事を待つ秒数。既定 15）、CMS_CACHE_MAX_AGE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 60、0 で no-store）、
 /// CMS_MODE=import-microcms（サーバを立てず、CMS_IMPORT_DIR の microCMS のスキーマを写してダミーの entry を CMS_IMPORT_COUNT 件ずつ積んで終わる）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
-/// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health に出す版。省略時は dev）、CMS_MAX_CONNECTIONS（HTTP の同時接続の上限。超えた接続は 503。既定 256）
+/// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health とログの version に出す版。省略時は dev）、CMS_MAX_CONNECTIONS（HTTP の同時接続の上限。超えた接続は 503。既定 256）、
+/// CMS_LOG_LEVEL（trace / debug / info / warn / error / fatal。これより軽い行は出さない。既定 info）
 ///
 def main(): Unit \ {IO, Fs.FileRead, Sys.Exit, Sys.Env} =
-    let started = forM (
+    let version = Sys.Env.getVar("CMS_VERSION") |> Option.getWithDefault("dev");
+    let sink = sinkOf(version, Sys.Env.getVar("CMS_LOG_LEVEL"));
+    Log.runWith(sink, () -> start(version, sink))
+
+///
+/// ログの出力先。CMS_LOG_LEVEL で絞り、service / version を全行に足し、1 行 JSON を stdout に書く。
+/// 知らない値は info にする（起動を止めるほどの事ではない。起動の行に出る）。
+///
+def sinkOf(version: String, level: Option[String]): Log.Sink =
+    Log.Sink.minSeverity(level |> Option.flatMap(Log.parseSeverity) |> Option.getWithDefault(Log.Severity.Info),
+        Log.Sink.enrich(Log.Fields.empty() |> Log.Fields.str("service", "cms") |> Log.Fields.str("version", version),
+            Log.Sink.json(_ -> System.currentTimeMillis(), line -> println(line))))
+
+///
+/// 起動の本体。Log は main が入れる。
+///
+/// WhyNot: 1 つの関数にしないのは、Log を持つ関数は CPS の frame に落ちて、この長さだと JVM のメソッドの上限（64 KB）を超えるため
+/// （2026-09-08 に "Method too large" で実測）。boot / importMicrocms / serve に分ける。
+///
+def start(version: String, sink: Log.Sink): Unit \ {IO, Fs.FileRead, Sys.Exit, Sys.Env, Log} =
+    match (boot(sink), Sys.Env.getVar("CMS_MODE")) {
+        case (Err(message), _) => { Log.Fields.empty() |> Log.Fields.str("error.message", message) |> Log.fatal("startup failed"); Sys.Exit.exit(1) }
+        // 一発処理: microCMS のスキーマを写してダミーを積み、終わる（サーバは立てない）
+        case (Ok(started), Some("import-microcms")) => importMicrocms(started)
+        case (Ok(started), _)                       => serve(version, sink, started)
+    }
+
+///
+/// 起動時に組む物。
+///
+type alias Started = { pool = Pool, adminEngines = AdminEngine.Cache, deps = Deps, defaultProject = Option[ProjectId], accountEngine = Graphql.Engine }
+
+///
+/// SDL と生成物の一致、DB、migrations、ロール、プール、依存、既定プロジェクト、エンジンの順に確かめて組む。
+///
+def boot(sink: Log.Sink): Result[String, Started] \ {IO, Fs.FileRead, Sys.Env, Log} =
+    forM (
         _           <- checkGenerated(GeneratedCheck.admin());
         _           <- checkGenerated(GeneratedCheck.account());
         connection  <- DbConfig.fromEnv();
@@ -25,93 +62,181 @@ def main(): Unit \ {IO, Fs.FileRead, Sys.Exit, Sys.Env} =
         pool        <- openPool(appConnection |> Option.getWithDefault(connection));
         storage     <- StorageConfig.fromEnv();
         auth        <- AuthConfig.fromEnv();
-        deps        <- Ok({ storage = storage, auth = auth });
+        deps        <- Ok({ storage = storage, auth = auth, log = sink });
         defaultProject <- resolveDefaultProject(pool, Sys.Env.getVar("CMS_DEFAULT_PROJECT"));
         accountEngine  <- AccountSchema.engine(pool, deps);
         adminEngines <- Ok(AdminEngine.create(deps));
         _           <- AdminEngine.current(adminEngines, pool, defaultProject |> Option.getWithDefault(ProjectId.default()))
-    ) yield (pool, adminEngines, deps, defaultProject, accountEngine);
-    match (started, Sys.Env.getVar("CMS_MODE")) {
-        case (Err(message), _) => { println(message); Sys.Exit.exit(1) }
-        // 一発処理: microCMS のスキーマを写してダミーを積み、終わる（サーバは立てない）
-        case (Ok((pool, _, deps, defaultProject, _)), Some("import-microcms")) =>
-            let dir = Sys.Env.getVar("CMS_IMPORT_DIR") |> Option.getWithDefault("import/microcms/schema");
-            let count = Sys.Env.getVar("CMS_IMPORT_COUNT") |> Option.flatMap(Int32.fromString) |> Option.getWithDefault(3);
-            match MicrocmsCli.execute(dir, pool, deps, defaultProject |> Option.getWithDefault(ProjectId.default()), count) {
-                case Ok(summary)  => { println(summary); Pool.close(pool) }
-                case Err(message) => { println(message); Pool.close(pool); Sys.Exit.exit(1) }
-            }
-        case (Ok((pool, adminEngines, deps, defaultProject, accountEngine)), _) =>
-            let jwks = TokenVerifier.createCache();
-            let cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins };
-            let version = Sys.Env.getVar("CMS_VERSION") |> Option.getWithDefault("dev");
-            let baseDomain = Sys.Env.getVar("CMS_BASE_DOMAIN") |> Option.filter(text -> not String.isEmpty(text));
-            let jobsToken = Sys.Env.getVar("CMS_JOBS_TOKEN") |> Option.filter(text -> not String.isEmpty(text));
-            let jobsOn = Sys.Env.getVar("CMS_JOBS") |> Option.getWithDefault("on") != "off";
-            let drainSeconds = Sys.Env.getVar("CMS_JOBS_DRAIN_SECONDS") |> Option.flatMap(Int64.fromString) |> Option.getWithDefault(15i64);
-            let jobs = BackgroundJobs.createState(drainSeconds);
-            let cacheMaxAge = Sys.Env.getVar("CMS_CACHE_MAX_AGE") |> Option.flatMap(Int32.fromString) |> Option.getWithDefault(60);
-            let config = { cors = cors, version = version, jobsToken = jobsToken, cacheMaxAge = if (cacheMaxAge > 0) Some(cacheMaxAge) else None };
-            let engineCache = ContentEngine.create(deps);
-            // WhyNot: 開発モード（X-Dev-User を信じる）で 127.0.0.1 にしか bind しないのは、ヘッダで人になれる経路を LAN に開けないため
-            let bind = match deps#auth#mode { case AuthConfig.Mode.Dev => Some("127.0.0.1") case _ => None };
-            // 予約公開と Webhook の配信はプロセス内のワーカーで回す。積むのはリクエストの Tx（outbox）、拾って実行するのはここ
-            region rc {
-            BackgroundJobs.installShutdownHook(jobs);
-            if (jobsOn) spawn BackgroundJobs.runForever(pool, jobs) @ rc else println("jobs: CMS_JOBS=off なのでプロセス内のワーカーは回しません（POST /jobs/tick か別の worker で回してください）");
-            let maxConnections = Sys.Env.getVar("CMS_MAX_CONNECTIONS") |> Option.flatMap(Int32.fromString) |> Option.filter(n -> n > 0) |> Option.getWithDefault(256);
-            let listener = HttpServer.open({ bind = bind, maxConnections = maxConnections | HttpServer.defaultConfig() });
-            let runtime = {
-                pool = pool, deps = deps, jwks = jwks, baseDomain = baseDomain, defaultProject = defaultProject,
-                accountEngine = accountEngine, adminEngines = adminEngines, engineCache = engineCache,
-                config = config, routes = Server.routes(config, Health.ofPool(pool, jobs, listener)) |> Router.withProjectPrefix };
-            HttpServer.listen(listener, served -> println(HttpServer.logLine(Log.timeText(System.currentTimeMillis()), served)), request -> dispatch(runtime, request))
-            }
+    ) yield { pool = pool, adminEngines = adminEngines, deps = deps, defaultProject = defaultProject, accountEngine = accountEngine }
+
+///
+/// CMS_MODE=import-microcms。microCMS のスキーマを写してダミーを積み、終わる。
+///
+def importMicrocms(started: Started): Unit \ {IO, Fs.FileRead, Sys.Exit, Sys.Env, Log} =
+    let dir = Sys.Env.getVar("CMS_IMPORT_DIR") |> Option.getWithDefault("import/microcms/schema");
+    let count = Sys.Env.getVar("CMS_IMPORT_COUNT") |> Option.flatMap(Int32.fromString) |> Option.getWithDefault(3);
+    match MicrocmsCli.execute(dir, started#pool, started#deps, started#defaultProject |> Option.getWithDefault(ProjectId.default()), count) {
+        // WhyNot: まとめを Log にしないのは、これはコマンドの出力（人が読む複数行の表）で、ログの行ではないため
+        case Ok(summary)  => { println(summary); Pool.close(started#pool) }
+        case Err(message) => { Log.Fields.empty() |> Log.Fields.str("error.message", message) |> Log.fatal("import failed"); Pool.close(started#pool); Sys.Exit.exit(1) }
+    }
+
+///
+/// サーバを立てて待つ。戻らない。
+///
+def serve(version: String, sink: Log.Sink, started: Started): Unit \ {IO, Sys.Env, Log} =
+    let deps = started#deps;
+    let jwks = TokenVerifier.createCache();
+    let cors = { allowedOrigins = Sys.Env.getVar("CMS_CORS_ORIGINS") |> Option.getWithDefault("") |> Cors.parseOrigins };
+    let baseDomain = Sys.Env.getVar("CMS_BASE_DOMAIN") |> Option.filter(text -> not String.isEmpty(text));
+    let jobsToken = Sys.Env.getVar("CMS_JOBS_TOKEN") |> Option.filter(text -> not String.isEmpty(text));
+    let jobsOn = Sys.Env.getVar("CMS_JOBS") |> Option.getWithDefault("on") != "off";
+    let drainSeconds = Sys.Env.getVar("CMS_JOBS_DRAIN_SECONDS") |> Option.flatMap(Int64.fromString) |> Option.getWithDefault(15i64);
+    let jobs = BackgroundJobs.createState(drainSeconds);
+    let cacheMaxAge = Sys.Env.getVar("CMS_CACHE_MAX_AGE") |> Option.flatMap(Int32.fromString) |> Option.getWithDefault(60);
+    let config = { cors = cors, version = version, jobsToken = jobsToken, cacheMaxAge = if (cacheMaxAge > 0) Some(cacheMaxAge) else None };
+    let engineCache = ContentEngine.create(deps);
+    // WhyNot: 開発モード（X-Dev-User を信じる）で 127.0.0.1 にしか bind しないのは、ヘッダで人になれる経路を LAN に開けないため
+    let bind = match deps#auth#mode { case AuthConfig.Mode.Dev => Some("127.0.0.1") case _ => None };
+    // 予約公開と Webhook の配信はプロセス内のワーカーで回す。積むのはリクエストの Tx（outbox）、拾って実行するのはここ
+    region rc {
+    BackgroundJobs.installShutdownHook(jobs, sink);
+    if (jobsOn) spawn BackgroundJobs.runForever(started#pool, jobs, sink) @ rc else Log.warn("jobs off (CMS_JOBS=off): POST /jobs/tick か別の worker で回してください", Log.Fields.empty());
+    let maxConnections = Sys.Env.getVar("CMS_MAX_CONNECTIONS") |> Option.flatMap(Int32.fromString) |> Option.filter(n -> n > 0) |> Option.getWithDefault(256);
+    let listener = HttpServer.open({ bind = bind, maxConnections = maxConnections | HttpServer.defaultConfig() });
+    let runtime = {
+        pool = started#pool, deps = deps, jwks = jwks, baseDomain = baseDomain, defaultProject = started#defaultProject,
+        defaultProjectSlug = Sys.Env.getVar("CMS_DEFAULT_PROJECT") |> Option.getWithDefault("default") |> Some |> Option.filter(text -> not String.isEmpty(text)),
+        accountEngine = started#accountEngine, adminEngines = started#adminEngines, engineCache = engineCache,
+        config = config, sink = sink, routes = Server.routes(config, Health.ofPool(started#pool, jobs, listener)) |> Router.withProjectPrefix };
+    Log.Fields.empty()
+        |> Log.Fields.str("server.address", bind |> Option.getWithDefault("0.0.0.0"))
+        |> Log.Fields.int("server.port", Int32.toInt64(listener#port))
+        |> Log.info("listening");
+    HttpServer.listen(listener, served -> logServed(sink, served), request -> dispatch(runtime, request))
     }
 
 ///
 /// 起動後にリクエストごとに使う物の束。
 ///
 type alias Runtime = {
-    pool = Pool, deps = Deps, jwks = TokenVerifier.JwksCache, baseDomain = Option[String], defaultProject = Option[ProjectId],
+    pool = Pool, deps = Deps, jwks = TokenVerifier.JwksCache, baseDomain = Option[String], defaultProject = Option[ProjectId], defaultProjectSlug = Option[String],
     accountEngine = Graphql.Engine, adminEngines = AdminEngine.Cache, engineCache = ContentEngine.Cache,
-    config = ServerConfig, routes = List[Route[{Graphql, IO}]] }
+    config = ServerConfig, sink = Log.Sink, routes = List[Route[{Graphql, Log, Time.Clock.Clock, IO}]] }
 
 ///
-/// 1 リクエストを middleware（CORS → Host のプロジェクト → 身元）を通してルート表で振り分け、行の engine に合わせてエンジンを入れて実行する。
-/// 404 / 405 / 503 も CORS を通る。
+/// 1 リクエスト（接続のスレッド）の入口。request id を決め、Log を入れ直して span（request.id / cf.ray / method / path）を張り、
+/// 処理の後にリクエストの行を 1 つ出す。
 ///
 def dispatch(runtime: Runtime, request: HttpRequest): HttpResponse \ IO =
-    let pipeline =
-        Cors.wrap(runtime#config#cors, Router.allowedMethods(runtime#routes),
-            Server.wrapProjectFromHost(runtime#baseDomain,
-                Credentials.wrap(tokenHeaderOf(runtime#deps#auth), verifierOf(runtime#deps#auth, runtime#jwks),
-                    Server.dispatch(runtime#routes, (found, routeRequest) -> runRoute(runtime, found, routeRequest)))));
-    pipeline({ request = request, params = Map.empty(), credential = Credential.Missing })
+    let requestId = RequestId.resolve(request#headers);
+    let span = LogFields.request(requestId, request);
+    run {
+        serveRequest(runtime, requestId, span, request)
+    } with Log.withFields(span)
+      with Log.runWith(runtime#sink)
+
+///
+/// middleware（request id → CORS → Host のプロジェクト → 身元）を通してルート表で振り分け、行の engine に合わせてエンジンを入れて実行する。
+/// 404 / 405 / 503 も CORS と X-Request-Id を通る。処理の中で決まる属性（credential.kind / project / graphql.*）は extra に積み、リクエストの行に乗せる。
+///
+/// WhyNot: リクエストの行を HttpServer の onServed でなくここで出すのは、onServed には request id も身元も GraphQL の結果も無く、
+/// スレッドを跨がずに届ける口が無いため。onServed は handle が投げた・読めなかった・書けなかった物だけを出す（logServed）。
+/// 所要時間はソケットの読み書きを含まない。
+///
+def serveRequest(runtime: Runtime, requestId: String, span: Log.Fields, request: HttpRequest): HttpResponse \ {IO, Log} =
+    region rc {
+        let extra = Ref.fresh(rc, Log.Fields.empty());
+        let startedAt = System.currentTimeMillis();
+        let pipeline =
+            RequestId.wrap(requestId,
+                Cors.wrap(runtime#config#cors, Router.allowedMethods(runtime#routes),
+                    Server.wrapProjectFromHost(runtime#baseDomain,
+                        Credentials.wrap(tokenHeaderOf(runtime#deps#auth), verifierOf(runtime#deps#auth, runtime#jwks),
+                            Server.dispatch(runtime#routes, (found, routeRequest) -> runRoute(runtime, span, extra, found, routeRequest))))));
+        let response = pipeline({ request = request, params = Map.empty(), credential = Credential.Missing });
+        let fields = Ref.get(extra)
+            |> LogFields.response(response#status, System.currentTimeMillis() - startedAt, Int32.toInt64(Http.utf8Length(request#body)), Int32.toInt64(Http.utf8Length(response#body)));
+        Log.emit({ severity = LogFields.responseSeverity(request#path, response#status, false), message = "request", fields = fields });
+        response
+    }
+
+///
+/// HttpServer が見た結果のうち、serveRequest が行を出せなかった物（handle が投げた・読めなかった 400 / 413 / 431・503 の reject・書けなかった）を出す。
+/// 正常に処理して書けた物は serveRequest が出しているので出さない。
+///
+/// WhyNot: request.id が付かないのは、この経路は dispatch に入る前か例外で抜けた後で、id を持って来られないため。
+/// 例外の行は同じスレッドの直前の行と時刻で突き合わせる。
+///
+def logServed(sink: Log.Sink, served: HttpServer.Served): Unit \ IO =
+    if (Option.isEmpty(served#failure) and served#method != "-") ()
+    else Log.runWith(sink, () -> emitServed(served))
+
+/// HttpServer の結果の行。
+def emitServed(served: HttpServer.Served): Unit \ {IO, Log} =
+    let base = Log.Fields.empty()
+        |> Log.Fields.str("http.request.method", served#method)
+        |> Log.Fields.str("url.path", served#path)
+        |> LogFields.response(served#status, served#elapsedMs, served#requestBytes, served#responseBytes);
+    let fields = match served#failure {
+        case Some(error) => Log.exception(error, base)
+        case None        => base
+    };
+    Log.emit({ severity = LogFields.responseSeverity(served#path, served#status, Option.nonEmpty(served#failure)), message = "request", fields = fields })
 
 ///
 /// 一致した行を実行する。engine が None ならエンジン無し、Account ならプロジェクトを見ない。
 /// Content / Admin は params の projectSlug（無ければ既定プロジェクト）を id に解き、無ければ 404、エンジンを組めなければ 503。
+/// 身元の種類とプロジェクト slug をリクエストの行（extra）と、リゾルバに渡す span（Context の log）に足す。
 ///
 /// WhyNot: エンジンの要らない道（/health、/jobs/tick）でエンジンを組まないのは、型定義が壊れた時に死活監視まで 503 になり、
 /// プロジェクトの SELECT が余分に走るため。
 ///
-def runRoute(runtime: Runtime, found: Route[{Graphql, IO}], routeRequest: RouteRequest): HttpResponse \ IO =
+def runRoute(runtime: Runtime, span: Log.Fields, extra: Ref[Log.Fields, r], found: Route[{Graphql, Log, Time.Clock.Clock, IO}], routeRequest: RouteRequest): HttpResponse \ {IO, Log, r} =
+    let projectSlug = Map.get(Router.projectSlugParam(), routeRequest#params);
+    let routeFields = Log.Fields.empty()
+        |> Log.Fields.str("credential.kind", LogFields.credentialKind(routeRequest#credential))
+        |> Log.Fields.opt("project", projectSlug |> Option.withDefault(default = runtime#defaultProjectSlug));
+    Ref.put(Ref.get(extra) |> Log.Fields.merge(routeFields), extra);
+    let contextFields = span |> Log.Fields.merge(routeFields);
     let execute = () -> (found#handle)(routeRequest);
     match found#engine {
-        case None                 => Graphql.runWithoutEngine(execute)
-        case Some(Engine.Account) => Graphql.runWithEngine(runtime#accountEngine, execute)
+        case None                 => Graphql.runWithoutEngine(() -> withClock(execute))
+        case Some(Engine.Account) => runObserved(runtime#accountEngine, contextFields, extra, execute)
         case Some(engine)         =>
-            let projectSlug = Map.get(Router.projectSlugParam(), routeRequest#params);
             match resolveProject(runtime#pool, runtime#defaultProject, projectSlug) {
                 case Err(message)        => Server.unavailable(message)
                 case Ok(None)            => Server.notFound("プロジェクト '${projectSlug |> Option.getWithDefault("")}' がありません")
                 case Ok(Some(projectId)) => match engineOf(runtime, engine, projectId) {
-                    case Ok(built)    => Graphql.runWithEngine(built, execute)
+                    case Ok(built)    => runObserved(built, contextFields, extra, execute)
                     case Err(message) => Server.unavailable(message)
                 }
             }
     }
+
+///
+/// エンジンで Graphql effect を本物の実行にし、時計を入れる。実行ごとに Context に span を入れ（Runner がリゾルバの中の行に付ける）、
+/// 操作の名前と種類、errors[] の code を extra に積む（リクエストの行に乗る）。
+///
+def runObserved(engine: Graphql.Engine, contextFields: Log.Fields, extra: Ref[Log.Fields, r], thunk: Unit -> HttpResponse \ {Graphql, Log, Time.Clock.Clock, IO}): HttpResponse \ {IO, Log, r} =
+    run {
+        withClock(thunk)
+    } with handler Graphql {
+        def execute(request, context, resume) = {
+            let response = Graphql.executeWith(engine, request, { log = contextFields | context });
+            Ref.put(Ref.get(extra) |> LogFields.graphql(request, response), extra);
+            resume(response)
+        }
+    }
+
+///
+/// Route の時計（MCP の所要時間）を本物にする。
+///
+/// WhyNot: 呼ぶ所で Time.Clock.runWithIO(() -> …) と書かないのは、ラムダに包むと subeffecting で Log と region の effect が
+/// 署名から消えた事にされ、「Unused effect」で落ちるため（2026-09-08 に実測）。名前の付いた関数で受けると通る。
+///
+def withClock(thunk: Unit -> HttpResponse \ {Graphql, Log, Time.Clock.Clock, IO}): HttpResponse \ {Graphql, Log, IO} =
+    Time.Clock.runWithIO(thunk)
 
 ///
 /// 行の engine に合う、このプロジェクトのエンジン。コンテンツ API は型の定義から組み（目印で組み直す）、管理 API はプロジェクトごとに 1 つ。
@@ -174,8 +299,8 @@ def resolveDefaultProject(pool: Pool, configured: Option[String]): Result[String
 /// WhyNot: 所有者で繋ぐ事を Err にしないのは、セルフホストで 1 プロジェクトならロール分離の価値が薄く、
 /// policy は FORCE で所有者にも効くため。ログには出して分かるようにする。
 ///
-def ensureAppRole(owner: Jdbc.ConnectionConfig, app: Option[Jdbc.ConnectionConfig]): Result[String, Unit] \ IO = match app {
-    case None        => { println("db: CMS_DB_APP_PASSWORD が無いので所有者（${owner#user}）で繋ぎます。RLS は効きますがロール分離はありません"); Ok(()) }
+def ensureAppRole(owner: Jdbc.ConnectionConfig, app: Option[Jdbc.ConnectionConfig]): Result[String, Unit] \ {IO, Log} = match app {
+    case None        => { Log.Fields.empty() |> Log.Fields.str("db.user", owner#user) |> Log.warn("db: CMS_DB_APP_PASSWORD が無いので所有者で繋ぐ（RLS は効くがロール分離は無い）"); Ok(()) }
     case Some(found) => AppRole.ensure(owner, found)
 }
 
@@ -199,11 +324,11 @@ def openPool(connection: Jdbc.ConnectionConfig): Result[String, Pool] \ IO =
 /// WhyNot: 手元の既定を check にするのは、DSN の打ち間違いで別の DB に migration を当ててしまうのを避けるため。
 /// イメージ（Dockerfile）は apply を既定にし、`docker compose pull && up` だけで更新が終わるようにする。
 ///
-def prepareMigrations(connection: Jdbc.ConnectionConfig, mode: Option[String]): Result[String, Unit] \ {IO, Fs.FileRead} =
+def prepareMigrations(connection: Jdbc.ConnectionConfig, mode: Option[String]): Result[String, Unit] \ {IO, Fs.FileRead, Log} =
     let outcome = run {
         Migrate.runWithResult(() -> DbError.runWithFailure(() ->
             if (mode == Some("apply"))
-                Migrate.apply(Migrate.defaultConfig(connection), "migrations") |> List.forEach(version -> println("migration applied: ${version}"))
+                Migrate.apply(Migrate.defaultConfig(connection), "migrations") |> List.forEach(version -> Log.Fields.empty() |> Log.Fields.str("migration.version", version) |> Log.info("migration applied"))
             else
                 Jdbc.withConnection(connection, conn -> Migrate.check(conn, "migrations"))))
     } with Fs.ReadFile.runWithFileRead

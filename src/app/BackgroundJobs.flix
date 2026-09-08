@@ -35,16 +35,20 @@ mod BackgroundJobs {
         { lastTick = Ref.fresh(Static, None), stopping = Ref.fresh(Static, false), inTick = Ref.fresh(Static, false), drainMs = drainSeconds * 1000i64 }
 
     ///
-    /// 止まらずに回す。失敗はログに出して次の周へ。停止が始まったら抜ける。
+    /// 止まらずに回す。失敗はログに出して次の周へ。停止が始まったら抜ける。周ごとに Log を sink で入れ直す（spawn の中なので Main の handler は届かない）。
     ///
-    pub def runForever(pool: Pool, state: State): Unit \ IO =
-        if (Ref.get(state#stopping)) println("jobs: 停止します")
+    pub def runForever(pool: Pool, state: State, sink: Log.Sink): Unit \ IO =
+        if (Ref.get(state#stopping)) Log.runWith(sink, () -> Log.info("jobs stopping", Log.Fields.empty()))
         else {
-            guarded(() -> tick(pool, state)) |> List.forEach(message -> println("jobs: ${message}"));
-            Ref.put(false, state#inTick);
+            Log.runWith(sink, () -> round(pool, state));
             Thread.sleep(intervalMs());
-            runForever(pool, state)
+            runForever(pool, state, sink)
         }
+
+    /// 1 周。失敗は Error の行にする（1 周に 1 行ずつ）。
+    def round(pool: Pool, state: State): Unit \ {IO, Log} =
+        guarded(() -> tick(pool, state)) |> List.forEach(message -> Log.Fields.empty() |> Log.Fields.str("error.message", message) |> Log.error("jobs tick failed"));
+        Ref.put(false, state#inTick)
 
     ///
     /// 1 周を JVM の例外から守る。Throwable が飛んだら失敗の説明にして返し、次の周へ進める。
@@ -53,13 +57,23 @@ mod BackgroundJobs {
     /// WhyNot: tick の中の DbRunner に任せないのは、Tx の外（Scheduler / Dispatcher の Java interop や、リゾルバと同じ VerifyError）で
     /// 飛んだ Error は Exception の catch を素通りし、ワーカーのスレッドだけが黙って死んでプロセスは生き残るため。
     ///
-    pub def guarded(thunk: Unit -> List[String] \ ef): List[String] \ ef + IO =
+    /// WhyNot: catch の中で Log を呼ばないのは、effect の操作を catch の腕に書くと JVM の VerifyError になるため（2026-09-08 に実測）。
+    /// catch は値（Result）を返すだけにして、ログと再送出は外でする。
+    ///
+    pub def guarded(thunk: Unit -> List[String] \ ef): List[String] \ ef + IO + Log =
+        match attempt(thunk) {
+            case Ok(messages) => messages
+            case Err(fatal)   => { Log.Fields.empty() |> Log.exception(fatal) |> Log.fatal("jobs fatal"); throw fatal }
+        }
+
+    /// 1 周を回し、Throwable は値にする。致命的な物（OutOfMemoryError）は Err、それ以外は失敗の説明。
+    def attempt(thunk: Unit -> List[String] \ ef): Result[Throwable, List[String]] \ ef + IO =
         try {
-            thunk()
+            Ok(thunk())
         } catch {
             case e: Throwable =>
-                if (JvmErrors.isFatal(e)) { println("jobs: 致命的な例外: ${JvmErrors.describe(e)}"); throw e }
-                else List#{"1 周の途中で例外: ${JvmErrors.describe(e)}"}
+                if (JvmErrors.isFatal(e)) Err(e)
+                else Ok(List#{"1 周の途中で例外: ${JvmErrors.describe(e)}"})
         }
 
     ///
@@ -69,11 +83,11 @@ mod BackgroundJobs {
     /// 数秒待つだけで通常のデプロイではそれが無くなる。
     /// WhyNot: Runtime.addShutdownHook（Runnable）を使わないのは、Runnable の `run` が Flix の予約語で書けないため。
     ///
-    pub def installShutdownHook(state: State): Unit \ IO =
+    pub def installShutdownHook(state: State, sink: Log.Sink): Unit \ IO =
         let onSignal = new SignalHandler {
             def handle(_this: SignalHandler, _signal: Signal): Unit \ IO = {
                 Ref.put(true, state#stopping);
-                drain(state, System.currentTimeMillis() + state#drainMs);
+                Log.runWith(sink, () -> drain(state, System.currentTimeMillis() + state#drainMs));
                 System.exit(0)
             }
         };
@@ -81,15 +95,15 @@ mod BackgroundJobs {
         discard Signal.handle(new Signal("INT"), onSignal)
 
     /// 実行中の 1 周が終わるか、期限が来るまで待つ。
-    def drain(state: State, deadline: Int64): Unit \ IO =
-        if (not Ref.get(state#inTick)) println("jobs: 実行中の仕事はありません。終わります")
-        else if (System.currentTimeMillis() > deadline) println("jobs: 実行中の仕事を待ちきれませんでした（回復で拾い直します）")
+    def drain(state: State, deadline: Int64): Unit \ {IO, Log} =
+        if (not Ref.get(state#inTick)) Log.info("jobs drained", Log.Fields.empty())
+        else if (System.currentTimeMillis() > deadline) Log.warn("jobs drain timed out (claimed_at で拾い直す)", Log.Fields.empty())
         else { Thread.sleep(100i64); drain(state, deadline) }
 
     ///
     /// 回復 → 予約公開 → Webhook の順に 1 周する。失敗した所の説明を返す（空なら全部通った）。停止中なら何もしない。
     ///
-    pub def tick(pool: Pool, state: State): List[String] \ IO =
+    pub def tick(pool: Pool, state: State): List[String] \ {IO, Log} =
         if (Ref.get(state#stopping)) Nil
         else {
             Ref.put(true, state#inTick);

@@ -181,12 +181,4 @@ mod TestMcpServer {
             expected = (Some(("publish", "e1", true)), None),
             (McpServer.callSummary(call, failed), McpServer.callSummary(ping, failed)))
 
-    /// ログに出す身元の種類。生の鍵やトークンは出さない。
-    @Test
-    def testCredentialKind(): Unit \ Assert =
-        Assert.assertEq(
-            expected = List#{ "bearer", "api-key", "pat", "preview", "anonymous", "invalid" },
-            List#{ Credential.Bearer("i", "s", "e", "n"), Credential.ApiKey("cms_x"), Credential.PersonalToken("cmspat_x"), Credential.Preview("pv_x"), Credential.Missing, Credential.Invalid("x") }
-                |> List.map(McpServer.credentialKind))
-
 }

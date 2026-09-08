@@ -115,7 +115,6 @@ mod HttpServer {
     /// 行にするのは呼び出し側（Main）。
     ///
     pub def listen(listener: Listener, onServed: Served -> Unit \ IO, handle: HttpRequest -> HttpResponse \ IO): Unit \ IO =
-        println("listening on http://${listener#config#bind |> Option.getWithDefault("0.0.0.0")}:${listener#port}/");
         acceptLoop(listener, onServed, handle)
 
     ///
@@ -327,26 +326,6 @@ mod HttpServer {
     ///
     pub def sanitizePath(path: String): String =
         path |> withoutQuery |> String.replaceMatches(regex = "\\p{Cntrl}", to = "")
-
-    ///
-    /// Served を 1 行 JSON にする（time / method / path / status / ms / requestBytes / responseBytes、失敗があれば error）。
-    /// time は呼び出し側が渡す（ISO 8601）。ログ基盤（Loki 等）が `| json` で引ける形。
-    ///
-    pub def logLine(time: String, served: Served): String \ IO =
-        let base = Map#{
-            "time" => Value.Str(time),
-            "method" => Value.Str(served#method),
-            "path" => Value.Str(served#path),
-            "status" => Value.Int(served#status),
-            "ms" => Value.Int(Int64.clampToInt32(min = 0, max = Int32.maxValue(), served#elapsedMs)),
-            "requestBytes" => Value.Int(Int64.clampToInt32(min = 0, max = Int32.maxValue(), served#requestBytes)),
-            "responseBytes" => Value.Int(Int64.clampToInt32(min = 0, max = Int32.maxValue(), served#responseBytes))
-        };
-        let fields = match served#failure {
-            case Some(error) => Map.insert("error", Value.Str(JvmErrors.describe(error)), base)
-            case None        => base
-        };
-        JsonValue.toJsonString(Value.Obj(fields))
 
     /// `?` より後ろを落とす。
     def withoutQuery(path: String): String =

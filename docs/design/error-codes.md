@@ -83,9 +83,14 @@
 `expectedVersion` は送った `expectedVersion`、`actualVersion` は今サーバにある版。
 差が 1 なら誰かの 1 回の保存に負けただけなので、読み直してもう一度出せば済む事が多い。
 
-### `FORBIDDEN` / `REQUIRES_LOGIN` / `UNAUTHENTICATED` / `INTERNAL`
+### `FORBIDDEN` / `REQUIRES_LOGIN` / `UNAUTHENTICATED`
 
 `code` だけ。どの権限が要るかは `message` にある（機械が読む必要がある物ではない）。
+
+### `INTERNAL`
+
+`code` と `requestId`（応答ヘッダ `X-Request-Id` と同じ。ログの `request.id`）。問い合わせに添えれば、その時のログの行に辿り着く。
+他の分類には付けない（クライアントが自分で直せる物で、ヘッダで足りる）。
 
 ## 部分的な失敗
 

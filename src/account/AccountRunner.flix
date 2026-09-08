@@ -2,7 +2,7 @@
 /// Account API のリゾルバが使う効果の和。DB の読み書き、CMS の業務エラー、主体、時計。Tenant が無いのが管理 API との違いで、
 /// プロジェクトのユースケース（型に Tenant が付く）はここから呼べない。
 ///
-pub type alias AccountEff = Db + CmsErr + IdGen + Session + Time.Clock.Clock
+pub type alias AccountEff = Db + CmsErr + IdGen + Session + Time.Clock.Clock + Log
 
 ///
 /// Account API の Runner。リゾルバ 1 つを「最初の SQL で借りる接続 1 本・Tx 1 つ」に包み、身元から主体を決め、失敗を GraphQL のエラーに写す。
@@ -28,13 +28,16 @@ mod AccountRunner {
             case Credential.ApiKey(_)       => Err(GraphqlErrors.requiresLogin("Account API は API キーでは使えません。ログインしてください"))
             case Credential.Preview(_)      => Err(GraphqlErrors.requiresLogin("Account API はプレビュートークンでは使えません。ログインしてください"))
             case credential =>
-                let outcome =
-                    IdGen.runWithRandom(() -> Time.Clock.runWithIO(() ->
-                        DbRunner.transact(pool, None, () -> match RequestIdentity.resolveForAccount(deps, credential) {
-                            case Err(rejection) => Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection)))
-                            case Ok(resolved)   => { RequestIdentity.touch(resolved); Session.runWith(resolved#actor, () -> DbRunner.guarded(f)) }
-                        })));
-                DbRunner.toFieldResult(outcome)
+                run {
+                    let outcome =
+                        IdGen.runWithRandom(() -> Time.Clock.runWithIO(() ->
+                            DbRunner.transact(pool, None, () -> match RequestIdentity.resolveForAccount(deps, credential) {
+                                case Err(rejection) => Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection)))
+                                case Ok(resolved)   => { RequestIdentity.touch(resolved); Log.withFields(resolved#log, () -> Session.runWith(resolved#actor, () -> DbRunner.guarded(f))) }
+                            })));
+                    DbRunner.toFieldResult(LogFields.requestIdOf(context#log), outcome)
+                } with Log.withFields(context#log)
+                  with Log.runWith(deps#log)
         }
 
 }

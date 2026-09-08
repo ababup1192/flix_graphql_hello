@@ -29,7 +29,7 @@ mod Server {
     /// - POST /jobs/tick: 外部トリガー。X-Jobs-Token が設定と一致すればワーカーを 1 周回す（無ければ 404）
     /// - POST /mcp: MCP サーバ（JSON-RPC。tools だけ）。管理 API のエンジンへの GraphQL クライアントとして動く
     ///
-    pub def routes(config: ServerConfig, health: Health[ef]): List[Route[{Graphql, ef}]] =
+    pub def routes(config: ServerConfig, health: Health[ef]): List[Route[{Graphql, Log, Time.Clock.Clock, ef}]] =
         Router.route(Method.Post, "/graphql",         Some(Engine.Content), widen(executeBody)) ::
         Router.route(Method.Get,  "/graphql",         Some(Engine.Content), widen(executeQueryString(config#cacheMaxAge))) ::
         Router.route(Method.Post, "/admin/graphql",   Some(Engine.Admin),   widen(executeBody)) ::
@@ -37,7 +37,7 @@ mod Server {
         Router.route(Method.Post, "/account/graphql", Some(Engine.Account), widen(executeBody)) ::
         Router.route(Method.Get,  "/health",          None,                 widen(healthRoute(config#version, health))) ::
         Router.route(Method.Post, "/jobs/tick",       None,                 widen(jobsTick(config#jobsToken, health))) ::
-        Router.route(Method.Post, "/mcp",             Some(Engine.Admin),   mcpRoute(config, health)) :: Nil
+        Router.route(Method.Post, "/mcp",             Some(Engine.Admin),   widen(mcpRoute(config))) :: Nil
 
     ///
     /// 行の handler を表全体の effect に広げる。行ごとの handler は自分の effect（Graphql だけ、Health の ef だけ）を宣言したままにする。
@@ -49,7 +49,7 @@ mod Server {
     /// リクエストを 1 つ処理する。エンジンは呼ぶ側が入れておく（表の engine は見ない）。health は /health と /jobs/tick が読む値。
     /// 表に無いパスは 404、パスはあるがメソッドが違えば 405 と Allow、OPTIONS は preflight。許したオリジンからのリクエストには CORS ヘッダを足す。
     ///
-    pub def handle(config: ServerConfig, health: Health[ef], credential: Credential, request: HttpRequest): HttpResponse \ {Graphql, ef} =
+    pub def handle(config: ServerConfig, health: Health[ef], credential: Credential, request: HttpRequest): HttpResponse \ {Graphql, Log, Time.Clock.Clock, ef} =
         let table = routes(config, health) |> Router.withProjectPrefix;
         let pipeline = Cors.wrap(config#cors, Router.allowedMethods(table), dispatch(table, (found, routeRequest) -> (found#handle)(routeRequest)));
         pipeline({ request = request, params = Map.empty(), credential = credential })
@@ -149,17 +149,17 @@ mod Server {
     ///
     /// POST /mcp。Content-Type が JSON でなければ 415、Origin が許可外なら 403、知らない MCP-Protocol-Version は 400、
     /// プレビュートークンは 400（この経路では受けない）、壊れたログインの JWT と死んだ PAT は 401 + WWW-Authenticate。
-    /// parse に落ちた本文は 400、通知は 202、それ以外は 200 で JSON-RPC の応答。tools/call は 1 行 JSON のログを出す。
+    /// parse に落ちた本文は 400、通知は 202、それ以外は 200 で JSON-RPC の応答。tools/call は Log の行（mcp.tool / mcp.outcome）を出す。
     ///
-    def mcpRoute(config: ServerConfig, health: Health[ef], routeRequest: RouteRequest): HttpResponse \ {Graphql, ef} =
+    def mcpRoute(config: ServerConfig, routeRequest: RouteRequest): HttpResponse \ {Graphql, Log, Time.Clock.Clock} =
         match mcpPrecheck(config, routeRequest) {
             case Err(response) => response
             case Ok(())        => match McpServer.parse(routeRequest#request#body) {
                 case Err(errorBody) => jsonResponse(400, Nil, errorBody)
                 case Ok(message)    =>
-                    let startedAt = (health#nowMillis)();
+                    let startedAt = Time.Clock.now();
                     let reply = McpServer.dispatch(config#version, message, executeAs(routeRequest#credential));
-                    logMcpCall(health, routeRequest#credential, message, reply, (health#nowMillis)() - startedAt);
+                    logMcpCall(routeRequest#credential, message, reply, Time.Clock.now() - startedAt);
                     toMcpResponse(reply)
             }
         }
@@ -196,17 +196,19 @@ mod Server {
     }
 
     ///
-    /// tools/call を 1 行 JSON で出す（JobLog と同じ形）。主体は鍵の種類だけ、引数は残さない。
+    /// tools/call の行。主体は身元の種類だけ、引数は残さない（id だけ）。
     ///
-    def logMcpCall(health: Health[ef], credential: Credential, message: McpServer.Message, reply: McpServer.Reply, elapsedMillis: Int64): Unit \ ef =
+    def logMcpCall(credential: Credential, message: McpServer.Message, reply: McpServer.Reply, elapsedMillis: Int64): Unit \ Log =
         match McpServer.callSummary(message, reply) {
             case None => ()
             case Some((tool, entryId, isError)) =>
-                (health#logLine)(JsonValue.toJsonString(Value.Obj(Map#{
-                    "mcp" => Value.Str("tools/call"), "tool" => Value.Str(tool), "entryId" => Value.Str(entryId),
-                    "credential" => Value.Str(McpServer.credentialKind(credential)), "ms" => Value.Int(Int64.clampToInt32(min = 0, max = 2147483647, elapsedMillis)),
-                    "status" => Value.Str(if (isError) "error" else "ok"),
-                    "time" => Value.Str(Timestamp.toIso8601(Timestamp.fromEpochMillis((health#nowMillis)()))) })))
+                Log.Fields.empty()
+                    |> Log.Fields.str("mcp.tool", tool)
+                    |> Log.Fields.str("mcp.outcome", if (isError) "error" else "ok")
+                    |> Log.Fields.opt("id", if (String.isEmpty(entryId)) None else Some(entryId))
+                    |> Log.Fields.str("credential.kind", LogFields.credentialKind(credential))
+                    |> Log.Fields.int("duration_ms", elapsedMillis)
+                    |> Log.info("mcp tools/call")
         }
 
     ///
@@ -263,6 +265,30 @@ mod Server {
     pub def isReadOnly(queryText: String): Bool =
         topLevelWords(String.toList(queryText), 0, false, false, Nil)
             |> List.forAll(word -> word != "mutation" and word != "subscription")
+
+    ///
+    /// ログに出す操作の種類と名前。深さ 0 の query / mutation / subscription が種類（無名の { ... } は query）、
+    /// その次の語が名前（`query Q($a: Int!)` の Q。無ければ None）。operationName があればその名前の操作、無ければ最初の操作。fragment だけの文書は query。
+    ///
+    pub def operationOf(queryText: String, operationName: Option[String]): (String, Option[String]) =
+        let words = topLevelWords(String.toList(queryText), 0, false, false, Nil);
+        let operations = operationsOf(words, Nil);
+        match operationName {
+            case Some(name) => List.find(match (_, found) -> found == Some(name), operations) |> Option.getWithDefault(("query", Some(name)))
+            case None       => List.head(operations) |> Option.getWithDefault(("query", None))
+        }
+
+    /// 深さ 0 の語から (種類, 名前) の並び。種類の語の直後の語が名前（次も種類の語なら無名）。
+    def operationsOf(words: List[String], acc: List[(String, Option[String])]): List[(String, Option[String])] = match words {
+        case keyword :: name :: rest if isOperationKeyword(keyword) and not isOperationKeyword(name) => operationsOf(rest, (keyword, Some(name)) :: acc)
+        case keyword :: rest if isOperationKeyword(keyword) => operationsOf(rest, (keyword, None) :: acc)
+        case _ :: rest => operationsOf(rest, acc)
+        case Nil       => List.reverse(acc)
+    }
+
+    /// 操作の種類の語か。
+    def isOperationKeyword(word: String): Bool =
+        word == "query" or word == "mutation" or word == "subscription"
 
     /// 深さ 0 の語を集める。inString は文字列の中、inComment は # から行末。
     def topLevelWords(chars: List[Char], depth: Int32, inString: Bool, inComment: Bool, acc: List[String]): List[String] = match chars {

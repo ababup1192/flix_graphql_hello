@@ -1,0 +1,136 @@
+///
+/// LogFields: CMS の値をログの属性に写す規則。リクエストの span、身元の種類、応答の重さ、GraphQL の境界、業務エラー。
+///
+mod TestLogFields {
+
+    use Log.Fields
+    use Log.Severity
+    use CmsErr.CmsFailure
+
+    /// ヘッダ付きの GET。
+    def get(path: String, headers: List[(String, String)]): HttpRequest =
+        { version = "HTTP/1.1", method = "GET", path = path, headers = headers, body = "" }
+
+    /// GraphQL のリクエスト。
+    def graphqlRequest(queryText: String, operationName: Option[String]): GraphqlRequest =
+        { queryText = queryText, variables = Map.empty(), operationName = operationName }
+
+    /// extensions 付きのエラー。
+    def errorWith(extensions: Map[String, Value]): Value =
+        Value.Obj(Map#{ "message" => Value.Str("x"), "extensions" => Value.Obj(extensions) })
+
+    // ---- リクエストの span ----
+
+    /// request.id と method と、クエリと制御文字を落としたパス。CF-Ray はあれば cf.ray（形が合わなければ無し）。
+    @Test
+    def testRequestSpanTable(): Unit \ Assert =
+        let cases = List#{
+            (get("/graphql?token=secret", Nil),
+             List#{("http.request.method", Value.Str("GET")), ("request.id", Value.Str("rid")), ("url.path", Value.Str("/graphql"))}),
+            (get("/health\n{\"fake\":1}", ("CF-Ray", "7d4b3c2a1f0e9d8c-NRT") :: Nil),
+             List#{("cf.ray", Value.Str("7d4b3c2a1f0e9d8c-NRT")), ("http.request.method", Value.Str("GET")), ("request.id", Value.Str("rid")), ("url.path", Value.Str("/health{\"fake\":1}"))}),
+            (get("/", ("cf-ray", "a b") :: Nil),
+             List#{("http.request.method", Value.Str("GET")), ("request.id", Value.Str("rid")), ("url.path", Value.Str("/"))})
+        };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (request, _) -> LogFields.request("rid", request) |> Map.toList))
+
+    /// 身元の種類。生の値（トークン・鍵・email）は入らない。
+    @Test
+    def testCredentialKindTable(): Unit \ Assert =
+        let cases = List#{
+            (Credential.Bearer("iss", "sub", "a@example.com", "A"), "jwt"),
+            (Credential.ApiKey("cms_secret"),                       "api-key"),
+            (Credential.PersonalToken("cmspat_secret"),             "pat"),
+            (Credential.Preview("pv_secret"),                       "preview"),
+            (Credential.Missing,                                    "anonymous"),
+            (Credential.Invalid("expired"),                         "invalid")
+        };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (credential, _) -> LogFields.credentialKind(credential)))
+
+    /// 本人は public_id だけ（email は出ない）、鍵は名前だけ。
+    @Test
+    def testUserAndApiKeyFields(): Unit \ Assert =
+        let user = { id = UserId.UserId(1i64), publicId = "pub-1", issuer = "iss", subject = "sub", email = "a@example.com", name = "A" };
+        Assert.assertEq(
+            expected = List#{("api_key.name", Value.Str("ci")), ("user.id", Value.Str("pub-1"))},
+            Fields.empty() |> LogFields.user(user) |> LogFields.apiKey("ci") |> Map.toList)
+
+    // ---- 応答の行 ----
+
+    /// ステータス・所要時間・ボディの大きさが OTel の名前で付く。
+    @Test
+    def testResponseFields(): Unit \ Assert =
+        Assert.assertEq(
+            expected = List#{("duration_ms", Value.Int(12)), ("http.request.body.size", Value.Int(3)), ("http.response.body.size", Value.Int(34)), ("http.response.status_code", Value.Int(200))},
+            Fields.empty() |> LogFields.response(200, 12i64, 3i64, 34i64) |> Map.toList)
+
+    /// 重さ: 2xx / 4xx は Info、401 / 403 / 503 は Warn、5xx と例外は Error、/health の 2xx だけ Debug（/p/x/health も）。
+    @Test
+    def testResponseSeverityTable(): Unit \ Assert =
+        let cases = List#{
+            (("/graphql", 200, false),      Severity.Info),
+            (("/graphql", 404, false),      Severity.Info),
+            (("/graphql", 400, false),      Severity.Info),
+            (("/admin/graphql", 401, false), Severity.Warn),
+            (("/admin/graphql", 403, false), Severity.Warn),
+            (("/graphql", 503, false),      Severity.Warn),
+            (("/graphql", 500, false),      Severity.Error),
+            (("/graphql", 200, true),       Severity.Error),
+            (("/health", 200, false),       Severity.Debug),
+            (("/p/shop/health", 200, false), Severity.Debug),
+            (("/health", 503, false),       Severity.Warn),
+            (("-", 400, false),             Severity.Info)
+        };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match ((path, status, failed), _) -> LogFields.responseSeverity(path, status, failed)))
+
+    // ---- GraphQL の境界 ----
+
+    /// 操作の種類と名前。名前は operationName が勝ち、無ければ文書から、それも無ければ付かない。
+    @Test
+    def testGraphqlOperationTable(): Unit \ Assert =
+        let noErrors: GraphqlResponse = { data = Value.Null, errors = Nil };
+        let cases = List#{
+            (graphqlRequest("{ x }", None),                                   List#{("graphql.operation.type", Value.Str("query"))}),
+            (graphqlRequest("query Q($a: Int!) { x(a: $a) }", None),         List#{("graphql.operation.name", Value.Str("Q")), ("graphql.operation.type", Value.Str("query"))}),
+            (graphqlRequest("mutation { publish }", None),                     List#{("graphql.operation.type", Value.Str("mutation"))}),
+            (graphqlRequest("mutation M { publish } query Q { x }", Some("Q")), List#{("graphql.operation.name", Value.Str("Q")), ("graphql.operation.type", Value.Str("query"))}),
+            (graphqlRequest("fragment F on T { a } { ...F }", None),          List#{("graphql.operation.type", Value.Str("query"))}),
+            (graphqlRequest("subscription S { x }", None),                    List#{("graphql.operation.name", Value.Str("S")), ("graphql.operation.type", Value.Str("subscription"))})
+        };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (request, _) -> Fields.empty() |> LogFields.graphql(request, noErrors) |> Map.toList))
+
+    /// errors[] の extensions.code を重複無しで並べる。code の無い graphql-java の検証エラーは classification、どちらも無い物は数えない。
+    @Test
+    def testGraphqlErrorCodes(): Unit \ Assert =
+        let response: GraphqlResponse = { data = Value.Null, errors = List#{
+            errorWith(Map#{ "code" => Value.Str("NOT_FOUND") }),
+            errorWith(Map#{ "code" => Value.Str("NOT_FOUND") }),
+            errorWith(Map#{ "code" => Value.Str("FORBIDDEN"), "entity" => Value.Str("Entry") }),
+            errorWith(Map#{ "classification" => Value.Str("ValidationError") }),
+            Value.Obj(Map#{ "message" => Value.Str("no extensions") }) } };
+        Assert.assertEq(
+            expected = Some(Value.List(List#{Value.Str("NOT_FOUND"), Value.Str("FORBIDDEN"), Value.Str("ValidationError")})),
+            Fields.empty() |> LogFields.graphql(graphqlRequest("{ x }", None), response) |> Map.get("graphql.error_codes"))
+
+    // ---- 業務エラー ----
+
+    /// error.code は GraphQL の extensions.code と同じ綴り。notFound / conflict は entity と id も付く。
+    @Test
+    def testFailureTable(): Unit \ Assert =
+        let cases = List#{
+            (CmsFailure.NotFound(Entity.Entry, "e1"),                        List#{("entity", Value.Str("Entry")), ("error.code", Value.Str("NOT_FOUND")), ("id", Value.Str("e1"))}),
+            (CmsFailure.Conflict(Entity.Entry, "e1", 1, 3),                  List#{("entity", Value.Str("Entry")), ("error.code", Value.Str("CONFLICT")), ("id", Value.Str("e1"))}),
+            (CmsFailure.Invalid(Violation.Violation("apiId", "x") :: Nil),   List#{("error.code", Value.Str("INVALID"))}),
+            (CmsFailure.Forbidden(Permission.ManageTypes),                   List#{("error.code", Value.Str("FORBIDDEN"))}),
+            (CmsFailure.RequiresLogin(LoginRequirement.Interactive),         List#{("error.code", Value.Str("REQUIRES_LOGIN"))})
+        };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (failure, _) -> Fields.empty() |> LogFields.failure(failure) |> Map.toList))
+
+    /// span から request.id を読む。無ければ None。
+    @Test
+    def testRequestIdOf(): Unit \ Assert =
+        Assert.assertEq(
+            expected = (Some("rid"), None),
+            (LogFields.requestIdOf(Fields.empty() |> Fields.str("request.id", "rid")), LogFields.requestIdOf(Fields.empty())))
+
+}

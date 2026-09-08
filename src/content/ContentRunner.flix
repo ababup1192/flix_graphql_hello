@@ -1,7 +1,7 @@
 ///
 /// コンテンツ API のリゾルバが使う効果の和。読むだけ。書く関数を呼べばコンパイルで落ちる。
 ///
-pub type alias ContentEff = DbRead + CmsErr + Tenant + Session + ObjectStore
+pub type alias ContentEff = DbRead + CmsErr + Tenant + Session + ObjectStore + Log
 
 ///
 /// コンテンツ API の Runner。読むだけなので Tx は要らないが、フィールド単位で接続を借り直さないよう
@@ -19,14 +19,17 @@ mod ContentRunner {
         (context, f) -> runOne(pool, deps, projectId, context, f)
 
     def runOne(pool: Pool, deps: Deps, projectId: ProjectId, context: Context, f: Unit -> Result[FieldError, JavaValue.Boxed] \ ContentEff + IO): Result[FieldError, JavaValue.Boxed] \ IO =
-        let outcome =
-            Tenant.runWith(projectId, () ->
-                Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () -> IdGen.runWithRandom(() ->
-                    DbRunner.transact(pool, Some(projectId), () -> match RequestIdentity.resolveForProject(deps, projectId, context#credential) {
-                        case Err(rejection) => Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection)))
-                        case Ok(resolved)   => { guardVisibility(projectId, resolved#actor); Session.runWith(resolved#actor, () -> DbRunner.guarded(f)) }
-                    }))))));
-        DbRunner.toFieldResult(outcome)
+        run {
+            let outcome =
+                Tenant.runWith(projectId, () ->
+                    Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () -> IdGen.runWithRandom(() ->
+                        DbRunner.transact(pool, Some(projectId), () -> match RequestIdentity.resolveForProject(deps, projectId, context#credential) {
+                            case Err(rejection) => Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection)))
+                            case Ok(resolved)   => { guardVisibility(projectId, resolved#actor); Log.withFields(resolved#log, () -> Session.runWith(resolved#actor, () -> DbRunner.guarded(f))) }
+                        }))))));
+            DbRunner.toFieldResult(LogFields.requestIdOf(context#log), outcome)
+        } with Log.withFields(context#log)
+          with Log.runWith(deps#log)
 
     ///
     /// private なプロジェクトは、鍵か役割を持つ人しか読めない。

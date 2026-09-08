@@ -47,10 +47,14 @@ mod GraphqlErrors {
         FieldError.of(ErrorCode.RequiresLogin, message)
 
     ///
-    /// DB の失敗。クライアントからは直せない。
+    /// DB の失敗。クライアントからは直せない。INTERNAL にだけ extensions.requestId を付け、問い合わせとログの行を繋げる。
     ///
-    pub def fromDbFailure(failure: DbFailure): FieldError =
-        FieldError.internal(DbRunner.failureMessage(failure))
+    /// WhyNot: 他の分類に requestId を付けないのは、NOT_FOUND / INVALID はクライアントが自分で直せる物で、
+    /// 応答ヘッダの X-Request-Id で十分なため。INTERNAL は「この id を添えて問い合わせてください」と言う場面。
+    ///
+    pub def fromDbFailure(requestId: Option[String], failure: DbFailure): FieldError =
+        FieldError.make(ErrorCode.Internal, DbRunner.failureMessage(failure),
+            requestId |> Option.map(id -> Map#{ "requestId" => Value.Str(id) }) |> Option.getWithDefault(Map.empty()))
 
     ///
     /// code 以外の extensions。invalid は violations、notFound と conflict は何のどの id か（conflict は版も）。

@@ -14,7 +14,7 @@ mod TestWebhooksPg {
 
     /// 決まったステータスを返し、受けたリクエストを記録する Http の handler で tick を回す。
     def tickWith(status: Int32, received: Ref[List[HttpRequest], Static], pool: Pool): Result[String, Int32] \ IO =
-        run WebhookDispatcher.tick(pool) with handler Http {
+        run ServerTestKit.quietly(() -> WebhookDispatcher.tick(pool)) with handler Http {
             def request(req, resume) = {
                 Ref.put(req :: Ref.get(received), received);
                 resume(Ok(HttpResponse.HttpResponse({ url = HttpRequest.url(req), status = status, headers = Map.empty(), body = Net.Body.Text("") })))
