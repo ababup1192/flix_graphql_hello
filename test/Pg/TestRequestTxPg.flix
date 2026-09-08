@@ -21,8 +21,8 @@ mod TestRequestTxPg {
 
     /// 既定のプロジェクトに型を 2 つ置く。
     def seedTwoTypes(): Unit \ Db + CmsErr + IdGen + Tenant + Session =
-        discard ContentTypes.create(CmsTestKit.typeDraft("tags", "タグ"));
-        discard ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"))
+        discard ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("tags", "タグ"));
+        discard ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"))
 
     ///
     /// 共有の接続（READ ONLY, REPEATABLE READ）でも BEGIN の直後に置いた印が効く: 既定のプロジェクトの印なら 2 行、印の無い Tx なら 0 行。
@@ -47,7 +47,7 @@ mod TestRequestTxPg {
         let counts = PgTestSupport.withPool(pool -> {
             let handle = DbRunner.openRequestTx(pool, Some(ProjectId.default()), Actor.System, Ref.fresh(Static, None));
             let before = countTypesOn(handle);
-            discard PgTestSupport.mutateOrBug(pool, () -> ContentTypes.create(CmsTestKit.typeDraft("pages", "ページ")));
+            discard PgTestSupport.mutateOrBug(pool, () -> ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("pages", "ページ")));
             let during = countTypesOn(handle);
             let closed = DbRunner.closeRequestTx(handle);
             (before, during, closed#outcome, countTypesWith(pool, Some(ProjectId.default())))
