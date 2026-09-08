@@ -175,7 +175,7 @@ mod TestNaming {
     /// 型が生やす型名は、singular と接尾辞付き、Select の enum、Blocks の union と variant（入れ子は名前が続く）。Text からは生えない。
     @Test
     def testNamingSchemaTypeNames(): Unit \ Assert =
-        Assert.assertEq(expected = List#{"Blog", "BlogWhere", "BlogWhereLeaf", "BlogOrderBy", "BlogConnection", "BlogCategory", "BlogSections", "BlogSectionsHero"},
+        Assert.assertEq(expected = List#{"Blog", "BlogWhere", "BlogWhereLeaf", "BlogOrderBy", "BlogConnection", "BlogEdge", "BlogCategory", "BlogSections", "BlogSectionsHero"},
             Naming.schemaTypeNames(blogSingular(), blogFields()))
 
     /// 他の型が生やす名前（BlogCategory）と同じ singular は invalid。重ならなければ通る。

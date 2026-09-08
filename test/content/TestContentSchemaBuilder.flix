@@ -21,22 +21,23 @@ mod TestContentSchemaBuilder {
             { name = "題名" | CmsTestKit.fieldDef("title", FieldKind.Text) } :: CmsTestKit.fieldDef("views", FieldKind.Number) :: { many = true | CmsTestKit.fieldDef("tags", FieldKind.Text) } :: Nil) ::
         CmsTestKit.contentType(2i64, "siteSettings", TypeKind.Singleton, "サイト設定", CmsTestKit.fieldDef("title", FieldKind.Text) :: Nil) :: Nil
 
-    /// collection には 1 件と一覧のクエリ、singleton には 1 件だけが生える。Where / OrderBy / Connection は型ごと。
+    /// collection には 1 件と一覧のクエリ、singleton には 1 件だけが生える。Where / OrderBy / Connection / Edge は型ごと、PageInfo は共通。
     @Test
     def testContentSchemaBuilderSdl(): Unit \ Assert =
         let sdl = match Schema.toSdl(ContentSchemaBuilder.build(sampleTypes(), dryRunner())) {
             case Ok(text)     => text
             case Err(message) => bug!("sdl: ${message}")
         };
-        Assert.assertEq(expected = (true, true, true, true, true, true, true, false),
+        Assert.assertEq(expected = (true, true, true, true, true, true, true, false, true),
             (String.contains(substr = "blog(id: ID!, stage: Stage = PUBLISHED): Blog", sdl),
-             String.contains(substr = "blogs(where: BlogWhere, orderBy: [BlogOrderBy!], first: Int = 20, skip: Int = 0, stage: Stage = PUBLISHED): BlogConnection!", sdl),
+             String.contains(substr = "blogs(where: BlogWhere, orderBy: [BlogOrderBy!], first: Int = 20, skip: Int = 0, after: String, stage: Stage = PUBLISHED): BlogConnection!", sdl),
              String.contains(substr = "siteSetting(stage: Stage = PUBLISHED): SiteSetting", sdl),
              String.contains(substr = "title_contains: String", sdl) and String.contains(substr = "views_gte: Float", sdl) and String.contains(substr = "tags_isNull: Boolean", sdl),
              String.contains(substr = "OR: [BlogWhereLeaf!]", sdl),
              String.contains(substr = "views_DESC", sdl) and not String.contains(substr = "tags_ASC", sdl),
              String.contains(substr = "tags: [String!]!", sdl) and String.contains(substr = "views: Float", sdl),
-             String.contains(substr = "siteSettings(", sdl)))
+             String.contains(substr = "siteSettings(", sdl),
+             String.contains(substr = "edges: [BlogEdge!]!", sdl) and String.contains(substr = "pageInfo: PageInfo!", sdl) and String.contains(substr = "endCursor: String", sdl) and String.contains(substr = "node: Blog!", sdl)))
 
     /// DATE は String で出て、_eq と範囲の 4 つで絞れ、orderBy に出る。配列の SELECT は enum の配列で出て、_contains は enum を受ける。
     @Test

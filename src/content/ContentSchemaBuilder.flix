@@ -1,7 +1,7 @@
 ///
 /// content type の定義からコンテンツ API の Schema を組む。型ごとに
-/// `<singular>(id, stage)`、`<plural>(where, orderBy, first, skip, stage)`（singleton は `<singular>(stage)` だけ）と、
-/// `<Singular>` / `<Singular>Where` / `<Singular>WhereLeaf` / `<Singular>OrderBy` / `<Singular>Connection` が生える。
+/// `<singular>(id, stage)`、`<plural>(where, orderBy, first, skip, after, stage)`（singleton は `<singular>(stage)` だけ）と、
+/// `<Singular>` / `<Singular>Where` / `<Singular>WhereLeaf` / `<Singular>OrderBy` / `<Singular>Connection` / `<Singular>Edge` が生える。PageInfo は共通。
 ///
 /// WhyNot: Where の AND / OR を再帰させないのは、input 型のフィールド一覧が値として即時に要り、自分自身を含む型を
 /// 組めないため。OR / AND は 1 段（WhereLeaf のリスト）に限る。microCMS の filters も平らだったので移行には足りる。
@@ -76,7 +76,7 @@ mod ContentSchemaBuilder {
         ContentEntries.firstByStage(owner, accessTo(None, stage))
 
     ///
-    /// `<plural>(where, orderBy, first, skip, stage): <Singular>Connection!`
+    /// `<plural>(where, orderBy, first, skip, after, stage): <Singular>Connection!`
     ///
     def manyField(all: List[ContentType], owner: ContentType): Field[Unit, ContentEff] =
         // 引数の定義。SDL に出す物（infos）と、入力を読む物（Arg.decode）を同じ値から出す
@@ -84,8 +84,9 @@ mod ContentSchemaBuilder {
         let orderArg = Schema.arg("orderBy", GqlCodec.option(GqlCodec.list(orderByCodec(owner))));
         let firstArg = Schema.arg("first", GqlCodec.option(GqlCodec.int32())) |> Arg.withDefaultValue(Value.Int(20));
         let skipArg = Schema.arg("skip", GqlCodec.option(GqlCodec.int32())) |> Arg.withDefaultValue(Value.Int(0));
+        let afterArg = Schema.arg("after", GqlCodec.option(GqlCodec.string()));
         let stage = stageArg();
-        let infos = Arg.info(whereArg) :: Arg.info(orderArg) :: Arg.info(firstArg) :: Arg.info(skipArg) :: Arg.info(stage) :: Nil;
+        let infos = Arg.info(whereArg) :: Arg.info(orderArg) :: Arg.info(firstArg) :: Arg.info(skipArg) :: Arg.info(afterArg) :: Arg.info(stage) :: Nil;
         Schema.fieldRaw(ApiId.text(owner#plural), infos, Out.obj(connectionType(all, owner)), (_context, _root, args) ->
             // 引数を復号し、ページの上限に収めて一覧を引く
             forM (
@@ -93,17 +94,16 @@ mod ContentSchemaBuilder {
                 orderBy <- Arg.decode(orderArg, args);
                 first   <- Arg.decode(firstArg, args);
                 skip    <- Arg.decode(skipArg, args);
+                after   <- Arg.decode(afterArg, args);
                 atStage <- Arg.decode(stage, args)
-            ) yield {
-                let (limit, offset) = EntryPage.clamp(20, first, skip);
-                ContentEntries.listByStage(owner, accessTo(None, stageOrDefault(atStage)), {
-                    filter  = filter |> Option.getWithDefault(Nil),
-                    orderBy = orderBy |> Option.getWithDefault(Nil),
-                    first   = limit,
-                    start   = PageStart.Offset(offset)
-                })
-            })
+            ) yield listPage(owner, stageOrDefault(atStage), filter |> Option.getWithDefault(Nil), orderBy |> Option.getWithDefault(Nil), EntryPage.clamp(20, first, skip), after))
             |> Field.withDescription("${TypeName.text(owner#singular)} の一覧")
+
+    /// 一覧の 1 ページ。after は orderBy と対で復号し、skip との同時指定と壊れた cursor は invalid。
+    def listPage(owner: ContentType, stage: Stage, filter: Where, orderBy: OrderBy, page: (Int32, Int32), after: Option[String]): EntryPage \ DbRead + CmsErr + Tenant + Session =
+        let (first, skip) = page;
+        let start = Cursor.pageStart(orderBy, skip, after) |> CmsErr.okOrInvalid;
+        ContentEntries.listByStage(owner, accessTo(None, stage), { filter = filter, orderBy = orderBy, first = first, start = start })
 
     ///
     /// 1 件クエリの名前。singular の先頭を小文字にした物（Blog → blog）。規則は Naming が持つ（衝突の検査と同じ物を使う）。
@@ -281,12 +281,32 @@ mod ContentSchemaBuilder {
         if (field#name == "") (built -> built) else Field.withDescription(field#name)
 
     ///
-    /// `<Singular>Connection { nodes, totalCount }`
+    /// `<Singular>Connection { nodes, edges { cursor node }, pageInfo { hasNextPage endCursor }, totalCount }`。GitHub の GraphQL API と同じ形。
     ///
     def connectionType(all: List[ContentType], owner: ContentType): ObjectType[EntryPage, ContentEff] =
         Schema.objectType("${TypeName.text(owner#singular)}Connection", () ->
             Schema.field0("nodes", Out.list(Out.obj(entryType(all, owner))), (_context, page) -> Ok(page#entries)) ::
+            Schema.field0("edges", Out.list(Out.obj(edgeType(all, owner))), (_context, page) -> Ok(EntryPage.edges(page))) ::
+            Schema.field0("pageInfo", Out.obj(pageInfoType()), (_context, page) -> Ok(EntryPage.pageInfo(page))) ::
             Schema.field0("totalCount", Out.int32(), (_context, page) -> Ok(EntryPage.totalCountInt32(page))) :: Nil)
+            |> ObjectType.withDescription("一覧の 1 ページ。nodes か edges のどちらかを読む。次のページは pageInfo.endCursor を after に渡す（orderBy と対。skip とは同時に渡せない）")
+
+    ///
+    /// `<Singular>Edge { cursor, node }`。
+    ///
+    def edgeType(all: List[ContentType], owner: ContentType): ObjectType[EntryEdge, ContentEff] =
+        Schema.objectType("${TypeName.text(owner#singular)}Edge", () ->
+            Schema.field0("cursor", Out.string(), (_context, edge) -> Ok(edge#cursor)) ::
+            Schema.field0("node", Out.obj(entryType(all, owner)), (_context, edge) -> Ok(edge#node)) :: Nil)
+
+    ///
+    /// `PageInfo { hasNextPage, endCursor }`。全型で共通の 1 つ。
+    ///
+    def pageInfoType(): ObjectType[PageInfo, ContentEff] =
+        Schema.objectType("PageInfo", () ->
+            Schema.field0("hasNextPage", Out.bool(), (_context, info) -> Ok(info#hasNextPage)) ::
+            Schema.field0("endCursor", Out.option(Out.string()), (_context, info) -> Ok(info#endCursor)) :: Nil)
+            |> ObjectType.withDescription("ページの続き。hasNextPage なら endCursor を after に渡して次を読む")
 
     // ---- 引数 ----
 

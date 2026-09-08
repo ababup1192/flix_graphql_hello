@@ -18,14 +18,35 @@ mod TestCdnCachePg {
 
     /// GET /graphql?query={ blogs { nodes { id } } }（パーセント符号化済み）。
     def get(headers: List[(String, String)]): HttpRequest =
-        { version = "HTTP/1.1", method = "GET", path = "/graphql?query=%7B%20blogs%20%7B%20nodes%20%7B%20id%20%7D%20%7D%20%7D", headers = headers, body = "" }
+        getPath("/graphql?query=%7B%20blogs%20%7B%20nodes%20%7B%20id%20%7D%20%7D%20%7D", headers)
+
+    def getPath(path: String, headers: List[(String, String)]): HttpRequest =
+        { version = "HTTP/1.1", method = "GET", path = path, headers = headers, body = "" }
+
+    /// GET /graphql?query=query($after: String) { blogs(after: $after) { nodes { id } pageInfo { endCursor } } }&variables={"after": …}（パーセント符号化済み）。
+    /// after は base64url なので符号化せずそのまま置ける。
+    def getAfter(after: Option[String]): HttpRequest =
+        let variables = after |> Option.map(cursor -> "%7B%22after%22%3A%22${cursor}%22%7D") |> Option.getWithDefault("%7B%22after%22%3Anull%7D");
+        getPath("/graphql?query=query(%24after%3A%20String)%20%7B%20blogs(after%3A%20%24after)%20%7B%20nodes%20%7B%20id%20%7D%20pageInfo%20%7B%20endCursor%20%7D%20%7D%20%7D&variables=${variables}", Nil)
 
     /// 匿名で認証して版を読み（Main.runRoute と同じ）、コンテンツ API のエンジンで処理する。(status, ETag, 本文の entry id)。
     def handle(pool: Pool, engine: Graphql.Engine, headers: List[(String, String)]): (Int32, Option[String], List[String]) \ IO =
+        handleRequest(pool, engine, get(headers))
+
+    /// リクエストを渡す版。(status, ETag, 本文の entry id)。
+    def handleRequest(pool: Pool, engine: Graphql.Engine, request: HttpRequest): (Int32, Option[String], List[String]) \ IO =
+        let response = handleFull(pool, engine, request);
+        (response#status, Http.findHeader("ETag", response#headers), idsOf(response#body))
+
+    /// リクエストを処理して応答そのものを返す。
+    def handleFull(pool: Pool, engine: Graphql.Engine, request: HttpRequest): HttpResponse \ IO =
         let (auth, version) = PgTestSupport.locateAnonymousObserved(pool, _ -> ());
         let config = { cache = Some(CacheHeaders.defaultPolicy()) | Server.defaultConfig() };
-        let response = Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handleWithVersion(config, HealthFake.ok(), Credential.Missing, auth, version, get(headers))));
-        (response#status, Http.findHeader("ETag", response#headers), idsOf(response#body))
+        Graphql.runWithEngine(engine, () -> ServerTestKit.quietly(() -> Server.handleWithVersion(config, HealthFake.ok(), Credential.Missing, auth, version, request)))
+
+    /// 本文の data.blogs.pageInfo.endCursor。無ければ None。
+    def endCursorOf(body: String): Option[String] =
+        JsonValue.parse(body) |> Result.toOption |> Option.flatMap(parsed -> Value.path(List#{"data", "blogs", "pageInfo", "endCursor"}, parsed) |> Value.asStr)
 
     /// 本文の data.blogs.nodes[].id を id 順に。本文が無ければ空（一覧の既定の並びは新しい順なので、順序は見ない）。
     def idsOf(body: String): List[String] = match JsonValue.parse(body) {
@@ -63,5 +84,21 @@ mod TestCdnCachePg {
                 PgTestSupport.named("third", (200, true, List#{"b1", "b2"}))
             },
             outcome)
+
+    ///
+    /// after は variables に入るので ETag が変わる。同じ query で variables だけ after: null → 1 ページ目の endCursor に変えると、
+    /// どちらも 200 だが ETag が違い、2 回目は b1 の次なので 0 件。
+    ///
+    @Test
+    def testPgCdnEtagVariesByAfter(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withPool(pool -> {
+            PgTestSupport.seed(seed);
+            let engine = PgTestSupport.contentEngine(pool);
+            let first = handleFull(pool, engine, getAfter(None));
+            let firstEtag = Http.findHeader("ETag", first#headers);
+            let (secondStatus, secondEtag, secondIds) = handleRequest(pool, engine, getAfter(endCursorOf(first#body)));
+            (first#status, idsOf(first#body), Option.nonEmpty(firstEtag), secondStatus, secondIds, Option.nonEmpty(secondEtag) and secondEtag != firstEtag)
+        });
+        Assert.assertEq(expected = (200, List#{"b1"}, true, 200, (Nil: List[String]), true), outcome)
 
 }

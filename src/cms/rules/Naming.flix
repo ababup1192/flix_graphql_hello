@@ -20,7 +20,7 @@ mod Naming {
     ///
     /// 型ごとに生える型の接尾辞。singular がこれで終わると、別の型から生えた名前と衝突しうる。
     ///
-    pub def reservedSuffixes(): List[String] = "Where" :: "WhereLeaf" :: "OrderBy" :: "Connection" :: Nil
+    pub def reservedSuffixes(): List[String] = "Where" :: "WhereLeaf" :: "OrderBy" :: "Connection" :: "Edge" :: Nil
 
     ///
     /// apiId から singular を導く。"blogs" → "Blog"、"categories" → "Category"、"news" → "News"（s 1 つでは落とさない語もあるので、合わなければ入力で上書きする）。
