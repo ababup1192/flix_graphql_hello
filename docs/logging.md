@@ -34,12 +34,12 @@
 | `http.request.body.size` | int | リクエストの行 | UTF-8 のバイト数 |
 | `http.response.body.size` | int | リクエストの行 | UTF-8 のバイト数 |
 | `project` | string | リクエストの行、リゾルバの中の行、ワーカーの行 | プロジェクト slug（パス・Host・既定。ワーカーは拾った行の project_id から） |
-| `credential.kind` | string | リクエストの行、リゾルバの中の行 | `jwt` / `api-key` / `pat` / `preview` / `anonymous` / `invalid`。ヘッダから読んだ種類。Runner が知らない鍵・合わないプレビュートークン・死んだ PAT を `invalid` に上書きする |
-| `user.id` | string | リクエストの行、リゾルバの中の行 | 本人の public_id（email は出さない） |
+| `credential.kind` | string | リクエストの行、リゾルバの中の行 | `jwt` / `api-key` / `pat` / `preview` / `anonymous` / `invalid`。ヘッダから読んだ種類。認証（`Main.runRoute`）が知らない鍵・合わないプレビュートークン・死んだ PAT・壊れたログインの JWT を `invalid` に上書きする |
+| `user.id` | string | リクエストの行、リゾルバの中の行 | 本人の public_id（email は出さない）。認証（リクエストに 1 回）が決め、リゾルバの span にも写す |
 | `api_key.name` | string | リクエストの行、リゾルバの中の行 | 鍵の名前（鍵は出さない） |
 | `graphql.operation.type` | string | リクエストの行 | `query` / `mutation` / `subscription` |
 | `graphql.operation.name` | string | リクエストの行 | operationName か文書の操作の名前。無ければ付かない |
-| `graphql.error_codes` | string[] | リクエストの行 | `errors[].extensions.code` の一覧（重複無し）。graphql-java の検証エラーは `classification`。業務エラーの率がこれで見える |
+| `graphql.error_codes` | string[] | リクエストの行 | `errors[].extensions.code` の一覧（重複無し）。graphql-java の検証エラーは `classification`。認証に落ちたリクエスト（path 無しの 1 件）もここ。業務エラーの率がこれで見える |
 | `exception.type` | string | Error の行 | `Log.exception` |
 | `exception.message` | string | Error の行 | 200 字。`Detail:` 以降は落とす（PG が行の値を入れるため） |
 | `exception.stacktrace` | string | Error の行 | Flix の frame だけ 8 つ |
@@ -47,8 +47,8 @@
 | `error.message` | string | 起動の失敗、ワーカーの失敗、リゾルバの失敗、4xx のリクエストの行、繋がらなかった Webhook の行 | 人が読む文。4xx は応答本文と同じ文、Webhook は「接続できませんでした: java.net.ConnectException」のような文 |
 | `error.kind` | string | リゾルバの失敗の行 | DB の失敗の種類（sqlfx の TransientDbErr の名前 `deadlock` / `timeout` / `connectionLost`）。再試行で枯渇した物は最後の失敗の種類。「DB が落ちた」と「DB が遅い」を読み分ける。制約違反などには付かない |
 | `db.retries` | int | リクエストの行 | 一時的な失敗で呼び直した回数。1 以上の時だけ。リクエストの中の Tx 全部の和 |
-| `db.statements` | int | リクエストの行 | そのリクエストで出した SQL の数（fetch / execute / executeReturning を 1 と数える。RLS の印と認証の SQL を含む）。Tx ごとに Runner が戻し、受ける側（`LogFields.mergeCounts`）が足す |
-| `db.transactions` | int | リクエストの行 | そのリクエストで張った Tx の数（`DbRunner.transact` / `withTx` を呼んだ回数。SQL を出さなかった物も数える） |
+| `db.statements` | int | リクエストの行 | そのリクエストで出した SQL の数（fetch / execute / executeReturning を 1 と数える。RLS の印と認証の SQL を含む）。Tx ごとに DbRunner が observe で戻し（認証の Tx も Runner の Tx も）、受ける側（`LogFields.mergeCounts`）が足す。上限は `test/Pg/TestQueryBudgetPg` |
+| `db.transactions` | int | リクエストの行 | そのリクエストで張った Tx の数（`DbRunner.transact` / `withTx` を呼んだ回数。SQL を出さなかった物も数える）。認証の 1 つ + ルートフィールドと入れ子のフィールドの数 |
 | `db.pool.waiting` | int | リクエストの行 | DB の接続プールを借りるのを待っているスレッドの数。Runner の入口で 1 回読み、1 以上の時だけ |
 | `db.pool.active` | int | リクエストの行、`self-heal: exiting` の行 | 借りられている接続の数。リクエストの行には `db.pool.waiting` が付く時だけ |
 | `db.pool.idle` | int | `self-heal: exiting` の行 | 空いている接続の数 |
@@ -90,8 +90,8 @@
 
 - リクエスト: 接続のスレッドの入口（`Main.dispatch`）で `Log.runWith(sink)` を入れ直し、`request.id` / `cf.ray` / method / path の span を張る。
   リクエストの行は処理の後に `Main.serveRequest` が出す。Route の handler と 404 / 405 の分岐は `Observe` effect（`Observe.note`）で属性（`mcp.*`、4xx の `error.code` / `error.message`）を積み、`serveRequest` が `extra` に受ける。HttpServer が見た失敗（handle の例外、読めない 400 / 413 / 431、混雑の 503、書けなかった）は `onServed` から別に出る（413 / 431 はヘッダまで読めているので method / path と、`X-Request-Id` があれば `request.id` が付く。ULID は作らない）
-- リゾルバの中: Runner が `deps#log` で入れ直し（graphql-java の Java コールバックの中なので dispatch の handler は届かない）、Context の span に `user.id` / `api_key.name` を足す。今出るのは DB の失敗（`field failed`）だけ。
-  同じ属性（と検証に落ちた印）は Context の `observe` でリクエストの行にも戻す（Ref を閉じ込めた関数の値。Java のコールバックの中から effect は届かない）
+- リゾルバの中: Runner が `deps#log` で入れ直す（graphql-java の Java コールバックの中なので dispatch の handler は届かない）。span は `Main.runRoute` が request の span に `credential.kind` / `project` と認証の属性（`user.id` / `api_key.name` / 検証に落ちた印）を merge した物。今出るのは DB の失敗（`field failed`）だけ。
+  Runner が数えた SQL と Tx の数は Context の `observe` でリクエストの行に戻す（Ref を閉じ込めた関数の値。Java のコールバックの中から effect は届かない）
 - ワーカー: `BackgroundJobs.runForever` が周ごとに入れ直す。外部トリガー `POST /jobs/tick` はリクエストの span の中で出る
 - 自己回復: プールが壊れたまま戻らないと決まったら `self-heal: exiting`（error。`reason` とプールの数字）を出し、停止と同じ drain をして終了コード 3 で終わる。
   その後の `Terminating due to java.lang.OutOfMemoryError` のような JVM の平文は JSON にできないので、収集器は終了コードとこの行で判断する

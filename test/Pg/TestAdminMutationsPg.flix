@@ -25,6 +25,24 @@ mod TestAdminMutationsPg {
         (typeId, titleId, bodyId)
 
     ///
+    /// 1 リクエストに並べた mutation のルートフィールドは互いに独立した Tx。2 つ目が業務エラー（同じ apiId で INVALID）でも 1 つ目は COMMIT されていて、
+    /// 次のリクエストの一覧に出る。まとめて成功か失敗かにしたい操作は 1 つの mutation にする（withDependencies のように）。
+    /// 応答の data は null（createContentType は non-null なので、失敗が data まで伝播する GraphQL の決まり。COMMIT の有無とは別）。
+    ///
+    @Test
+    def testPgRootFieldsAreIndependentTransactions(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withAdminApi(() -> (), (api, _) -> {
+            let ask = PgTestSupport.askOwner(api);
+            let paired = ask("mutation { first: createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { apiId } second: createContentType(input: { apiId: \"blogs\", name: \"重複\" }) { apiId } }");
+            let listed = ask("{ contentTypes { apiId name } }");
+            (paired, listed)
+        });
+        Assert.assertEq(
+            expected = ((Value.Null, Some("apiId: 'blogs' は既にあります")),
+                        (Value.Obj(Map#{ "contentTypes" => Value.List(Value.Obj(Map#{ "apiId" => Value.Str("blogs"), "name" => Value.Str("記事") }) :: Nil) }), None)),
+            outcome)
+
+    ///
     /// content type とフィールドと Webhook の mutation。SCHEMA_CHANGED を受ける Webhook を先に作り、型の変更で配信が積まれ、redeliver で送る番に戻せる。
     ///
     ///   createWebhook(SCHEMA_CHANGED) ─ createContentType ─ addField ×3 ─ updateField ─ removeField ─ reorderFields ─ updateContentType

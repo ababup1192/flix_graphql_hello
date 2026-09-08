@@ -8,9 +8,9 @@ auth の表（memberships / invitations / api_keys）も RLS 済み（migration 
 言葉: **プロジェクト slug** は URL の `/p/{プロジェクト slug}/` と subdomain でプロジェクトを選ぶ人が読める名前（`ProjectSlug` 型。parse 済みしか作れない）。
 **プロジェクト id** は DB の主キー。**既定プロジェクト** はプロジェクト slug 無しの時に落ちる先（`CMS_DEFAULT_PROJECT`）。
 
-実装での名前: 主体の effect は `Actor` ではなく `Session`（`Session.current()` / `Session.require(permission)`。`Actor` は主体の enum）。
-ユーザーの解決は `Accounts`（`resolveUser` / `actorFor` / `me`）、身元は graphql 層の `Credential`（Bearer / ApiKey / PersonalToken / Preview / Missing / Invalid）で
-`Context` に載り、Runner が Tx の中で主体を決める。API キーの write と PAT は下の「API キーの write と Personal Access Token」。
+実装での名前: 認証済みユーザーの effect は `Actor` ではなく `Session`（`Session.current()` / `Session.require(permission)`。`Actor` は認証済みユーザーの enum）。
+ユーザーの解決は `Accounts`（`resolveUser` / `actorFor` / `me`）、ヘッダから読んだ物は `Credential`（Bearer / ApiKey / PersonalToken / Preview / Missing / Invalid）で、
+認証（Credential → Actor）は `Authentication` がリクエストに 1 回行い、graphql 層の `Context` は `actor` を持つ（下の「認証はリクエストに 1 回」）。API キーの write と PAT は「API キーの write と Personal Access Token」。
 
 ## 目的
 
@@ -214,3 +214,18 @@ pepper の回転: 行の `pepper_id` は解決時に使っていないので、`
 - 他のクラウド型 CMS の形: microCMS / Sanity / Prismic は subdomain、Contentful / Hygraph はパス、Storyblok はトークンだけ。
   どれも読み取り（CDN）と書き込み（管理）はホストを分けている
 - 後回しにしてよい物: entry id をプロジェクトごとに重ねる（PK を `(project_id, id)` にする。約 1 日）、RLS
+
+## 認証はリクエストに 1 回（2026-09-08 追記。実装済み）
+
+Schema の `Field.erase` が全フィールドを Runner で包むので、Runner の Tx の先頭で認証していた時は、認証（JWT なら users / invitations / memberships / org の SELECT 6〜7 本、鍵と PAT なら hash の検索と last_used_at の UPDATE）がフィールドの数だけ繰り返されていた（entries 50 件 × 10 フィールドで 503 回。`TestQueryBudgetPg` の実測で 3723 本の SQL）。
+
+- 認証は **`Main.runRoute` がリクエストに 1 回**、プロジェクトの解決と同じ Tx（`DbRunner.withTx`）で `Authentication.resolve(deps, engine, scope, credential)` を呼ぶ。middleware（`Credentials.wrap` の隣）に置けないのは、API キーの解決と membership の検索がプロジェクトの RLS の印の下で行を見るので、プロジェクトが決まってからでないと SQL を出せないため。/p/ と Host の経路はプロジェクトの SELECT と同じ Tx、既定プロジェクトの経路は認証の Tx が 1 つ増える
+- `Context` は Credential でなく **`actor`（認証済みユーザー）** を持つ。Runner は `AppEnv.runWith` → `DbRunner.transactObserved(pool, scope, observe, context#actor, f)` → `toFieldResult` の 2 段で、認証も `Credential.Invalid` の分岐も持たない
+- 断る理由は `Rejection`（`Invalid` / `DeadToken(PatRejection)` / `NotForAccount` / `PrivateProject` / `NotMember`）で `RouteRequest#auth` に載り、形は handler が決める: `/graphql`（POST / GET）は 200 で `data: null` と path 無しの `errors[]` 1 件（`extensions.code`）、`/mcp` は 401 + `WWW-Authenticate`。`Credential.Invalid` の断りも認証の先頭の 1 か所（コンテンツ API でも壊れたログインの JWT は匿名にせず断る）
+- `DbRunner.transact(pool, scope, actor, f)` が BEGIN の直後に RLS の印（プロジェクトと、人なら `app.user_id` / `app.email`）を置き、`Session` の handler と `Db.guard` を入れる。Session の handler はここだけ。仕組みが呼ぶ物（Scheduler / MicrocmsCli / ContentEngine の組み直し / テストの mutate）は `Actor.System` を渡す
+- RLS の policy は `app.project_id` / `app.user_id` / `app.email` / `app.token_hash` の 4 つ。`app.token_hash` は `PersonalTokens.resolve`（認証の Tx）だけが置く。業務の Tx で personal_access_tokens を読む一覧・失効は本人の印で通る
+- `last_used_at` は認証の Tx で COMMIT される（業務が失敗してもトークンは使われたので残すのが正しい）。コンテンツ API は書かない（CDN の道に UPDATE を足さない）
+- private なプロジェクトのコンテンツ API は認証の Content の分岐で断る。匿名は `UNAUTHENTICATED`、メンバーでない人は `FORBIDDEN`（以前はどちらも INVALID）
+- 失敗は層ごとに 1 種類: 認証は `Rejection`、ドメインは `CmsFailure`、DB は `DbFailure`。Tx の境界（`DbRunner.transact`）は `ApplicationFailure`（`Infrastructure` / `Domain`）で返し、`toFieldResult` / `GraphqlErrors` / `LogFields` は平らな match で写す。ドメインは UNAUTHENTICATED を出せない
+- Unit of Work は**ルートフィールドごとの Tx のまま**（変えない）。1 リクエストに mutation を並べても互いに独立で、2 つ目が業務エラーでも 1 つ目は COMMIT されている。まとめたい操作は 1 つの mutation にする（`TestAdminMutationsPg.testPgRootFieldsAreIndependentTransactions`）
+- 数は `db.statements` / `db.transactions`（docs/logging.md）で見え、`TestQueryBudgetPg` が上限で見張る。実測: JWT で entries 50 件 × 10 フィールドが 3723 → 209 本、`contentTypes { name }` が 16 → 9 本（認証 1 回分）、API キーの一覧が 1208 → 204 本

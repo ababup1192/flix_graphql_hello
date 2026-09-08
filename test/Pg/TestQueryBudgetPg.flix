@@ -1,7 +1,9 @@
 ///
-/// 1 リクエストで出る SQL の数（db.statements）と張った Tx の数（db.transactions）を、代表的な query で数える。
-/// Runner が Context の observe に戻す値を LogFields.mergeCounts で足し合わせる（Main の runObserved と同じ受け方）。
+/// 1 リクエストで出る SQL の数（db.statements）と張った Tx の数（db.transactions）を、代表的な query で数えて上限と比べる。
+/// 認証の Tx と Runner が observe に戻す値を LogFields.mergeCounts で足し合わせる（Main の runRoute / runObserved と同じ受け方）。
 /// 数は標準出力にも出す（実測値をコミットログに残すため）。
+///
+/// 上限は実測（2026-09-08）+ 少しの余裕。認証の SQL（JWT で 7 本）がフィールドごとに繰り返されると (b) が 2 倍を超えて落ちる。
 ///
 mod TestQueryBudgetPg {
 
@@ -39,11 +41,10 @@ mod TestQueryBudgetPg {
         (name, count("db.statements"), count("db.transactions"), message)
 
     ///
-    /// 3 つの query の SQL の数と Tx の数。
-    ///   (a) JWT で entries 50 件 × 10 フィールド
-    ///   (b) JWT で contentTypes { name }
-    ///   (c) API キー（EDITOR の WRITE）で (a) と同じ一覧
-    /// どれも 1 以上（数えられている）で、エラーは無い。数そのものは出力を読む。
+    /// 3 つの query の SQL の数と Tx の数が上限の中に収まり、エラーは無い。
+    ///   (a) JWT で entries 50 件 × 10 フィールド   実測 209 / 504（認証 1 Tx + フィールド 503 Tx）
+    ///   (b) JWT で contentTypes { name }            実測 9 / 3（認証 7 本 + 印 + 一覧 1 本。認証が 1 回分）
+    ///   (c) API キー（EDITOR の WRITE）で (a) の一覧 実測 204 / 504
     ///
     @Test
     def testPgQueryBudget(): Unit \ {IO, Assert} =
@@ -54,14 +55,15 @@ mod TestQueryBudgetPg {
             let typeId = GraphqlTestKit.stringAt(List#{"contentType", "id"}, ask("{ contentType(apiId: \"blogs\") { id } }"));
             let key = GraphqlTestKit.stringAt(List#{"createApiKey", "key"}, ask("mutation { createApiKey(name: \"ci\", scope: WRITE, role: EDITOR) { key } }"));
             List#{
-                budget("jwt entries 50x10", measure(api, engine, owner, listQuery(typeId))),
-                budget("jwt contentTypes name", measure(api, engine, owner, "{ contentTypes { name } }")),
-                budget("api-key entries 50x10", measure(api, engine, Credential.ApiKey(key), listQuery(typeId)))
+                (budget("jwt entries 50x10", measure(api, engine, owner, listQuery(typeId))), (230, 510)),
+                (budget("jwt contentTypes name", measure(api, engine, owner, "{ contentTypes { name } }")), (12, 4)),
+                (budget("api-key entries 50x10", measure(api, engine, Credential.ApiKey(key), listQuery(typeId))), (230, 510))
             }
         });
-        List.forEach(match (name, statements, transactions, _) -> println("query budget: ${name}: db.statements=${statements} db.transactions=${transactions}"), budgets);
+        List.forEach(match ((name, statements, transactions, _), _) -> println("query budget: ${name}: db.statements=${statements} db.transactions=${transactions}"), budgets);
         Assert.assertEq(
-            expected = budgets |> List.map(match (name, _, _, _) -> (name, true, true, None)),
-            budgets |> List.map(match (name, statements, transactions, message) -> (name, statements > 0, transactions > 0, message)))
+            expected = budgets |> List.map(match ((name, _, _, _), _) -> (name, true, true, None)),
+            budgets |> List.map(match ((name, statements, transactions, message), (maxStatements, maxTransactions)) ->
+                (name, statements > 0 and statements <= maxStatements, transactions > 0 and transactions <= maxTransactions, message)))
 
 }
