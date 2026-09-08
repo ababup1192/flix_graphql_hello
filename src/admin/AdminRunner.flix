@@ -25,18 +25,14 @@ mod AdminRunner {
         match context#credential {
             case Credential.Invalid(reason) => Err(GraphqlErrors.unauthenticated("認証に失敗しました: ${reason}"))
             case credential =>
-                run {
+                AppEnv.runWith(deps, context#log, projectId, () -> {
                     let outcome =
-                        IdGen.runWithRandom(() ->
-                            Tenant.runWith(projectId, () ->
-                                Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () ->
-                                    DbRunner.transactObserved(pool, Some(projectId), context#observe, () -> match RequestIdentity.resolveForProject(deps, projectId, credential) {
-                                        case Err(rejection) => { (context#observe)(LogFields.rejectedCredential(Log.Fields.empty())); Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection))) }
-                                        case Ok(resolved)   => { (context#observe)(resolved#log); RequestIdentity.touch(resolved); Log.withFields(resolved#log, () -> Session.runWith(resolved#actor, () -> Db.guard(f))) }
-                                    }))))));
+                        DbRunner.transactObserved(pool, Some(projectId), context#observe, () -> match RequestIdentity.resolveForProject(deps, projectId, credential) {
+                            case Err(rejection) => { (context#observe)(LogFields.rejectedCredential(Log.Fields.empty())); Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection))) }
+                            case Ok(resolved)   => { (context#observe)(resolved#log); RequestIdentity.touch(resolved); Log.withFields(resolved#log, () -> Session.runWith(resolved#actor, () -> Db.guard(f))) }
+                        });
                     DbRunner.toFieldResult(LogFields.requestIdOf(context#log), outcome)
-                } with Log.withFields(context#log)
-                  with Log.runWith(deps#log)
+                })
         }
 
 }

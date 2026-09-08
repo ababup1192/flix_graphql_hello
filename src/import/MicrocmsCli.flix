@@ -11,13 +11,12 @@ mod MicrocmsCli {
     pub def execute(dir: String, pool: Pool, deps: Deps, projectId: ProjectId, count: Int32): Result[String, String] \ {IO, Fs.FileRead} =
         forM (
             apis <- readApis(dir);
-            outcome <- Tenant.runWith(projectId, () -> Session.runWith(Actor.System, () -> IdGen.runWithRandom(() ->
-                Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () ->
+            outcome <- AppEnv.runWith(deps, Log.Fields.empty(), projectId, () -> Session.runWith(Actor.System, () ->
                     DbRunner.transact(pool, Some(projectId), () -> {
                         let types = MicrocmsImport.importSchema(apis);
                         let created = MicrocmsImport.seedDummy(apis, types, count);
                         (Map.size(types), created |> Map.valuesOf |> List.map(List.length) |> List.sum)
-                    })))))))
+                    })))
                 |> Result.mapErr(failure -> "DB の失敗: ${failure}")
                 |> Result.flatMap(Result.mapErr(CmsErr.toMessage))
         ) yield {

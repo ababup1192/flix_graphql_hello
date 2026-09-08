@@ -19,17 +19,14 @@ mod ContentRunner {
         (context, f) -> runOne(pool, deps, projectId, context, f)
 
     def runOne(pool: Pool, deps: Deps, projectId: ProjectId, context: Context, f: Unit -> Result[FieldError, JavaValue.Boxed] \ ContentEff + IO): Result[FieldError, JavaValue.Boxed] \ IO =
-        run {
+        AppEnv.runWith(deps, context#log, projectId, () -> {
             let outcome =
-                Tenant.runWith(projectId, () ->
-                    Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(deps#storage, () -> IdGen.runWithRandom(() ->
-                        DbRunner.transactObserved(pool, Some(projectId), context#observe, () -> match RequestIdentity.resolveForProject(deps, projectId, context#credential) {
-                            case Err(rejection) => { (context#observe)(LogFields.rejectedCredential(Log.Fields.empty())); Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection))) }
-                            case Ok(resolved)   => { (context#observe)(resolved#log); guardVisibility(projectId, resolved#actor); Log.withFields(resolved#log, () -> Session.runWith(resolved#actor, () -> Db.guard(f))) }
-                        }))))));
+                DbRunner.transactObserved(pool, Some(projectId), context#observe, () -> match RequestIdentity.resolveForProject(deps, projectId, context#credential) {
+                    case Err(rejection) => { (context#observe)(LogFields.rejectedCredential(Log.Fields.empty())); Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection))) }
+                    case Ok(resolved)   => { (context#observe)(resolved#log); guardVisibility(projectId, resolved#actor); Log.withFields(resolved#log, () -> Session.runWith(resolved#actor, () -> Db.guard(f))) }
+                });
             DbRunner.toFieldResult(LogFields.requestIdOf(context#log), outcome)
-        } with Log.withFields(context#log)
-          with Log.runWith(deps#log)
+        })
 
     ///
     /// private なプロジェクトは、鍵か役割を持つ人しか読めない。

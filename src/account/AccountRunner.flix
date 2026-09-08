@@ -28,16 +28,14 @@ mod AccountRunner {
             case Credential.ApiKey(_)       => Err(GraphqlErrors.requiresLogin("Account API は API キーでは使えません。ログインしてください"))
             case Credential.Preview(_)      => Err(GraphqlErrors.requiresLogin("Account API はプレビュートークンでは使えません。ログインしてください"))
             case credential =>
-                run {
+                AppEnv.runWithoutProject(deps, context#log, () -> {
                     let outcome =
-                        IdGen.runWithRandom(() -> Time.Clock.runWithIO(() ->
-                            DbRunner.transactObserved(pool, None, context#observe, () -> match RequestIdentity.resolveForAccount(deps, credential) {
-                                case Err(rejection) => { (context#observe)(LogFields.rejectedCredential(Log.Fields.empty())); Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection))) }
-                                case Ok(resolved)   => { (context#observe)(resolved#log); RequestIdentity.touch(resolved); Log.withFields(resolved#log, () -> Session.runWith(resolved#actor, () -> Db.guard(f))) }
-                            })));
+                        DbRunner.transactObserved(pool, None, context#observe, () -> match RequestIdentity.resolveForAccount(deps, credential) {
+                            case Err(rejection) => { (context#observe)(LogFields.rejectedCredential(Log.Fields.empty())); Err(GraphqlErrors.unauthenticated(RequestIdentity.rejectionMessage(rejection))) }
+                            case Ok(resolved)   => { (context#observe)(resolved#log); RequestIdentity.touch(resolved); Log.withFields(resolved#log, () -> Session.runWith(resolved#actor, () -> Db.guard(f))) }
+                        });
                     DbRunner.toFieldResult(LogFields.requestIdOf(context#log), outcome)
-                } with Log.withFields(context#log)
-                  with Log.runWith(deps#log)
+                })
         }
 
 }
