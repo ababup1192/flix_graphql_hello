@@ -213,7 +213,13 @@ sum(count_over_time({service="cms"} | json | __error__ != "" [5m])) > 0
 `waiting` が 0 より大きい状態が続けば枯渇していて、`active` が `max` に張り付いたまま `waiting` も減らないなら接続が返っていない（漏れ）。
 リクエストの行にも、待ちが出ている時だけ `db.pool.waiting` / `db.pool.active` が付く。
 
-DB の失敗の行（`message: "field failed"`）には `error.kind` が付く。`connectionLost` なら DB に届いていない（落ちている）、`timeout` なら届くが遅い（`statement_timeout` か borrow 待ち）、`deadlock` はロックの競合。
+DB の失敗の行（`message: "field failed"`）には `error.kind` が付く。`deadlock` はロックの競合。接続を借りる段の失敗は sqlfx 0.3.1 が
+その時の `pool` の数字と例外の cause で 2 つに分ける。
+
+- `connectionLost` … **DB に届いていない**（停止・DSN・ネットワーク）。プールは空いているのに接続が作れなかった時、または cause に `java.net.ConnectException` / `java.net.SocketTimeoutException` / SQLState が `08` で始まる `PSQLException` がある時
+- `timeout` … **借り待ちの上限**。プールが満杯（`active >= max`）で空きを待ち切った。DB は生きている見込みで、遅い SQL か接続の漏れを疑う。SQL の実行中の `statement_timeout` も同じ `timeout`
+
+`connectionLost` は `/health` の `pool.total` が 0 に落ちる形と、`timeout` は `pool.waiting` が伸びる形と揃う。
 一時的な失敗で呼び直した時は、リクエストの行に `db.retries`（1〜2）が付く。
 
 `CMS_DB_LEAK_DETECTION_SECONDS` を入れると HikariCP が「借りたまま返らない接続」を見張るが、**警告の行は出ない**（cms は HikariCP の SLF4J を `slf4j-nop` で黙らせている。出すと Flix のテストが標準エラーで落ちるため）。
