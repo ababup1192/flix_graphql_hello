@@ -52,6 +52,8 @@
 | `db.pool.idle` | int | `self-heal: exiting` の行 | 空いている接続の数 |
 | `db.pool.total` | int | `self-heal: exiting` の行 | 開いている接続の数（active + idle） |
 | `db.pool.max` | int | `self-heal: exiting` の行 | プールの上限 |
+| `jobs.stalled_ms` | int | `/health` のリクエストの行 | 仕事の周が最後に回ってからの経過。上限（30 秒）を超えて 503 にした時だけ |
+| `watch.stalled_ms` | int | `/health` のリクエストの行 | 自己回復の見張りの周が最後に回ってからの経過。上限（30 秒）を超えて 503 にした時だけ |
 | `reason` | string | `self-heal: exiting` の行 | 自分で終わると決めた理由（何 ms 届かなかったか） |
 | `origin` | string | 403 のリクエストの行（MCP） | 断った `Origin` の scheme + host（パスやクエリは無い） |
 | `entity` | string | 業務エラーの行 | `extensions.entity` と同じ |

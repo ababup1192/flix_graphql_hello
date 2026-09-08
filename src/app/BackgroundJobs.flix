@@ -11,10 +11,10 @@ mod BackgroundJobs {
     import java.lang.Throwable
 
     /// tick の間隔（ミリ秒）。
-    def intervalMs(): Int64 = 2000i64
+    pub def intervalMs(): Int64 = 2000i64
 
     /// 自己回復の見張りの間隔（ミリ秒）。
-    def healIntervalMs(): Int64 = 2000i64
+    pub def healIntervalMs(): Int64 = 2000i64
 
     /// 実行中のまま残った行を戻すまでの分。
     def staleMinutes(): Int64 = 10i64
@@ -27,14 +27,18 @@ mod BackgroundJobs {
     /// ワーカーの状態。/health と停止処理が読む。
     ///
     /// - lastTick: 最後に 1 周が終わった時刻（UNIX ミリ秒）
+    /// - lastWatch: 見張りのスレッドが最後に 1 周を回した時刻（UNIX ミリ秒）
     /// - stopping: 停止が始まった。新しい周を始めない
     /// - inTick: 1 周の途中
     /// - drainMs: 停止時に実行中の 1 周を待つ上限（ミリ秒。CMS_JOBS_DRAIN_SECONDS）
     ///
-    pub type alias State = { lastTick = Ref[Option[Int64], Static], stopping = Ref[Bool, Static], inTick = Ref[Bool, Static], drainMs = Int64 }
+    /// WhyNot: lastWatch を /health からの step で更新しないのは、この値が指すのは「見張りのスレッドが生きているか」で、
+    /// リクエストのスレッドが進めた事を混ぜると、死んだスレッドを生きていると読ませてしまうため。
+    ///
+    pub type alias State = { lastTick = Ref[Option[Int64], Static], lastWatch = Ref[Option[Int64], Static], stopping = Ref[Bool, Static], inTick = Ref[Bool, Static], drainMs = Int64 }
 
     pub def createState(drainSeconds: Int64): State \ IO =
-        { lastTick = Ref.fresh(Static, None), stopping = Ref.fresh(Static, false), inTick = Ref.fresh(Static, false), drainMs = drainSeconds * 1000i64 }
+        { lastTick = Ref.fresh(Static, None), lastWatch = Ref.fresh(Static, None), stopping = Ref.fresh(Static, false), inTick = Ref.fresh(Static, false), drainMs = drainSeconds * 1000i64 }
 
     ///
     /// 止まらずに回す。失敗はログに出して次の周へ。停止が始まったら抜ける。周ごとに Log を sink で入れ直す（spawn の中なので Main の handler は届かない）。
@@ -57,6 +61,7 @@ mod BackgroundJobs {
         if (Ref.get(state#stopping)) ()
         else {
             let startedAt = System.currentTimeMillis();
+            Ref.put(Some(startedAt), state#lastWatch);
             Log.runWith(sink, () -> healCheck(pool, state, heal));
             Thread.sleep(nextWaitMs(healIntervalMs(), System.currentTimeMillis() - startedAt));
             watchForever(pool, state, heal, sink)

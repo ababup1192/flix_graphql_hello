@@ -17,15 +17,22 @@ mod HealthFake {
 
     ///
     /// checkDb が常に Ok を返す。ワーカーは 1 度も回っていない事にし、runJobs は何もせず空を返す。
-    /// 自己回復の判断は何もしない。
+    /// 周は止まっておらず、自己回復の判断は何もしない。
     ///
     pub def ok(): Health[{}] =
-        { checkDb = _ -> Ok(()), jobsSummary = _ -> idle(), runJobs = _ -> Nil, connections = _ -> busy(), poolStats = _ -> pool(), heal = _ -> () }
+        { checkDb = _ -> Ok(()), jobsSummary = _ -> idle(), runJobs = _ -> Nil, connections = _ -> busy(), poolStats = _ -> pool(),
+          stall = _ -> None, heal = _ -> () }
 
     ///
     /// checkDb が常に message の Err を返す。
     ///
     pub def failing(message: String): Health[{}] =
         { checkDb = _ -> Err(message) | ok() }
+
+    ///
+    /// DB には届くが、仕事の周が止まっている。
+    ///
+    pub def stalled(): Health[{}] =
+        { stall = _ -> Some(Health.Stall.Jobs(120000i64)) | ok() }
 
 }

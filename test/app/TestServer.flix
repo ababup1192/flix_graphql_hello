@@ -264,6 +264,14 @@ mod TestServer {
         Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }), "pool" => Value.Obj(Map#{ "active" => Value.Int(1), "idle" => Value.Int(2), "waiting" => Value.Int(0), "total" => Value.Int(3), "max" => Value.Int(10) }) }))),
             (response#status, JsonValue.parse(response#body)))
 
+    /// DB に届いても仕事の周が止まっていれば 503 で、reason に止まった周を入れる。
+    @Test
+    def testServerHealthStalled(): Unit \ Assert =
+        let response = GraphqlFake.runWithEcho(() ->
+            serve(Server.defaultConfig(), HealthFake.stalled(), Credential.Missing, { version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" }));
+        Assert.assertEq(expected = (503, Ok(Value.Str("jobs stalled"))),
+            (response#status, JsonValue.parse(response#body) |> Result.map(body -> match body { case Value.Obj(fields) => Map.get("reason", fields) |> Option.getWithDefault(Value.Null) case _ => Value.Null })))
+
     /// /health への POST は 405 で Allow: GET。
     @Test
     def testServerHealthPostNotAllowed(): Unit \ Assert =

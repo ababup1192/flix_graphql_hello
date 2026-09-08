@@ -113,7 +113,7 @@ Origin ヘッダが付いていて `CMS_CORS_ORIGINS` に無ければ 403（無�
 実行中にプロセスが落ちた仕事は 10 分後に拾い直す（公開は冪等。Webhook は受け手が `X-Cms-Delivery` で重複を捨てる）。終わった記録は 30 日で消す。
 
 `/health` の `jobs` にワーカーの最終実行時刻（`lastTickAt`）と、待ち・失敗の件数（`pendingSchedules` / `failedSchedules` / `pendingDeliveries` / `failedDeliveries`。数えられなければ -1）が出る。
-外形監視で `lastTickAt` が古ければワーカーが止まっている。`failedDeliveries` が増えていれば受け手が落ちている。仕事 1 件ごとに `{"message":"job delivered","job.kind":"webhook","job.id":...,"job.outcome":"delivered","detail":"HTTP 200",...}` の 1 行 JSON もログに出る（`job.id` は `X-Cms-Delivery` と同じ）。
+`lastTickAt` が 30 秒より古ければ `/health` 自身が 503 と `"reason": "jobs stalled"` を返す（`CMS_JOBS=off` の時は見ない）。`failedDeliveries` が増えていれば受け手が落ちている。仕事 1 件ごとに `{"message":"job delivered","job.kind":"webhook","job.id":...,"job.outcome":"delivered","detail":"HTTP 200",...}` の 1 行 JSON もログに出る（`job.id` は `X-Cms-Delivery` と同じ）。
 
 SIGTERM / SIGINT を受けると次の順で止まる（下の「停止と終了コード」）。
 
@@ -203,7 +203,7 @@ sum(rate({service="cms"} | json | message="request" | http_response_status_code 
 sum(count_over_time({service="cms"} | json | __error__ != "" [5m])) > 0
 ```
 
-4 本目は Loki でなく外形監視: `/health` の `jobs.lastTickAt` が 60 秒より古ければワーカーが止まっている（Better Stack の JSON の条件か、cron の `curl | jq` で見る）。
+4 本目は Loki でなく外形監視: `/health` が 503 と `"reason": "jobs stalled"` / `"watch stalled"` を返していればワーカーか見張りが止まっている（Better Stack や UptimeRobot が status で拾う）。
 
 `/health` の `connections` は `{"active": 今つないでいる数, "max": CMS_MAX_CONNECTIONS}`。active が max に張り付いていれば 503 が出ている。
 
@@ -242,6 +242,9 @@ SIGTERM / SIGINT を受けると、この順で止まる。
 | 2 | 停止の drain が間に合わなかった（`shutdown timed out`） |
 | 3 | 自己回復（`self-heal: exiting`。下） |
 
+DB が止まっている最中の停止は、tick が DB 待ちで詰まって期限に間に合わず **2 になり得る**（`shutdown.in_tick: true`）。
+「綺麗に止まれなかった」事実なのでこれで正しい。0 で止めたいなら `stop_grace_period` を `CMS_DB_TIMEOUT_SECONDS` より長くする。
+
 compose の `stop_grace_period` は `CMS_SHUTDOWN_TIMEOUT_SECONDS` より長くする（既定なら 30s 以上）。短いと Docker が SIGKILL を送り、drain の途中で切れる。
 
 keep-alive の idle の接続も枠を占めるので、前段（Caddy）が接続を使い回している時は 3 で最長 15 秒（`idleTimeoutMs`）残りうる。
@@ -250,7 +253,8 @@ keep-alive の idle の接続も枠を占めるので、前段（Caddy）が接�
 ### 自己回復（自分で終わって再起動させる）
 
 OOM のような事故の後、プロセスは生きているのに接続プールだけが壊れ、PostgreSQL が健在でも `/health` が 503 を返し続ける事がある（実験 1 回目の S5。2 分観測して戻らなかった）。
-プールを作り直す口が無いので、cms は**自分で終わって、コンテナに起こし直させる**。見張りは仕事の周とは別のスレッドで 2 秒ごとに回り（仕事の周が DB 待ちで伸びても粒度は変わらない）、次の 4 つがそろった時だけ終わる。
+プールを作り直す口が無いので、cms は**自分で終わって、コンテナに起こし直させる**。見張りは仕事の周とは別のスレッドで 2 秒ごとに回り（仕事の周が DB 待ちで伸びても粒度は変わらない）、
+**`/health` を叩かれた時にも同じ判断が 1 回進む**（見張りのスレッドが OOM で死んでも、リクエストのスレッドは生きているので評価が止まらない）。次の 4 つがそろった時だけ終わる。
 
 1. 起動から `CMS_SELF_HEAL_WARMUP_SECONDS`（既定 300 秒）経っている（起動直後の DB 待ちで落ちない）
 2. プール経由の ping が `CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS`（既定 90 秒）以上続けて失敗している
@@ -262,6 +266,9 @@ compose の `restart: unless-stopped` が起こし直す。`CMS_SELF_HEAL=off` �
 
 OOM で JVM 自身が落ちる時（`-XX:+ExitOnOutOfMemoryError`）の最後の行 `Terminating due to java.lang.OutOfMemoryError` は **JSON ではない**（JVM が出す物で、アプリ側では塞げない）。
 収集器は終了コード 3 と、その直前の行で判断する（LogQL なら `__error__ != ""` で拾う）。
+
+見張りのスレッド自体が止まった時は、`/health` が 503 と `"reason": "watch stalled"` を返す（最後に回ってから 30 秒より古い時）。
+リクエストの行には `jobs.stalled_ms` / `watch.stalled_ms` が付く。
 
 **`/health` は DB が落ちている時に `CMS_DB_BORROW_TIMEOUT_SECONDS` × 3 + backoff だけ返らない**（既定で 7〜8 秒。Dockerfile の `HEALTHCHECK --timeout=3s` は毎回 timeout 扱いになる）。
 接続を借りる所で待つので、ping の前に `SET LOCAL statement_timeout` を置いても効かない。もっと短くしたいなら `CMS_DB_BORROW_TIMEOUT_SECONDS=1` にする。

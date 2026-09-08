@@ -113,7 +113,7 @@ def serve(version: String, sink: Log.Sink, started: Started): Unit \ {IO, Sys.En
         pool = started#pool, deps = deps, jwks = jwks, baseDomain = baseDomain, defaultProject = started#defaultProject,
         defaultProjectSlug = Sys.Env.getVar("CMS_DEFAULT_PROJECT") |> Option.getWithDefault("default") |> Some |> Option.filter(text -> not String.isEmpty(text)),
         accountEngine = started#accountEngine, adminEngines = started#adminEngines, engineCache = engineCache,
-        config = config, sink = sink, routes = Server.routes(config, Health.ofPool(started#pool, jobs, listener, heal)) |> Router.withProjectPrefix };
+        config = config, sink = sink, routes = Server.routes(config, Health.ofPool(started#pool, jobs, listener, System.currentTimeMillis(), jobsOn, heal)) |> Router.withProjectPrefix };
     Log.Fields.empty()
         |> Log.Fields.str("server.address", bind |> Option.getWithDefault("0.0.0.0"))
         |> Log.Fields.int("server.port", Int32.toInt64(listener#port))
