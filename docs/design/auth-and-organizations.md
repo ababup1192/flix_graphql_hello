@@ -55,7 +55,7 @@ api_keys         (id, project_id, key_hash, scope, created_at, revoked_at)  -- �
 
 - **`Actor` effect** を `Tenant` の隣に置く。`Actor.current(): Actor`（ユーザー id と今のプロジェクトでの役割）と `Actor.require(role)`。Runner が JWT を検証して membership を引き、`Tenant.runWith` と一緒に handler を入れる
 - ユースケースは `Actor.require(Editor)` のように書く。権限チェックの抜けは「Actor effect を使っていない」でコンパイル時に見つかる（テナントと同じ守り方）
-- **ユースケース（src/cms）の pub は Session を持つ。持たない物は写しか内部**（外向きの id の写し、同じ Tx に積む outbox、Runner が主体を決める前に呼ぶ認証の解決）。一覧は `scripts/session-allowlist.txt` で、`make check` の `scripts/check-session.sh` が増減を見張る。仕組みが呼ぶ物（Scheduler / Import / ContentEngine）は `Session.runWith(Actor.System)` で入る
+- **ユースケース（src/cms）の DB に触る pub は権限の証明 `Granted[p]` を最初の引数で受ける。受けない物は写しか内部**（外向きの id の写し、同じ Tx に積む outbox、Runner が主体を決める前に呼ぶ認証の解決、公開の読み）で、理由を各関数の doc に WhyNot で書く（後述の「権限の証明（Granted）」。以前は Session を持つ約束を `scripts/check-session.sh` が名前の一覧で見張っていた）。仕組みが呼ぶ物（Scheduler / Import / ContentEngine）は `Session.runWith(Actor.System)` で入る
 - 公開 API の鍵は `api_keys` を hash で引く。`ContentRunner` に入れるのは `Tenant` だけで、鍵はプロジェクトへの読み取り許可の判定にしか使わない
 - `Server.splitProject` の前に Host の先頭ラベルを slug として拾う。パスの `/p/` があればそちらを優先。予約 slug（`www` / `api` / `admin` / `app` など）は `Projects.create` で弾く。slug は作った後は変えない（URL が変わるため。microCMS も同じ）
 - JWT は Flix で発行しない。**OIDC の JWKS で検証し `sub` と `email` を取るだけ**に閉じ、発行元は環境変数（issuer URL / JWKS URL / audience）で差し替える。最初は Cloudflare Access（50 人まで無料、社内利用向き。ヘッダ `Cf-Access-Jwt-Assertion`）。顧客が自分で登録する段になったら Clerk / Auth0（1 万 MAU まで無料）、セルフホストは Keycloak か自前のマジックリンクへ。どれも同じ検証コードで通る
@@ -230,32 +230,37 @@ Schema の `Field.erase` が全フィールドを Runner で包むので、Runne
 - Unit of Work は**ルートフィールドごとの Tx のまま**（変えない）。1 リクエストに mutation を並べても互いに独立で、2 つ目が業務エラーでも 1 つ目は COMMIT されている。まとめたい操作は 1 つの mutation にする（`TestAdminMutationsPg.testPgRootFieldsAreIndependentTransactions`）
 - 数は `db.statements` / `db.transactions`（docs/logging.md）で見え、`TestQueryBudgetPg` が上限で見張る。実測: JWT で entries 50 件 × 10 フィールドが 3723 → 209 本（認証 1 回）→ 12 本（版と型の先読み。`Preloaded`）、`contentTypes { name }` が 16 → 9 本（認証 1 回分）、API キーの一覧が 1208 → 204 → 7 本、コンテンツ API の一覧 50 件 + 参照先が API キーで 5 本
 
-## 権限の証明（Granted）（2026-09-08 追記。第 1 段を実装済み）
+## 権限の証明（Granted）（2026-09-08 追記。第 1 段・第 2 段とも実装済み）
 
 「DB に触る pub のユースケースは中で `Session.require(permission)` を呼ぶ」は約束で、守られているかは `scripts/check-session.sh` が名前の一覧で見張っていた。
-権限の証明を値にして引数で渡す形に変え、呼び忘れをコンパイルエラーにする。
+権限の証明を値にして引数で渡す形に変え、呼び忘れをコンパイルエラーにした。
 
 ### 形
 
 - `Granted[p]`（`src/cms/model/Granted.flix`）は権限の証明。p は印の型（`ReadDraft` / `WriteEntries` / `PublishEntries` / `ManageTypes` / `ManageAssets` / `ManageMembers` / `ManageApiKeys` / `ManageProject`。`Permission` の腕と 1 対 1 の空の enum）で、値は持たない（phantom）
-- 作れるのは `Session.grant(): Granted[p] \ Session + CmsErr with Perm[p]` と、対象付きの `Session.grantOn(resource)` だけ。中は今までの `Session.require` / `requireOn` で、通らなければ forbidden。p は渡す先の引数の型から決まる（`ContentTypes.create(Session.grant(), draft)`）
+- 作れるのは `Session.grant(): Granted[p] \ Session + CmsErr with Perm[p]`、対象付きの `Session.grantOn(resource)`、できなければ None の `Session.tryGrant(): Option[Granted[p]] \ Session` だけ。中は `Authz.can` で、通らなければ forbidden。p は渡す先の引数の型から決まる（`ContentTypes.create(Session.grant(), draft)`）
 - 印の型 → 実行時の `Permission` は trait `Perm[p] { def permission(proof: Granted[p]): Permission }` の instance（権限ごとに関数を増やさない）
-- ユースケースの pub の入口は `pub def create(_proof: Granted[ManageTypes], draft: ContentTypeDraft): ContentType \ Db + CmsErr + IdGen + Tenant` のように最初の引数で証明を受け、`Session` を持たず、自分では判定しない。呼ぶ側（src/admin のリゾルバ、`ContentEngine.rebuild`、`MicrocmsImport`、テスト）が `Session.grant()` で作って渡す
+- ユースケースの pub の入口は `pub def create(_proof: Granted[ManageTypes], draft: ContentTypeDraft): ContentType \ Db + CmsErr + IdGen + Tenant` のように最初の引数で証明を受け、`Session` を持たず、自分では判定しない。呼ぶ側（src/admin のリゾルバ、`ContentEngine.rebuild`、`Scheduler`、`MicrocmsImport`、テスト）が `Session.grant()` で作って渡す
+- ユースケースが Session を持つのは主体そのものを読む時だけ（`Session.currentUser()` / `displayName()` / `currentUserForRead()`。Members.invite、Schedules.schedule、ApiKeys.create の発行者の役割、PersonalTokens）
+- 来かたの証明: 鍵と PAT の発行は `Granted[Interactive]`（印 `Interactive`。Perm の instance は無く `Session.grant()` では作れない。`Session.grantInteractive()` がログインの JWT かサーバ自身にだけ作る）を受ける。`ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, draft, now)` のように 2 つの証明を並べる
+- 書く証明から読む証明: `Session.readDraftOfWriter(Granted[WriteEntries]): Granted[ReadDraft]` と `readDraftOfPublisher`。判定し直さない（writeEntries / publishEntries を持つ主体は Authz の Implies で全部 readDraft も持つ）。この含意は `TestGranted.testReadDraftIsImpliedByWriteAndPublish` が主体の一覧で見張る。ContentEntries が型の定義（`ContentTypes.get`）を引く時に使う
+- 条件付きの証明: 公開中の entry の削除は取り下げも要る。`ContentEntries.delete(proof: Granted[WriteEntries], unpublishing: Option[Granted[PublishEntries]], id)` で、呼ぶ側が `Session.tryGrant()` で持てるだけ渡し、公開中なのに None なら forbidden(publishEntries)（writer は下書きは消せるが公開中の物は消せない、を型で残す）
+- コンテンツ API: `ContentEntries.StageAccess`（`Published` は証明なし、`Draft(Granted[ReadDraft])`）で stage を受ける。公開中は誰でも読める（private なプロジェクトは認証が断る）ので証明が要らず、下書きは content 層（`ContentSchemaBuilder.accessTo`）が 1 件なら `grantOn(entryResource(id))`（プレビュートークンはその entry だけ通る）、一覧なら `grant()` で作る
 - リゾルバは「ラムダに effect を使う式を直に書かない」決まりに合わせ、`Session.grant()` を呼ぶ小さな関数（`createType(input)` など）に切り出してラムダからはそれを呼ぶ
-- `check-session.sh` は「Session も引数の `Granted[…]` も持たない DB の pub」を集める（allowlist は増やしていない）
-- 第 1 段で移したのは ContentTypes（list / find / findByApiId / fetch / fetchField / create / update / delete / addField / updateField / removeField / reorderFields）、Assets（createUpload / confirm / updateAlt / delete / holders / find / list）、Projects.updateVisibility の 20 本
+- 証明を受けない DB の pub は意図的に権限を見ない物で、理由を各関数の doc に WhyNot で書く: 認証と起動が主体を決める前に呼ぶ物（Accounts.resolveUser / resolveUserById / actorFor、ApiKeys.resolve / touch、PersonalTokens.resolve / touch、Projects.findBySlug / find / visibilityOf / contentVersion）、外向きの id の写し（Accounts.requireByPublicId、Organizations.idOfPublic）、組織側の部品（Accounts.findByEmail、Projects.listOfOrg）、outbox とプロジェクトの版（Webhooks.emitEntry / emitSchema、Projects.bumpContentVersion）、公開の読み（Assets.findMany）
+- `scripts/check-session.sh` と `scripts/session-allowlist.txt` は廃止。「DB に触る pub は証明を受ける」が型で守られ、受けない物は署名に `Granted` が無い事と doc の WhyNot で読める
 
 ### Flix で書けた所と妥協した所
 
-- phantom の型引数（`pub enum Granted[_p]`）、空の enum を印の型にする事、trait の instance を印の型ごとに付ける事、`Session.grant()` の p を呼び出し先の引数の型から推論する事、はそのまま書けた
-- **コンストラクタを mod の外に出せない。** Flix の enum の case は型と同じ可視性で、case だけを隠せない。本体を `mod Session` の中の `pub enum Granted[_p](Seal)` にし、中身の `Seal` を非 pub の enum にして、作れるのを Session の中だけにした。署名で短く書くための alias `pub type alias Granted[p] = Session.Granted[p]` をトップに置く
+- phantom の型引数（`pub enum Granted[_p]`）、空の enum を印の型にする事、trait の instance を印の型ごとに付ける事、`Session.grant()` の p を呼び出し先の引数の型から推論する事、enum の payload に証明を載せる事（`StageAccess.Draft`）、はそのまま書けた
+- **コンストラクタを mod の外に出せない。** Flix の enum の case は型と同じ可視性で、case だけを隠せない。本体を `mod Session` の中の `pub enum Granted[_p](Seal)` にし、中身の `Seal` を非 pub の enum にして、作れるのを Session の中だけにした。署名で短く書くための alias `pub type alias Granted[p] = Session.Granted[p]` をトップに置く。手元に 1 つ証明があれば `let Granted.Granted(seal) = proof` で中身を取り出して別の印の証明を組めるが、守りたいのは書き忘れであって悪意ではないので、ここまでで止めている
 - **`Perm.permission(): Permission` のような証明を受けない trait の署名は書けない。** trait の署名には型変数 p が現れなければならず、p が phantom の Granted は値として渡す以外に p を決める手が無い。`permission(proof: Granted[p])` の形にした
-- `grantOn(resource)` の Granted は対象（entryId）を値で持たない。今の `requireOn` の呼び方（ContentEntries の draft の読みで 1 か所）は判定して通すだけなので、証明にも載せない。載せたくなったら `Granted` を `(Seal, Resource)` にする
-- `ContentTypes.get(id)` / `getField(id)` は Session 付きの形で残し、証明を受ける物を `fetch` / `fetchField` と呼ぶ。ContentEntries / PreviewTokens が Session.require の形のままで証明を持っていないため。第 2 段で消して `fetch` を `get` に戻す
+- **含意（p ⇒ q）を型で一般に書かなかった。** Flix の trait は 1 引数で、2 つの印の関係を trait で表すには associated type が要る。要るのは「書く → 読む」の 2 本だけなので、Session の中の具体的な関数（`readDraftOfWriter` / `readDraftOfPublisher`）にし、含意が Authz と合っている事はテストで見張る
+- `grantOn(resource)` の Granted は対象（entryId）を値で持たない。今の使い方（コンテンツ API の 1 件の下書き）は判定して通すだけなので、証明にも載せない。載せたくなったら `Granted` を `(Seal, Resource)` にする
+- 証明を引数の先頭に置くと、引数の評価順で権限の判定が入力の検査（AdminMapping の parse）より先に走る。以前は入力の invalid が forbidden より先に出ていた（権限の無い人にも入力の誤りが見えていた）ので、今の順の方が正しい
 
-### 第 2 段（未着手）
+### CmsErr.runWithResult（Tx の境界だけが呼ぶ）
 
-- 残りの全ユースケースを移す。`Session.require` は 37 か所: ContentEntries 18（`requireOn` 1 つ込み）、Webhooks 6、Members 6、ApiKeys 3（`requireInteractive` は別。証明にするなら `Granted[Interactive]` のような印を足す）、Schedules 3、PreviewTokens 1。`Session.require` / `requireOn` を消し、`Session.currentUser()` のような主体を読む物だけ Session を残す
-- `ContentTypes.get` / `getField` の Session 付きの形を消し、`fetch` / `fetchField` を `get` / `getField` に戻す
-- `scripts/check-session.sh` と `scripts/session-allowlist.txt` を廃止する。「DB に触る pub は証明を受ける」が型で守られ、受けない物（写し・outbox・認証と起動が呼ぶ物）は署名に `Granted` が無い事で読める
-- `scripts/cmserr-allowlist.txt`（`CmsErr.runWithResult` を呼べるファイル）にも同じ手を使う: Tx の境界だけが作れる印（Seal 付きの `TxBoundary` のような型）を `runWithResult` の引数にし、ユースケースの途中で呼べないようにする
+`CmsErr.runWithResult` はユースケースの途中で呼ぶと業務エラーが Tx の中で値に潰れ、ROLLBACK も errors[] への写しも起きない。呼べるファイルを `scripts/cmserr-allowlist.txt` で見張っていたが、
+関数そのものを Tx の境界（`DbRunner`）の private にして allowlist と `check-cmserr.sh` を廃止した。CmsErr には失敗の値 `CmsFailure` だけを残し、handler を書く場所は DbRunner（`runCmsErr`）とテストの `CmsTestKit.runWithResult`（テストは自分で境界を作るのが仕事）の 2 つ。
+Seal 付きの印（`TxBoundary`）を引数に取る案は、テストが印を作れる pub の入口を要求して結局 allowlist と同じ穴になるので選ばなかった。

@@ -108,7 +108,7 @@ pub type alias ToolDef = { tool = Tool, description = String, args = List[ArgDef
 /// MCP のツールの表と、引数 → 管理 API の GraphQL リクエスト、応答 → content の写し。
 /// ユースケースは呼ばず、admin engine への GraphQL クライアントとして動く。Tx・主体・last_used_at・エラーの分類は AdminRunner のまま。
 ///
-/// WhyNot: ユースケース（ContentEntries など）を直に呼ばないのは、Session を持たない pub 関数を素通りして権限の検査が抜けるため。
+/// WhyNot: ユースケース（ContentEntries など）を直に呼ばないのは、管理 API と同じ形（証明の作り方、id の写し、エラーの形）を 2 度書かないため。
 /// GraphQL 越しなら Runner が主体を決め、業務エラーが同じ code で返る。
 ///
 mod McpTools {

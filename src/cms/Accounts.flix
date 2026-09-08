@@ -12,6 +12,8 @@ mod Accounts {
     ///
     /// 本人からユーザー。無ければ作り、email / name が変わっていれば更新する。招待と bootstrap もここで処理する。
     ///
+    /// WhyNot: 権限の証明を取らないのは、認証（Authentication.resolve）が認証済みユーザーを決める前に呼ぶ物で、まだ判定する主体が無いため。
+    ///
     pub def resolveUser(bootstrap: Bootstrap, principal: Principal): User \ Db + IdGen =
         // 発行元と subject でユーザーを引く。無ければ作り、プロファイルが変わっていれば更新する
         let user = findOrCreateUser(principal);
@@ -41,6 +43,8 @@ mod Accounts {
     ///
     /// PAT で来た人。users を引いて RLS の印を置く。招待の受け入れと bootstrap はしない（PAT は既にログインした人が作る物）。
     /// 無ければ None（ユーザーが消えていれば PAT も効かない）。
+    ///
+    /// WhyNot: 権限の証明を取らないのは resolveUser と同じ（認証の途中で呼ぶ）。
     ///
     pub def resolveUserById(userId: UserId): Option[User] \ DbRead =
         AuthQueries.findUserById(UserId.toInt64(userId)) |> Option.map(row -> {
@@ -72,6 +76,8 @@ mod Accounts {
     ///
     /// このプロジェクトでの主体。直接の membership と、プロジェクトが属する組織での役割から役割の並びを組む。
     ///
+    /// WhyNot: 権限の証明を取らないのは、これが主体を作る側で、証明はこの戻り（Actor）の下で作る物のため。
+    ///
     pub def actorFor(user: User, projectId: ProjectId, login: Login): Actor \ DbRead =
         let membership = AuthQueries.findMembership({ userId = UserId.toInt64(user#id), projectId = ProjectId.toInt64(projectId) })
             |> Option.flatMap(row -> Role.parse(row#role));
@@ -89,6 +95,8 @@ mod Accounts {
     ///
     /// email で 1 人。誰も居なければ None、同じ email が発行元をまたいで複数居れば invalid（どちらか決められない）。
     ///
+    /// WhyNot: 権限の証明を取らないのは、組織の owner の操作（Organizations.addMemberByEmail が requireOwner で守る）の部品で、users はプロジェクトに属さず Permission の腕に無いため。
+    ///
     pub def findByEmail(email: String): Option[User] \ DbRead + CmsErr =
         match AuthQueries.listUsersByEmail(String.toLowerCase(String.trim(email))) {
             case Nil        => None
@@ -104,6 +112,8 @@ mod Accounts {
 
     ///
     /// 外向きの id から内部の UserId。無ければ notFound（argument は誤りの path）。GraphQL の写しが使う。
+    ///
+    /// WhyNot: 権限の証明を取らないのは、id の写しで中身を返さず、写した先のユースケースが証明を受けるため。
     ///
     pub def requireByPublicId(argument: String, publicId: String): UserId \ DbRead + CmsErr =
         findByPublicId(publicId) |> Option.map(user -> user#id) |> CmsErr.orNotFound(Entity.Member, "${argument}=${publicId}")

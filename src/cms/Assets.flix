@@ -70,8 +70,9 @@ mod Assets {
         AssetsQueries.findAsset({ id = AssetId.text(id), projectId = Tenant.currentId() }) |> Option.map(AssetRows.toAsset)
 
     ///
-    /// id の並びで引く。無い物は落ちる。順は問わない。権限は見ない（コンテンツ API の配信と公開の検査が使う。
-    /// asset は stage を持たず、配信 URL は誰でも開けるので、読める entry の asset は誰でも読める）。
+    /// id の並びで引く。無い物は落ちる。順は問わない。コンテンツ API の配信と公開の検査が使う。
+    ///
+    /// WhyNot: 権限の証明を取らないのは、asset は stage を持たず配信 URL は誰でも開けるので、読める entry の asset は誰でも読めるため。
     ///
     pub def findMany(ids: List[AssetId]): List[Asset] \ DbRead + Tenant = match ids {
         case Nil => Nil

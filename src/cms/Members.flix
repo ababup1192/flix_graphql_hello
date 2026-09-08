@@ -97,6 +97,8 @@ mod Organizations {
     ///
     /// 外向きの id から内部の id。無ければ notFound（member かどうかは呼ぶ先が見る）。
     ///
+    /// WhyNot: 権限の証明を取らないのは、id の写しで中身を返さず、写した先（find / members / addMember …）が本人か owner かを見るため。
+    ///
     pub def idOfPublic(publicId: String): OrgId \ DbRead + CmsErr =
         AuthQueries.findOrganizationByPublicId(publicId) |> Option.map(row -> OrgId.OrgId(row#id)) |> CmsErr.orNotFound(Entity.Organization, publicId)
 

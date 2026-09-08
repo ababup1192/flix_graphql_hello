@@ -6,11 +6,16 @@ mod Projects {
     ///
     /// プロジェクト slug で 1 つ。無ければ None。
     ///
+    /// WhyNot: 権限の証明を取らないのは、Main.runRoute がプロジェクトを解決する（認証の前）時に呼ぶ物で、まだ主体が無いため。
+    ///
     pub def findBySlug(slug: ProjectSlug): Option[ProjectId] \ DbRead =
         ProjectsQueries.findProjectBySlug(ProjectSlug.text(slug)) |> Option.map(row -> ProjectId.ProjectId(row#id))
 
     ///
     /// id で 1 つ（認証の文脈の形）。無ければ None。
+    ///
+    /// WhyNot: 権限の証明を取らないのは、認証（Authentication）と、証明を受けた側のユースケース（Webhooks の payload、Organizations.createProject）の部品で、
+    /// プロジェクトの行そのものに Permission の腕が無いため（見え方は visibilityOf を認証が見る）。
     ///
     pub def find(id: ProjectId): Option[Project] \ DbRead =
         ProjectsQueries.findProjectById(ProjectId.toInt64(id)) |> Option.map(AuthRows.toProject)
@@ -18,11 +23,15 @@ mod Projects {
     ///
     /// プロジェクトの見え方。無いプロジェクトは private 扱い（存在を教えない）。
     ///
+    /// WhyNot: 権限の証明を取らないのは、認証がコンテンツ API の匿名を断るかを決めるために読む物で、主体が決まる前だから。
+    ///
     pub def visibilityOf(id: ProjectId): Visibility \ DbRead =
         find(id) |> Option.map(found -> found#visibility) |> Option.getWithDefault(Visibility.Private)
 
     ///
     /// 組織の下のプロジェクト。
+    ///
+    /// WhyNot: 権限の証明を取らないのは、組織の member かどうか（Organizations.projects / Accounts.me が見る）はプロジェクトの Permission でなく組織の役割で決まるため。
     ///
     pub def listOfOrg(orgId: OrgId): List[Project] \ DbRead =
         AuthQueries.listProjectsOfOrg(OrgId.toInt64(orgId)) |> List.map(AuthRows.toProject)
@@ -38,11 +47,15 @@ mod Projects {
     /// 今のプロジェクトの版（content_version）。コンテンツ API の GET の ETag に入れる。公開・取り下げ・削除・型の変更で進む。
     /// 行が無ければ 0（RLS の印の無い Tx で projects は見えるので、通常は無い）。
     ///
+    /// WhyNot: 権限の証明を取らないのは、Main.runRoute が認証と同じ Tx で読む物で、版の数字は公開中の中身と同じく誰でも見て良いため（ETag として応答に出る）。
+    ///
     pub def contentVersion(): Int64 \ DbRead + Tenant =
         ProjectsQueries.findContentVersion(Tenant.currentId()) |> Option.map(row -> row#contentVersion) |> Option.getWithDefault(0i64)
 
     ///
-    /// 今のプロジェクトの版を +1 する。公開・取り下げ・削除・型の変更のユースケースが同じ Tx で呼ぶ（権限はそちらが見る）。
+    /// 今のプロジェクトの版を +1 する。公開・取り下げ・削除・型の変更のユースケースが同じ Tx で呼ぶ。
+    ///
+    /// WhyNot: 権限の証明を取らないのは、outbox（Webhooks.emitEntry）と同じで、進めるのは操作の結果で誰ができるかは公開などの入口が決めているため。
     ///
     /// WhyNot: 下書きの保存で進めないのは、コンテンツ API の匿名の GET は公開中しか読めず、下書きが変わってもキャッシュの中身は変わらないため。
     /// 進めると下書きの保存のたびに CDN のキャッシュが全部外れる。
