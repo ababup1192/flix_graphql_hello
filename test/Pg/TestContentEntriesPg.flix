@@ -45,6 +45,28 @@ mod TestContentEntriesPg {
         }));
         Assert.assertEq(expected = Ok(Ok((Err(CmsFailure.Conflict(Entity.Entry, "c1", 1, 2)), Some(Json.JString("v2"))))), result)
 
+    /// 複数の entry の版をまとめて引くと、entry ごとに新しい順で載り、版の無い entry と無い id も空で載る。空の並びは SQL 無しで空。
+    ///
+    ///   v1: save ×2（v2, v1 の順）/ v2: 版なし / 無い id "zz": 空
+    @Test
+    def testPgVersionsOfManyEntries(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"v1", "v2"}, () -> {
+            let blogs = blogsWithFields();
+            let first = ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("one"))}));
+            let second = ContentEntries.create(blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("two"))}));
+            discard ContentEntries.saveVersion(first#id, "tester");
+            discard ContentEntries.update(first#id, CmsTestKit.entryData(List#{("title", Json.JString("one!"))}), first#version);
+            discard ContentEntries.saveVersion(first#id, "tester");
+            let missing = CmsTestKit.entryId("zz");
+            let found = ContentEntries.versionsOf(List#{first#id, second#id, missing})
+                |> Map.map(List.map(version -> (version#version, version#reason)))
+                |> Map.toList |> List.map(match (id, versions) -> (EntryId.text(id), versions));
+            (found, ContentEntries.versionsOf(Nil) |> Map.isEmpty)
+        }));
+        Assert.assertEq(expected = Ok(Ok((
+            List#{("v1", List#{(2, VersionReason.Save), (1, VersionReason.Save)}), ("v2", Nil), ("zz", Nil)},
+            true))), result)
+
     /// 一覧は更新が新しい順、search で絞れ、totalCount は絞った後の件数。渡した id はそのまま使われる。
     @Test
     def testPgEntryList(): Unit \ {IO, Assert} =

@@ -243,6 +243,20 @@ mod ContentEntries {
         EntriesQueries.listVersions({ entryId = EntryId.text(id), projectId = Tenant.currentId() }) |> List.map(EntryRows.toVersion)
 
     ///
+    /// 複数の entry の版を 1 本の SELECT でまとめて。id → 版（新しい順）。渡した id は版が無くても（他のプロジェクトの物でも）空で載る。
+    /// 一覧の行ごとに versions を引く代わりに使う（管理 API の先読み）。
+    ///
+    pub def versionsOf(ids: List[EntryId]): Map[EntryId, List[EntryVersion]] \ DbRead + CmsErr + Tenant + Session =
+        Session.require(Permission.ReadDraft);
+        let empty = ids |> List.map(id -> (id, Nil)) |> List.toMap;
+        if (List.isEmpty(ids)) empty else {
+            let found = EntriesQueries.listVersionsOf({ entryIds = List.map(EntryId.text, ids), projectId = Tenant.currentId() })
+                |> List.map(EntryRows.toVersion)
+                |> Preload.groupBy(version -> version#entryId);
+            Map.union(found, empty)
+        }
+
+    ///
     /// 今の下書きを版として積む。
     ///
     pub def saveVersion(id: EntryId, author: String): EntryVersion \ Db + CmsErr + Tenant + Session =
@@ -269,7 +283,13 @@ mod ContentEntries {
     pub def diff(id: EntryId, fromRef: VersionRef, toRef: VersionRef): List[FieldChange] \ DbRead + CmsErr + Tenant + Session =
         Session.require(Permission.ReadDraft);
         let existing = load(id);
-        let owner = ContentTypes.get(existing#typeId);
+        diffOf(ContentTypes.get(existing#typeId), existing, fromRef, toRef)
+
+    ///
+    /// 読み込み済みの entry と型で diff。一覧の行（先読みした型）から呼ぶ用で、entry と型は引き直さない。
+    ///
+    pub def diffOf(owner: ContentType, existing: Entry, fromRef: VersionRef, toRef: VersionRef): List[FieldChange] \ DbRead + CmsErr + Tenant + Session =
+        Session.require(Permission.ReadDraft);
         EntryDiff.diff(owner#fields, versionData(existing, fromRef), versionData(existing, toRef))
 
     ///

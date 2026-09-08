@@ -7,7 +7,7 @@ mod EntriesQueries {
     ///
     /// 生成元 entries.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -250699010
+    pub def sourceHash(): Int32 = -369755578
 
     ///
     /// entryExists の 1 行。
@@ -261,6 +261,30 @@ mod EntriesQueries {
         let sql = "SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE entry_id = $1 AND project_id = $2 ORDER BY id DESC";
         let params = List#{SqlValue.Str(args#entryId), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listVersionsDecoder(), sql, params))
+
+    ///
+    /// listVersionsOf の 1 行。
+    ///
+    pub type alias ListVersionsOfRow = { id = Int64, entryId = String, version = Int32, data = Util.Json.Json, author = String, reason = String, createdAt = Timestamp.Timestamp }
+
+    def listVersionsOfDecoder(): Decoder[ListVersionsOfRow] =
+        forA (
+            id <- Decoder.int64("id");
+            entryId <- Decoder.str("entry_id");
+            version <- Decoder.int32("version");
+            data <- Decoder.json("data");
+            author <- Decoder.str("author");
+            reason <- Decoder.str("reason");
+            createdAt <- Decoder.timestamp("created_at")
+        ) yield { id = id, entryId = entryId, version = version, data = data, author = author, reason = reason, createdAt = createdAt }
+
+    ///
+    /// listVersionsOf: SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE entry_id = ANY($1) AND project_id = $2 ORDER BY entry_id, id DESC
+    ///
+    pub def listVersionsOf(args: { entryIds = List[String], projectId = Int64 }): List[ListVersionsOfRow] \ DbRead =
+        let sql = "SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE entry_id = ANY($1) AND project_id = $2 ORDER BY entry_id, id DESC";
+        let params = List#{SqlValue.StrArray(args#entryIds), SqlValue.Int64(args#projectId)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listVersionsOfDecoder(), sql, params))
 
     ///
     /// findVersion の 1 行。

@@ -107,6 +107,11 @@ query listVersions(entryId: String, projectId: Int64) -> many {
     SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE entry_id = :entryId AND project_id = :projectId ORDER BY id DESC
 }
 
+// 複数の entry の版をまとめて 1 本で（一覧の先読み用）。entry ごとに新しい順
+query listVersionsOf(entryIds: List[String], projectId: Int64) -> many {
+    SELECT id, entry_id, version, data, author, reason, created_at FROM entry_versions WHERE entry_id = ANY(:entryIds) AND project_id = :projectId ORDER BY entry_id, id DESC
+}
+
 query findVersion(id: Int64, projectId: Int64) -> one {
     SELECT id, entry_id, version, data, author, reason, created_at
     FROM entry_versions
