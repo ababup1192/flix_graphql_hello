@@ -159,4 +159,35 @@ mod TestAuthPg {
                 (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(1) }) }), None)),
             (publicRead, anonymousDraft, ownerDraft, privateAnonymous, privateStranger, privateWithKey))
 
+    ///
+    /// コンテンツ API に壊れたログインの JWT（Credential.Invalid）を付けても匿名と同じ:
+    ///   public  → 公開中が読める（断らない）
+    ///   private → 匿名として UNAUTHENTICATED の文言
+    /// 何も付けない匿名と表で並べて、同じ結果になる事を見る。
+    ///
+    @Test
+    def testPgContentApiTreatsBrokenJwtAsAnonymous(): Unit \ {IO, Assert} =
+        let seed = () -> CmsTestKit.withIds(List#{"e1"}, () -> {
+            let blogs = ContentTypes.create(CmsTestKit.typeDraft("blogs", "記事"));
+            discard ContentTypes.addField(blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+            let entry = ContentEntries.create(blogs#id, Some(CmsTestKit.entryId("e1")), CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
+            ContentEntries.publish(entry#id, "tester", false)
+        });
+        let published = (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(1) }) }), None);
+        let unauthenticated = (Value.Null, Some("このプロジェクトは非公開です。API キーを X-Api-Key で渡してください"));
+        let table = List#{
+            ("public",  Credential.Invalid("JWT は無し"), published),
+            ("public",  Credential.Missing,               published),
+            ("private", Credential.Invalid("JWT は無し"), unauthenticated),
+            ("private", Credential.Missing,               unauthenticated)
+        };
+        let results = PgTestSupport.withContentApiAndPool(seed, (pool, _) -> {
+            let engine = PgTestSupport.contentEngine(pool);
+            table |> List.map(match (visibility, credential, _) -> {
+                discard PgTestSupport.mutate(pool, () -> AuthQueries.updateProjectVisibility({ projectId = ProjectId.toInt64(ProjectId.default()), visibility = visibility }));
+                PgTestSupport.askEngineAs(pool, Engine.Content, engine, credential)("{ blogs { totalCount } }")
+            })
+        });
+        Assert.assertEq(expected = table |> List.map(match (_, _, expected) -> expected), results)
+
 }

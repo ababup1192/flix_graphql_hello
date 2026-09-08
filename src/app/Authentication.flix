@@ -7,7 +7,11 @@
 /// - PersonalToken: hash で引き、生きていれば本人（read なら読むだけ）。期限切れ・失効・知らない物は Rejection（黙って匿名にしない）
 /// - Preview: pepper があれば署名と期限とプロジェクトを確かめ、合えばその entry のプレビュー。それ以外は Anonymous（同じ印）
 /// - Missing: Anonymous
-/// - Invalid: Rejection（ログインの JWT が付いていたが検証に落ちた）。どの API でも SQL を出さずに断る
+/// - Invalid: 管理 API と Account API では Rejection（ログインの JWT が付いていたが検証に落ちた。SQL を出さずに断る）。コンテンツ API では Anonymous（同じ印）
+///
+/// WhyNot: コンテンツ API で壊れたログインの JWT を断らないのは、公開の読み取り API は資格証明の良し悪しを教える場所ではなく、
+/// CDN の前に置く API がヘッダを無視するのと同じ扱いが正しいため。古い JWT がブラウザに残っている公開サイトを壊さない
+/// （private なら匿名として guardVisibility が UNAUTHENTICATED で断る）。
 ///
 /// WhyNot: 知らない鍵を匿名に落としても断らないのは、公開プロジェクトでは鍵が無くても読めるので API の振る舞いとしては匿名で正しいため。
 /// ログでは総当たりと区別が要るので、匿名に落とした理由を印で残す。
@@ -84,11 +88,12 @@ mod Authentication {
 
     ///
     /// エンジンごとの認証。呼ぶ側が Tx を張り、projectId の RLS の印を置いた後に呼ぶ。
-    /// Admin はこのプロジェクトでの役割で、鍵と PAT の使用時刻を書く。Content は同じ認証済みユーザーで使用時刻は書かず、private なプロジェクトの匿名とメンバーでない人を断る。
-    /// Account はプロジェクトを見ず、鍵とプレビュートークンを断る。
+    /// Admin はこのプロジェクトでの役割で、鍵と PAT の使用時刻を書く。Content は同じ認証済みユーザーで使用時刻は書かず、壊れたログインの JWT は匿名に落とし、
+    /// private なプロジェクトの匿名とメンバーでない人を断る。Account はプロジェクトを見ず、鍵とプレビュートークンを断る。
     ///
     pub def resolve(deps: Deps, engine: Engine, scope: Option[ProjectId], credential: Credential): Result[Rejection, Authenticated] \ Db + IdGen + Time.Clock.Clock =
         match (engine, scope, credential) {
+            case (Engine.Content, Some(projectId), Credential.Invalid(_)) => guardVisibility(projectId, rejected()#auth)
             case (_, _, Credential.Invalid(reason))          => Err(Rejection.Invalid(reason))
             case (Engine.Account, _, found)                  => resolveForAccount(deps, found)
             case (Engine.Admin, Some(projectId), found)      => resolveForProject(deps, projectId, found) |> Result.map(resolved -> { touch(resolved); resolved#auth })

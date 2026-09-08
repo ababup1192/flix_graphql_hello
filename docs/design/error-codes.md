@@ -33,7 +33,7 @@
 | `FORBIDDEN` | 認証済みユーザーに権限が無い（viewer が型を作る等、private なプロジェクトのコンテンツ API にメンバーでない人が来た） | 操作を出さない。役割を上げてもらう |
 | `CONFLICT` | 楽観ロックに負けた（読んでから書くまでに他で更新された） | 読み直して差分を見せ、もう一度保存させる |
 | `REQUIRES_LOGIN` | 認証済みユーザーの種類が合わない（read の PAT で書く、API キーやプレビュートークンで Account API を使う） | ログインし直す。書く操作には write の PAT かログインの JWT が要る |
-| `UNAUTHENTICATED` | 認証に失敗した（壊れたログインの JWT、期限切れ・失効した PAT、知らない PAT、private なプロジェクトのコンテンツ API に匿名で来た） | 再ログイン。トークンを取り直す（private なら API キーを渡す） |
+| `UNAUTHENTICATED` | 認証に失敗した（壊れたログインの JWT（管理 API と Account API。コンテンツ API は匿名に落とす）、期限切れ・失効した PAT、知らない PAT、private なプロジェクトのコンテンツ API に匿名で来た） | 再ログイン。トークンを取り直す（private なら API キーを渡す） |
 | `INTERNAL` | 上のどれでもない（DB の失敗、サーバの設定漏れ） | 再試行してよい。直らなければ運用へ |
 
 **再試行してよいのは `INTERNAL` だけ。** 他は同じリクエストを送っても同じ結果になる。
@@ -101,7 +101,7 @@
 { "data": null, "errors": [ { "message": "認証に失敗しました: PAT は失効しています", "extensions": { "code": "UNAUTHENTICATED" } } ] }
 ```
 
-- 壊れたログインの JWT・死んだ PAT → `UNAUTHENTICATED`
+- 壊れたログインの JWT・死んだ PAT → `UNAUTHENTICATED`（壊れた JWT はコンテンツ API では匿名に落とす。public なら読め、private なら匿名の `UNAUTHENTICATED`）
 - Account API に API キーやプレビュートークン → `REQUIRES_LOGIN`
 - private なプロジェクトのコンテンツ API に匿名 → `UNAUTHENTICATED`、メンバーでない人 → `FORBIDDEN`
 - **MCP（`POST /mcp`）だけ HTTP 401**（JSON-RPC の error と `WWW-Authenticate`）。MCP のクライアントはステータスで再認証を判断するため
