@@ -210,7 +210,9 @@ class TiptapEditor extends HTMLElement {
 
     const extensions = [
       // codeBlock は色付きの物に差し替える。
-      StarterKit.configure({ heading: { levels: [1, 2, 3, 4] }, codeBlock: false }),
+      // gapcursor は切る。**置ける所と置けない所ができ、見た目も横一本の線で
+      // 区切り線と紛れる。** ブロックの間は `BlockEdges` が疑似行で揃える。
+      StarterKit.configure({ heading: { levels: [1, 2, 3, 4] }, codeBlock: false, gapcursor: false }),
       CodeBlockLowlight.extend({
         addNodeView: () => codeBlockView(lowlight),
         // CMS の codeBlock は language の他に fileName と highlightLines を受ける

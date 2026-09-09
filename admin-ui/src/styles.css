@@ -162,44 +162,6 @@ tiptap-editor.is-big .tt-mount {
   min-height: 0;
   overflow-y: auto;
 }
-/* ブロックとブロックのすき間に立つカーソル（prosemirror-gapcursor）。
-
-   **表・コードブロック・区切り線・画像のような、中に文章を持たないブロックの
-   上下に立つ。** そこで打てば新しい段落ができるので、先に Enter で空行を作る必要が無い
-   （先頭のブロックの上には Enter が届かないので、そもそも作れない）。
-
-   仕組みは TipTap の StarterKit が持っていたが、**`prosemirror-gapcursor` の CSS を
-   読んでいなかったので見えていなかった。** 立っているのに何も出ないので、
-   押しても効かないように見えていた。ここで管理画面の色に合わせて描く。 */
-.tt-body .ProseMirror-gapcursor {
-  display: none;
-  position: absolute;
-  pointer-events: none;
-  /* 中身の幅（.tt-mount の幅から .tt-body の左右の padding を引く）。
-     既定の 20px は棒切れに見えて、行の頭なのかブロックの間なのか読めない。
-
-     **`.tt-body` を頭に付けて詳細度を上げる。** tiptap が同じ名前の CSS を後から
-     差し込むので、素の `.ProseMirror-gapcursor` では負けて 20px のままになる。 */
-  width: calc(100% - 2rem);
-}
-.tt-body .ProseMirror-gapcursor::after {
-  content: "";
-  display: block;
-  position: absolute;
-  top: -2px;
-  width: 100%;
-  border-top: 2px solid var(--color-ink);
-  animation: tt-gap-blink 1.1s steps(2, start) infinite;
-}
-@keyframes tt-gap-blink {
-  to {
-    visibility: hidden;
-  }
-}
-.tt-body.ProseMirror-focused .ProseMirror-gapcursor {
-  display: block;
-}
-
 /* 広げている間は下にも余白を置く（最後の行が画面の底に貼り付かない）。 */
 tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 
