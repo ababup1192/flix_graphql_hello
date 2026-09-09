@@ -42,6 +42,12 @@ mod RichText {
     /// callout の種類。html では data-kind に出る。
     pub def calloutKinds(): List[String] = "note" :: "tip" :: "warning" :: Nil
 
+    ///
+    /// 表のセルの寄せ。html では style の text-align、Markdown では区切り行の `:`。
+    /// **列の属性**なので、画面は列の全セルに同じ値を入れる（Markdown の区切り行が列に 1 つしか持てない）。
+    ///
+    pub def cellAligns(): List[String] = "left" :: "center" :: "right" :: Nil
+
     /// heading の level の範囲。
     pub def maxHeadingLevel(): Int32 = 4
 
@@ -105,6 +111,8 @@ mod RichText {
             case Some("linkCard") => checkLinkCard(path, fields)
             case Some("details") => checkDetails(path, fields) ::: checkChildren(path, fields)
             case Some("listItem") => checkListItem(path, fields) ::: checkChildren(path, fields)
+            case Some("tableCell") => checkTableCell(path, fields) ::: checkChildren(path, fields)
+            case Some("tableHeader") => checkTableCell(path, fields) ::: checkChildren(path, fields)
             case Some("mathBlock") => checkMathBlock(path, fields)
             case Some("video") => checkVideo(path, fields)
             case Some(name) if List.memberOf(name, containerNodes()) => checkChildren(path, fields)
@@ -172,6 +180,14 @@ mod RichText {
     def checkCallout(path: String, fields: Map[String, Json]): List[Violation] = match attrString("kind", fields) {
         case Some(kind) if List.memberOf(kind, calloutKinds()) => Nil
         case _ => Violation.Violation(path, "callout の attrs.kind は ${List.join(" / ", calloutKinds())} にしてください") :: Nil
+    }
+
+    /// 表のセル。attrs.align は任意で、あれば left / center / right。
+    def checkTableCell(path: String, fields: Map[String, Json]): List[Violation] = match Map.get("align", attrs(fields)) {
+        case None    => Nil
+        case Some(found) =>
+            if (EntryValue.asString(found) |> Option.exists(align -> List.memberOf(align, cellAligns()))) Nil
+            else Violation.Violation(path, "セルの attrs.align は ${List.join(" / ", cellAligns())} にしてください") :: Nil
     }
 
     /// image ノード。attrs.assetId は asset の id。alt は任意の文字列。
@@ -441,8 +457,8 @@ mod RichText {
                     "<pre${diagram}${fileName}${highlightLines}><code${language}>${inner()}</code></pre>"
                 case Some("table")          => tableHtml(images, fields)
                 case Some("tableRow")       => "<tr>${inner()}</tr>"
-                case Some("tableCell")      => "<td${spanAttrs(fields)}>${inner()}</td>"
-                case Some("tableHeader")    => "<th${spanAttrs(fields)}>${inner()}</th>"
+                case Some("tableCell")      => "<td${spanAttrs(fields)}${alignAttr(fields)}>${inner()}</td>"
+                case Some("tableHeader")    => "<th${spanAttrs(fields)}${alignAttr(fields)}>${inner()}</th>"
                 case Some("callout")        => "<aside data-kind=\"${escape(attrString("kind", fields) |> Option.getWithDefault("note"))}\">${inner()}</aside>"
                 case Some("horizontalRule") => "<hr>"
                 case Some("hardBreak")      => "<br>"
@@ -609,6 +625,14 @@ mod RichText {
     /// エディタは結合していないセルにも colspan / rowspan を 1 で付けるので、そのまま出すと
     /// 全セルに意味の無い属性が並ぶ。落とすと、API や取り込みが入れた結合が消えて表が崩れる。
     ///
+    ///
+    /// セルの寄せ。**style で出す**（属性の align は HTML5 で廃止）。
+    /// colgroup には出せない（CSS の text-align は col から効かない）ので、セルごとに書く。
+    ///
+    def alignAttr(fields: Map[String, Json]): String =
+        attrString("align", fields) |> Option.filter(align -> List.memberOf(align, cellAligns()))
+            |> Option.map(align -> " style=\"text-align: ${align}\"") |> Option.getWithDefault("")
+
     def spanAttrs(fields: Map[String, Json]): String =
         spanAttr("colspan", fields) ++ spanAttr("rowspan", fields)
 

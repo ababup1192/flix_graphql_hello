@@ -24,6 +24,7 @@ import { CodeEditing } from "./code-editing";
 import { MarkdownRules } from "./markdown-rules";
 import { LinkDialog, type Candidate, type LinkChoice } from "./link-dialog";
 import { dismissOn } from "./dismiss";
+import { type Align, alignColumn, columnAlign, resizeTable, tableSize } from "./table-tools";
 import { MathBlock, MathMark } from "./math";
 import { AssetStore, galleryNode, imageDropExtension, imageNode, insertionOf, UploadingImage } from "./image-node";
 import { createLowlight } from "lowlight";
@@ -83,6 +84,11 @@ const ICONS = {
   rule: '<path d="M3 12h18"/>',
   underline: '<path d="M7 4v6a5 5 0 0 0 10 0V4"/><path d="M5 20h14"/>',
   table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M3 15h18"/><path d="M9 10v10"/>',
+  size: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  alignLeft: '<path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h13"/>',
+  alignCenter: '<path d="M4 6h16"/><path d="M7 12h10"/><path d="M6 18h12"/>',
+  alignRight: '<path d="M4 6h16"/><path d="M10 12h10"/><path d="M7 18h13"/>',
+  trash: '<path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="m4 17 4.5-4.5 3 3L15 12l5 5"/>',
   // WhyNot: 丸い矢印（rotate-ccw / rotate-cw）にしない。16px では左右の違いが読めず、
   // 2 つ並ぶと同じ印に見える。矢の頭が横を向く形にして、向きを一目で分かるようにする。
@@ -116,6 +122,19 @@ function unfold(node: any): any {
     next.content = node.content.filter((child: any) => child?.type !== "uploading").map(unfold);
   }
   return dropEmptyAttrs(next);
+}
+
+// セルの寄せ。**CMS は attrs.align、画面は style の text-align。**
+// 属性に持たせないと setNodeMarkup が黙って捨てる（codeBlock の fileName と同じ）。
+function alignAttribute() {
+  return {
+    align: {
+      default: null,
+      parseHTML: (element: HTMLElement) => element.style.textAlign || element.getAttribute("data-align") || null,
+      renderHTML: (attributes: Record<string, unknown>) =>
+        attributes.align ? { style: `text-align: ${attributes.align}` } : {},
+    },
+  };
 }
 
 // チェックリストの形を、CMS と TipTap の間で写す。
@@ -264,8 +283,8 @@ class TiptapEditor extends HTMLElement {
       // 持たず、HTML にも幅を出さない。画面でだけ動く幅は保存されず、消えたように見える。
       Table.configure({ resizable: false, renderWrapper: true }),
       TableRow,
-      TableHeader,
-      TableCell,
+      TableHeader.extend({ addAttributes() { return { ...this.parent?.(), ...alignAttribute() }; } }),
+      TableCell.extend({ addAttributes() { return { ...this.parent?.(), ...alignAttribute() }; } }),
       CodeEditing,
       BlockEdges,
       MarkdownRules,
@@ -282,11 +301,11 @@ class TiptapEditor extends HTMLElement {
       onUpdate: () => {
         this.emit();
         this.paint();
-        this.paintGrips();
+        this.paintTableTools();
       },
       onSelectionUpdate: () => {
         this.paint();
-        this.paintGrips();
+        this.paintTableTools();
       },
     });
 
@@ -448,9 +467,9 @@ class TiptapEditor extends HTMLElement {
     this.undismiss = dismissOn({ inside: button ? [dialog.dom, button] : [dialog.dom], onClose: () => this.closeDialog() });
   }
 
-  // 表を作る面。**大きさを升目で選ぶ**（Word / Google ドキュメント / Notion の `/table` と同じ）。
-  // WhyNot: 行と列の足し引きをここに並べない。触りたい行・列から遠く、面が表そのものを覆う。
-  // 足し引きは表の上に出す掴み（tt-grip）が持つ。
+  // 表を**作る**面。大きさを升目で選ぶ（Word / Google ドキュメント / Notion の `/table` と同じ）。
+  // WhyNot: 既にある表への操作をここに並べない。触りたい表から遠く、面が表そのものを覆う。
+  // 表への操作は表の上に出す帯（tt-tablebar）が持つ。
   private tableMenu() {
     if (!this.editor) return;
     if (this.menu) {
@@ -492,34 +511,11 @@ class TiptapEditor extends HTMLElement {
     grid.addEventListener("mouseleave", () => mark(0, 0));
     dom.append(label, grid);
 
-    // 表そのものへの操作（行・列ではないので掴みには置けない）。
-    if (this.editor.isActive("table")) {
-      for (const [text, run] of [
-        ["見出しの行を切り替える", () => this.editor!.chain().focus().toggleHeaderRow().run()],
-        ["表を消す", () => this.editor!.chain().focus().deleteTable().run()],
-      ] as Array<[string, () => void]>) {
-        dom.appendChild(this.menuItem(text, run));
-      }
-    }
-
     this.menu = dom;
     this.appendChild(dom);
     this.placeUnder(dom, '.tt-tool[title="表"]', 220);
     const button = this.querySelector<HTMLElement>('.tt-tool[title="表"]');
     this.unmenu = dismissOn({ inside: button ? [dom, button] : [dom], onClose: () => this.closeMenu() });
-  }
-
-  private menuItem(text: string, run: () => void): HTMLElement {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "tt-menu-item";
-    item.textContent = text;
-    item.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-      run();
-      this.closeMenu();
-    });
-    return item;
   }
 
   private closeMenu() {
@@ -528,17 +524,16 @@ class TiptapEditor extends HTMLElement {
     this.menu?.remove();
     this.menu = null;
     this.editor?.commands.focus();
-    this.paintGrips();
+    this.paintTableTools();
   }
 
-  // 掴み。**セルにカーソルがある時か、表にマウスが乗っている時だけ**、列の上端と行の左端に出る。
   //
-  // 見えているのは 4px の細い線で、当たり判定だけ 10px 取る（Notion / Google ドキュメントの実物が
-  // どちらもそう。塗った太い棒にすると、表の中身より枠が目立つ）。
+  // 表の道具（帯と、縮める時の印）。**セルにカーソルがある時か、表にマウスが乗っている時だけ**出す。
   //
-  // WhyNot: 掴みを ProseMirror の DOM の中に入れない。表の node view は書き換えの度に
-  // 中を作り直すので、入れた物が消えるか、PM が「知らない変更」として拾う。
-  private paintGrips(hovered?: HTMLTableElement | null) {
+  // WhyNot: ProseMirror の DOM の中に入れない。表の node view は書き換えの度に中を作り直すので、
+  // 入れた物が消えるか、PM が「知らない変更」として拾って戻す（実際に戻された）。
+  //
+  private paintTableTools(hovered?: HTMLTableElement | null) {
     if (!this.editor) return;
     const mount = this.querySelector<HTMLElement>(".tt-mount");
     if (!mount) return;
@@ -555,42 +550,14 @@ class TiptapEditor extends HTMLElement {
       layer.className = "tt-grips";
       mount.appendChild(layer);
     }
-    const rows = Array.from(table.rows);
-    const head = rows[0];
-    if (!head) return;
     const base = mount.getBoundingClientRect();
     const wrap = (table.closest(".tableWrapper") as HTMLElement | null) ?? table;
     const clip = wrap.getBoundingClientRect();
-    // 罫線 1 本ぶん短くして、隣の掴みとの切れ目が列・行の境目に重なるようにする。
-    const inset = 1;
+    layer.replaceChildren(this.tableBar(table, base, clip));
 
-    const made: HTMLElement[] = [];
-    Array.from(head.cells).forEach((cell, index) => {
-      const at = cell.getBoundingClientRect();
-      const left = Math.max(at.left, clip.left);
-      const right = Math.min(at.right, clip.right);
-      if (right - left < 6) return;
-      made.push(this.grip("col", index, {
-        left: left - base.left + inset,
-        top: at.top - base.top - 10,
-        width: right - left - inset * 2,
-        height: 10,
-      }));
-    });
-    rows.forEach((row, index) => {
-      const at = row.getBoundingClientRect();
-      made.push(this.grip("row", index, {
-        left: clip.left - base.left - 10,
-        top: at.top - base.top + inset,
-        width: 10,
-        height: at.height - inset * 2,
-      }));
-    });
-    layer.replaceChildren(...made);
-
-    // 横に長い表はスクロールするので、掴みも付いて動く。
+    // 横に長い表はスクロールするので、帯も付いて動く。
     this.unwatchScroll?.();
-    const again = () => this.paintGrips(hovered);
+    const again = () => this.paintTableTools(hovered);
     wrap.addEventListener("scroll", again);
     this.unwatchScroll = () => wrap.removeEventListener("scroll", again);
   }
@@ -599,13 +566,13 @@ class TiptapEditor extends HTMLElement {
   private watchTableHover(mount: HTMLElement) {
     mount.addEventListener("mouseover", (event) => {
       const table = (event.target as Element | null)?.closest?.("table") as HTMLTableElement | null;
-      if (table) this.paintGrips(table);
+      if (table) this.paintTableTools(table);
     });
     mount.addEventListener("mouseout", (event) => {
       const to = (event as MouseEvent).relatedTarget as Element | null;
       if (to?.closest?.("table") || to?.closest?.(".tt-grips")) return;
       if (this.menu) return;
-      this.paintGrips();
+      this.paintTableTools();
     });
   }
 
@@ -617,90 +584,168 @@ class TiptapEditor extends HTMLElement {
     return (node?.closest("table") as HTMLTableElement | null) ?? null;
   }
 
-  private grip(kind: "col" | "row", index: number, box: { left: number; top: number; width: number; height: number }): HTMLElement {
+  //
+  // 表の上の帯。**表そのものを相手にする操作**（大きさ・列の寄せ・削除）を置く。
+  //
+  // 掴みは行と列を相手にするので、帯には出さない。削除だけ右端に離すのは、
+  // 押し間違いが一番痛い物を他と隣り合わせにしないため（Notion / Confluence も同じ置き方）。
+  //
+  private tableBar(table: HTMLTableElement, base: DOMRect, clip: DOMRect): HTMLElement {
+    const bar = document.createElement("div");
+    bar.className = "tt-tablebar";
+    const at = table.getBoundingClientRect();
+    bar.style.left = `${Math.max(at.left, clip.left) - base.left}px`;
+    bar.style.top = `${at.top - base.top - 33}px`;
+    bar.style.width = `${Math.min(at.right, clip.right) - Math.max(at.left, clip.left)}px`;
+
+    const left = document.createElement("div");
+    left.className = "tt-tablebar-left";
+    left.appendChild(this.barButton(ICONS.size, "大きさを変える", (button) => this.sizeMenu(button)));
+
+    const now = this.editor ? columnAlign(this.editor) : null;
+    const aligns: Array<[Align, string, string]> = [
+      ["left", ICONS.alignLeft, "左に寄せる"],
+      ["center", ICONS.alignCenter, "中央に寄せる"],
+      ["right", ICONS.alignRight, "右に寄せる"],
+    ];
+    for (const [align, icon, title] of aligns) {
+      // **押した列全体に効く**（マークダウンの寄せは列の属性）。もう一度押すと外す。
+      const button = this.barButton(icon, title, () => {
+        if (!this.editor) return;
+        alignColumn(this.editor, columnAlign(this.editor) === align ? null : align);
+        this.paintTableTools();
+      });
+      button.classList.toggle("is-on", now === align);
+      left.appendChild(button);
+    }
+
+    const remove = this.barButton(ICONS.trash, "表を消す", () => {
+      this.editor?.chain().focus().deleteTable().run();
+      this.paintTableTools();
+    });
+    remove.classList.add("tt-tablebar-remove");
+
+    bar.append(left, remove);
+    return bar;
+  }
+
+  private barButton(icon: string, title: string, run: (button: HTMLElement) => void): HTMLElement {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `tt-grip tt-grip-${kind}`;
-    button.title = kind === "col" ? `${index + 1} 列目` : `${index + 1} 行目`;
-    button.setAttribute("aria-label", button.title);
-    button.style.left = `${Math.round(box.left)}px`;
-    button.style.top = `${Math.round(box.top)}px`;
-    button.style.width = `${Math.round(box.width)}px`;
-    button.style.height = `${Math.round(box.height)}px`;
+    button.className = "tt-tablebar-button";
+    button.title = title;
+    button.innerHTML = svg(icon);
     button.addEventListener("mousedown", (event) => {
       event.preventDefault();
-      this.gripMenu(kind, index, button);
+      run(button);
     });
     return button;
   }
 
-  // 掴みを押した時。**その行・列に対する操作だけ**を出す。
-  private gripMenu(kind: "col" | "row", index: number, at: HTMLElement) {
+  //
+  // 大きさを選び直す面。**升目をなぞると、消える行・列が表の上で赤く出る。**
+  // 出さないと、縮めた時に何が消えたか押した後にしか分からない。
+  //
+  private sizeMenu(at: HTMLElement) {
     if (!this.editor) return;
-    this.closeMenu();
-    if (!this.moveInto(kind, index)) return;
-    const chain = () => this.editor!.chain().focus();
-    const items: Array<[string, () => void]> =
-      kind === "col"
-        ? [
-            ["左に列を足す", () => chain().addColumnBefore().run()],
-            ["右に列を足す", () => chain().addColumnAfter().run()],
-            ["この列を消す", () => chain().deleteColumn().run()],
-          ]
-        : [
-            ["上に行を足す", () => chain().addRowBefore().run()],
-            ["下に行を足す", () => chain().addRowAfter().run()],
-            ["この行を消す", () => chain().deleteRow().run()],
-          ];
+    if (this.menu) {
+      this.closeMenu();
+      return;
+    }
+    const size = tableSize(this.editor);
+    if (!size) return;
+
     const dom = document.createElement("div");
-    dom.className = "tt-menu";
-    for (const [text, run] of items) dom.appendChild(this.menuItem(text, run));
+    dom.className = "tt-menu tt-size";
+    const label = document.createElement("div");
+    label.className = "tt-size-label";
+    label.textContent = `${size.rows} 行 × ${size.cols} 列`;
+    const grid = document.createElement("div");
+    grid.className = "tt-size-grid";
+
+    const MAX = 8;
+    const cells: HTMLElement[] = [];
+    const mark = (rows: number, cols: number) => {
+      cells.forEach((cell, index) => {
+        const row = Math.floor(index / MAX) + 1;
+        const col = (index % MAX) + 1;
+        cell.classList.toggle("is-on", rows > 0 && row <= rows && col <= cols);
+      });
+      label.textContent = rows > 0 ? `${rows} 行 × ${cols} 列` : `${size.rows} 行 × ${size.cols} 列`;
+      this.markDropped(rows, cols);
+    };
+    for (let row = 1; row <= MAX; row += 1) {
+      for (let col = 1; col <= MAX; col += 1) {
+        const cell = document.createElement("span");
+        cell.className = "tt-size-cell";
+        cell.addEventListener("mousemove", () => mark(row, col));
+        cell.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          resizeTable(this.editor!, row, col);
+          this.closeMenu();
+          this.paintTableTools();
+        });
+        cells.push(cell);
+        grid.appendChild(cell);
+      }
+    }
+    grid.addEventListener("mouseleave", () => mark(0, 0));
+    dom.append(label, grid);
+    mark(size.rows, size.cols);
+
     this.menu = dom;
     this.appendChild(dom);
-    at.classList.add("is-open");
-    this.shade(kind, index);
-    const box = at.getBoundingClientRect();
-    dom.style.position = "fixed";
-    dom.style.top = `${Math.round(Math.min(box.bottom + 4, window.innerHeight - 130))}px`;
-    dom.style.left = `${Math.round(Math.min(box.left, window.innerWidth - 190))}px`;
-    this.unmenu = dismissOn({ inside: [dom, at], onClose: () => this.closeMenu() });
+    this.placeUnder(dom, at, 220);
+    this.unmenu = dismissOn({
+      inside: [dom, at],
+      onClose: () => {
+        this.markDropped(0, 0);
+        this.closeMenu();
+      },
+    });
   }
 
-  // 押した行・列に薄い網掛けを敷く。**どこに効くのかを押した時点で見せる。**
-  private shade(kind: "col" | "row", index: number) {
-    const layer = this.querySelector<HTMLElement>(".tt-grips");
-    const table = this.currentTable();
+  //
+  // 縮めた時に消える行・列を、表の上に赤く敷く。
+  //
+  // WhyNot: セルに class を付けない。**ProseMirror が「知らない DOM 変更」として戻す**
+  // （実際に戻されて、印が 1 つも出なかった）。掴みと同じで、層の側に描く。
+  //
+  private markDropped(rows: number, cols: number) {
     const mount = this.querySelector<HTMLElement>(".tt-mount");
-    if (!layer || !table || !mount) return;
-    const rows = Array.from(table.rows);
-    const boxes =
-      kind === "row"
-        ? [rows[index]?.getBoundingClientRect()]
-        : rows.map((row) => row.cells[index]?.getBoundingClientRect());
-    const base = mount.getBoundingClientRect();
-    for (const box of boxes) {
-      if (!box) continue;
-      const shade = document.createElement("span");
-      shade.className = "tt-grip-shade";
-      shade.style.left = `${Math.round(box.left - base.left)}px`;
-      shade.style.top = `${Math.round(box.top - base.top)}px`;
-      shade.style.width = `${Math.round(box.width)}px`;
-      shade.style.height = `${Math.round(box.height)}px`;
-      layer.appendChild(shade);
-    }
-  }
-
-  // 操作の前に、その行・列のセルへカーソルを移す（コマンドは今のセルを見る）。
-  private moveInto(kind: "col" | "row", index: number): boolean {
+    const layer = this.querySelector<HTMLElement>(".tt-grips");
+    if (!mount || !layer) return;
+    layer.querySelectorAll(".tt-drop").forEach((node) => node.remove());
     const table = this.currentTable();
-    if (!table || !this.editor) return false;
-    const row = kind === "row" ? table.rows[index] : table.rows[0];
-    const cell = kind === "row" ? row?.cells[0] : row?.cells[index];
-    if (!cell) return false;
-    const pos = this.editor.view.posAtDOM(cell, 0);
-    if (pos < 0) return false;
-    this.editor.commands.setTextSelection(pos + 1);
-    return true;
+    if (!table || rows <= 0) return;
+
+    const base = mount.getBoundingClientRect();
+    const wrap = (table.closest(".tableWrapper") as HTMLElement | null) ?? table;
+    const clip = wrap.getBoundingClientRect();
+    const at = table.getBoundingClientRect();
+    const left = Math.max(at.left, clip.left);
+    const right = Math.min(at.right, clip.right);
+    const shade = (box: { left: number; top: number; width: number; height: number }) => {
+      if (box.width <= 0 || box.height <= 0) return;
+      const dom = document.createElement("div");
+      dom.className = "tt-drop";
+      dom.style.left = `${box.left - base.left}px`;
+      dom.style.top = `${box.top - base.top}px`;
+      dom.style.width = `${box.width}px`;
+      dom.style.height = `${box.height}px`;
+      layer.appendChild(dom);
+    };
+
+    const rowList = Array.from(table.rows);
+    if (rows < rowList.length) {
+      const top = rowList[rows].getBoundingClientRect().top;
+      shade({ left, top, width: right - left, height: at.bottom - top });
+    }
+    const head = rowList[0];
+    if (head && cols < head.cells.length) {
+      const start = Math.max(head.cells[cols].getBoundingClientRect().left, clip.left);
+      shade({ left: start, top: at.top, width: right - start, height: at.height });
+    }
   }
 
   // 選んだリンクを本文に入れる。
@@ -739,8 +784,8 @@ class TiptapEditor extends HTMLElement {
     this.placeUnder(dom, '.tt-tool[title="リンク"]', 300);
   }
 
-  private placeUnder(dom: HTMLElement, selector: string, width: number) {
-    const button = this.querySelector<HTMLButtonElement>(selector);
+  private placeUnder(dom: HTMLElement, anchor: string | HTMLElement, width: number) {
+    const button = typeof anchor === "string" ? this.querySelector<HTMLElement>(anchor) : anchor;
     if (!button) return;
     const at = button.getBoundingClientRect();
     const gap = 6;

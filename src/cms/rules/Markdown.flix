@@ -65,9 +65,10 @@ mod Markdown {
     /// summary の無い details に入れる summary。
     def defaultSummary(): String = "詳細"
 
-    /// 表のセル。(tableHeader か, 中身)。
+    /// 表のセル。(tableHeader か, 寄せ, 中身)。
+    /// **寄せは列の属性**（区切り行が列に 1 つしか持てない）。JSON はセルごとに同じ値を持つ。
     enum Cell {
-        case Cell(Bool, List[Block])
+        case Cell(Bool, Option[String], List[Block])
     }
 
     /// callout の種類。
@@ -150,10 +151,14 @@ mod Markdown {
         objectFields(node) |> Option.filter(fields -> typeOf(fields) == Some("tableRow")) |> Option.map(fields -> children(fields) |> List.filterMap(cellOf))
 
     def cellOf(node: Json): Option[Cell] = objectFields(node) |> Option.flatMap(fields -> match typeOf(fields) {
-        case Some("tableHeader") => Some(Cell.Cell(true, blocksOf(children(fields))))
-        case Some("tableCell")   => Some(Cell.Cell(false, blocksOf(children(fields))))
+        case Some("tableHeader") => Some(Cell.Cell(true, alignOf(fields), blocksOf(children(fields))))
+        case Some("tableCell")   => Some(Cell.Cell(false, alignOf(fields), blocksOf(children(fields))))
         case _                   => None
     })
+
+    def alignOf(fields: Map[String, Json]): Option[String] =
+        Map.get("align", attrs(fields)) |> Option.flatMap(EntryValue.asString)
+            |> Option.filter(align -> List.memberOf(align, RichText.cellAligns()))
 
     def inlinesOf(fields: Map[String, Json]): List[Inline] = children(fields) |> List.filterMap(inlineOf)
 
@@ -244,8 +249,9 @@ mod Markdown {
         objectNode("listItem", checked |> Option.map(found -> ("checked", Json.JBool(found))) |> Option.toList, blocks |> List.map(blockJson))
 
     def cellJson(cell: Cell): Json =
-        let Cell.Cell(isHeader, blocks) = cell;
-        objectNode(if (isHeader) "tableHeader" else "tableCell", Nil, blocks |> List.map(blockJson))
+        let Cell.Cell(isHeader, align, blocks) = cell;
+        let attrs = align |> Option.map(found -> ("align", Json.JString(found))) |> Option.toList;
+        objectNode(if (isHeader) "tableHeader" else "tableCell", attrs, blocks |> List.map(blockJson))
 
     def inlineJson(inline: Inline): Json = match inline {
         case Inline.Text(marks, text) => textNode(marks |> List.map(markJson), text)
@@ -354,19 +360,32 @@ mod Markdown {
         "${fence}${header}\n${code}\n${fence}"
 
     /// GFM の表。1 行目の次に区切り行。列数は 1 行目に合わせる。
+    /// **寄せは 1 行目のセルから取る**（区切り行は列に 1 つしか持てない）。
     def renderTable(rows: List[List[Cell]]): String =
-        let columns = rows |> List.head |> Option.map(List.length) |> Option.getWithDefault(1);
-        let separator = "| ${List.repeat(columns, "---") |> List.join(" | ")} |";
+        let headRow = rows |> List.head |> Option.getWithDefault(Nil);
+        let columns = if (List.isEmpty(headRow)) 1 else List.length(headRow);
+        let marks = if (List.isEmpty(headRow)) List.repeat(columns, "---") else headRow |> List.map(alignMark);
+        let separator = "| ${marks |> List.join(" | ")} |";
         match rows |> List.map(renderRow) {
             case first :: rest => (first :: separator :: rest) |> List.join("\n")
             case Nil           => separator
+        }
+
+    /// 区切り行の 1 列分。`:` の位置が寄せ。
+    def alignMark(cell: Cell): String =
+        let Cell.Cell(_, align, _) = cell;
+        match align {
+            case Some("left")   => ":---"
+            case Some("center") => ":---:"
+            case Some("right")  => "---:"
+            case _              => "---"
         }
 
     def renderRow(cells: List[Cell]): String = "| ${cells |> List.map(renderCell) |> List.join(" | ")} |"
 
     /// セルは 1 行。段落と見出しの中身だけを空白で繋ぎ、改行は <br> に。
     def renderCell(cell: Cell): String =
-        let Cell.Cell(_, blocks) = cell;
+        let Cell.Cell(_, _, blocks) = cell;
         blocks |> List.filterMap(cellInlines) |> List.map(renderInlines("<br>")) |> List.join(" ") |> String.replace(src = "\n", dst = " ")
 
     def cellInlines(block: Block): Option[List[Inline]] = match block {
@@ -659,15 +678,35 @@ mod Markdown {
     def isTableSeparator(line: String): Bool =
         String.isMatch(regex = "^\\s*\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|?\\s*$", line) and String.contains(substr = "-", line)
 
-    /// 1 行目が tableHeader、2 行目（区切り）は読み飛ばし、`|` を含む行が続く間が表。
+    /// 1 行目が tableHeader、2 行目（区切り）は寄せを読んで捨て、`|` を含む行が続く間が表。
+    /// **寄せは列の属性なので、その列の全セルに同じ値を入れる**（JSON にはセルごとに乗る）。
     def parseTable(lines: List[String]): (Option[Block], List[String]) =
         let (rowLines, after) = List.span(line -> not isBlank(line) and String.contains(substr = "|", line), lines);
         let rows = match rowLines {
-            case header :: _ :: body => (splitCells(header) |> List.map(text -> Cell.Cell(true, cellBlocks(text)))) :: (body |> List.map(line -> splitCells(line) |> List.map(text -> Cell.Cell(false, cellBlocks(text)))))
-            case header :: Nil       => (splitCells(header) |> List.map(text -> Cell.Cell(true, cellBlocks(text)))) :: Nil
-            case Nil                 => Nil
+            case header :: separator :: body =>
+                let aligns = alignsOf(separator);
+                cellsOf(true, aligns, header) :: (body |> List.map(line -> cellsOf(false, aligns, line)))
+            case header :: Nil => cellsOf(true, Nil, header) :: Nil
+            case Nil           => Nil
         };
         (Some(Block.Table(rows)), after)
+
+    def cellsOf(isHeader: Bool, aligns: List[Option[String]], line: String): List[Cell] =
+        splitCells(line) |> List.zipWithIndex
+            |> List.map(match (index, text) -> Cell.Cell(isHeader, List.nth(index, aligns) |> Option.flatten, cellBlocks(text)))
+
+    /// 区切り行から列ごとの寄せ。`:---` 左、`:---:` 中央、`---:` 右、`---` 指定なし。
+    def alignsOf(separator: String): List[Option[String]] =
+        splitCells(separator) |> List.map(mark -> {
+            let left = String.startsWith(prefix = ":", mark);
+            let right = String.endsWith(suffix = ":", mark);
+            match (left, right) {
+                case (true, true)  => Some("center")
+                case (true, false) => Some("left")
+                case (false, true) => Some("right")
+                case _             => None
+            }
+        })
 
     def cellBlocks(text: String): List[Block] = Block.Paragraph(parseInlines(text)) :: Nil
 

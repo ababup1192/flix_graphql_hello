@@ -229,6 +229,13 @@ mod TestRichText {
             }),
              "<table><thead><tr><th colspan=\"2\"><p>h</p></th></tr></thead><tbody><tr><td rowspan=\"3\"><p>c</p></td></tr></tbody></table>"),
 
+            // 寄せ。style で出す（属性 align は HTML5 で廃止）
+            (table(List#{
+                row(List#{ cell("tableHeader", List#{ ("align", Json.JString("center")) }, "h") }),
+                row(List#{ cell("tableCell", List#{ ("align", Json.JString("right")) }, "c") })
+            }),
+             "<table><thead><tr><th style=\"text-align: center\"><p>h</p></th></tr></thead><tbody><tr><td style=\"text-align: right\"><p>c</p></td></tr></tbody></table>"),
+
             // 行が 1 つも無い
             (table(Nil), "<table></table>")
         };

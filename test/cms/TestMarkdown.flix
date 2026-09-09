@@ -50,6 +50,12 @@ mod TestMarkdown {
 
     def tableCell(inlines: List[Json]): Json = CmsTestKit.richNode("tableCell", Nil, List#{ paragraph(inlines) })
 
+    def alignedHeader(align: String, inlines: List[Json]): Json =
+        CmsTestKit.richNode("tableHeader", List#{ ("align", Json.JString(align)) }, List#{ paragraph(inlines) })
+
+    def alignedCell(align: String, inlines: List[Json]): Json =
+        CmsTestKit.richNode("tableCell", List#{ ("align", Json.JString(align)) }, List#{ paragraph(inlines) })
+
     def horizontalRule(): Json = CmsTestKit.richLeaf("horizontalRule", Nil)
 
     def hardBreak(): Json = CmsTestKit.richLeaf("hardBreak", Nil)
@@ -114,6 +120,11 @@ mod TestMarkdown {
             tableRow(List#{ tableHeader(List#{ plain("見出し") }), tableHeader(List#{ plain("値") }) }),
             tableRow(List#{ tableCell(List#{ plain("a") }), tableCell(List#{ plain("b|c") }) }) }) }),
          "| 見出し | 値 |\n| --- | --- |\n| a | b\\|c |"),
+        // table の寄せ: 区切り行の : が列の寄せ。**列の全セルが同じ値を持つ**
+        (doc(List#{ table(List#{
+            tableRow(List#{ alignedHeader("left", List#{ plain("名") }), alignedHeader("center", List#{ plain("印") }), alignedHeader("right", List#{ plain("額") }) }),
+            tableRow(List#{ alignedCell("left", List#{ plain("a") }), alignedCell("center", List#{ plain("b") }), alignedCell("right", List#{ plain("c") }) }) }) }),
+         "| 名 | 印 | 額 |\n| :--- | :---: | ---: |\n| a | b | c |"),
         // callout: GitHub alerts
         (doc(List#{ callout("note", List#{ simpleParagraph("補足") }) }), "> [!NOTE]\n> 補足"),
         (doc(List#{ callout("tip", List#{ simpleParagraph("ヒント") }) }), "> [!TIP]\n> ヒント"),
