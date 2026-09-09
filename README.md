@@ -1,56 +1,41 @@
 # flix_graphql_hello
 
-Flix と PostgreSQL で書く headless CMS の API サーバ。GraphQL の実行には Java の graphql-java を
-Java interop で使い、Flix 側は代数的 effect でそれを境界に閉じ込めている。DB 層は sqlfx（GitHub の release から取る）。
+**Flix と PostgreSQL で書く headless CMS の API サーバ。** GraphQL の実行は Java の graphql-java を Java interop で使い、
+Flix 側は代数的 effect でそれを境界に閉じ込めている。DB 層は [sqlfx](https://github.com/ababup1192/sqlfx)、HTTP は `java.net.ServerSocket` の上の手書き HTTP/1.1。
 
-API は 2 つある。
+microCMS の移行先として作っている（動的に content type を定義し、GraphQL で読む）。ロードマップは [docs/design/roadmap.md](docs/design/roadmap.md)。
 
-- `/admin/graphql`: 管理 API。content type とフィールドの定義、entry の下書きを読み書きする。スキーマは `admin.graphql`（SDL）が正で、
-  そこから型付きの Flix コードを生成する。人が書くのは SDL と、生成されたレコード型に合わせたリゾルバだけで、
-  スキーマとリゾルバのズレはコンパイルで落ちる
-- `/graphql`: コンテンツ API。型の定義から graphql-java のスキーマを実行時に組む。`blogs` 型を作れば
-  `blog(id)` / `blogs(where, orderBy, first, skip, stage)` と `Blog` / `BlogWhere` / `BlogOrderBy` / `BlogConnection` が生え、
-  定義を変えると次のリクエストで組み直す。読むだけ（リゾルバの効果が `\ DbRead` に閉じる）
+## API
 
-HTTP サーバは `java.net.ServerSocket` の上に手書きした最小の HTTP/1.1。設計と作る順番は
-[docs/design/cms-spec](https://claude.ai/code/artifact/bdc58ed6-4ee0-45bf-9282-a842a0fcc988) にある。
+| 入口 | 何をする |
+|---|---|
+| `/graphql` | **コンテンツ API**（読むだけ）。型の定義から graphql-java のスキーマを実行時に組む。`blogs` 型を作れば `blog(id)` / `blogs(where, orderBy, first, skip, after, stage)` と `Blog` / `BlogWhere` / `BlogOrderBy` / `BlogConnection` が生え、定義を変えると次のリクエストで組み直す |
+| `/admin/graphql` | **管理 API**。型とフィールドの定義、entry の読み書き、公開、asset、Webhook、予約公開、鍵。SDL は `admin.graphql`（正） |
+| `/account/graphql` | **Account API**。プロジェクトを選ぶ前の操作（me / 組織 / プロジェクト作成 / PAT）。SDL は `account.graphql` |
+| `/mcp` | **MCP サーバ**。AI エージェントから読み書きする 12 のツール。管理 API への GraphQL クライアント |
+| `/health` | DB に届けば `{"status":"ok","version":"<git の sha>"}`、届かなければ 503 |
 
-## 使い方
+管理 API と Account API は SDL が正で、そこから型付きの Flix コードを生成する。人が書くのは SDL と、生成されたレコード型に合わせたリゾルバだけで、**スキーマとリゾルバのズレはコンパイルで落ちる**。
 
-Flix コンパイラは flix_game_engine の devbox が持つ jar を借りる（`bin/flix` が解決する）。
-JDK と Docker が要る。DB 層は [sqlfx](https://github.com/ababup1192/sqlfx) で、`flix.toml` の `[dependencies]` から GitHub の release を取る。
+`/p/{プロジェクト slug}/graphql` か Host（`CMS_BASE_DOMAIN`）でプロジェクトを選ぶ。省くと既定プロジェクト（`CMS_DEFAULT_PROJECT`）。
+
+## 動かす
+
+Flix コンパイラは flix_game_engine の devbox が持つ jar を借りる（`bin/flix` が解決する）。JDK と Docker が要る。
 
 ```bash
-make db-up     # PostgreSQL 16 を docker compose で起動
+make db-up     # PostgreSQL と MinIO を docker compose で起動
 make migrate   # migrations/ を当てる（初回と、migration を足した時）
 make run       # サーバ起動（CMS_DSN 等は Makefile が渡す。初回は Maven 依存の取得で時間がかかる）
-make query     # 起動中のサーバへ /health とサンプルのクエリと mutation を投げる
-make generate  # schema.graphql / admin.graphql から src/generated/ を作り直す
-make gen       # migrations/ と queries/*.q から src/generated/sql/ を作り直す（sqlfx の生成器。flix_db 側で動く）
-make check     # 型検査
-make test      # DB 無しのテスト（test/Pg を除く）
-make test-pg   # コンテナを立てて実 PostgreSQL 込みで全部回し、止める
-make db-down   # PostgreSQL を止めてデータを消す
+make query     # 起動中のサーバへ /health と管理 API・コンテンツ API のサンプルを投げる
 ```
 
-`bin/flix` は `--Xsubeffecting=lambdas` を付けて呼ぶ（純粋なリゾルバのラムダをそのまま `\ AppEff` の関数型に置くため）。
-VS Code の Flix 拡張にも同じフラグが要り、`.vscode/settings.json` の `flix.extraFlixArgs` で渡している。
-フラグが効く前の診断が残っていたら「Developer: Reload Window」で読み直す。
+環境変数の一覧（認証、asset、CDN、仕事、自己回復、停止）は [deploy/README.md](deploy/README.md)。手元では `CMS_AUTH=dev` で `X-Dev-User` が使える（`CMS_VERSION=dev` の時だけで、その時は 127.0.0.1 にしか bind しない）。
 
-### 環境変数
-
-| 変数 | 意味 |
-|---|---|
-| `CMS_DSN` | `jdbc:postgresql://host:port/db`。必須。起動時に SELECT 1 が通らなければ終了コード 1 |
-| `CMS_DB_USER` / `CMS_DB_PASSWORD` | 省略時は `cms` |
-| `CMS_CORS_ORIGINS` | 許すオリジンのカンマ区切り（`https://admin.example.com`）。`*` で全部。省略時は CORS ヘッダを付けない |
-
-起動すると `http://localhost:8080/admin/graphql`（管理 API）と `/graphql`（見本）で待ち受け、`GET /health` が DB に届けば `{"status":"ok"}`、
-届かなければ 503 を返す。起動時に migrations が全部当たっているかも確かめ、未適用なら終了コード 1（`make migrate`）。
-
-### 管理 API の例
+### 型を作って entry を公開する
 
 ```bash
+# 型とフィールド
 curl -s -X POST localhost:8080/admin/graphql -H 'Content-Type: application/json' \
   -d '{"query": "mutation { createContentType(input: { apiId: \"blogs\", name: \"記事\" }) { id singular plural } }"}'
 # {"data":{"createContentType":{"id":"1","plural":"blogs","singular":"Blog"}}}
@@ -58,369 +43,143 @@ curl -s -X POST localhost:8080/admin/graphql -H 'Content-Type: application/json'
 curl -s -X POST localhost:8080/admin/graphql -H 'Content-Type: application/json' \
   -d '{"query": "mutation { addField(typeId: \"1\", input: { apiId: \"title\", name: \"題名\", kind: TEXT, required: true, config: { maxLength: 120 } }) { id position } }"}'
 
-curl -s -X POST localhost:8080/admin/graphql -d '{"query": "{ contentTypes { apiId singular fields { apiId kind required config { maxLength } } } }"}'
-```
-
-名前の規則（lowerCamel の apiId、予約名、他の型との衝突）に合わない入力は `errors[].message` に理由が並ぶ。
-
-### 公開
-
-`publishEntry` は required と unique を検査して下書きを公開側へ写し、版を積む。公開後に下書きを直すと `stage` が `CHANGED` になり、再公開で反映する。
-`unpublishEntry` で取り下げ、`saveVersion` / `restoreVersion` で版を残して戻せる。
-
-```bash
-curl -s -X POST localhost:8080/admin/graphql -d '{"query": "mutation { publishEntry(id: \"b1\") { stage publishedAt versions { version reason } } }"}'
-```
-
-### コンテンツ API の例
-
-型 `blogs`（title / views）と公開した entry があれば、`/graphql` にこう投げられる。`stage` を省けば公開中の物、下書きは `stage: DRAFT`。
-
-```bash
-curl -s -X POST localhost:8080/graphql -H 'Content-Type: application/json' \
-  -d '{"query": "{ blogs(where: { title_contains: \"flix\", OR: [{ views_gte: 10 }] }, orderBy: [views_DESC], first: 10) { totalCount nodes { id title views } } }"}'
-curl -s -X POST localhost:8080/graphql -d '{"query": "{ blog(id: \"b1\", stage: DRAFT) { title updatedAt } }"}'
-curl -s -X POST localhost:8080/graphql -d '{"query": "{ __type(name: \"BlogWhere\") { inputFields { name } } }"}'
-```
-
-`where` はフィールドの kind ごとに `_eq` / `_in` / `_contains` / `_startsWith`（文字列）、`_eq` / `_gt` / `_gte` / `_lt` / `_lte`（数値と DATE。DATE の値は ISO 8601 の文字列で、日付だけなら UTC の 0 時）、
-`_eq`（真偽値）、`_eq` / `_in`（select）、`_id_eq` / `_id_in`（reference）、配列のフィールドには `_contains`（複数選択の select は選択肢 1 つ）、全部に `_isNull` が生え、
-`OR` / `AND` は 1 段（`BlogWhereLeaf` のリスト）。値は全部プレースホルダで SQL に渡す。
-
-### 参照と選択肢
-
-`REFERENCE`（`targetTypeId` で参照先の型）はコンテンツ API で参照先の型として展開され、同じ stage の物を返す。一覧では参照先を
-1 本の SELECT で先読みする。公開時は参照先が公開済みである事を検査し（`publishEntry(withDependencies: true)` で一緒に公開）、
-公開中の entry から参照されている物は取り下げられない。`SELECT`（`config.options`、UPPER_SNAKE）は型ごとの enum（`BlogCategory`）になり、`many: true` なら複数選択（`[BlogCategory!]!`）。
-`DATE` は ISO 8601 の文字列（`"2026-09-08T09:00:00Z"`。`"2026-09-08"` は書く時に `T00:00:00Z` を足す）で、範囲の絞り込みと並び替えは timestamptz で比べる。
-
-```bash
-curl -s -X POST localhost:8080/graphql -d '{"query": "{ blogs(where: { category_eq: \"NEWS\", tags_contains: \"t1\" }) { nodes { title profile { name } tags { label } } } }"}'
-```
-
-entry（下書き）は `fields: JSON` で中身を渡す。型に無いフィールドや kind に合わない値は invalid。`updateEntry` は
-`expectedVersion` が今の version と違えば conflict（楽観ロック）。
-
-```bash
+# entry（中身は JSON。型に無いフィールドや kind に合わない値は invalid）
 curl -s -X POST localhost:8080/admin/graphql -H 'Content-Type: application/json' \
   -d '{"query": "mutation { createEntry(typeId: \"1\", fields: { title: \"Flix で GraphQL\" }) { id version fields } }"}'
 # {"data":{"createEntry":{"fields":{"title":"Flix で GraphQL"},"id":"3f1c9a2b7d4e","version":1}}}
 
-curl -s -X POST localhost:8080/admin/graphql -d '{"query": "mutation { updateEntry(id: \"3f1c9a2b7d4e\", expectedVersion: 1, fields: { title: \"直した\" }) { version } }"}'
-curl -s -X POST localhost:8080/admin/graphql -d '{"query": "{ entries(typeId: \"1\", search: \"Flix\") { totalCount nodes { id version fields } } }"}'
+# 公開（required と unique と参照先を検査して公開側へ写し、版を積む）
+curl -s -X POST localhost:8080/admin/graphql \
+  -d '{"query": "mutation { publishEntry(id: \"3f1c9a2b7d4e\") { stage publishedAt versions { version reason } } }"}'
 ```
 
-カウンタはカレントディレクトリの `counter.db`（SQLite）に保存され、再起動しても値が残る。リポジトリのルートで起動する。
+`updateEntry` は `expectedVersion` が今の version と違えば conflict（楽観ロック）。公開後に下書きを直すと `stage` が `CHANGED` になり、
+再公開で反映する。`unpublishEntry` で取り下げ、`restoreVersion` で版から戻す。名前の規則（lowerCamel の apiId、予約名、他の型との衝突）に
+合わない入力は `errors[].message` に理由が並ぶ。
 
-### リクエストの形
+**押す前に分かる / 壊れない**ための入口が 3 つある（前の 2 つは query）。
 
-GraphQL over HTTP の POST 形式。`query` は必須、`variables` と `operationName` は省略できる。
+- `publishCheck(id)` — required / unique / 参照 / asset の違反と未公開の参照先を**全部一度に**返す（dry-run）
+- `impact(id)` — 取り下げ・削除で壊れる entry（フィールドの参照・本文内のリンク・asset の使用先）
+- `publishPlan(ids, withDependencies)` / `publishMany` — 参照先が先の順に並べ、1 つでも通らなければ何も公開しない
+
+### コンテンツ API で読む
 
 ```bash
-curl -s -X POST localhost:8080/graphql \
-  -H 'Content-Type: application/json' \
-  -d '{"query": "query($a: Int!) { add(a: $a, b: 2) fibonacci(n: 10) counter }", "variables": {"a": 40}}'
-# {"data":{"add":42,"counter":0,"fibonacci":55}}
-
-curl -s -X POST localhost:8080/graphql \
-  -d '{"query": "{ post(id: \"p1\") { title author { name posts { id } } } }"}'
-# {"data":{"post":{"author":{"name":"abab","posts":[{"id":"p1"},{"id":"p2"}]},"title":"Flix で GraphQL"}}}
-
-curl -s -X POST localhost:8080/graphql -d '{"query": "mutation { increment(by: 3) }"}'
-# {"data":{"increment":3}}
+curl -s -X POST localhost:8080/graphql -H 'Content-Type: application/json' \
+  -d '{"query": "{ blogs(where: { title_contains: \"flix\", OR: [{ views_gte: 10 }] }, orderBy: [views_DESC], first: 10) { totalCount nodes { id title views } pageInfo { hasNextPage endCursor } } }"}'
+curl -s -X POST localhost:8080/graphql -d '{"query": "{ blog(id: \"b1\", stage: DRAFT) { title updatedAt } }"}'
 ```
 
-エラーは GraphQL 仕様どおり `errors[].message` で返る。graphql-java が付ける
-`locations` や `extensions` もそのまま通す。リゾルバが `Err("...")` を返すと、その文字列がそのまま
-`message` になり、`path` と `locations` が付く（ステータスは 200 のまま）。
+`where` はフィールドの kind ごとに `_eq` / `_in` / `_contains` / `_startsWith`（文字列）、`_eq` / `_gt` / `_gte` / `_lt` / `_lte`（数値と DATE）、
+`_eq`（真偽値）、`_eq` / `_in`（select）、`_id_eq` / `_id_in`（reference）、配列には `_contains`、全部に `_isNull` が生え、`OR` / `AND` は 1 段。
+値は全部プレースホルダで SQL に渡す。一覧は `first` / `skip` に加えて `after`（cursor）で辿れる（[docs/design/pagination.md](docs/design/pagination.md)）。
 
-| 状況 | ステータス |
-|---|---|
-| 正常（GraphQL のエラーを含む） | 200 |
-| JSON が壊れている / `query` が無い / `variables` がオブジェクトでない | 400 |
-| `/graphql` 以外のパス | 404 |
-| `/graphql` への POST 以外 | 405（`Allow: POST` 付き） |
-| Content-Length が 1 MiB を超える | 413 |
-| ヘッダ 1 行が 8 KiB を超える（リクエスト行も含む） / ヘッダが 100 行を超える | 431 |
-| リクエスト行が壊れている / Content-Length が数字でない | 400 |
-| 接続の処理中に例外が起きた（read のタイムアウト、レスポンス変換の失敗など） | 500（ボディ無し） |
+`REFERENCE` は参照先の型として展開され、同じ stage の物を返す（一覧は 1 本の SELECT で先読み）。`SELECT` は型ごとの enum（`BlogCategory`）で、
+`many: true` なら複数選択。`RICH_TEXT` は doc / html / text / 目次 / 抜粋 と Markdown で返せる。`DATE` は ISO 8601 の文字列。
 
-### 落とし穴
+匿名の GET はプロジェクトの版から weak な ETag を組み、`If-None-Match` が合えば GraphQL を実行せず 304 を返す。
 
-- graphql-java 22 の good-faith introspection: 1 つのクエリに `__type` や `__schema` を複数並べると
-  「This request is not asking for introspection in good faith」で data が null になる。GraphiQL は問題ないが、
-  自前のクライアントは introspection を 1 つずつ投げる。
+### 認証
 
-## スキーマの書き方
-
-### 1. `schema.graphql` を書く
-
-```graphql
-type Query {
-  add(a: Int!, b: Int!): Int!
-  post(id: ID!): Post
-}
-
-type Post {
-  id: ID!
-  title: String!
-  author: Author!
-}
-```
-
-対応しているのは `type`、`enum`、`input`、`union`、`interface`、`schema { }` ブロック、組み込みスカラー
-（`Int / Float / String / Boolean / ID`）、リスト、nullable、description（型・フィールド・引数・enum 値）、
-`@deprecated`（フィールド・enum 値）、引数と input フィールドの既定値。enum 値の description は生成された `case` の
-doc コメントにもなる。`subscription` / custom scalar / `extend` / それ以外の directive / interface が interface を implements する形は
-生成器がエラーにする。
-
-`input` は Flix のレコード型の別名と Codec になる（`input PostInput { title: String!  status: PostStatus = DRAFT }`
-→ `Generated.PostInput = { title = String, status = Option[PostStatus] }`）。リゾルバには `input#title` で届く。
-input の中にオブジェクト型を書く、input 同士を循環させる、input を戻り値にする、のどれも生成器が止める
-（循環は Flix のレコード型の別名が再帰できないため）。
-
-`union` と `interface` は枝（実装型）ごとの case を持つ Flix の enum になり、リゾルバはその enum に包んで返す
-（`Generated.SearchResult.Post(post)`）。`__typename` と inline fragment は graphql-java が処理し、枝のリゾルバは
-通常のオブジェクト型と同じ経路で動く。interface のフィールドは実装型が持つので、interface 自身にリゾルバは無い。
-生成器は、実装型が interface の全フィールドを同じ型で持つか、union の枝がオブジェクト型か、union / interface が
-どこかのフィールドの型に使われているか（implements だけでは SDL に宣言が出ない）を検査する。
-
-引数の既定値にオブジェクトリテラル
-（`input: PostInput = {title: "x"}`）を書くのは未対応で、生成器が止める（input のフィールド側の既定値は使える）。
-Query / Mutation から届かない型、大文字始まりのフィールド名、小文字始まりの型名も生成器が止める（Flix の識別子にならないため）。
-
-### 2. `make generate` で生成する
-
-`src/generated/graphql/GeneratedSchema.flix` ができる。中身は型ごとのリゾルバのレコード型と、それを graphql-java に
-配線するコードで、人は読まない。
-
-```flix
-/// Post.author
-pub type alias PostAuthorResolver[ef: Eff] = Context -> Post -> Result[FieldError, Author] \ ef
-
-/// type Post のリゾルバ一式
-pub type alias PostResolvers[ef: Eff] = { id = PostIdResolver[ef], title = PostTitleResolver[ef], author = PostAuthorResolver[ef] }
-
-/// type Post の既定リゾルバ。source の同名ラベルをそのまま返す。author は含まない
-pub def postDefaults(): { id = Context -> { id = Id | r0 } -> Result[FieldError, Id] \ ef, title = … } = …
-```
-
-`ef` はリゾルバが使う効果で、実装側が決める（`\ IO` に固定していない）。既定リゾルバは引数が無く
-スカラー・enum・そのリストを返すフィールドの分だけ作られ、source の型は行変数で開いている
-（`Post` が SDL に無いラベルを持ってよい）。
-
-`enum` は Flix の enum と Codec ごと生成される（`enum Status { IN_PROGRESS }` → `Generated.Status.InProgress`）。
-
-### 3. `make scaffold` で雛形を作り、リゾルバを書く
-
-```bash
-make scaffold                 # 全型。src/sample/resolvers/XResolvers.flix を書く（既にあるファイルは触らない）
-make scaffold TYPE=Post       # 1 型だけ
-make scaffold DEFAULTS=no     # 既定リゾルバを使わず全フィールドを吐く（source が enum の型向け）
-```
-
-`src/sample/resolvers/PostResolvers.flix` は人が所有するファイルで、gqlgen の resolver.go に当たる。
-フィールドごとの関数と、それを既定リゾルバに足すレコードが入っている。
-
-```flix
-mod PostResolvers {
-    /// Post.author
-    pub def author(): Generated.PostAuthorResolver[AppEff] =
-        (_context, post) -> Post.findAuthor(post#authorId) |> Option.toOk("author not found")
-
-    /// type Post のリゾルバ一式
-    pub def resolvers(): Generated.PostResolvers[AppEff] =
-        { +author = author() | Generated.postDefaults() }
-}
-```
-
-`id` / `title` / `status` は書かない（既定リゾルバが source の同名ラベルを返す）。既定を上書きしたい
-フィールドは `{ id = …, +author = … | Generated.postDefaults() }` のように更新構文で置き換える。
-
-SDL の `type Post` に対応する Flix の型 `Post` は人が定義する（トップレベルの `pub type alias` か `pub enum`。
-名前を揃える）。SDL に無いフィールドを持ってよい。`Post` が enum なら既定リゾルバは使えないので
-`DEFAULTS=no` で全フィールドを書く。
-
-`AppEff` は `src/app/AppEff.flix` にある、このサーバのリゾルバが使う効果の和（今は `CounterStore`）。
-リゾルバは `counter = context -> Counter.counter(context)` のように `\ CounterStore` のまま書け、
-純粋な物は `ef` に吸収される。効果を足すときは `AppEff` に `+` でつなぐ。
-
-最後に `src/app/AppSchema.flix` で全部を `Generated.schema({ queryRoot = QueryResolvers.resolvers(), post = PostResolvers.resolvers(), ... }, runApp)` に渡す。
-`runApp: Runner[AppEff]` は `AppEff` を IO に落とすハンドラで、本番は `SqliteCounter.runWithSqlite`、
-テストは `CounterFake.runWithMemory`。ハンドラを渡すのはここ 1 回だけ。
-
-### コンパイルで落ちる物
-
-| ズレ | エラー |
-|---|---|
-| SDL にフィールドを足したがリゾルバが無い | レコードのラベル不足。エラーの 1 行目に足りないラベル名が出る |
-| SDL から消したのにリゾルバが残っている | レコードのラベル余分（Extra label） |
-| 引数の型・個数、戻り値の型が SDL と違う | 関数型の不一致。フィールドごとの関数（`def author(): Generated.PostAuthorResolver[AppEff]`）の行に出る |
-| ある型のリゾルバ一式を丸ごと書き忘れ | `Resolvers` のラベル不足 |
-| `type Post` に対応する Flix の `Post` が無い | 未定義の型 |
-| リゾルバが `AppEff` に無い effect を使う | `Unexpected effect 'Clock' in function declared as {'CounterStore'}`（別名は展開されて出る。`AppEff` に足すか、ハンドラで包む） |
-| source の型（`Post`）に既定リゾルバが要るラベルが無い、または Option の有無が違う | `resolvers()` の行で `( )` と `( title = String \| r0 )` の不一致。「source に無い」とは出ないので、ラベル名を見て `Post` を直す |
-| `make generate` し忘れ、または古い生成器で作った生成物 | テスト `testSchemaGeneratedIsUpToDate` が落ち、`make run` も起動を拒否する |
-
-### 書き方の決まり
-
-- **効果が `AppEff` と一致しない def はラムダで包む。** `add = CalcResolvers.add` のように純粋な def をそのまま置くと、
-  サブエフェクトはラムダにしか効かないので `\ AppEff` に広がらずコンパイルエラーになる。
-  効果がちょうど `AppEff` の def は参照のままで通る。
-- **効果は `AppEff` 1 つで書く。** 型ごとに `PostResolvers[CounterStore]` と `AuthorResolvers[Clock]` のように
-  別の効果を書くと、`Resolvers[ef]` の `ef` はレコード全体で 1 つなので合わない。
-- **フィールドごとに注釈付きの関数で書く**（`def author(): Generated.PostAuthorResolver[AppEff]`）。レコードに
-  直接ラムダを書くと、型が 1 つ違うだけでレコード全体がエラーにダンプされ「どのフィールドか」が出ない。
-  `make scaffold` の雛形はこの形になっている。
-- SDL の名前が Flix の予約語（`from` `run` `query` など）のときは、生成物のラベルは末尾に `_` が付く（`from_`）。
+ヘッダで渡す。`Authorization: Bearer <JWT>`（OIDC の JWKS で検証）、`Authorization: Bearer cmspat_...`（PAT）、`X-Api-Key`（プロジェクトの鍵）、`X-Preview-Token`（その entry の下書きだけ）。
+役割は owner ⊃ editor ⊃ writer ⊃ viewer で、判定は Datalog。public なプロジェクトのコンテンツ API は鍵無しで公開中を読める。
+詳しくは [docs/architecture/auth.md](docs/architecture/auth.md)。
 
 ## アーキテクチャ
 
+### SDL が正、Flix コードは生成物
+
+生成器 `schemagen/` は別プロジェクト（Flix + graphql-java のパーサ）。本体と分けているのは、生成物が壊れていると本体がコンパイルできず、
+コンパイルできないと生成し直せない、という循環を避けるため。生成物には SDL と生成器バージョンの SHA-256 が埋まり、テストと起動時に SDL と照合する。
+
+生成物の中身は `src/graphql/Schema.flix` の型付き DSL（`Schema.fieldRaw` / `Out` / `GqlCodec` / `objectType`）で、人が直接書くこともできる（コンテンツ API はそうしている）。
+素通しのフィールドには既定リゾルバ `<型名>Defaults()` が生成されるので、手書きのリゾルバは写しが要る物だけをレコードの更新で上書きする。
+
 ```
-schema.graphql ──(make generate / schemagen)──▶ src/generated/graphql/GeneratedSchema.flix ──▶ Schema（Field / ObjectType / Out）
-                                                          ▲                                       │
-                                        AppSchema（リゾルバのレコード）                   Graphql.buildEngine ──▶ graphql-java
-
-HTTP (socket)          純粋な HTTP 解析        ルーティング          GraphQL 実行 effect       graphql-java
-HttpServer.listen ──▶ Http.parse* / render ──▶ Server.handle ──▶ eff Graphql.execute ──▶ Graphql.runWithEngine
-                                                    │                                          │
-                                              JsonValue                                  JavaValue
-                                          (Value <-> JSON)                          (Value / Boxed <-> Java Object)
-                                                                                           │
-                                                                                   eff CounterStore ──▶ SqliteCounter (JDBC)
-```
-
-### 1. SDL が正、Flix コードは生成物
-
-生成器 `schemagen/` は別プロジェクト（Flix + graphql-java のパーサ）。本体と分けているのは、
-生成物が壊れていると本体がコンパイルできず、コンパイルできないと生成し直せない、という循環を避けるため。
-生成物には SDL と生成器バージョンの SHA-256 が埋まり、テストと起動時に `schema.graphql` と照合する。
-
-生成物の中身は `src/graphql/Schema.flix` の型付き DSL（`Schema.fieldRaw` / `Out` / `GqlCodec` / `objectType`）。
-この DSL は人が直接書くこともできる（テストではそうしている）。DSL 自体の設計は
-[docs/design/typed-schema.md](docs/design/typed-schema.md)、生成の設計は
-[docs/design/sdl-first-codegen.md](docs/design/sdl-first-codegen.md)。
-
-オブジェクト型は `Value.Obj` に潰さず、Flix の値を `(Context, 値)` で箱詰めして graphql-java の source として渡す。
-クエリで選ばれた子フィールドのリゾルバだけが走る（graphql-java の流儀どおり。DataLoader もこの上に乗る）。
-
-リゾルバの effect は型変数 `ef`（`Field[source, ef]` / `ObjectType[a, ef]` / `Out[a, ef]`）で、実装側が決める。
-リゾルバは graphql-java の Java コールバックの中で呼ばれ、そこから `main` のハンドラへは戻れないので、
-`Schema.make(query, mutation, runner)` が受け取った `Runner[ef]` をコールバックのクロージャの中で走らせて IO に落とす。
-ハンドラは別スレッドから呼ばれても動く。`Runner` の戻り型が箱（`JavaValue.Boxed`）に固定なのは、
-型別名が自由な型変数を持てず rank-2 型も無いため。
-
-### 2. GraphQL の実行は代数的 effect
-
-```flix
-pub eff Graphql {
-    def execute(request: GraphqlRequest, context: Context): GraphqlResponse
-}
+admin.graphql ──(make generate / schemagen)──▶ src/generated/graphql/ ──▶ Schema（Field / ObjectType / Out）
+                                                       ▲                          │
+                                          src/admin/ のリゾルバ          Graphql.buildEngine ──▶ graphql-java
 ```
 
-ルーティング（`Server`）はこの effect だけに依存し、graphql-java を知らない。
-本物のハンドラは `Graphql.runWithEngine(engine, f)` で、`main` が起動時に 1 回だけ
-`Graphql.buildEngine(schema)` でエンジンを組み立て、接続ごとに使い回す。
-テストでは `test/graphql/GraphqlFake.flix` の偽ハンドラに差し替えるので、エンジン無しでルーティングを検証できる。
+コンテンツ API だけは逆で、**型の定義（DB の行）から実行時に Schema を組む**（`ContentSchemaBuilder`）。プロジェクトの版が変われば組み直す。
 
-`Context` はリクエスト単位の情報（`userId`）で、全リゾルバの第 1 引数に届く。JWT 検証を入れるまでは `Context.anonymous()`。
+### 境界は代数的 effect
 
-### 3. Java のオブジェクトはリゾルバに出さない
+- `eff Graphql` — ルーティング（`Server`）は graphql-java を知らない。テストは偽ハンドラに差し替える
+- `eff Tenant` — 今のプロジェクト。ユースケースは読み書きを全部そこに閉じる
+- `eff Session` — 認証済みユーザー。handler を入れるのは `DbRunner.transact` だけ
+- `eff Log` / `eff Observe` — 構造化ログ（`src/log/` は cms / http に依存しない独立したライブラリ）
+- `eff ObjectStore` — asset の置き先。MinIO と R2 を同じ handler で
 
-スカラーと引数は JSON 相当の enum `Value`（`Null / Bool / Int / Float / Str / List / Obj`）で持ち、
-オブジェクト型の値は `JavaValue.Boxed` で不透明に箱詰めして graphql-java の source として往復させる。
-`Value` と Java の値の変換は `JavaValue` に、JSON との変換は `JsonValue` に閉じている。
+Java のオブジェクトはリゾルバに出さない。スカラーと引数は JSON 相当の enum `Value`、オブジェクト型の値は `JavaValue.Boxed` で不透明に箱詰めして往復させる。
 
-エラーメッセージの言語は 2 種類に分ける。クライアントに返る文字列（リゾルバの `Err`、
-`Server` の 400 ボディ）は英語、起動時に運用者が読む文字列（`buildEngine` の `Err`、`Main` の出力、生成器の出力）は日本語。
+### 守り方を型と機構に落とす
 
-### 4. 保存先も effect で分離（SQLite はハンドラの 1 つ）
+- **権限は証明で運ぶ** — DB に触るユースケースは `Granted[ManageTypes]` のような証明を最初の引数で受け、自分では判定しない。作り忘れは引数不足でコンパイルが落ちる
+- **テナントは三重** — 型（`Tenant` effect）、生成器（`make gen --scope project_id` が条件の無い query を通さない）、DB（RLS。印の無い Tx は 0 行）
+- **Tx の入口は 3 つだけ** — `scripts/check-tx.sh` が allowlist の増減を見張る。読むだけの文書は 1 リクエスト 1 Tx、mutation はルートフィールドごと
+- **1 リクエストの SQL と Tx の数に上限** — `test/Pg/TestQueryBudgetPg`
+- **ログのキーの一覧** — `scripts/check-log-keys.sh`
 
-Mutation の例 `Counter` は、値の読み書きを `CounterStore` effect として宣言し、
-JDBC はハンドラ `SqliteCounter.runWithSqlite` に閉じている。
+### 仕事と運用
 
-```flix
-pub eff CounterStore {
-    def load(): Result[String, Int32]
-    def increment(by: Int32): Result[String, Int32]
-}
+配信と予約公開は outbox（業務の Tx で行を積み、tick が `FOR UPDATE SKIP LOCKED` で拾う。複数台でも二重にならない）。
+プロセス内のワーカーが 2 秒ごとに回復・掃除 → 予約公開 → Webhook → CDN の purge を回す。
+SIGTERM は listen を閉じる → 接続を待つ → 仕事を drain → プールを閉じるの順、接続プールが壊れたまま戻らなければ自分で exit 3（`SelfHeal`）。
+ログは 1 行 1 JSON（[docs/logging.md](docs/logging.md)）。
+
+## 開発
+
+```bash
+make check     # 型検査（+ tx allowlist と log キーの検査）
+make test      # DB 無しのテスト（test/Pg を除いた写しを build/unit/ に作って回す）
+make test-pg   # 実 PostgreSQL と MinIO 込み（コンテナの起動と停止まで）
+make generate  # admin.graphql / account.graphql → src/generated/graphql/
+make gen       # migrations/ + queries/*.q → src/generated/sql/（sqlfx の生成器）
+make fatjar    # 実行可能な jar（artifact/）
 ```
 
-`Counter.counter(context)` は `\ CounterStore` のまま書く。ハンドラは `AppSchema.make(runApp)` に 1 回渡す。
-本番は `SqliteCounter.runWithSqlite`、テストは `CounterFake.runWithMemory`（メモリ上の `Ref`）なので、
-リゾルバの検証に SQLite は要らない。
+`bin/flix` は `--Xsubeffecting=lambdas` を付けて呼ぶ（純粋なリゾルバのラムダをそのまま effect 付きの関数型に置くため）。
+VS Code の Flix 拡張にも同じフラグが要り、`.vscode/settings.json` の `flix.extraFlixArgs` で渡している。
+CI は push ごとに `make check` と `make test-pg`。
 
-SQLite 側は `SqliteCounter.open` で `Database`（JDBC の URL）を作り、テーブル 1 行に値を置く。
-Flix 側に可変状態を持たず、並行アクセスの直列化も SQLite のロックに任せる。
-sqlite-jdbc の `Connection` はスレッドセーフではないので、呼び出しごとに開いて閉じる。
-Flix は Maven の jar を独自のクラスローダで読むため `DriverManager` の自動登録が効かず、
-`org.sqlite.JDBC` を直接呼んでいる。
+テストの方針は**純粋な物はテストファースト**。`src/cms/rules`、`src/cms/db` の SQL 化、`src/crypto`、`src/http/Router` のような入出力が決まる物は、
+実装の前に表（入力 → 期待）を書いて通す。実 PG と GraphQL は後付けで、機能ごとに 1 回「繋ぎ目を伸ばす」観点を入れる。
 
-### 5. HTTP サーバは最小
+### 落とし穴
 
-`HttpServer.listen(port, handle)` は接続ごとに軽量スレッドを `spawn` し、
-ログは 1 本のチャネルに集約して順に出す。GraphQL のことは知らない。
-
-対応範囲は意図的に狭い。
-
-- 1 接続 1 リクエスト（常に `Connection: close`）。keep-alive 非対応
-- 接続ごとに軽量スレッドを 1 本 spawn する。同時接続数の上限は無い
-- ボディの長さは `Content-Length` だけで決める。chunked 非対応。無ければ空ボディ
-- ボディは 1 MiB まで（413）、ヘッダは 100 行・1 行 8 KiB まで（どちらも 431）
-- 読み取りのタイムアウトは 1 回の read ごとに 10 秒。1 回の read が 10 秒止まると 500 を返して閉じる
-- ボディはバイト単位で読んでから UTF-8 に戻す。サロゲートペア（絵文字）も `Content-Length` どおりに読める
-- 接続スレッド内の例外はログに流し、500（ボディ無し）を返してソケットを閉じる
-
-## フィールドを足す
-
-1. `schema.graphql` にフィールドを足す
-2. `make generate`
-3. `make check` が落ちる場所（`XResolvers` のラベル不足）に、`src/sample/resolvers/XResolvers.flix` のフィールド関数を足す。
-   素通しのフィールドなら既定リゾルバが拾うので何も書かない。新しい型なら `make scaffold TYPE=X` で雛形を作る。
-   外部に触るなら `CounterStore` のように effect を宣言して `AppEff` に足し、ハンドラを `main` の `runApp` に重ねる
+- **リゾルバのラムダに effect を使う式を直に書かない**（JVM の VerifyError。関数に切り出す）。型検査もスキーマの組み立ても素通りし、そのフィールドを選ぶ query でだけ出る
+- **graphql-java 22 の good-faith introspection**: 1 つのクエリに `__type` や `__schema` を複数並べると data が null になる。introspection は 1 つずつ投げる
+- **`Net.Http.runWithIO` を src/ で使わない**（handler ごとに HttpClient を作りスレッドが残る）
 
 ## ディレクトリ
 
 ```
-schema.graphql           SDL（正。人が書く）
-schemagen/               生成器（別プロジェクト）。SdlReader（graphql-java の AST を読む）、Emit（生成物を組む）、Scaffold（雛形を組む）
-src/
-  Main.flix              起動（生成物の照合、SQLite を開く、エンジン組み立て、listen）
-  generated/
-    GeneratedSchema.flix 生成物（make generate。手で編集しない）
-  graphql/               GraphQL の実行と graphql-java との境界
-    Value.flix           GraphQL の値（JSON 相当の enum）
-    JsonValue.flix       Value <-> JSON 文字列
-    JavaValue.flix       Value <-> Java Object、Flix の値の箱詰め（Boxed）
-    GqlCodec.flix        スカラー・enum・input の Codec、Id
-    Schema.flix          Context / TypeRef / Arg / Out / Field / ObjectType / Schema、field0..3 / fieldRaw、toSdl
-    GeneratedCheck.flix  生成物に埋まった SDL 本文・生成器バージョンと schema.graphql の照合
-    Graphql.flix         eff Graphql、buildEngine / runWithEngine
-  http/                  HTTP/1.1 サーバ（GraphQL を知らない）
-    Http.flix            解析と組み立て（純粋関数）
-    HttpServer.flix      ソケット、接続ごとのスレッド、ログ
-  app/                   HTTP と GraphQL をつなぐ層
-    Server.flix          HttpRequest -> GraphqlRequest -> レスポンス JSON
-    AppSchema.flix       Generated.Resolvers に src/sample/resolvers/ の型ごとのリゾルバを当てはめる
-    AppEff.flix          リゾルバが使う効果の和（Runner を渡す単位）
-  resolvers/             型ごとのリゾルバ（make scaffold の雛形に実装を書いた物。人が所有する）
-    QueryResolvers.flix / MutationResolvers.flix / PostResolvers.flix / AuthorResolvers.flix
-  features/              リゾルバから呼ぶロジックとデータ
-    calc/                Calc（純粋な計算）
-    post/                Post（固定データ）
-    counter/             CounterStore（eff）、Counter（Query.counter / Mutation.increment）、SqliteCounter（JDBC）
-test/                    src と同じ構成。偽ハンドラ（*Fake.flix）と GraphqlTestKit もここ
-docs/design/             設計メモ（typed-schema.md: DSL、sdl-first-codegen.md: 生成）
+admin.graphql / account.graphql   管理 API / Account API の SDL（正）
+migrations/ queries/*.q           DDL と SQL（sqlfx の生成器の元）
+schemagen/                        SDL → Flix の生成器（別プロジェクト）
+src/generated/                    生成物（触らない）
+src/cms/                          ドメイン。model / rules / db とユースケース
+src/admin/ src/content/ src/account/   各 API のリゾルバと Runner
+src/graphql/                      graphql-java の境界と Schema の DSL
+src/app/                          AppEnv・認証・ルート表・DbRunner・仕事・ログ・/health・停止
+src/mcp/ src/import/              MCP サーバ、microCMS からの取り込み
+src/http/ src/log/ src/crypto/ src/auth/ src/storage/
+admin-ui/                         管理画面（Elm）
+deploy/                           本番とセルフホスト（compose + Caddy / Alloy）
+test/                             src と同じ構成。test/Pg/ だけ実 PG
 ```
 
-## テストの方針
+## 読む先
 
-- `Server` / `Http` / `JsonValue` / `GqlCodec` / `Schema.toSdl` / `Counter` はエンジン無し・ソケット無し・DB 無しで検証する
-- graphql-java との境界（source の受け渡し、selection に従った子の実行、Context の到達、errors の形、値の変換）は
-  `TestGraphqlJava*` で本物のエンジンを使って検証する。アプリのスキーマは `GraphqlTestKit.appSchema`（カウンタはメモリ上）
-- `SqliteCounter` のハンドラ本体だけを一時ファイルの SQLite で検証する
-- 生成器は `schemagen/test/` で SDL → 生成物の断片を検証する（`cd schemagen && ../bin/flix test`）
-- HTTP の読み取りは `ByteArrayInputStream` で検証する
-
-Flix の書き方の決まりは [docs/flix-conventions.md](docs/flix-conventions.md)、
-コードの流儀は [AGENTS.md](AGENTS.md) を参照。
+| 何を知りたいか | どこ |
+|---|---|
+| 動かす・環境変数・監視 | [deploy/README.md](deploy/README.md) |
+| ドメイン・型・テナント | [docs/architecture/domain.md](docs/architecture/domain.md) |
+| API 層・リゾルバ・MCP | [docs/architecture/api.md](docs/architecture/api.md) |
+| Tx・仕事・ログ・停止 | [docs/architecture/runtime.md](docs/architecture/runtime.md) |
+| 認証と権限 | [docs/architecture/auth.md](docs/architecture/auth.md) |
+| これから作る物 | [docs/design/roadmap.md](docs/design/roadmap.md) |
+| Flix の書き方 | [docs/flix-conventions.md](docs/flix-conventions.md) |
+| コードの流儀 | [AGENTS.md](AGENTS.md) |

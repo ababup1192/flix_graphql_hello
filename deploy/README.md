@@ -205,9 +205,27 @@ sum(rate({service="cms"} | json | message="request" | http_response_status_code 
 
 # JSON でない行（OOM のスタックトレースや JVM の平文はこれで拾う）
 sum(count_over_time({service="cms"} | json | __error__ != "" [5m])) > 0
+
+# DB の失敗の率が 1 % を超えた（GraphQL は 200 を返すので、status code では拾えない）
+sum(rate({service="cms"} | json | message="request" | error_code="INTERNAL" [5m]))
+  / sum(rate({service="cms"} | json | message="request" [5m])) > 0.01
+
+# 接続プールが張り付いている（接続の漏れ。ping は通るので /health は 200 のまま）
+sum(count_over_time({service="cms"} | json | message="request" | url_path=~".*/health" | severity="warn" [10m])) > 3
+
+# 仕事の 1 周が長引いている（止まって 503 になる前に気付く）
+sum(count_over_time({service="cms"} | json | message="jobs tick slow" [15m])) > 0
+
+# Webhook が 4 回目の再試行に入った（次が最後）
+sum(count_over_time({service="cms"} | json | job_kind="webhook" | job_attempts >= 4 [30m])) > 0
 ```
 
-4 本目は Loki でなく外形監視: `/health` が 503 と `"reason": "jobs stalled"` / `"watch stalled"` を返していればワーカーか見張りが止まっている（Better Stack や UptimeRobot が status で拾う）。
+`error_code="INTERNAL"` は **DB の失敗のうちリゾルバの中で起きた分**。DB に届かなかった分は 503 + `error_code="unavailable"` で出るので、1 本にまとめるなら `error_code=~"INTERNAL|unavailable"`。
+
+**外形監視で見るもの**（Loki ではなく Better Stack や UptimeRobot）:
+
+- `/health` が 503 → ワーカーか見張りが止まっている（`"reason": "jobs stalled"` / `"watch stalled"`）か、DB に届いていない
+- `/health` が 200 でも本文が `"status": "degraded"` → 接続プールが張り付いている（`"reason": "pool saturated (…%)"`）。**status code では拾えないので、応答本文に `"status":"ok"` が含まれることを条件にする**
 
 `/health` の `connections` は `{"active": 今つないでいる数, "max": CMS_MAX_CONNECTIONS}`。active が max に張り付いていれば 503 が出ている。
 

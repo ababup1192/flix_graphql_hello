@@ -23,3 +23,4 @@ microCMS を日常で使ってきた人が挙げた不満。管理画面の計�
 | 動画を直接置けない（oEmbed だけ） | 短い動画のために YouTube に上げる | `video` node（assetId、caption、poster）。HTML は `figure > video[controls]`、Markdown は `@[video](asset:ID "caption"){poster=asset:ID}`。AssetRules は mp4 / webm を 200 MB まで（画像は 20 MB のまま）。容量はプランの枠に乗る。変換はしない。長い物は embed に（2026-09-08） |
 | 画像の拡大表示が無い | 小さい画像を読めない | バックエンドは width / height を持っているので無し。サイト側の lightbox |
 | 本文に別の entry を差し込めない（参照はフィールドの外側だけ） | 記事カードや共通の注意書きを本文に置けない | `entryEmbed` node（entryId）。impact と参照展開に乗せる。差分と MCP の後に単独で計画 |
+| どこに何があるか分かりづらく、遷移が多い（API の設定とコンテンツが別の場所、公開・設定が確認のモーダルの連鎖、asset が別の世界） | 1 つの操作に画面を何枚も渡る。戻ると一覧の状態が消える | サイドバーは「型 = 一覧」の 1 段。型の定義は一覧の中のタブ。公開・予約・status・プレビューはエディタの右のレールで、モーダルを重ねない。全部に URL（一覧の絞り込みと列も URL）。Cmd+K でどこへでも（2026-09-09） |

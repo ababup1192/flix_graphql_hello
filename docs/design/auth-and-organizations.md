@@ -12,6 +12,8 @@ auth の表（memberships / invitations / api_keys）も RLS 済み（migration 
 ユーザーの解決は `Accounts`（`resolveUser` / `actorFor` / `me`）、ヘッダから読んだ物は `Credential`（Bearer / ApiKey / PersonalToken / Preview / Missing / Invalid）で、
 認証（Credential → Actor）は `Authentication` がリクエストに 1 回行い、graphql 層の `Context` は `actor` を持つ（下の「認証はリクエストに 1 回」）。API キーの write と PAT は「API キーの write と Personal Access Token」。
 
+**今どうなっているかは [../architecture/auth.md](../architecture/auth.md)。この文書は決めた理由と、決めた時の状態を残す。**
+
 ## 目的
 
 microCMS に対抗するサービスとして出すために、次の 3 つを足す。
@@ -53,8 +55,6 @@ api_keys         (id, project_id, key_hash, scope, created_at, revoked_at)  -- �
 
 ## Flix 側の形
 
-- **`Actor` effect** を `Tenant` の隣に置く。`Actor.current(): Actor`（ユーザー id と今のプロジェクトでの役割）と `Actor.require(role)`。Runner が JWT を検証して membership を引き、`Tenant.runWith` と一緒に handler を入れる
-- ユースケースは `Actor.require(Editor)` のように書く。権限チェックの抜けは「Actor effect を使っていない」でコンパイル時に見つかる（テナントと同じ守り方）
 - **ユースケース（src/cms）の DB に触る pub は権限の証明 `Granted[p]` を最初の引数で受ける。受けない物は写しか内部**（外向きの id の写し、同じ Tx に積む outbox、Runner が主体を決める前に呼ぶ認証の解決、公開の読み）で、理由を各関数の doc に WhyNot で書く（後述の「権限の証明（Granted）」。以前は Session を持つ約束を `scripts/check-session.sh` が名前の一覧で見張っていた）。仕組みが呼ぶ物（Scheduler / Import / ContentEngine）は `Session.runWith(Actor.System)` で入る
 - 公開 API の鍵は `api_keys` を hash で引く。`ContentRunner` に入れるのは `Tenant` だけで、鍵はプロジェクトへの読み取り許可の判定にしか使わない
 - `Server.splitProject` の前に Host の先頭ラベルを slug として拾う。パスの `/p/` があればそちらを優先。予約 slug（`www` / `api` / `admin` / `app` など）は `Projects.create` で弾く。slug は作った後は変えない（URL が変わるため。microCMS も同じ）
@@ -153,10 +153,6 @@ api_keys       (id, project_id, name, key_hash, scope: read | readDraft, created
 - 後で `access_rules(project_id, subject_kind, subject_id, field_api_id, allowed_values)` を足し、Datalog の事実（`Scope`）と readFilter で
   「このタグの記事だけ」を人にも API キーにも付けられる。RLS はテナント境界に限り、属性の絞り込みは SQL の条件で行う
 
-### 作業の順
-
-表と migration → `Authz`（Datalog）→ `TokenVerifier` → `Actor` と Runner と PgTestSupport → 既存 mutation に `require`、`me` と組織・メンバー・鍵 → Host で slug、slug 無しの管理 API、公開 API のキー。
-
 ## API キーの write と Personal Access Token（2026-09-07 追記。実装済み）
 
 人の代わりに叩く身元を 2 つに分ける。**プロジェクトの API キー**（CI 用。`X-Api-Key`）と、**本人の PAT**（CLI 用。`Authorization: Bearer cmspat_...`）。
@@ -192,22 +188,10 @@ policy を `USING (user_id = app.user_id OR token_hash = app.token_hash)`、`WIT
 
 pepper の回転: 行の `pepper_id` は解決時に使っていないので、`CMS_API_KEY_PEPPER` を回すと API キーと PAT は全部再発行になる（deploy/README）。
 
-## 管理 API に足す物
-
-- `me { id email projects { slug name role } }`: 切り替え候補。membership が無いプロジェクトは出ない
-- `createProject(orgId, slug, name)`: 組織の owner だけ（Account API）
-- `inviteMember(projectId, email, role)` / `removeMember` / `changeRole`: プロジェクトの owner だけ
-- `createApiKey(projectId, scope)` / `revokeApiKey`: owner だけ。生の鍵は作った時に 1 回だけ返す
-
 ## 見えないは UI ではなく API が守る
 
 切り替え候補に出さないだけでなく、`business.example.com/admin/graphql` を叩いても membership が無ければ 403。
 テストは `TestTenantPg` と同じ形で「Consumer の editor が Business の型を読めない・作れない」を書く。
-
-## 見積もり
-
-3〜4 日。内訳: 表と migration（0.5）、JWT 検証と Runner への組み込み（1）、Actor effect と既存ユースケースへの
-`require` 追加とテスト（1）、`me` とメンバー・鍵の mutation（1）、Host ルーティングと予約 slug（0.5）。
 
 ## 関連
 
