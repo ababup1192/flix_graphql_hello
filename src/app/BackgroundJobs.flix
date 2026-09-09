@@ -136,12 +136,31 @@ mod BackgroundJobs {
         shutdown(state);
         System.exit(3)
 
-    /// 1 tick。失敗は Error の行にする（1 tickに 1 行ずつ）。
+    ///
+    /// tickが長引いたと見なす長さ（ミリ秒）。/health が止まったと見なす 30 秒の半分。
+    ///
+    /// WhyNot: 毎回の周を Info で出さないのは、間隔 2 秒だと 1 日 4 万行を超え、長引いた周が埋もれるため。
+    /// 長引いた周だけ出せば「5 秒 → 25 秒と伸びていて、明日には 503 になる」が 503 の前に見える。
+    ///
+    def slowTickMs(): Int64 = 15000i64
+
+    /// 1 tick。失敗は Error の行にする（1 tickに 1 行ずつ）。長引いた周は Warn の行を 1 つ。
     def round(pool: Pool, state: State, sink: Log.Sink): Unit \ IO =
-        // tick を JVM の例外の catch の中で回し、失敗の説明を集める
+        // tick を JVM の例外の catch の中で回し、失敗の説明を集める（かかった時間も測る）
+        let startedAt = System.currentTimeMillis();
         let messages = guarded(sink, () -> tick(pool, state));
-        // 失敗 1 つにつき Error の行を 1 つ
-        Log.runWith(sink, () -> List.forEach(message -> Log.Fields.empty() |> Log.Fields.str("error.message", message) |> Log.error("jobs tick failed"), messages));
+        let elapsedMs = System.currentTimeMillis() - startedAt;
+        Log.runWith(sink, () -> {
+            // 失敗 1 つにつき Error の行を 1 つ
+            List.forEach(message -> Log.Fields.empty()
+                |> Log.Fields.str("error.message", message)
+                |> Log.Fields.int("job.tick.duration_ms", elapsedMs)
+                |> Log.error("jobs tick failed"), messages);
+            // 止まる前に気付けるよう、長引いた周だけ 1 行
+            if (elapsedMs > slowTickMs())
+                Log.Fields.empty() |> Log.Fields.int("job.tick.duration_ms", elapsedMs) |> Log.warn("jobs tick slow")
+            else ()
+        });
         // 例外で tick が途中で抜けた時も、inTick フラグを必ず下ろす
         Ref.put(false, state#inTick)
 

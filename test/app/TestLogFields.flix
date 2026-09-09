@@ -73,6 +73,7 @@ mod TestLogFields {
 
     /// 重さ: 2xx / 4xx は Info、401 / 403 / 503 は Warn、5xx と例外は Error、/health の 2xx だけ Debug（/p/x/health も）。
     /// 200 でも credential.kind が invalid か graphql.error_codes に UNAUTHENTICATED があれば Warn（FORBIDDEN だけ・生きた鍵は Info）。
+    /// /health が 200 でも reason（degraded）が付いていれば Warn。
     @Test
     def testResponseSeverityTable(): Unit \ Assert =
         let none = Fields.empty();
@@ -88,6 +89,11 @@ mod TestLogFields {
             (("/health", 200, false, none),       Severity.Debug),
             (("/p/shop/health", 200, false, none), Severity.Debug),
             (("/health", 503, false, none),       Severity.Warn),
+            // degraded（200 だが reason が付いている）は Debug に落とさず Warn。既定の info でも行が出る
+            (("/health", 200, false, none |> Fields.str("reason", "pool saturated (90%)")),        Severity.Warn),
+            (("/p/shop/health", 200, false, none |> Fields.str("reason", "pool saturated (90%)")), Severity.Warn),
+            // reason は /health 以外の 200 では重さを変えない
+            (("/graphql", 200, false, none |> Fields.str("reason", "x")),                          Severity.Info),
             (("-", 400, false, none),             Severity.Info),
             (("/admin/graphql", 200, false, none |> Fields.str("credential.kind", "invalid")),                        Severity.Warn),
             (("/admin/graphql", 200, false, none |> Fields.strs("graphql.error_codes", List#{"UNAUTHENTICATED"})),     Severity.Warn),
@@ -190,6 +196,29 @@ mod TestLogFields {
         Assert.assertEq(
             expected = Some(Value.List(List#{Value.Str("NOT_FOUND"), Value.Str("FORBIDDEN"), Value.Str("ValidationError")})),
             Fields.empty() |> LogFields.graphql(graphqlRequest("{ x }", None), response) |> Map.get("graphql.error_codes"))
+
+    ///
+    /// INTERNAL（DB の失敗）が errors[] にあれば、スカラーの error.code にも同じ語を置く。
+    /// 他の分類だけの行には付けず、既に error.code がある行（MCP の tools/call など）は上書きしない。
+    ///
+    @Test
+    def testGraphqlInternalErrorCodeTable(): Unit \ Assert =
+        let responseWith = codes -> ({ data = Value.Null, errors = codes |> List.map(code -> errorWith(Map#{ "code" => Value.Str(code) })) }: GraphqlResponse);
+        let cases = List#{
+            // DB の失敗だけ
+            ((Fields.empty(), responseWith(List#{"INTERNAL"})),                        Some(Value.Str("INTERNAL"))),
+            // 業務エラーに混じっていても拾う
+            ((Fields.empty(), responseWith(List#{"NOT_FOUND", "INTERNAL"})),           Some(Value.Str("INTERNAL"))),
+            // 業務エラーだけなら付けない
+            ((Fields.empty(), responseWith(List#{"NOT_FOUND"})),                       None),
+            // errors[] が空なら付けない
+            ((Fields.empty(), responseWith(Nil)),                                      None),
+            // 既に error.code がある行（MCP の細かい語）は上書きしない
+            ((Fields.empty() |> Fields.str("error.code", "preview_token"), responseWith(List#{"INTERNAL"})), Some(Value.Str("preview_token")))
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd),
+            cases |> List.map(match ((fields, response), _) -> fields |> LogFields.graphql(graphqlRequest("{ x }", None), response) |> Map.get("error.code")))
 
     // ---- 業務エラー ----
 

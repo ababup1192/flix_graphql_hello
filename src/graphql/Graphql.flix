@@ -46,7 +46,9 @@ import graphql.analysis.MaxQueryDepthInstrumentation
     import graphql.GraphQLException
     import graphql.TypeResolutionEnvironment
     import graphql.execution.DataFetcherResult
+    import graphql.execution.UnknownOperationException
     import graphql.language.SourceLocation
+    import graphql.parser.ParserOptions
     import graphql.schema.DataFetcher
     import graphql.schema.DataFetchingEnvironment
     import graphql.schema.FieldCoordinates
@@ -84,6 +86,7 @@ import graphql.analysis.MaxQueryDepthInstrumentation
     /// 同じ配線ができる GraphQLCodeRegistry 経由にしている。
     ///
     pub def buildEngine(schema: Schema): Result[String, Engine] \ IO =
+        applyParserLimits();
         forM (
             types            <- Schema.collectTypes(schema);
             executableSchema <- makeExecutableSchema(Schema.renderSdl(schema, types), types)
@@ -96,6 +99,32 @@ import graphql.analysis.MaxQueryDepthInstrumentation
     pub def maxQueryDepth(): Int32 = 15
 
     ///
+    /// クエリのトークン数の上限。管理画面（elm-graphql）は variables を使わず引数を document に埋め込むので、
+    /// 記事の本文（richText の doc）がそのままクエリに乗る。MCP と CLI も同じ形で大きな本文を送る。
+    ///
+    /// WhyNot: graphql-java 22.3 の既定（15,000）のままにしないのは、本文の上限（Http.maxBodyBytes() = 1 MiB）より先に当たり、
+    /// 長い記事の保存だけが読めない理由で落ちるため。文字数の上限（maxCharacters）が 1 MiB のままなので、
+    /// この値を上げてもクエリの大きさは本文の上限で頭打ちになる。
+    ///
+    /// WhyNot: 環境変数にしないのは、運用で回す値ではなく「本文の上限より先に当たらない」という 1 つの条件で決まるため。
+    ///
+    pub def maxQueryTokens(): Int32 = 100000
+
+    ///
+    /// graphql-java のパーサの上限を JVM 全体に入れる。クエリのパースが読むのは
+    /// ParserOptions.getDefaultOperationParserOptions()（ParseAndValidate.parse）なので、そちらを差し替える。
+    /// エンジンを組むたびに呼ぶ（同じ値を入れ直すだけ）。
+    ///
+    /// WhyNot: SDL 側（setDefaultSdlParserOptions）を触らないのは、SDL の既定が既に上限無しのため。
+    ///
+    /// WhyNot: 既定を transform で写して maxTokens だけ変えないのは、transform が java.util.function.Consumer を取り、
+    /// Flix のラムダをそのまま渡せないため。graphql-java 22.3 の既定と同じ値を並べて組み直す。
+    ///
+    def applyParserLimits(): Unit \ IO =
+        ParserOptions.setDefaultOperationParserOptions(
+            ParserOptions.newParserOptions().captureIgnoredChars(false).captureSourceLocation(true).captureLineComments(false).maxCharacters(1048576).maxTokens(maxQueryTokens()).maxWhitespaceTokens(200000).maxRuleDepth(500).build())
+
+    ///
     /// 組み立て済みのエンジンで 1 リクエストを実行する。MCP やテストのように「エンジンを持っている側」はこれを直に呼ぶ。
     ///
     /// WhyNot: `Graphql` effect をやめてこの関数（executor）を値で渡さないのは、handler が Main でもテストでも 1 段で
@@ -103,7 +132,29 @@ import graphql.analysis.MaxQueryDepthInstrumentation
     ///
     pub def executeWith(engine: Engine, request: GraphqlRequest, context: Context): GraphqlResponse \ IO =
         let Engine.Engine(graphql) = engine;
-        toResponse(graphql.execute(toExecutionInput(request, context)).toSpecification())
+        try {
+            toResponse(graphql.execute(toExecutionInput(request, context)).toSpecification())
+        } catch {
+            case e: UnknownOperationException => invalidRequestResponse(e.getMessage())
+        }
+
+    ///
+    /// クライアントの入力の誤りで graphql-java が例外を投げた時の応答。data は null、errors[] は path の無い 1 件で
+    /// extensions.code は INVALID。HTTP は 200 のまま（GraphQL の実行まで届いた失敗は errors[] で返す決まり）。
+    ///
+    /// WhyNot: 例外をそのまま外へ出さないのは、HTTP の層で 500 と INTERNAL になり「サーバの障害」としてクライアントに
+    /// 再試行を促すため。捕まえるのを UnknownOperationException（operationName が文書の操作と食い違う・複数の操作があるのに
+    /// 選んでいない）に絞るのは、DB のようなサーバ起因の例外を 500 と INTERNAL のまま残すため。
+    ///
+    /// WhyNot: message を日本語に書き換えないのは、文書の誤りの文言は graphql-java の検査エラー（Validation error of type ...）も
+    /// 英語のままクライアントに届いており、同じ層の物を揃えるため。
+    ///
+    def invalidRequestResponse(message: String): GraphqlResponse =
+        { data = Value.Null,
+          errors = Value.Obj(Map#{
+              "message"    => Value.Str(message),
+              "extensions" => Value.Obj(Map#{ "code" => Value.Str(ErrorCode.text(ErrorCode.Invalid)) })
+          }) :: Nil }
 
     ///
     /// 組み立て済みのエンジンで `Graphql` effect を本物の実行に置き換えるハンドラ。

@@ -97,13 +97,24 @@ mod LogFields {
     ///
     /// リクエストの行の重さ。5xx か例外は Error、401 / 403 / 503 は Warn、/health の 2xx は Debug、それ以外は Info。
     /// 認証に落ちた物（`credential.kind` が invalid、`graphql.error_codes` に UNAUTHENTICATED）は HTTP が 200 でも Warn。
+    /// /health が ok でない物（reason が付いた degraded の 200）も Warn。
     ///
     pub def responseSeverity(path: String, status: Int32, failed: Bool, fields: Fields): Severity =
         if (failed or status >= 500 and status != 503) Severity.Error
         else if (status == 401 or status == 403 or status == 503) Severity.Warn
         else if (authenticationFailed(fields)) Severity.Warn
+        else if (healthDegraded(path, status, fields)) Severity.Warn
         else if (status < 300 and String.endsWith(suffix = "/health", path)) Severity.Debug
         else Severity.Info
+
+    ///
+    /// /health が 200 を返したが status が ok でない（reason が付いている）行か。
+    ///
+    /// WhyNot: 200 のまま Debug に落とすと、既定の CMS_LOG_LEVEL=info では行が出ず、
+    /// 接続の漏れ（degraded）が本文を目で見る以外に届かないため。
+    ///
+    def healthDegraded(path: String, status: Int32, fields: Fields): Bool =
+        status < 300 and String.endsWith(suffix = "/health", path) and Map.memberOf("reason", fields)
 
     def authenticationFailed(fields: Fields): Bool =
         Map.get("credential.kind", fields) |> Option.flatMap(Value.asStr) == Some("invalid")
@@ -153,6 +164,13 @@ mod LogFields {
 
     ///
     /// GraphQL の境界の属性。操作の種類と名前、errors[].extensions.code の一覧（無ければ付けない）。
+    /// INTERNAL（DB の失敗）が 1 つでもあれば error.code にも同じ語を置く。
+    ///
+    /// WhyNot: INTERNAL のときに行の severity を上げないのは、プールが枯渇すると正常なリクエストが軒並み INTERNAL になり、
+    /// 1 分で数百行の Error が出て本当に見るべき行（self-heal や job failed）が埋もれるため。
+    ///
+    /// WhyNot: graphql.error_codes だけに任せないのは、あれが配列で、Loki の json が
+    /// graphql_error_codes_0 のように展開するため率のアラートを書きにくいから。error.code はスカラー。
     ///
     pub def graphql(request: GraphqlRequest, response: GraphqlResponse, fields: Fields): Fields =
         let (operationType, operationName) = Server.operationOf(request#queryText, request#operationName);
@@ -161,6 +179,15 @@ mod LogFields {
             |> Fields.str("graphql.operation.type", operationType)
             |> Fields.opt("graphql.operation.name", operationName)
             |> (found -> if (List.isEmpty(codes)) found else Fields.strs("graphql.error_codes", codes, found))
+            |> withInternalCode(codes)
+
+    ///
+    /// INTERNAL があれば error.code に置く。すでに error.code がある行（MCP の tools/call など、より細かい語）は触らない。
+    ///
+    def withInternalCode(codes: List[String], fields: Fields): Fields =
+        if (List.memberOf("INTERNAL", codes) and not Map.memberOf("error.code", fields))
+            Fields.str("error.code", "INTERNAL", fields)
+        else fields
 
     ///
     /// errors[] の 1 つの分類。業務エラーは extensions.code、graphql-java の検証エラーは extensions.classification。どちらも無ければ None。

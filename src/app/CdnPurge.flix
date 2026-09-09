@@ -83,9 +83,11 @@ mod CdnPurge {
                 case None        => discard CdnPurgesQueries.markPurgeFailed({ id = claimed#id, projectId = claimed#projectId, lastStatus = status, lastError = reason })
             }
         };
+        // 何回目の試行かと、次に試すまでの秒数（Webhook と同じ間隔）
+        let retry = { attempts = claimed#attempts, delaySeconds = WebhookDispatcher.retryDelaySeconds(claimed#attempts) };
         match outcome {
             case Ok(status)       => JobLog.write({ kind = JobLog.JobKind.CdnPurge, id = claimed#id, outcome = JobLog.JobOutcome.Delivered, detail = "HTTP ${status} (v${claimed#contentVersion})" }, labels |> WebhookDispatcher.outcomeFields(outcome))
-            case Err((_, reason)) => JobLog.write({ kind = JobLog.JobKind.CdnPurge, id = claimed#id, outcome = if (Option.isEmpty(WebhookDispatcher.retryDelaySeconds(claimed#attempts))) JobLog.JobOutcome.Failed else JobLog.JobOutcome.RetryLater, detail = reason }, labels |> WebhookDispatcher.outcomeFields(outcome))
+            case Err((_, reason)) => JobLog.write({ kind = JobLog.JobKind.CdnPurge, id = claimed#id, outcome = if (Option.isEmpty(retry#delaySeconds)) JobLog.JobOutcome.Failed else JobLog.JobOutcome.RetryLater, detail = reason }, labels |> WebhookDispatcher.outcomeFields(outcome) |> JobLog.retryFields(retry))
         };
         DbRunner.withTx(pool, None, write) |> Result.mapErr(failure -> "purge の結果を書けません: ${failure}")
 

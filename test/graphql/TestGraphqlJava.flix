@@ -9,7 +9,7 @@ mod TestGraphqlJava {
     import java.lang.Thread
 
     use Schema.{arg, field0, field1, objectType}
-    use GraphqlTestKit.{appSchema, executeOnce, executeQuery, executeRequest, queryOnly, queryOnlySchema}
+    use GraphqlTestKit.{appSchema, executeOnce, executeQuery, executeRequest, firstErrorField, queryOnly, queryOnlySchema}
 
 
     ///
@@ -244,6 +244,32 @@ mod TestGraphqlJava {
         Assert.assertEq(expected = (Ok(true), Ok(false)),
             (tooDeep |> Result.map(match (_, message) -> message |> Option.exists(String.contains(substr = "depth"))),
              fine |> Result.map(match (_, message) -> message |> Option.exists(String.contains(substr = "depth")))))
+
+    /// ping だけを返すスキーマ。操作名とトークン数のテストが使う。
+    def pingSchema(): Schema =
+        queryOnlySchema(field0("ping", Out.string(), (_context, _root) -> Ok("pong")) :: Nil)
+
+    ///
+    /// operationName が文書の操作と食い違うと、例外が素通りせず data は null・errors[] 1 件で extensions.code は INVALID。
+    ///
+    ///   query { ping }  +  operationName: "nope"  ─▶  { data: null, errors: [{ extensions: { code: INVALID } }] }
+    ///
+    @Test
+    def testGraphqlJavaUnknownOperationIsInvalid(): Unit \ {Assert, IO} =
+        Assert.assertEq(
+            expected = Ok((Value.Null, Value.Obj(Map#{ "code" => Value.Str("INVALID") }))),
+            executeOnce(pingSchema(), { queryText = "query { ping }", variables = Map.empty(), operationName = Some("nope") })
+                |> Result.map(response -> (response#data, firstErrorField("extensions", response))))
+
+    ///
+    /// graphql-java の既定（15,000 トークン）を超える長さのクエリも通る。1 つの別名で 3 トークン（別名・コロン・フィールド）なので、
+    /// 6,000 個で 18,000 トークン。
+    ///
+    @Test
+    def testGraphqlJavaTokenLimit(): Unit \ {Assert, IO} =
+        let aliases = List.range(0, 6000) |> List.map(index -> "a${index}: ping") |> List.join(" ");
+        Assert.assertEq(expected = Ok(None),
+            executeQuery(pingSchema(), "{ ${aliases} }") |> Result.map(match (_, message) -> message))
 
     // ---- 実行のスレッド ----
 

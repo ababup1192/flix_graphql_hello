@@ -154,7 +154,7 @@ mod AdminMutationResolvers {
     pub def inviteMember(): GeneratedAdmin.MutationInviteMemberResolver[AdminEff] =
         (_context, email, role) -> Ok(inviteOf(email, role))
 
-    def inviteOf(email: String, role: GeneratedAdmin.Role): Invitation \ Db + CmsErr + IdGen + Tenant + Session =
+    def inviteOf(email: String, role: GeneratedAdmin.Role): Invitation \ Db + CmsErr + IdGen + Tenant + Session + Time.Clock.Clock =
         Members.invite(Session.grant(), email, AdminMapping.roleOf(role))
 
     /// Mutation.cancelInvitation。消した id を返す

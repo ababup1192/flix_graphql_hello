@@ -43,6 +43,21 @@ mod JobLog {
     }
 
     ///
+    /// 再試行する仕事の属性。何回目の試行か（job.attempts）と、次に試すまでの秒数（job.retry_delay_seconds）。
+    /// 諦めた（もう試さない）ときは秒数を付けない。
+    ///
+    /// WhyNot: 次に試す「時刻」を出さないのは、時刻を決めるのが SQL 側（now() + make_interval）で、
+    /// この行を出す時点ではまだ書いていないため。JVM 側で組むと DB との時計差ぶん嘘になる。行の時刻に秒数を足せば読める。
+    ///
+    /// WhyNot: write の entry に足さないのは、entry が閉じたレコードで、再試行を持たない仕事（予約公開）まで
+    /// None を書く事になるため。仕事ごとに違う属性は fields で渡す、が元からの形。
+    ///
+    pub def retryFields(retry: { attempts = Int32, delaySeconds = Option[Int64] }, fields: Fields): Fields =
+        fields
+            |> Fields.int("job.attempts", Int32.toInt64(retry#attempts))
+            |> (found -> retry#delaySeconds |> Option.map(seconds -> Fields.int("job.retry_delay_seconds", seconds, found)) |> Option.getWithDefault(found))
+
+    ///
     /// 1 行出す。fields は業務エラーの属性（LogFields.failure）など、足したい物。
     ///
     pub def write(entry: { kind = JobKind, id = String, outcome = JobOutcome, detail = String }, fields: Fields): Unit \ Log =

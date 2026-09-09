@@ -117,9 +117,11 @@ mod WebhookDispatcher {
             }
         };
         // 仕事の行を先に出してから、そのプロジェクトの RLS の印を置いた Tx で書く
+        // 何回目の試行かと、次に試すまでの秒数（失敗した時だけ。届いた行には要らない）
+        let retry = { attempts = claimed#attempts, delaySeconds = retryDelaySeconds(claimed#attempts) };
         match outcome {
             case Ok(status)       => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = JobLog.JobOutcome.Delivered, detail = "HTTP ${status}" }, labels |> outcomeFields(outcome))
-            case Err((_, reason)) => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = if (Option.isEmpty(retryDelaySeconds(claimed#attempts))) JobLog.JobOutcome.Failed else JobLog.JobOutcome.RetryLater, detail = reason }, labels |> outcomeFields(outcome))
+            case Err((_, reason)) => JobLog.write({ kind = JobLog.JobKind.Webhook, id = claimed#id, outcome = if (Option.isEmpty(retry#delaySeconds)) JobLog.JobOutcome.Failed else JobLog.JobOutcome.RetryLater, detail = reason }, labels |> outcomeFields(outcome) |> JobLog.retryFields(retry))
         };
         DbRunner.withTx(pool, Some(projectId), write) |> Result.mapErr(failure -> "配信の結果を書けません: ${failure}")
 

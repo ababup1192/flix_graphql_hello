@@ -43,7 +43,7 @@
 | `exception.type` | string | Error の行 | `LogFields.exception`。graphql-java が包む `CompletionException` は剥がして中の例外の型 |
 | `exception.message` | string | Error の行 | 200 字。`Detail:` 以降は落とす（PG が行の値を入れるため） |
 | `exception.stacktrace` | string | Error の行 | Flix の frame だけ 8 つ |
-| `error.code` | string | 業務エラーの行、リゾルバの失敗の行、4xx / 503 のリクエストの行、MCP の error の行、鍵が検証に落ちた行 | 業務エラーと認証の断り（MCP の 401）は GraphQL の `extensions.code` と同じ綴り（`UNAUTHENTICATED` / `REQUIRES_LOGIN` / `FORBIDDEN`）。4xx / 503 は短い固定の語（`no_route` / `method_not_allowed` / `unsupported_media_type` / `bad_json` / `bad_request` / `jobs_token` / `no_project` / `unavailable`、MCP の `origin` / `protocol_version` / `preview_token`）。鍵が検証に落ちた 200 の行は `api_key_unknown` / `api_key_expired` / `api_key_revoked`。MCP の tools/call が isError なら content の `code` |
+| `error.code` | string | 業務エラーの行、リゾルバの失敗の行、4xx / 503 のリクエストの行、MCP の error の行、鍵が検証に落ちた行 | 業務エラーと認証の断り（MCP の 401）は GraphQL の `extensions.code` と同じ綴り（`UNAUTHENTICATED` / `REQUIRES_LOGIN` / `FORBIDDEN`）。4xx / 503 は短い固定の語（`no_route` / `method_not_allowed` / `unsupported_media_type` / `bad_json` / `bad_request` / `jobs_token` / `no_project` / `unavailable`、MCP の `origin` / `protocol_version` / `preview_token`）。鍵が検証に落ちた 200 の行は `api_key_unknown` / `api_key_expired` / `api_key_revoked`。MCP の tools/call が isError なら content の `code`。GraphQL が 200 で返した `errors[]` に `INTERNAL`（DB の失敗）があれば `INTERNAL`（`graphql.error_codes` は配列で率のアラートを書きにくいため、スカラーでも置く。他の理由で既に付いている行は上書きしない） |
 | `error.message` | string | 起動の失敗、ワーカーの失敗、リゾルバの失敗、4xx のリクエストの行、繋がらなかった Webhook の行 | 人が読む文。4xx は応答本文と同じ文、Webhook は「接続できませんでした: java.net.ConnectException」のような文 |
 | `error.kind` | string | リゾルバの失敗の行、DB に届かなかった 503 のリクエストの行 | DB の失敗の種類（sqlfx の TransientDbErr の名前 `deadlock` / `timeout` / `connectionLost` と、失敗した SQL の後の COMMIT が弾かれた `rollback`）。再試行で枯渇した物は最後の失敗の種類。「DB が落ちた」と「DB が遅い」を読み分ける。制約違反などには付かない |
 | `db.retries` | int | リクエストの行 | 一時的な失敗で呼び直した回数。1 以上の時だけ。リクエストの中の Tx 全部（認証と版を読む Tx を含む）の和。DB が落ちている時の 503 の行にも付く |
@@ -56,15 +56,19 @@
 | `db.pool.idle` | int | `self-heal: exiting` の行 | 空いている接続の数 |
 | `db.pool.total` | int | `self-heal: exiting` の行 | 開いている接続の数（active + idle） |
 | `db.pool.max` | int | `self-heal: exiting` の行 | プールの上限 |
+| `pool.used_percent` | int | `/health` のリクエストの行 | DB の接続プールの使用中の割合。9 割以上で張り付きと見なした時だけ（`status: degraded`）。接続の漏れは ping が通ってしまうので、この行でしか見えない |
 | `jobs.stalled_ms` | int | `/health` のリクエストの行 | 仕事の周が最後に回ってからの経過。上限（30 秒）を超えて 503 にした時だけ |
 | `watch.stalled_ms` | int | `/health` のリクエストの行 | 自己回復の見張りの周が最後に回ってからの経過。上限（30 秒）を超えて 503 にした時だけ |
-| `reason` | string | `self-heal: exiting` の行、`/health` の 503 のリクエストの行 | 自分で終わると決めた理由（何 ms 届かなかったか）。`/health` は応答の `db`（DB に届かない理由）か `reason`（`jobs stalled` / `watch stalled`）と同じ文 |
+| `reason` | string | `self-heal: exiting` の行、`/health` の 503 と degraded のリクエストの行 | 自分で終わると決めた理由（何 ms 届かなかったか）。`/health` は応答の `db`（DB に届かない理由）か `reason`（`jobs stalled` / `watch stalled` / `pool saturated (…%)`）と同じ文。この行が付いた `/health` は 200 でも Warn |
 | `origin` | string | 403 のリクエストの行（MCP） | 断った `Origin` の scheme + host（パスやクエリは無い） |
 | `entity` | string | 業務エラーの行 | `extensions.entity` と同じ |
 | `id` | string | 業務エラーの行、予約公開の行、MCP のリクエストの行、プレビューの span | entry の id など。連番は出さない。MCP は引数の id、無ければ結果の id（create_entry で作った物） |
 | `job.kind` | string | ワーカーの行 | `schedule` / `webhook` / `cdn_purge` |
 | `job.id` | string | ワーカーの行 | 予約の id、配信の ULID（`X-Cms-Delivery` と同じ。受け手のログと突き合わせる相関 id） |
 | `job.outcome` | string | ワーカーの行 | `done` / `failed` / `retry` / `delivered` |
+| `job.attempts` | int | ワーカーの行（webhook / cdn_purge） | 何回目の試行か。予約公開（schedule）は再試行しないので付かない |
+| `job.retry_delay_seconds` | int | ワーカーの行（webhook / cdn_purge の retry） | 次に試すまでの秒数。次の時刻は行の時刻 + この秒数（時刻そのものは SQL 側が決めるので、この行を出す時点ではまだ書いていない）。諦めた（failed）行には付かない |
+| `job.tick.duration_ms` | int | `jobs tick failed` / `jobs tick slow` の行 | 1 周にかかったミリ秒。15 秒（`/health` が止まったと見なす 30 秒の半分）を超えた周は `jobs tick slow` の Warn で出す。503 になる前に「周が伸びている」が見える |
 | `detail` | string | ワーカーの行 | `publish e_x`、`HTTP 500`、`接続できませんでした: …` など |
 | `webhook.id` | string | Webhook の行 | Webhook の public_id（管理 API の `Webhook.id`）。消えた Webhook の行には無い |
 | `cache.status` | string | リクエストの行（コンテンツ API の `GET /graphql` で認証が通った物） | `hit`（If-None-Match が ETag に合って 304。GraphQL は実行しない）/ `miss`（匿名で 200）/ `bypass`（鍵やトークン付き。no-store） |
@@ -77,14 +81,25 @@
 | `shutdown.connections` | int | `shutdown timed out` の行 | 期限までに閉じなかった HTTP の接続の数 |
 | `shutdown.in_tick` | bool | `shutdown timed out` の行 | 仕事の 1 周が途中のままだったか |
 
+## DB が落ちた時の見え方（2 通りある）
+
+同じ「DB が落ちた」でも、どこで落ちたかで行が変わる。通知の条件を書く時はどちらも拾う。
+
+| どこ | HTTP | severity | 目印 |
+|---|---|---|---|
+| 接続する前（Tx を張れない） | 503 | warn | `error.code: unavailable`、`error.kind` |
+| リゾルバの中（Tx の失敗） | 200 + `errors[]` | error（`field failed` の行）| リクエストの行に `error.code: INTERNAL` |
+
+リクエストの行だけを見るなら `error.code` が `unavailable` か `INTERNAL` の率で 1 本にまとめられる。
+
 ## severity の決め
 
 | severity | 何を |
 |---|---|
 | error | 5xx、handle の例外、Webhook の最後の失敗、予約公開の失敗、リゾルバの DB の失敗（INTERNAL）、ワーカーの 1 周の失敗 |
-| warn | 停止の待ち切れ（`shutdown timed out`。この後 exit 2）、401 / 403、知らない鍵・死んだ PAT（HTTP は 200 でも `credential.kind: invalid` か `graphql.error_codes` に `UNAUTHENTICATED`）、限界の 503、Webhook の再試行、jobs off、所有者で DB に繋ぐ |
+| warn | 停止の待ち切れ（`shutdown timed out`。この後 exit 2）、401 / 403、知らない鍵・死んだ PAT（HTTP は 200 でも `credential.kind: invalid` か `graphql.error_codes` に `UNAUTHENTICATED`）、限界の 503、Webhook の再試行、jobs off、所有者で DB に繋ぐ、`/health` の degraded（200 でも `reason` が付いた行）、長引いた仕事の周（`jobs tick slow`） |
 | info | 2xx / 4xx のリクエストの行（404 / 400 はユーザーの正常な失敗。MCP の tools/call もこの行）、job の done / delivered、起動（`listening`）、停止（SIGTERM / SIGINT の `shutting down` → `jobs drained`） |
-| debug | `/health` の 2xx（外形監視で 1 日 1.4k 行。集計を汚さない） |
+| debug | `/health` の 2xx で `reason` が付いていない物（外形監視で 1 日 1.4k 行。集計を汚さない） |
 | fatal | 起動の失敗（この後 exit 1）、OutOfMemoryError |
 
 `CMS_LOG_LEVEL`（既定 `info`）より軽い行は出ない。
