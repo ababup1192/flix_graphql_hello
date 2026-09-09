@@ -1,0 +1,50 @@
+{
+  "name": "cms-admin-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "gen": "elm-graphql --schema-file ../admin.graphql --base Api.Admin --output generated --scalar-codecs ScalarCodecs && elm-graphql --schema-file ../account.graphql --base Api.Account --output generated --scalar-codecs AccountCodecs",
+    "test": "elm-test",
+    "check": "elm-format --validate src tests && elm-review && elm-test && elm make src/Main.elm --output=/dev/null && tsc --noEmit",
+    "review": "elm-review",
+    "contract": "node scripts/contract.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "verify": "npm run check && npm run contract && npm run smoke && npm run audit",
+    "seed": "node scripts/seed.mjs",
+    "explore": "node scripts/explore.mjs",
+    "audit": "node scripts/audit.mjs && node scripts/audit2.mjs"
+  },
+  "devDependencies": {
+    "@dillonkearns/elm-graphql": "4.3.1",
+    "@types/node": "^22.20.1",
+    "elm": "0.19.1-6",
+    "elm-format": "0.8.7",
+    "elm-review": "^2.12.0",
+    "elm-test": "0.19.1-revision12",
+    "playwright": "^1.49.0",
+    "typescript": "5.6.3",
+    "vite": "5.4.11",
+    "vite-plugin-elm": "3.0.1"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@tiptap/core": "^2.27.3",
+    "@tiptap/extension-code-block-lowlight": "^2.27.3",
+    "@tiptap/extension-link": "^2.27.3",
+    "@tiptap/extension-table": "^2.27.3",
+    "@tiptap/extension-table-cell": "^2.27.3",
+    "@tiptap/extension-table-header": "^2.27.3",
+    "@tiptap/extension-table-row": "^2.27.3",
+    "@tiptap/extension-task-item": "^2.27.3",
+    "@tiptap/extension-task-list": "^2.27.3",
+    "@tiptap/extension-underline": "^2.27.3",
+    "@tiptap/starter-kit": "^2.27.3",
+    "highlight.js": "^11.11.1",
+    "katex": "^0.18.7",
+    "lowlight": "^3.3.0",
+    "mermaid": "^11.17.2",
+    "tailwindcss": "^4.3.3"
+  }
+}

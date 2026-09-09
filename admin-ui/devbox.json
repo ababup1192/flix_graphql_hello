@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
+  "packages": ["nodejs@22", "gnumake"],
+  "shell": {
+    "scripts": {
+      "install": ["npm ci"],
+      "dev": ["npm run dev"],
+      "check": ["npm run check"],
+      "build": ["npm run build"]
+    }
+  }
+}

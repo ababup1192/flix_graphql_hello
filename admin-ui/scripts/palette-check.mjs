@@ -1,0 +1,21 @@
+import { chromium } from "playwright";
+const base = "http://localhost:5173";
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const say = (m) => console.log(m);
+page.on("pageerror", (e) => say("例外: " + String(e).slice(0, 200)));
+await page.goto(base + "/p/default/c/blogs", { waitUntil: "domcontentloaded" });
+await page.waitForTimeout(1800);
+await page.locator("button", { hasText: "API・コンテンツ・メディア・設定を検索" }).click();
+await page.waitForTimeout(600);
+await page.keyboard.type("あばば", { delay: 40 });
+await page.waitForTimeout(2000);
+const shown = await page.evaluate(() => {
+  const input = document.getElementById("palette-input");
+  if (!input) return "パレットが開いていない";
+  const box = input.closest("div[class*='fixed']") ?? input.parentElement?.parentElement;
+  return box ? box.textContent.replace(/\s+/g, " ").trim().slice(0, 260) : "箱が見つからない";
+});
+say("候補: " + JSON.stringify(shown));
+await page.screenshot({ path: "/tmp/palette.png", clip: { x: 300, y: 60, width: 900, height: 320 } });
+await browser.close();

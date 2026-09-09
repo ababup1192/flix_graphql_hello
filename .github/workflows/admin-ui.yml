@@ -1,0 +1,45 @@
+name: admin-ui
+
+on:
+  push:
+    paths: ["admin-ui/**", "admin.graphql", "account.graphql", ".github/workflows/admin-ui.yml"]
+  pull_request:
+    paths: ["admin-ui/**", "admin.graphql", "account.graphql", ".github/workflows/admin-ui.yml"]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin-ui/package-lock.json
+      - name: Elm のキャッシュ
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.elm
+            admin-ui/elm-stuff
+            admin-ui/review/elm-stuff
+          key: elm-${{ hashFiles('admin-ui/elm.json', 'admin-ui/review/elm.json') }}
+      - run: npm ci
+      - name: SDL と生成物のずれ
+        run: |
+          npm run gen
+          git diff --exit-code -- generated || {
+            echo "生成物が SDL とずれています。直し方: make ui-gen && git add admin-ui/generated"
+            exit 1
+          }
+      - run: npm run check
+      - run: npm run build
+      - name: 本番のビルドに dev のヘッダが無い事
+        run: |
+          if grep -ril "x-dev" dist; then
+            echo "dist に dev のヘッダが残っています"
+            exit 1
+          fi

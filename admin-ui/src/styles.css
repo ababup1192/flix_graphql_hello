@@ -1,0 +1,639 @@
+@import "tailwindcss";
+@source "./**/*.elm";
+
+/* トークンは意味で名付ける。要素に生の hex を書かない。
+   値は GitHub（Primer）の配色に合わせている。開発者が毎日見ている物に近い方が、
+   目が慣れていて疲れないため。 */
+@theme {
+  --color-app: #ffffff;
+  --color-panel: #ffffff;
+  --color-raised: #f6f8fa;
+  --color-well: #eff2f5;
+  --color-edge: #d1d9e0;
+  --color-ink: #1f2328;
+  --color-ink-soft: #59636e;
+  --color-ink-faint: #818b98;
+  --color-accent: #0969da;
+
+  /* 選んでいる物の下地。文字は ink のままにする（色の上に色を重ねると沈む） */
+  --color-accent-bg: #ddf4ff;
+  --color-link: #0969da;
+
+  /* 状態の色。ダークでも同じ意味を保つ */
+  --color-ok: #1a7f37;
+  --color-ok-bg: #dafbe1;
+  --color-warn: #9a6700;
+  --color-warn-bg: #fff8c5;
+  --color-bad: #cf222e;
+  --color-bad-bg: #ffebe9;
+  --color-done: #8250df;
+
+  /* 印の色。プロジェクトの頭文字の下地に使う。id から決まるので同じ物はいつも同じ色 */
+  --color-mark-1: #0969da;
+  --color-mark-2: #1f883d;
+  --color-mark-3: #bc4c00;
+  --color-mark-4: #cf222e;
+  --color-mark-5: #8250df;
+  --color-mark-6: #bf3989;
+  --color-mark-7: #1b7c83;
+  --color-mark-8: #6e7781;
+
+  /* フォントは OS の物。読み込みを待たずに出る */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", Meiryo, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* ダークは同じトークンを塗り替えるだけ。状態の色の意味は変えない。 */
+:root[data-theme="dark"] {
+  --color-app: #010409;
+  --color-panel: #0d1117;
+  --color-raised: #151b23;
+  --color-well: #212830;
+  --color-edge: #3d444d;
+  --color-ink: #f0f6fc;
+  --color-ink-soft: #9198a1;
+  --color-ink-faint: #656c76;
+  --color-accent: #4493f8;
+  --color-accent-bg: #121d2f;
+  --color-link: #4493f8;
+  --color-ok: #3fb950;
+  --color-ok-bg: #0f2f1a;
+  --color-warn: #d29922;
+  --color-warn-bg: #2b2413;
+  --color-bad: #f85149;
+  --color-bad-bg: #2d1416;
+  --color-done: #ab7df8;
+  --color-mark-1: #316dca;
+  --color-mark-2: #347d39;
+  --color-mark-3: #ae5622;
+  --color-mark-4: #c93c37;
+  --color-mark-5: #8256d0;
+  --color-mark-6: #ae4c8c;
+  --color-mark-7: #266e73;
+  --color-mark-8: #545d68;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-app: #010409;
+    --color-panel: #0d1117;
+    --color-raised: #151b23;
+    --color-well: #212830;
+    --color-edge: #3d444d;
+    --color-ink: #f0f6fc;
+    --color-ink-soft: #9198a1;
+    --color-ink-faint: #656c76;
+    --color-accent: #4493f8;
+    --color-accent-bg: #121d2f;
+    --color-link: #4493f8;
+    --color-ok: #3fb950;
+    --color-ok-bg: #0f2f1a;
+    --color-warn: #d29922;
+    --color-warn-bg: #2b2413;
+    --color-bad: #f85149;
+    --color-bad-bg: #2d1416;
+    --color-done: #ab7df8;
+    --color-mark-1: #316dca;
+    --color-mark-2: #347d39;
+    --color-mark-3: #ae5622;
+    --color-mark-4: #c93c37;
+    --color-mark-5: #8256d0;
+    --color-mark-6: #ae4c8c;
+    --color-mark-7: #266e73;
+    --color-mark-8: #545d68;
+  }
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  background: var(--color-app);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+code, pre, .font-mono {
+  font-family: var(--font-mono);
+}
+
+/* 押せる物のカーソル。
+   WhyNot: 部品ごとに cursor-pointer を書き足すだけにしない。Tailwind v4 の preflight は
+   button に cursor を当てないので、素の Html.button を 1 つ書き忘れるとそこだけ矢印になる。
+   WhyNot: 押せない物（disabled）には出さない。押せると誤解させる。 */
+@layer base {
+  button:not(:disabled),
+  summary,
+  [role="button"]:not([aria-disabled="true"]),
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="file"]) {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: default;
+  }
+}
+
+/* リッチエディタ。見た目は管理画面のテーマに従う（公開サイトの見た目ではない）。 */
+tiptap-editor {
+  display: block;
+  border: 1px solid var(--color-edge);
+  border-radius: 6px;
+  background: var(--color-panel);
+}
+.tt-body {
+  min-height: 12rem;
+  padding: 0.9rem 1rem;
+  outline: none;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--color-ink);
+}
+.tt-body > * + * { margin-top: 0.7rem; }
+.tt-body h1 { font-size: 1.4rem; font-weight: 600; }
+.tt-body h2 { font-size: 1.2rem; font-weight: 600; }
+.tt-body h3 { font-size: 1.05rem; font-weight: 600; }
+.tt-body ul { list-style: disc; padding-left: 1.4rem; }
+.tt-body ol { list-style: decimal; padding-left: 1.4rem; }
+.tt-body blockquote { border-left: 3px solid var(--color-edge); padding-left: 0.8rem; color: var(--color-ink-soft); }
+.tt-body pre { background: var(--color-well); border-radius: 6px; padding: 0.7rem 0.9rem; font-size: 12px; overflow-x: auto; }
+.tt-body code { font-family: ui-monospace, monospace; font-size: 0.9em; }
+.tt-body a { color: var(--color-link); text-decoration: underline; }
+.tt-body img { max-width: 100%; border-radius: 4px; }
+.tt-body ul[data-type="taskList"] { list-style: none; padding-left: 0.2rem; }
+.tt-body ul[data-type="taskList"] li { display: flex; gap: 0.5rem; align-items: flex-start; }
+.tt-passthrough {
+  border: 1px dashed var(--color-edge);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  color: var(--color-ink-faint);
+  font-size: 12px;
+}
+
+/* リッチエディタのツールバー。群を区切り線で束ねる（Contentful と同じ並び） */
+.tt-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--color-edge);
+  background: var(--color-raised);
+}
+.tt-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: var(--color-edge);
+}
+.tt-spacer { flex: 1; }
+.tt-block {
+  height: 28px;
+  padding: 0 4px 0 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+.tt-block:hover { background: var(--color-well); }
+.tt-tool {
+  min-width: 26px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tt-tool-icon { display: inline-flex; align-items: center; justify-content: center; padding: 5px; }
+.tt-tool:hover { background: var(--color-well); color: var(--color-ink); }
+.tt-tool.is-on { background: var(--color-well); color: var(--color-link); }
+
+/* 押せない物（戻す物が無い時の「元に戻す」）は薄くして、当たり判定も外す */
+.tt-tool:disabled { opacity: 0.35; cursor: default; }
+.tt-tool:disabled:hover { background: transparent; color: var(--color-ink-soft); }
+
+/* コードブロック。言語は帯の中で選ぶ（GitHub と同じ） */
+.tt-code {
+  position: relative;
+  margin: 12px 0;
+  border: 1px solid var(--color-edge);
+  border-radius: 6px;
+  background: var(--color-well);
+  /* WhyNot: overflow: hidden にしない。言語を選ぶ面が枠で切られる（実際に切れた）。
+     角の丸みは中の帯とコードに個別に付ける。 */
+}
+.tt-code-bar {
+  border-radius: 5px 5px 0 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--color-edge);
+  background: var(--color-raised);
+}
+.tt-code-lang {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-ink-soft);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.tt-code-lang:hover { border-color: var(--color-edge); background: var(--color-panel); color: var(--color-ink); }
+.tt-code-lang.is-unset { color: var(--color-ink-faint); }
+
+/* 打って絞る（70 以上あるのでセレクトボックスでは読めない） */
+.tt-code-pop {
+  position: absolute;
+  top: 30px;
+  left: 4px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  max-width: calc(100vw - 40px);
+  border: 1px solid var(--color-edge);
+  border-radius: 6px;
+  background: var(--color-panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+.tt-code-search {
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-bottom: 1px solid var(--color-edge);
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--color-ink);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+.tt-code-list { max-height: 240px; overflow: auto; padding: 4px; }
+.tt-code-item {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-ink-soft);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tt-code-item.is-at { background: var(--color-well); color: var(--color-ink); }
+.tt-code-item.is-on { font-weight: 600; color: var(--color-link); }
+
+.tt-code pre { margin: 0; padding: 12px; border: 0; border-radius: 0 0 5px 5px; background: transparent; overflow-x: auto; }
+
+/* コードの色付け（highlight.js の class 名）。GitHub の配色に合わせる */
+.tt-body pre code { display: block; }
+.hljs-comment, .hljs-quote { color: #59636e; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-meta { color: #cf222e; }
+.hljs-string, .hljs-regexp, .hljs-addition { color: #0a3069; }
+.hljs-number, .hljs-symbol { color: #0550ae; }
+.hljs-type, .hljs-class .hljs-title, .hljs-title.class_ { color: #953800; }
+.hljs-title, .hljs-title.function_, .hljs-section { color: #8250df; }
+.hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable { color: #0550ae; }
+.hljs-built_in { color: #953800; }
+
+:root[data-theme="dark"] .hljs-comment, :root[data-theme="dark"] .hljs-quote { color: #9198a1; }
+:root[data-theme="dark"] .hljs-keyword, :root[data-theme="dark"] .hljs-literal, :root[data-theme="dark"] .hljs-meta { color: #ff7b72; }
+:root[data-theme="dark"] .hljs-string, :root[data-theme="dark"] .hljs-regexp { color: #a5d6ff; }
+:root[data-theme="dark"] .hljs-number, :root[data-theme="dark"] .hljs-symbol { color: #79c0ff; }
+:root[data-theme="dark"] .hljs-type, :root[data-theme="dark"] .hljs-title.class_, :root[data-theme="dark"] .hljs-built_in { color: #ffa657; }
+:root[data-theme="dark"] .hljs-title, :root[data-theme="dark"] .hljs-title.function_ { color: #d2a8ff; }
+:root[data-theme="dark"] .hljs-attr, :root[data-theme="dark"] .hljs-variable { color: #79c0ff; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .hljs-comment { color: #9198a1; }
+  :root:not([data-theme="light"]) .hljs-keyword, :root:not([data-theme="light"]) .hljs-literal, :root:not([data-theme="light"]) .hljs-meta { color: #ff7b72; }
+  :root:not([data-theme="light"]) .hljs-string, :root:not([data-theme="light"]) .hljs-regexp { color: #a5d6ff; }
+  :root:not([data-theme="light"]) .hljs-number { color: #79c0ff; }
+  :root:not([data-theme="light"]) .hljs-type, :root:not([data-theme="light"]) .hljs-built_in { color: #ffa657; }
+  :root:not([data-theme="light"]) .hljs-title { color: #d2a8ff; }
+  :root:not([data-theme="light"]) .hljs-attr, :root:not([data-theme="light"]) .hljs-variable { color: #79c0ff; }
+}
+
+/* リンクの面。URL とコンテンツを 1 つの面で切り替える */
+.tt-link {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  border: 1px solid var(--color-edge);
+  border-radius: 6px;
+  background: var(--color-panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+.tt-link-input {
+  margin: 8px 8px 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--color-edge);
+  border-radius: 4px;
+  background: var(--color-panel);
+  color: var(--color-ink);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+.tt-link-input:focus { border-color: var(--color-accent); }
+.tt-link-list { display: flex; flex-direction: column; max-height: 220px; overflow: auto; padding: 6px; }
+.tt-link-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tt-link-item.is-at { background: var(--color-well); }
+/* URL の行は「打った物をそのまま使う」なので、候補と見た目を分ける */
+.tt-link-item.is-url .tt-link-title { color: var(--color-link); }
+.tt-link-item.is-url .tt-link-kind { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-link-title { flex: 1; color: var(--color-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-link-kind { color: var(--color-ink-faint); font-size: 10px; }
+.tt-link-note { padding: 8px; color: var(--color-ink-faint); font-size: 11px; }
+.tt-link-bottom { display: flex; padding: 0 8px 8px; }
+.tt-link-drop {
+  border: 0;
+  background: transparent;
+  color: var(--color-bad);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* コンテンツへのリンクは、外へのリンクと見分けが付くようにする */
+.tt-body a[data-entry-id] {
+  border-bottom: 1px dashed currentColor;
+  text-decoration: none;
+}
+
+/* 数式。文の中はカーソルが外れると描画に、乗ると TeX に戻る */
+.tt-math-src { display: none; }
+.tt-math { padding: 0 1px; }
+.tt-math.is-bad { color: var(--color-bad); font-family: ui-monospace, monospace; font-size: 12px; }
+
+/* 段落の数式。上に描画、下に TeX（Craft と同じ並び） */
+.tt-mathblock {
+  margin: 12px 0;
+  border: 1px solid var(--color-edge);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.tt-mathblock-out {
+  padding: 14px 12px;
+  background: var(--color-panel);
+  text-align: center;
+  overflow-x: auto;
+}
+.tt-mathblock-out.is-bad { color: var(--color-bad); font-family: ui-monospace, monospace; font-size: 12px; text-align: left; }
+.tt-mathblock-src {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-top: 1px solid var(--color-edge);
+  background: var(--color-well);
+  color: var(--color-ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+
+/* 図（mermaid）。コードの上に描く */
+.tt-diagram {
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--color-edge);
+  background: var(--color-panel);
+  text-align: center;
+  overflow-x: auto;
+}
+.tt-diagram.is-bad {
+  color: var(--color-bad);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  text-align: left;
+}
+.tt-diagram svg { max-width: 100%; height: auto; }
+
+/* 本文の画像。**知らない id は枠だけ出す**（読み込みの途中と、消された asset がある）。 */
+.tt-image { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.tt-image img { max-width: 100%; border-radius: 4px; }
+.tt-image.is-unknown {
+  border: 1px dashed var(--color-edge);
+  border-radius: 6px;
+  padding: 16px;
+  align-items: center;
+}
+.tt-image-note { color: var(--color-ink-faint); font-family: ui-monospace, monospace; font-size: 11px; }
+.tt-image-caption { color: var(--color-ink-soft); font-size: 12px; }
+.tt-image.ProseMirror-selectednode img { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+/* 画像の横並び。列の数はブロックの上で選ぶ。 */
+.tt-gallery {
+  border: 1px solid var(--color-edge);
+  border-radius: 6px;
+  background: var(--color-raised);
+}
+.tt-gallery-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-edge);
+}
+.tt-gallery-cols {
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-ink-soft);
+  font-size: 11px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.tt-gallery-cols:hover { border-color: var(--color-edge); background: var(--color-panel); color: var(--color-ink); }
+.tt-gallery-grid { display: grid; gap: 8px; padding: 8px; }
+.tt-gallery-grid .tt-image img { width: 100%; object-fit: cover; }
+
+/* 送っている間の仮の見た目。保存には出さない。 */
+.tt-uploading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px dashed var(--color-edge);
+  border-radius: 6px;
+  padding: 14px;
+  color: var(--color-ink-soft);
+  font-size: 12px;
+}
+.tt-uploading-spin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--color-edge);
+  border-top-color: var(--color-accent);
+  animation: tt-spin 0.7s linear infinite;
+}
+@keyframes tt-spin { to { transform: rotate(360deg); } }
+
+/* 候補の題は 1 行に収める。
+   WhyNot: .tt-link-title の nowrap と ellipsis だけでは効かない。flex の子は
+   min-width: auto で中身より縮まないので、長い題が行を押し広げて折り返す。 */
+.tt-link-item { min-width: 0; overflow: hidden; }
+.tt-link-title { min-width: 0; }
+.tt-link-kind { flex: 0 0 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 表。編集中は枠と見出しの色を出す（サイト側の見た目とは別）
+   WhyNot: table-layout: fixed で 100% に収めない。列が 10 本あると 1 列が数文字になり、
+   どのセルも読めなくなる。列は中身の幅を取り、入れ物の中で横に流す。 */
+.tt-body .tableWrapper { display: flex; overflow-x: auto; margin: 12px 0; padding: 12px 0 0 12px; }
+/* flex の子にして、狭い表は枠いっぱいに伸び、広い表は枠を越えて横に流れるようにする
+   WhyNot: min-width: 100% で伸ばさない。table には拡張が min-width の style を直に付けるので
+   後から CSS で上書きできない。 */
+.tt-body table { flex: 1 0 auto; border-collapse: collapse; }
+.tt-body table td, .tt-body table th {
+  min-width: 6em;
+  max-width: 22em;
+  border: 1px solid var(--color-edge);
+  padding: 6px 8px;
+  vertical-align: top;
+  /* 折り返せない長い英語でも枠を押し広げない */
+  overflow-wrap: anywhere;
+}
+.tt-body table th { background: var(--color-well); font-weight: 600; text-align: left; }
+.tt-body table .selectedCell { background: var(--color-well); }
+
+/* 行と列の掴み。セルにカーソルがある時か、表にマウスが乗っている時だけ出る
+   WhyNot: 塗った太い棒にしない。表の中身より枠が目立つ。見えるのは 4px の線で、
+   押せる当たり判定だけ透明な縁で 10px 取る（Notion / Google ドキュメントの実物と同じ）。 */
+.tt-mount { position: relative; }
+.tt-grips { position: absolute; inset: 0; pointer-events: none; }
+.tt-grip {
+  position: absolute;
+  padding: 0;
+  border-style: solid;
+  border-color: transparent;
+  border-radius: 4px;
+  background: var(--color-edge);
+  background-clip: padding-box;
+  opacity: 0.6;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.tt-grip-col { border-width: 3px 0; }
+.tt-grip-row { border-width: 0 3px; }
+.tt-grip:hover, .tt-grip.is-open { background: var(--color-accent); opacity: 1; }
+.tt-grip-shade {
+  position: absolute;
+  background: var(--color-accent);
+  opacity: 0.12;
+  pointer-events: none;
+}
+
+/* 表の大きさを升目で選ぶ */
+.tt-size-label { padding: 4px 6px; color: var(--color-ink-soft); font-size: 11px; }
+.tt-size-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; padding: 2px 6px 6px; }
+.tt-size-cell {
+  aspect-ratio: 1;
+  border: 1px solid var(--color-edge);
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+}
+.tt-size-cell.is-on { border-color: var(--color-accent); background: var(--color-accent); }
+
+/* ツールバーから出る小さな献立（表の操作） */
+.tt-menu {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: 220px;
+  padding: 4px;
+  border: 1px solid var(--color-edge);
+  border-radius: 6px;
+  background: var(--color-panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+.tt-menu-item {
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-ink);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tt-menu-item:hover { background: var(--color-well); }
+
+/* ボタンが増えても溢れさせない。狭い幅では折り返す
+   WhyNot: 「…」に畳まない。畳んだ物は押すまで何があるか分からず、
+   本文の飾りは押す前に見えている方が速い（Notion / Contentful も折り返す） */
+.tt-bar { flex-wrap: wrap; row-gap: 2px; }
+.tt-spacer { flex: 1 1 0; min-width: 0; }
+
+/* 画像のキャプションと代替テキスト。画像の下でそのまま打つ（microCMS と同じ置き方）
+   WhyNot: 代替テキストを常に濃く出さない。読み上げ用で、書いている間に読む物ではない。
+   触っている図の下でだけ出す。 */
+.tt-image-caption, .tt-image-alt {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px dashed transparent;
+  background: transparent;
+  color: var(--color-ink-soft);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+.tt-image-alt { color: var(--color-ink-faint); font-size: 11px; }
+.tt-image-caption:focus, .tt-image-alt:focus { border-bottom-color: var(--color-accent); }
+.tt-image-caption::placeholder, .tt-image-alt::placeholder { color: var(--color-ink-faint); }
+.tt-image-alt { visibility: hidden; }
+.tt-image:hover .tt-image-alt,
+.tt-image:focus-within .tt-image-alt,
+.tt-image.ProseMirror-selectednode .tt-image-alt { visibility: visible; }
+
+/* コードブロックのファイル名。言語の隣で打つ（microCMS も同じ場所） */
+.tt-code-file {
+  flex: 1;
+  min-width: 0;
+  margin-left: 8px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-ink-soft);
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  outline: none;
+}
+.tt-code-file:hover, .tt-code-file:focus { border-color: var(--color-edge); background: var(--color-panel); color: var(--color-ink); }
+.tt-code-file::placeholder { color: var(--color-ink-faint); }
+/* CMS が受けない形（空白や " < > が入っている）はその場で分かるようにする */
+.tt-code-file.is-bad { border-color: var(--color-bad); }
