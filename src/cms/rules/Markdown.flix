@@ -643,10 +643,22 @@ mod Markdown {
     def quoteBlock(inner: List[String]): Block = match inner {
         case first :: rest => match alertKind(first) {
             case Some(kind) => Block.Callout(kind, parseBlocks(rest))
-            case None       => Block.Blockquote(parseBlocks(inner))
+            case None       => Block.Blockquote(flattenQuotes(parseBlocks(inner)))
         }
         case Nil => Block.Blockquote(Nil)
     }
+
+    ///
+    /// 引用の中の引用を 1 段に潰す。
+    ///
+    /// WhyNot: `> > 中` を入れ子のまま読まない。richText は入れ子の引用を持たないので、
+    /// そのまま doc にすると validate で断られる（取り込んだ Markdown が保存できない）。
+    ///
+    def flattenQuotes(blocks: List[Block]): List[Block] =
+        blocks |> List.flatMap(block -> match block {
+            case Block.Blockquote(inner) => flattenQuotes(inner)
+            case other                   => other :: Nil
+        })
 
     def alertKind(line: String): Option[CalloutKind] = match captures("^\\s*\\[!([A-Za-z]+)\\]\\s*$", line) {
         case name :: Nil => calloutKindOf(name)
@@ -947,7 +959,18 @@ mod Markdown {
         if (not hasAt(delimiter, pos, text) or intraword) None
         else findCloser(delimiter, text, pos + width)
             |> Option.filter(end -> end > pos + width)
-            |> Option.map(end -> Step.Nested(scanInlines(marks ::: (mark :: Nil), String.slice(start = pos + width, end = end, text)), end + width))
+            |> Option.map(end -> Step.Nested(scanInlines(addMark(marks, mark), String.slice(start = pos + width, end = end, text)), end + width))
+
+    ///
+    /// 印を 1 つ足す。
+    ///
+    /// WhyNot: 上付きと下付きを重ねない。richText が持てない形（`~^a^~`）になり、
+    /// 取り込んだ Markdown が保存できない。内側に書いた方（後に足す方）が勝つ。
+    ///
+    def addMark(marks: List[Mark], mark: Mark): List[Mark] =
+        let raised = mark == Mark.Sub or mark == Mark.Sup;
+        let kept = if (raised) marks |> List.filter(found -> found != Mark.Sub and found != Mark.Sup) else marks;
+        kept ::: (mark :: Nil)
 
     /// 閉じの位置。1 文字の記号（* _）は、同じ記号が並んだ所（`**` の一部）を飛ばして探す。
     def findCloser(delimiter: String, text: String, offset: Int32): Option[Int32] =

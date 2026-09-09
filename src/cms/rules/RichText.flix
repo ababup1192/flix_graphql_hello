@@ -11,7 +11,9 @@
 ///   table / tableRow / tableCell / tableHeader / callout(kind) / gallery(columns。中は image だけ) / details(summary)
 /// - leaf: text(marks) / hardBreak / horizontalRule / image(assetId, alt, caption, width, height) / embed(url) / linkCard(url) /
 ///   mathBlock(tex) / video(assetId, caption, poster)
-/// - mark: bold / italic / strike / underline / code / link(href | entryId) / math（text が TeX。他のマークと混ぜない）
+/// - mark: bold / italic / strike / underline / code / link(href | entryId) / math（text が TeX。他のマークと混ぜない）/ sub / sup（重ねない）/ highlight
+///
+/// 入れ子は許さない: 表のセルの中は段落だけ、引用の中に引用は入らない。リストの入れ子だけは Markdown で往復するので残す。
 ///
 /// 数式は TeX のまま持ち、HTML は data-math の span / div（描画は KaTeX をサイト側で）。codeBlock の language が mermaid なら pre に data-diagram（描画は Mermaid をサイト側で）。
 ///
@@ -120,8 +122,9 @@ mod RichText {
             case Some("linkCard") => checkLinkCard(path, fields)
             case Some("details") => checkDetails(path, fields) ::: checkChildren(path, fields)
             case Some("listItem") => checkListItem(path, fields) ::: checkChildren(path, fields)
-            case Some("tableCell") => checkTableCell(path, fields) ::: checkChildren(path, fields)
-            case Some("tableHeader") => checkTableCell(path, fields) ::: checkChildren(path, fields)
+            case Some("tableCell") => checkTableCell(path, fields) ::: checkCellChildren(path, fields) ::: checkChildren(path, fields)
+            case Some("tableHeader") => checkTableCell(path, fields) ::: checkCellChildren(path, fields) ::: checkChildren(path, fields)
+            case Some("blockquote") => checkQuoteChildren(path, fields) ::: checkChildren(path, fields)
             case Some("mathBlock") => checkMathBlock(path, fields)
             case Some("video") => checkVideo(path, fields)
             case Some(name) if List.memberOf(name, containerNodes()) => checkChildren(path, fields)
@@ -142,7 +145,11 @@ mod RichText {
             case (true, 1, Some(tex)) if String.nonEmpty(tex) => Nil
             case _                   => Violation.Violation(path, "math の text は空でない TeX にし、他のマークと混ぜないでください") :: Nil
         };
-        textCheck ::: mathCheck ::: (marksOf(fields) |> List.zipWithIndex |> List.flatMap(match (index, mark) -> checkMark("${path}.marks[${index}]", mark)))
+        let raisedCheck =
+            if (List.length(marksOf(fields) |> List.filter(mark -> List.memberOf(typeOf(mark), List#{ Some("sub"), Some("sup") }))) >= 2)
+                Violation.Violation(path, "上付きと下付きは同じ文字に重ねないでください") :: Nil
+            else Nil;
+        textCheck ::: mathCheck ::: raisedCheck ::: (marksOf(fields) |> List.zipWithIndex |> List.flatMap(match (index, mark) -> checkMark("${path}.marks[${index}]", mark)))
 
     def hasMathMark(fields: Map[String, Json]): Bool = marksOf(fields) |> List.exists(mark -> typeOf(mark) == Some("math"))
 
@@ -192,6 +199,30 @@ mod RichText {
     }
 
     /// 表のセル。attrs.align は任意で、あれば left / center / right。
+    ///
+    /// 表のセルの中は段落だけ。
+    ///
+    /// WhyNot: 表・引用・コードブロック・箇条書き・見出し・画像を入れない。**Markdown の表の
+    /// セルは inline しか持てない**ので、書き出すと段落の中身以外は黙って消える
+    /// （`Markdown.renderCell`）。画面に出ている物と Markdown・HTML に出る物が食い違う。
+    ///
+    def checkCellChildren(path: String, fields: Map[String, Json]): List[Violation] =
+        children(fields) |> List.zipWithIndex |> List.flatMap(match (index, child) ->
+            if (nodeType(child) == Some("paragraph")) Nil
+            else Violation.Violation("${path}.content[${index}]", "表のセルの中は段落だけにしてください") :: Nil)
+
+    ///
+    /// 引用の中に引用は入れない。
+    ///
+    /// WhyNot: `>>` は Markdown で書けるが、深さに意味を持たせる書き方が定まらない。
+    /// 引用の引用は元の出典が二重になるだけで、読む側には 1 段の引用と区別が付かない。
+    ///
+    def checkQuoteChildren(path: String, fields: Map[String, Json]): List[Violation] =
+        children(fields) |> List.zipWithIndex |> List.flatMap(match (index, child) ->
+            if (nodeType(child) == Some("blockquote"))
+                Violation.Violation("${path}.content[${index}]", "引用の中に引用は入れられません") :: Nil
+            else Nil)
+
     def checkTableCell(path: String, fields: Map[String, Json]): List[Violation] = match Map.get("align", attrs(fields)) {
         case None    => Nil
         case Some(found) =>
@@ -582,6 +613,11 @@ mod RichText {
 
     def typeOf(fields: Map[String, Json]): Option[String] =
         Map.get("type", fields) |> Option.flatMap(EntryValue.asString)
+
+    def nodeType(node: Json): Option[String] = match node {
+        case Json.JObject(fields) => typeOf(fields)
+        case _                    => None
+    }
 
     def children(fields: Map[String, Json]): List[Json] = match Map.get("content", fields) {
         case Some(Json.JArray(items)) => Vector.toList(items)

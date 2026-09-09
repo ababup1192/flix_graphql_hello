@@ -483,6 +483,35 @@ mod TestMarkdown {
 
     // ---- 6. RichText との整合 ----
 
+    /// 入れ子で書いた Markdown も richText の形に潰れて validate を通る。
+    ///
+    ///   `> > 中` → 1 段の引用 / `~^a^~` → 上付きだけ / 表のセルは段落 1 つ
+    @Test
+    def testNestedMarkdownFlattens(): Unit \ Assert =
+        let cases = List#{
+            "> > 中",
+            "~^a^~",
+            "^~a~^",
+            "| a |\n| --- |\n| ~^b^~ |"
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(_ -> Nil),
+            cases |> List.map(markdown -> RichText.validate("fields.body", Markdown.fromMarkdown(markdown))))
+
+    /// `> > 中` は 1 段の引用になり、書き戻しても `>>` にならない。
+    @Test
+    def testQuoteInQuoteFlattens(): Unit \ Assert =
+        Assert.assertEq(
+            expected = (doc(List#{ blockquote(List#{ simpleParagraph("中") }) }), "> 中"),
+            (Markdown.fromMarkdown("> > 中"), Markdown.toMarkdown(Markdown.fromMarkdown("> > 中"))))
+
+    /// 上付きの中の下付きは、後に書いた方だけ残る。
+    @Test
+    def testSubInSupKeepsOne(): Unit \ Assert =
+        Assert.assertEq(
+            expected = List#{ doc(List#{ paragraph(List#{ marked("sub", "a") }) }), doc(List#{ paragraph(List#{ marked("sup", "a") }) }) },
+            List#{ Markdown.fromMarkdown("^~a~^"), Markdown.fromMarkdown("~^a^~") })
+
     /// 往復した記事は validate で Nil。平文は Markdown から記号を落とした物と同じ。
     @Test
     def testConsistentWithRichText(): Unit \ Assert =

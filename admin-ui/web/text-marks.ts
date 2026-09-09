@@ -12,11 +12,14 @@
 
 import { InputRule, Mark, mergeAttributes } from "@tiptap/core";
 
-type Spec = { name: string; tag: string; sign: string };
+type Spec = { name: string; tag: string; sign: string; excludes?: string };
 
+// WhyNot: 上付きと下付きを重ねられるようにしない。**片方の中にもう片方は無い。**
+// 重ねると `<sub><sup>a</sup></sub>` になり、Markdown（`~a~` と `^a^`）にも HTML にも
+// 意味の無い形で残る。後に押した方が前の物を外す。
 const SPECS: Spec[] = [
-  { name: "sub", tag: "sub", sign: "~" },
-  { name: "sup", tag: "sup", sign: "^" },
+  { name: "sub", tag: "sub", sign: "~", excludes: "sub sup" },
+  { name: "sup", tag: "sup", sign: "^", excludes: "sub sup" },
   { name: "highlight", tag: "mark", sign: "==" },
 ];
 
@@ -36,6 +39,7 @@ function ruleOf(sign: string) {
 function markOf(spec: Spec) {
   return Mark.create({
     name: spec.name,
+    excludes: spec.excludes,
 
     parseHTML() {
       return [{ tag: spec.tag }];

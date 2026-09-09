@@ -5,7 +5,8 @@
 //   1. 下線（underline の mark）
 //   2. 表（table / tableRow / tableHeader / tableCell）と、行と列の足し引き
 //   3. 画像の代替テキスト
-//   4. ツールバーが幅 1440 / 1024 / 768 で溢れない
+//   4. 入れ子（表 in 表・上付き＋下付き）が作れない事と、CMS が断る事
+//   5. ツールバーが幅 1440 / 1024 / 768 で溢れない
 
 import { chromium } from "playwright";
 
@@ -255,7 +256,67 @@ try {
   check(kinds.includes("paragraph image paragraph"), "画像の上下に行ができる", kinds);
   await save("代替テキスト付きの下書きが保存できる");
 
-  // 4. ツールバーの幅
+  // 4. 入れ子ができない
+  await openNew(`rich-nest ${marker}`);
+  await page.locator('.tt-tool[title="表"]').click();
+  await page.waitForSelector(".tt-size-grid", { timeout: 4000 });
+  await page.locator(".tt-size-cell").nth(1 * 8 + 1).click();
+  await page.waitForTimeout(600);
+  for (const title of ["引用", "コードブロック", "箇条書き", "区切り線"]) {
+    await page.locator(".tt-body table th").first().click();
+    await page.waitForTimeout(200);
+    await page.locator(`.tt-tool[title="${title}"]`).click();
+    await page.waitForTimeout(400);
+    const inside = (JSON.parse((await docOf()) || "{}").content ?? [])
+      .flatMap((node) => (node.type === "table" ? node.content ?? [] : []))
+      .flatMap((row) => row.content ?? [])
+      .flatMap((cell) => (cell.content ?? []).map((child) => child.type))
+      .filter((kind) => kind !== "paragraph");
+    check(inside.length === 0, `表のセルに「${title}」は入らない`, inside.join(" "));
+  }
+  // 表の中に表
+  await page.locator(".tt-body table th").first().click();
+  await page.locator('.tt-tool[title="表"]').click();
+  await page.waitForSelector(".tt-size-grid", { timeout: 4000 });
+  await page.locator(".tt-size-cell").nth(1 * 8 + 1).click();
+  await page.waitForTimeout(600);
+  const tables = (JSON.parse((await docOf()) || "{}").content ?? []).filter((node) => node.type === "table").length;
+  const nested = JSON.stringify(JSON.parse((await docOf()) || "{}")).includes('"tableCell","content":[{"type":"table"');
+  check(!nested, "表のセルに表は入らない", `表 ${tables} 個`);
+
+  // 上付き＋下付き
+  await openNew(`rich-raised ${marker}`);
+  await page.locator('.tt-tool[title="上付き"]').click();
+  await page.locator('.tt-tool[title="下付き"]').click();
+  await page.keyboard.type("a");
+  await page.waitForTimeout(400);
+  const raised = (JSON.parse((await docOf()) || "{}").content?.[0]?.content?.[0]?.marks ?? []).map((m) => m.type);
+  check(raised.length === 1 && raised[0] === "sub", "上付きと下付きは重ならない", raised.join("+"));
+  await save("上付きだけの下書きが保存できる");
+
+  // CMS も入れ子を断る
+  const send = (body) =>
+    fetch(`${cms}/p/default/admin/graphql`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Dev-User": process.env.VITE_DEV_USER ?? "dev@localhost" },
+      body: JSON.stringify(body),
+    }).then((response) => response.json());
+  const para = (text) => ({ type: "paragraph", content: [{ type: "text", text }] });
+  const badDocs = {
+    "表のセルの中の表": { type: "doc", content: [{ type: "table", content: [{ type: "tableRow", content: [{ type: "tableCell", content: [para("外"), { type: "table", content: [{ type: "tableRow", content: [{ type: "tableCell", content: [para("中")] }] }] }] }] }] }] },
+    "引用の中の引用": { type: "doc", content: [{ type: "blockquote", content: [{ type: "blockquote", content: [para("中")] }] }] },
+    "上付き＋下付き": { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "a", marks: [{ type: "sub" }, { type: "sup" }] }] }] },
+  };
+  for (const [name, doc] of Object.entries(badDocs)) {
+    const answer = await send({
+      query: `mutation m($fields: JSON!) { createEntry(typeId: "5", fields: $fields) { id } }`,
+      variables: { fields: { title: `nest ${marker} ${name}`, body: doc } },
+    });
+    const message = JSON.stringify(answer.errors ?? answer);
+    check(message.includes("INVALID") || message.includes("入力"), `CMS が「${name}」を断る`, message.slice(0, 200));
+  }
+
+  // 5. ツールバーの幅
   for (const width of [1440, 1024, 768]) {
     await page.setViewportSize({ width, height: 900 });
     await page.waitForTimeout(400);
@@ -278,7 +339,7 @@ try {
   }
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  // 5. CMS から読み直す
+  // 6. CMS から読み直す
   const found = await fetch(`${cms}/p/default/admin/graphql`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Dev-User": process.env.VITE_DEV_USER ?? "dev@localhost" },

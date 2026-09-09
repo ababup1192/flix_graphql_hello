@@ -307,6 +307,68 @@ mod TestRichText {
     /// 1 ブロックだけの doc が validate に通るか。
     def isValidDoc(block: Json): Bool = List.isEmpty(RichText.validate("fields.body", node("doc", List#{ block })))
 
+    /// 表のセルの中は段落だけ。表・引用・コードブロック・箇条書き・見出し・画像は止まる。
+    @Test
+    def testValidateTableCellChildren(): Unit \ Assert =
+        let cell = kind -> child -> node("doc", List#{ node("table", List#{ node("tableRow", List#{ node(kind, List#{ child }) }) }) });
+        let inner = node("table", List#{ node("tableRow", List#{ node("tableCell", List#{ node("paragraph", List#{ text("中") }) }) }) });
+        let cases = List#{
+            (node("paragraph", List#{ text("文") }), true),
+            (inner, false),
+            (node("blockquote", List#{ node("paragraph", List#{ text("引用") }) }), false),
+            (node("codeBlock", List#{ text("code") }), false),
+            (node("bulletList", List#{ node("listItem", List#{ node("paragraph", List#{ text("x") }) }) }), false),
+            (nodeWith("heading", List#{("level", CmsTestKit.intJson(2))}, List#{ text("見出し") }), false),
+            (image("asset001", ""), false)
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd) |> List.flatMap(ok -> List#{ ok, ok }),
+            cases |> List.flatMap(match (child, _) -> List#{
+                List.isEmpty(RichText.validate("fields.body", cell("tableCell")(child))),
+                List.isEmpty(RichText.validate("fields.body", cell("tableHeader")(child)))
+            }))
+
+    /// セルの中の表は、セルの場所で止まる。
+    @Test
+    def testValidateTableCellChildPath(): Unit \ Assert =
+        let inner = node("table", List#{ node("tableRow", List#{ node("tableCell", List#{ node("paragraph", List#{ text("中") }) }) }) });
+        let bad = node("doc", List#{ node("table", List#{ node("tableRow", List#{ node("tableCell", List#{ node("paragraph", List#{ text("外") }), inner }) }) }) });
+        Assert.assertEq(
+            expected = List#{ "fields.body.content[0].content[0].content[0].content[1]" },
+            CmsTestKit.violationPaths(RichText.validate("fields.body", bad)))
+
+    /// 引用の中に引用は入らない。段落・箇条書き・表は入る。
+    @Test
+    def testValidateBlockquoteNesting(): Unit \ Assert =
+        let quote = child -> node("doc", List#{ node("blockquote", List#{ child }) });
+        let cases = List#{
+            (node("paragraph", List#{ text("文") }), true),
+            (node("bulletList", List#{ node("listItem", List#{ node("paragraph", List#{ text("x") }) }) }), true),
+            (node("table", List#{ node("tableRow", List#{ node("tableCell", List#{ node("paragraph", List#{ text("c") }) }) }) }), true),
+            (node("blockquote", List#{ node("paragraph", List#{ text("中") }) }), false)
+        };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (child, _) -> List.isEmpty(RichText.validate("fields.body", quote(child)))))
+
+    /// 箇条書きの入れ子は通る。
+    @Test
+    def testValidateNestedList(): Unit \ Assert =
+        let inner = node("bulletList", List#{ node("listItem", List#{ node("paragraph", List#{ text("子") }) }) });
+        let doc = node("doc", List#{ node("bulletList", List#{ node("listItem", List#{ node("paragraph", List#{ text("親") }), inner }) }) });
+        Assert.assertEq(expected = Nil, RichText.validate("fields.body", doc))
+
+    /// 上付きと下付きは同じ文字に重ねない。片方だけなら通る。
+    @Test
+    def testValidateSubSupExclusive(): Unit \ Assert =
+        let para = marks -> node("doc", List#{ node("paragraph", List#{ marked("a", marks) }) });
+        let cases = List#{
+            (List#{ mark("sub") }, true),
+            (List#{ mark("sup") }, true),
+            (List#{ mark("sub"), mark("bold") }, true),
+            (List#{ mark("sub"), mark("sup") }, false),
+            (List#{ mark("sup"), mark("sub") }, false)
+        };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (marks, _) -> List.isEmpty(RichText.validate("fields.body", para(marks)))))
+
     /// gallery の attrs.columns は 2 〜 4。無ければ通る（既定 2）。1 と 5 は止まる。
     @Test
     def testValidateGalleryColumns(): Unit \ Assert =

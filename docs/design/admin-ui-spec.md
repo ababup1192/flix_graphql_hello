@@ -298,7 +298,9 @@ WRITE の API キーは manageMembers / manageApiKeys / manageProject が必ず�
 
 node は doc / paragraph / heading(level 1〜4, id は `[A-Za-z0-9_-]{1,64}`) / bulletList / orderedList / listItem(checked) / blockquote / codeBlock(language `^[a-z0-9+#-]{1,32}$`, fileName, highlightLines `1,3-5`) / table / tableRow / tableCell / tableHeader / callout(**kind 必須**: note / tip / warning) / details(**summary 必須・空不可**) / gallery(**中は image のみ・1 つ以上**, columns 2〜4) / text / hardBreak / horizontalRule / image(assetId 必須) / video(assetId 必須) / embed(**YouTube・Vimeo・X の URL のみ**) / linkCard(http(s) のみ) / mathBlock(tex 空不可)。
 
-mark は bold / italic / strike / underline / code / link(**href か entryId の片方だけ**。`javascript:` 不可) / math(**他の mark と重ねられない**、TeX は空不可)。
+mark は bold / italic / strike / underline / code / link(**href か entryId の片方だけ**。`javascript:` 不可) / math(**他の mark と重ねられない**、TeX は空不可) / sub / sup(**上付きと下付きは重ねられない**) / highlight。
+
+**入れ子は許さない。** 表のセル（tableCell / tableHeader）の中は paragraph だけ（GFM の表のセルが inline しか持てず、`Markdown.renderCell` が段落の中身しか拾わないため）。blockquote の中に blockquote は入らない。**リストの入れ子だけは残す**（Markdown で往復する）。Markdown から取り込む時は `> >` も `~^a^~` も 1 段に潰す。
 
 知らない node と mark は INVALID。エディタは未対応の node を消さずに素通しする。`heading.attrs.id` は空欄で作らない（無ければサーバが振る。キーがあって非文字列だと INVALID）。
 

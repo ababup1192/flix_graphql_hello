@@ -122,6 +122,45 @@ function foldUnknown(node: any, known: Set<string>): any {
   return node;
 }
 
+//
+// 表のセルの中を段落だけにする。上付きと下付きは重ねない。
+//
+// **入れ子は schema では止まらない。** ProseMirror は JSON を読む時に content の形を
+// 見ないので、外から来た「セルの中の表」も「上付き＋下付き」もそのまま読み込まれ、
+// 画面には出るのに保存では断られる。読む時に平らにして、見えている物と保存できる物を
+// 揃える。文字は残し、構造だけ落とす。
+//
+function flatten(node: any): any {
+  if (!node || typeof node !== "object") return node;
+  if (node.type === "text") return dropRaised(node);
+  if (!Array.isArray(node.content)) return node;
+  const content = node.content.map(flatten);
+  if (node.type !== "tableCell" && node.type !== "tableHeader") return { ...node, content };
+  const lines = content.flatMap((child: any) => {
+    if (child?.type === "paragraph") return [child];
+    const text = textOf(child);
+    return text ? [{ type: "paragraph", content: [{ type: "text", text }] }] : [];
+  });
+  return { ...node, content: lines.length > 0 ? lines : [{ type: "paragraph" }] };
+}
+
+function textOf(node: any): string {
+  if (!node || typeof node !== "object") return "";
+  if (typeof node.text === "string") return node.text;
+  if (!Array.isArray(node.content)) return "";
+  return node.content.map(textOf).join(" ").trim();
+}
+
+// 上付きと下付きが両方付いていたら、先に書いてある方だけ残す。
+function dropRaised(node: any): any {
+  const marks = node.marks;
+  if (!Array.isArray(marks)) return node;
+  const raised = marks.filter((mark: any) => mark?.type === "sub" || mark?.type === "sup");
+  if (raised.length < 2) return node;
+  const keep = raised[0].type;
+  return { ...node, marks: marks.filter((mark: any) => mark?.type === keep || (mark?.type !== "sub" && mark?.type !== "sup")) };
+}
+
 // 保存の時に Passthrough を元の形に戻す。
 function unfold(node: any): any {
   if (!node || typeof node !== "object") return node;
@@ -297,8 +336,11 @@ class TiptapEditor extends HTMLElement {
       // 持たず、HTML にも幅を出さない。画面でだけ動く幅は保存されず、消えたように見える。
       Table.configure({ resizable: false, renderWrapper: true }),
       TableRow,
-      TableHeader.extend({ addAttributes() { return { ...this.parent?.(), ...alignAttribute() }; } }),
-      TableCell.extend({ addAttributes() { return { ...this.parent?.(), ...alignAttribute() }; } }),
+      // **セルの中は段落だけ。** 既定の `block+` だと表の中に表・引用・コードブロック・
+      // 箇条書きが入るが、Markdown の表のセルは inline しか持てないので、書き出すと
+      // 黙って消える（`Markdown.renderCell` が段落と見出しの中身しか拾わない）。
+      TableHeader.extend({ content: "paragraph+", addAttributes() { return { ...this.parent?.(), ...alignAttribute() }; } }),
+      TableCell.extend({ content: "paragraph+", addAttributes() { return { ...this.parent?.(), ...alignAttribute() }; } }),
       CodeEditing,
       BlockEdges,
       MarkdownRules,
@@ -1009,7 +1051,7 @@ class TiptapEditor extends HTMLElement {
     try {
       const parsed = JSON.parse(raw);
       if (!parsed || parsed.type !== "doc") return EMPTY_DOC;
-      const doc = toTaskList(foldUnknown(parsed, this.knownNames(extensions)));
+      const doc = flatten(toTaskList(foldUnknown(parsed, this.knownNames(extensions))));
       return Array.isArray(doc.content) && doc.content.length > 0 ? doc : EMPTY_DOC;
     } catch {
       return EMPTY_DOC;
