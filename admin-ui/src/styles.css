@@ -605,6 +605,40 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 .tt-tablebar-button.is-on { background: var(--color-well); color: var(--color-ink); }
 .tt-tablebar-remove:hover { color: var(--color-bad); }
 
+/* 行と列の掴み。**表の端。見た目は出さず、カーソルの形だけで知らせる。**
+   WhyNot: 線や点を描かない。表の中身より枠が目立つ（前に太い掴みを出して使いにくかった）。 */
+.tt-handle { position: absolute; pointer-events: auto; }
+.tt-handle-col { cursor: ew-resize; }
+.tt-handle-row { cursor: ns-resize; }
+.tt-handle:hover { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
+
+/* 動かしている間。掴んだ物は元の場所に薄く残り、同じ大きさの塊が付いてくる。 */
+.tt-move-source {
+  position: absolute;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--color-ink) 10%, transparent);
+}
+/* WhyNot: 塊に枠線を付けない。落ちる境目の線と同じ色になって、どちらが行き先か読めない。 */
+.tt-move-ghost {
+  position: absolute;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  border-radius: 2px;
+}
+/* 落ちる境目。**滑って動く**ので、どこに入るか目で追える。 */
+.tt-move-line {
+  position: absolute;
+  pointer-events: none;
+  background: var(--color-accent);
+  border-radius: 2px;
+}
+.tt-move-line-col { width: 3px; margin-left: -1.5px; transition: left 90ms ease-out; }
+.tt-move-line-row { height: 3px; margin-top: -1.5px; transition: top 90ms ease-out; }
+
+/* 動かしている間は、画面のどこでもカーソルの形を保つ。 */
+body.tt-dragging-col, body.tt-dragging-col * { cursor: ew-resize !important; }
+body.tt-dragging-row, body.tt-dragging-row * { cursor: ns-resize !important; }
+
 /* 縮めた時に消える行・列。**押す前に見せる。** */
 .tt-drop {
   position: absolute;

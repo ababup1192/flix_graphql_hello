@@ -83,6 +83,82 @@ export function columnAlign(editor: Editor): Align | null {
   return null;
 }
 
+/** 表をマス目の並びにする。結合したセルは元のマスにだけ置き、残りは空にする。 */
+function gridOf(node: PmNode): { grid: Array<Array<PmNode | null>>; header: boolean } {
+  const map = TableMap.get(node);
+  const used = new Set<number>();
+  const grid: Array<Array<PmNode | null>> = [];
+  for (let row = 0; row < map.height; row += 1) {
+    const line: Array<PmNode | null> = [];
+    for (let col = 0; col < map.width; col += 1) {
+      const at = map.map[row * map.width + col];
+      if (at !== undefined && !used.has(at)) {
+        used.add(at);
+        line.push(node.nodeAt(at));
+      } else {
+        line.push(null);
+      }
+    }
+    grid.push(line);
+  }
+  return { grid, header: node.firstChild?.firstChild?.type.name === "tableHeader" };
+}
+
+/** マス目の並びから表に戻して置き換える。 */
+function writeGrid(
+  editor: Editor,
+  found: { node: PmNode; pos: number },
+  grid: Array<Array<PmNode | null>>,
+  header: boolean
+): boolean {
+  const { state, view } = editor;
+  const schema = state.schema;
+  const rows = grid.map((line, row) => {
+    const type = row === 0 && header ? schema.nodes.tableHeader : schema.nodes.tableCell;
+    const cells = line.flatMap((old) => {
+      const attrs = { colspan: 1, rowspan: 1, colwidth: null, align: old?.attrs.align ?? null };
+      const made = old && old.content.size > 0 ? type.createChecked(attrs, old.content) : type.createAndFill(attrs);
+      return made ? [made] : [];
+    });
+    return schema.nodes.tableRow.createChecked(null, cells);
+  });
+  const table = found.node.type.createChecked(found.node.attrs, rows);
+  view.dispatch(state.tr.replaceWith(found.pos, found.pos + found.node.nodeSize, table).scrollIntoView());
+  editor.commands.focus();
+  return true;
+}
+
+/** 並びを 1 つ動かす。 */
+function moved<T>(list: T[], from: number, to: number): T[] {
+  const next = list.slice();
+  const [taken] = next.splice(from, 1);
+  next.splice(to, 0, taken);
+  return next;
+}
+
+/**
+ * 行を入れ替える。**見出しの行は動かさない**（1 行目が見出しの型を持つので、
+ * 入れ替えると見出しが本文の途中に出る）。
+ */
+export function moveRow(editor: Editor, from: number, to: number): boolean {
+  const found = tableAt(editor);
+  if (!found || from === to) return false;
+  const { grid, header } = gridOf(found.node);
+  if (header && (from === 0 || to === 0)) return false;
+  if (from < 0 || to < 0 || from >= grid.length || to >= grid.length) return false;
+  return writeGrid(editor, found, moved(grid, from, to), header);
+}
+
+/** 列を入れ替える。 */
+export function moveColumn(editor: Editor, from: number, to: number): boolean {
+  const found = tableAt(editor);
+  if (!found || from === to) return false;
+  const { grid, header } = gridOf(found.node);
+  const width = grid[0]?.length ?? 0;
+  if (from < 0 || to < 0 || from >= width || to >= width) return false;
+  return writeGrid(editor, found, grid.map((line) => moved(line, from, to)), header);
+}
+
 /**
  * 大きさを選び直す。**足りない分は空のセル、はみ出た分は中身ごと捨てる。**
  *
@@ -95,35 +171,14 @@ export function columnAlign(editor: Editor): Align | null {
 export function resizeTable(editor: Editor, rows: number, cols: number): boolean {
   const found = tableAt(editor);
   if (!found) return false;
-  const { state, view } = editor;
-  const schema = state.schema;
   const map = TableMap.get(found.node);
   if (map.height === rows && map.width === cols) return false;
-
-  // 元のセルは 1 つにつき 1 回だけ使う（結合していると同じ位置が複数のマスに出る）。
-  const used = new Set<number>();
-  const header = found.node.firstChild?.firstChild?.type.name === "tableHeader";
-
-  const madeRows: PmNode[] = [];
+  const { grid, header } = gridOf(found.node);
+  const next: Array<Array<PmNode | null>> = [];
   for (let row = 0; row < rows; row += 1) {
-    const type = row === 0 && header ? schema.nodes.tableHeader : schema.nodes.tableCell;
-    const cells: PmNode[] = [];
-    for (let col = 0; col < cols; col += 1) {
-      const at = row < map.height && col < map.width ? map.map[row * map.width + col] : undefined;
-      let old: PmNode | null = null;
-      if (at !== undefined && !used.has(at)) {
-        used.add(at);
-        old = found.node.nodeAt(at);
-      }
-      const attrs = { colspan: 1, rowspan: 1, colwidth: null, align: old?.attrs.align ?? null };
-      const made = old && old.content.size > 0 ? type.createChecked(attrs, old.content) : type.createAndFill(attrs);
-      if (made) cells.push(made);
-    }
-    madeRows.push(schema.nodes.tableRow.createChecked(null, cells));
+    const line: Array<PmNode | null> = [];
+    for (let col = 0; col < cols; col += 1) line.push(grid[row]?.[col] ?? null);
+    next.push(line);
   }
-  const table = found.node.type.createChecked(found.node.attrs, madeRows);
-  const tr = state.tr.replaceWith(found.pos, found.pos + found.node.nodeSize, table);
-  view.dispatch(tr.scrollIntoView());
-  editor.commands.focus();
-  return true;
+  return writeGrid(editor, found, next, header);
 }

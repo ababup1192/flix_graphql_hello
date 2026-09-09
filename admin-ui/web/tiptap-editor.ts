@@ -24,6 +24,7 @@ import { CodeEditing } from "./code-editing";
 import { MarkdownRules } from "./markdown-rules";
 import { LinkDialog, type Candidate, type LinkChoice } from "./link-dialog";
 import { dismissOn } from "./dismiss";
+import { tableHandles } from "./table-drag";
 import { type Align, alignColumn, columnAlign, resizeTable, tableSize } from "./table-tools";
 import { MathBlock, MathMark } from "./math";
 import { AssetStore, galleryNode, imageDropExtension, imageNode, insertionOf, UploadingImage } from "./image-node";
@@ -553,7 +554,19 @@ class TiptapEditor extends HTMLElement {
     const base = mount.getBoundingClientRect();
     const wrap = (table.closest(".tableWrapper") as HTMLElement | null) ?? table;
     const clip = wrap.getBoundingClientRect();
-    layer.replaceChildren(this.tableBar(table, base, clip));
+    const headerRow = !!table.rows[0] && Array.from(table.rows[0].cells).every((cell) => cell.tagName === "TH");
+    layer.replaceChildren(
+      this.tableBar(table, base, clip),
+      ...tableHandles({
+        editor: this.editor,
+        table,
+        layer,
+        base,
+        clip,
+        headerRow,
+        onDone: () => this.paintTableTools(),
+      })
+    );
 
     // 横に長い表はスクロールするので、帯も付いて動く。
     this.unwatchScroll?.();
