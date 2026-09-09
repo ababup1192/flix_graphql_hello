@@ -159,6 +159,19 @@ function eatFirstEmptyLine(view: EditorView): boolean {
   return true;
 }
 
+/**
+ * ブロックの中の入力欄（画像の代替テキストなど）から、上（-1）か下（1）の行へ出る。
+ *
+ * **画像の中に居るので、上下の矢印が本文に届かない。** 入力欄が矢印を食べるため、
+ * 画像の代替テキストを打っている間は前後の行へ移れなかった。
+ */
+export function leaveBlock(view: EditorView, at: number, size: number, dir: -1 | 1): boolean {
+  const $at = view.state.doc.resolve(at);
+  // 並べた画像の中の 1 枚なら、出るのは並べた画像の外。段落は image* の中に入らない。
+  const target = $at.depth === 0 ? (dir < 0 ? at : at + size) : dir < 0 ? $at.before(1) : $at.after(1);
+  return place(view, target);
+}
+
 // 中に入れないブロック（区切り線・画像・埋め込み・数式）。
 // **中に入れる物（表・リスト・引用）は素の動きに任せる。** 矢印で中へ入るのが自然で、
 // ここで止めると表に入れなくなる。

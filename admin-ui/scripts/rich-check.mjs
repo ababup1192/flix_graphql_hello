@@ -4,7 +4,7 @@
 // 見る物:
 //   1. 下線（underline の mark）
 //   2. 表（table / tableRow / tableHeader / tableCell）と、行と列の足し引き
-//   3. 画像のキャプションと代替テキスト
+//   3. 画像の代替テキスト
 //   4. ツールバーが幅 1440 / 1024 / 768 で溢れない
 
 import { chromium } from "playwright";
@@ -89,78 +89,73 @@ try {
   check((await page.locator(".tt-body table tr").first().locator("th, td").count()) === 4, "選んだ列の数になる", "違います");
 
   await page.locator(".tt-body table th, .tt-body table td").first().click();
-  await page.keyboard.type("あ");
+  for (const letter of ["あ", "い", "う", "え"]) {
+    await page.keyboard.type(letter);
+    await page.keyboard.press("Tab");
+  }
+  await page.locator(".tt-body table th, .tt-body table td").first().click();
   await page.waitForTimeout(400);
 
-  // 掴みが表の上に出る
-  const colGrips = page.locator(".tt-grip-col");
-  const rowGrips = page.locator(".tt-grip-row");
-  check((await colGrips.count()) === 4, "列の掴みが列の数だけ出る", `${await colGrips.count()} 個`);
-  check((await rowGrips.count()) === 3, "行の掴みが行の数だけ出る", `${await rowGrips.count()} 個`);
-  // 掴みが表の上に重なっている
-  const overlap = await page.evaluate(() => {
-    const grip = document.querySelector(".tt-grip-col").getBoundingClientRect();
-    const cell = document.querySelector(".tt-body table th, .tt-body table td").getBoundingClientRect();
-    return Math.abs(grip.left - cell.left) < 4 && grip.bottom <= cell.top + 4;
+  // 表の帯が表の上に出る
+  const bar = page.locator(".tt-tablebar");
+  check((await bar.count()) === 1, "表の上に帯が出る", `${await bar.count()} 個`);
+  const barButtons = await page.locator(".tt-tablebar-button").evaluateAll((els) => els.map((el) => el.title));
+  check(
+    barButtons.join("/") === "大きさを変える/左に寄せる/中央に寄せる/右に寄せる/表を消す",
+    "帯は大きさ・寄せ 3 つ・ゴミ箱の順に並ぶ",
+    barButtons.join("/")
+  );
+  check((await page.locator(".tt-grip").count()) === 0, "古い掴みは出ない", `${await page.locator(".tt-grip").count()} 個`);
+  const barAbove = await page.evaluate(() => {
+    const box = document.querySelector(".tt-tablebar").getBoundingClientRect();
+    const at = document.querySelector(".tt-body table").getBoundingClientRect();
+    return Math.abs(box.left - at.left) < 4 && box.bottom <= at.top + 4;
   });
-  check(overlap, "列の掴みが列の真上に付く", "ずれています");
-  // 見えているのは細い線。太い棒にしない
-  const thin = await page.evaluate(() => {
-    const col = document.querySelector(".tt-grip-col");
-    const row = document.querySelector(".tt-grip-row");
-    const seen = (el, side) => el.getBoundingClientRect()[side] - parseFloat(getComputedStyle(el)[`border${side === "height" ? "Top" : "Left"}Width`]) * 2;
-    return {
-      colSeen: col.getBoundingClientRect().height - parseFloat(getComputedStyle(col).borderTopWidth) * 2,
-      rowSeen: row.getBoundingClientRect().width - parseFloat(getComputedStyle(row).borderLeftWidth) * 2,
-      colHit: col.getBoundingClientRect().height,
-      rowHit: row.getBoundingClientRect().width,
-      opacity: Number(getComputedStyle(col).opacity),
-    };
-  });
-  check(thin.colSeen <= 6 && thin.rowSeen <= 6, "掴みの見えている線は細い", `列 ${thin.colSeen}px / 行 ${thin.rowSeen}px`);
-  check(thin.colHit >= 8 && thin.rowHit >= 8, "掴みの当たり判定は広い", `列 ${thin.colHit}px / 行 ${thin.rowHit}px`);
-  check(thin.opacity < 1, "掴みは薄く出る", String(thin.opacity));
-  // 列の幅とぴったり合う
+  check(barAbove, "帯が表の真上に付く", "ずれています");
+
+  // 掴みは行と列の端に出る
+  check((await page.locator(".tt-handle-col").count()) === 4, "列の掴みが列の数だけ出る", `${await page.locator(".tt-handle-col").count()} 個`);
+  check((await page.locator(".tt-handle-row").count()) === 3, "行の掴みが行の数だけ出る（見出しも入る）", `${await page.locator(".tt-handle-row").count()} 個`);
   const fit = await page.evaluate(() => {
-    const grips = Array.from(document.querySelectorAll(".tt-grip-col")).map((el) => el.getBoundingClientRect());
+    const handles = Array.from(document.querySelectorAll(".tt-handle-col")).map((el) => el.getBoundingClientRect());
     const cells = Array.from(document.querySelectorAll(".tt-body table tr:first-child th, .tt-body table tr:first-child td")).map((el) => el.getBoundingClientRect());
-    return grips.every((grip, i) => cells[i] && Math.abs(grip.width - cells[i].width) <= 3 && Math.abs(grip.left - cells[i].left) <= 3);
+    return handles.every((handle, i) => cells[i] && Math.abs(handle.width - cells[i].width) <= 3 && Math.abs(handle.left - cells[i].left) <= 3);
   });
   check(fit, "列の掴みが列の幅と揃う", "ずれています");
 
-  // 掴みから行を足す
-  const beforeRows = await page.locator(".tt-body table tr").count();
-  await rowGrips.nth(1).click();
-  await page.waitForSelector(".tt-menu", { timeout: 4000 });
-  const menuTexts = await page.locator(".tt-menu-item").allTextContents();
-  check(menuTexts.join("/") === "上に行を足す/下に行を足す/この行を消す", "行の掴みは行の操作だけを出す", menuTexts.join("/"));
-  await page.getByRole("button", { name: "下に行を足す" }).click();
-  await page.waitForTimeout(600);
-  check((await page.locator(".tt-body table tr").count()) === beforeRows + 1, "掴みから行を足せる", `${beforeRows} → ${await page.locator(".tt-body table tr").count()}`);
+  // 寄せは列全体に効く
+  await page.locator('.tt-tablebar-button[title="中央に寄せる"]').click();
+  await page.waitForTimeout(500);
+  const centered = JSON.parse((await docOf()) || "{}");
+  const column = JSON.stringify(centered).split('"align":"center"').length - 1;
+  check(column === 3, "寄せが列全体（3 行）に付く", `${column} 個`);
 
-  // 掴みから列を足す
-  const beforeCols = await page.locator(".tt-body table tr").first().locator("th, td").count();
-  await colGrips.nth(0).click();
-  await page.waitForSelector(".tt-menu", { timeout: 4000 });
-  const colTexts = await page.locator(".tt-menu-item").allTextContents();
-  check(colTexts.join("/") === "左に列を足す/右に列を足す/この列を消す", "列の掴みは列の操作だけを出す", colTexts.join("/"));
-  await page.getByRole("button", { name: "右に列を足す" }).click();
-  await page.waitForTimeout(600);
-  check(
-    (await page.locator(".tt-body table tr").first().locator("th, td").count()) === beforeCols + 1,
-    "掴みから列を足せる",
-    `${beforeCols} → ${await page.locator(".tt-body table tr").first().locator("th, td").count()}`
-  );
+  // 掴んで列を入れ替える
+  const headings = () => page.locator(".tt-body table tr:first-child th, .tt-body table tr:first-child td").allTextContents();
+  const before = (await headings()).join("/");
+  const spot = await page.evaluate(() => {
+    const at = Array.from(document.querySelectorAll(".tt-handle-col")).map((el) => el.getBoundingClientRect());
+    // 真ん中ちょうどでは入れ替わらない（跨いだ分だけ数えるため）。少し越える。
+    return { from: { x: at[0].left + at[0].width / 2, y: at[0].top + 5 }, to: { x: at[1].left + at[1].width / 2 + 6, y: at[1].top + 5 } };
+  });
+  await page.mouse.move(spot.from.x, spot.from.y);
+  await page.mouse.down();
+  await page.mouse.move(spot.to.x, spot.to.y, { steps: 10 });
+  check((await page.locator(".tt-move-line").count()) === 1, "動かしている間に落ちる境目の線が出る");
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+  const after = (await headings()).join("/");
+  check(before === "あ/い/う/え" && after === "い/あ/う/え", "掴んで列を入れ替えられる", `${before} → ${after}`);
   await save("表を入れた下書きが保存できる");
 
   // 表から離れると消える
   await page.locator("tiptap-editor .tt-body p").first().click();
   await page.mouse.move(20, 20);
   await page.waitForTimeout(400);
-  check((await page.locator(".tt-grip").count()) === 0, "表を触っていない時は掴みが出ない", `${await page.locator(".tt-grip").count()} 個`);
+  check((await page.locator(".tt-tablebar").count()) === 0, "表を触っていない時は帯が出ない", `${await page.locator(".tt-tablebar").count()} 個`);
   await page.locator(".tt-body table").hover();
   await page.waitForTimeout(400);
-  check((await page.locator(".tt-grip").count()) > 0, "表にマウスを乗せると掴みが出る", "出ません");
+  check((await page.locator(".tt-tablebar").count()) > 0, "表にマウスを乗せると帯が出る", "出ません");
 
   // 2b. 列が多い表・長い文字でも本文の枠からはみ出さない
   await openNew(`rich-table-wide ${marker}`);
@@ -222,27 +217,43 @@ try {
   await page.waitForTimeout(500);
   await save("ファイル名付きのコードブロックが保存できる");
 
-  // 3. 画像のキャプションと代替テキスト
+  // 3. 画像の代替テキスト
   await openNew(`rich-caption ${marker}`);
   await page.locator('.tt-tool[aria-label="画像"]').click();
   await page.waitForTimeout(900);
   await page.locator(".fixed .grid button").nth(0).click();
   await page.getByRole("button", { name: /本文に入れる/ }).click();
   await page.waitForTimeout(700);
-  const captionBox = page.locator(".tt-image-caption").first();
   const altBox = page.locator(".tt-image-alt").first();
-  check((await captionBox.count()) === 1, "画像にキャプションの入力がある", `${await captionBox.count()} 個`);
+  check((await page.locator(".tt-image-caption").count()) === 0, "画像にキャプションの入力が無い");
   check((await altBox.count()) === 1, "画像に代替テキストの入力がある", `${await altBox.count()} 個`);
-  await captionBox.fill("さんぷるの説明");
   await altBox.click();
   await altBox.fill("さんぷるの代替");
   await page.locator("tiptap-editor .tt-body").click();
   await page.waitForTimeout(600);
-  const withCaption = JSON.parse((await docOf()) || "{}");
-  const image = (withCaption.content ?? []).find((node) => node.type === "image");
-  check(image?.attrs?.caption === "さんぷるの説明", "キャプションが image の attrs に入る", JSON.stringify(image?.attrs ?? {}));
+  const withAlt = JSON.parse((await docOf()) || "{}");
+  const image = (withAlt.content ?? []).find((node) => node.type === "image");
   check(image?.attrs?.alt === "さんぷるの代替", "代替テキストが image の attrs に入る", JSON.stringify(image?.attrs ?? {}));
-  await save("キャプション付きの下書きが保存できる");
+
+  // 代替テキストの欄から、上下の矢印で前後の行へ出られる
+  for (const [key, where] of [["ArrowUp", "上"], ["ArrowDown", "下"]]) {
+    await altBox.click();
+    await page.waitForTimeout(200);
+    await page.keyboard.press(key);
+    await page.waitForTimeout(300);
+    const at = await page.evaluate(() => {
+      const node = window.getSelection()?.anchorNode;
+      const el = node?.nodeType === 3 ? node.parentElement : node;
+      return el?.closest?.(".tt-body") ? (el.tagName ?? "") : "外";
+    });
+    check(at === "P", `代替テキストから ${key} で${where}の行へ出る`, `カーソルの親 ${at}`);
+    await page.keyboard.type(where);
+    await page.waitForTimeout(200);
+  }
+  const around = JSON.parse((await docOf()) || "{}");
+  const kinds = (around.content ?? []).map((node) => node.type).join(" ");
+  check(kinds.includes("paragraph image paragraph"), "画像の上下に行ができる", kinds);
+  await save("代替テキスト付きの下書きが保存できる");
 
   // 4. ツールバーの幅
   for (const width of [1440, 1024, 768]) {
@@ -277,7 +288,6 @@ try {
   check(saved.includes('"type":"underline"'), "CMS に underline の mark が入っている", saved.slice(0, 300));
   check(saved.includes('"type":"table"'), "CMS に table が入っている", saved.slice(0, 300));
   check(saved.includes('"type":"tableHeader"'), "CMS に tableHeader が入っている", saved.slice(0, 300));
-  check(saved.includes("さんぷるの説明"), "CMS に画像のキャプションが入っている", saved.slice(0, 300));
   check(saved.includes("さんぷるの代替"), "CMS に画像の代替テキストが入っている", saved.slice(0, 300));
   check(saved.includes("src/main.ts"), "CMS に codeBlock の fileName が入っている", saved.slice(0, 300));
 } catch (error) {

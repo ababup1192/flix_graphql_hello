@@ -51,7 +51,12 @@ const Passthrough = Node.create({
   },
 });
 
-const EMPTY_DOC = { type: "doc", content: [] };
+// 空でも段落を 1 つ持たせる。
+//
+// **中身が 0 個だと、打つ場所そのものが無い。** 押しても入る所が無いので、新規作成を開いた
+// 直後にツールバーの引用・コードブロック・表・箇条書きを押しても何も起きなかった
+// （文字を打つと段落ができて、そこから先は効く）。
+const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
 
 type Tool = {
   kind: "button" | "divider" | "spacer" | "block";
@@ -1004,7 +1009,8 @@ class TiptapEditor extends HTMLElement {
     try {
       const parsed = JSON.parse(raw);
       if (!parsed || parsed.type !== "doc") return EMPTY_DOC;
-      return toTaskList(foldUnknown(parsed, this.knownNames(extensions)));
+      const doc = toTaskList(foldUnknown(parsed, this.knownNames(extensions)));
+      return Array.isArray(doc.content) && doc.content.length > 0 ? doc : EMPTY_DOC;
     } catch {
       return EMPTY_DOC;
     }

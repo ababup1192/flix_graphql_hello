@@ -13,6 +13,7 @@
 
 import { Node, Extension } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { leaveBlock } from "./block-edges";
 
 export type AssetInfo = { id: string; url: string; alt?: string };
 
@@ -67,7 +68,13 @@ function paintImage(box: HTMLElement, img: HTMLImageElement, note: HTMLElement, 
 }
 
 // 画像の下に付く 1 行の入力。打ち終わり（blur）と Enter で node に書く。
-function captionInput(placeholder: string, className: string, onDone: (value: string) => void): HTMLInputElement {
+// 上下の矢印では、この欄から出て前後の行へ移る。
+function noteInput(
+  placeholder: string,
+  className: string,
+  onDone: (value: string) => void,
+  onLeave: (dir: -1 | 1) => void
+): HTMLInputElement {
   const input = document.createElement("input");
   input.type = "text";
   input.className = className;
@@ -76,9 +83,15 @@ function captionInput(placeholder: string, className: string, onDone: (value: st
   // Elm への docchange も打鍵の数だけ飛ぶ。
   input.addEventListener("blur", () => onDone(input.value.trim()));
   input.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      input.blur();
+      return;
+    }
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
     event.preventDefault();
-    input.blur();
+    onDone(input.value.trim());
+    onLeave(event.key === "ArrowUp" ? -1 : 1);
   });
   return input;
 }
@@ -116,11 +129,23 @@ export function imageNode(store: AssetStore) {
         const img = document.createElement("img");
         const note = document.createElement("span");
         note.className = "tt-image-note";
-        // キャプションと代替テキストは**その場で打つ**（CMS の image は attrs.caption /
-        // attrs.alt を受ける。microCMS も画像の下で直に打たせる）。
-        const caption = captionInput("キャプション", "tt-image-caption", (value) => write("caption", value));
-        const alt = captionInput("代替テキスト（読み上げ用）", "tt-image-alt", (value) => write("alt", value));
-        dom.append(img, note, caption, alt);
+        // 代替テキストは**その場で打つ**（CMS の image は attrs.alt を受ける）。
+        //
+        // WhyNot: キャプションの欄は置かない。ヘッドレス CMS の編集画面で画像の下に
+        // キャプションを打たせる物は無い（microCMS・Contentful・Strapi・Sanity のどれも
+        // 持たない。持っているのは Ghost・WordPress・Notion のような、見た目まで決める編集画面）。
+        // `attrs.caption` は CMS 側に残してあるので、取り込んだ物は消えずに往復する。
+        const alt = noteInput(
+          "代替テキスト（読み上げ用）",
+          "tt-image-alt",
+          (value) => write("alt", value),
+          (dir) => {
+            const pos = getPos();
+            if (pos === undefined) return;
+            leaveBlock(editor.view, pos, editor.view.state.doc.nodeAt(pos)?.nodeSize ?? 1, dir);
+          }
+        );
+        dom.append(img, note, alt);
 
         const write = (name: string, value: string) => {
           const pos = getPos();
@@ -134,9 +159,7 @@ export function imageNode(store: AssetStore) {
 
         const paint = (next: Record<string, unknown>) => {
           paintImage(dom, img, note, store, next);
-          const captionText = typeof next.caption === "string" ? next.caption : "";
           const altText = typeof next.alt === "string" ? next.alt : "";
-          if (document.activeElement !== caption) caption.value = captionText;
           if (document.activeElement !== alt) alt.value = altText;
         };
 
@@ -148,7 +171,7 @@ export function imageNode(store: AssetStore) {
           dom,
           // 打っている間に node の中身を作り直させない（1 文字ごとにフォーカスが飛ぶ）。
           ignoreMutation: () => true,
-          stopEvent: (event: Event) => event.target === caption || event.target === alt,
+          stopEvent: (event: Event) => event.target === alt,
           update(updated: { type: { name: string }; attrs: Record<string, unknown> }) {
             if (updated.type.name !== "image") return false;
             attrs = updated.attrs;
