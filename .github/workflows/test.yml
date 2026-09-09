@@ -20,6 +20,6 @@ jobs:
         env:
           FLIX_JAR: /tmp/flix.jar
       - name: 実 PostgreSQL と MinIO 込みのテスト
-        run: make test-pg
+        run: make test-pg-ci
         env:
           FLIX_JAR: /tmp/flix.jar

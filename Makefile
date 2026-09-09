@@ -1,10 +1,23 @@
-.PHONY: run check test test-unit test-pg import-microcms db-up db-down query generate scaffold gen gen-check migrate migrate-status migrate-new fatjar image
+.PHONY: run check test test-unit test-pg test-pg-ci import-microcms db-up db-down query generate scaffold gen gen-check migrate migrate-status migrate-new fatjar image
 
-# 実 PG と MinIO 用の接続。docker-compose.yml と同じ値。run と test-pg の両方で使う
-PG_ENV = CMS_DSN=jdbc:postgresql://127.0.0.1:5432/cms CMS_DB_USER=cms CMS_DB_PASSWORD=cms \
+# **テストの DB は開発の DB と分ける。** 同じ物を使うと、テストが終わりに消す時に
+# 手元のデータ（見本のコンテンツ、発行した鍵、招待）まで消える（実際に消えた）。
+# 同じ postgres の中でデータベースを分け、コンテナは落とさない。
+DEV_DB = cms
+TEST_DB = cms_test
+
+# 実 PG と MinIO 用の接続。docker-compose.yml と同じ値。
+# **DSN 以外をここに置く**（DSN を二重に渡すと、どちらが効くかがシェル任せになる）。
+PG_BASE = CMS_DB_USER=cms CMS_DB_PASSWORD=cms \
 	ASSET_ENDPOINT=http://127.0.0.1:9000 ASSET_BUCKET=cms ASSET_ACCESS_KEY=cms ASSET_SECRET_KEY=cms-secret \
 	ASSET_REGION=us-east-1 ASSET_PUBLIC_URL=http://127.0.0.1:9000/cms \
 	CMS_AUTH=dev CMS_BOOTSTRAP_OWNER=dev@localhost CMS_API_KEY_PEPPER=dev-pepper
+
+# 開発（make run / make import-microcms）が使う DB
+PG_ENV = CMS_DSN=jdbc:postgresql://127.0.0.1:5432/$(DEV_DB) $(PG_BASE)
+
+# テスト（make test-pg）が使う DB。**中身を毎回消すので、開発の物と別にする**
+PG_TEST_ENV = CMS_DSN=jdbc:postgresql://127.0.0.1:5432/$(TEST_DB) $(PG_BASE)
 
 # サーバ起動。PG は make db-up で立てておく
 run:
@@ -41,10 +54,18 @@ test-unit:
 # WhyNot: `docker compose up -d --wait` 1 発にしないのは、バケットを作る minio-init が終了する（exit 0）のを --wait が失敗と見るため
 COMPOSE_UP = docker compose up -d --wait postgres minio && docker compose up minio-init
 
-# 実 PostgreSQL と MinIO に当たるテスト。コンテナを立て、test/ を全部（test/Pg/ 込み）回し、終わったら止める
+# 実 PostgreSQL と MinIO に当たるテスト。**開発の DB は触らない**（$(TEST_DB) を作り直して使う）。
+# コンテナも落とさないので、make run を上げたまま回せる。
 test-pg:
 	$(COMPOSE_UP)
-	$(PG_ENV) bin/flix test; status=$$?; docker compose down -v; exit $$status
+	@docker compose exec -T postgres psql -U cms -d postgres -c "SELECT 1 FROM pg_database WHERE datname = '$(TEST_DB)'" | grep -q 1 || \
+		docker compose exec -T postgres psql -U cms -d postgres -c "CREATE DATABASE $(TEST_DB) OWNER cms" > /dev/null
+	$(PG_TEST_ENV) bin/flix test
+
+# CI 用。テストの後にコンテナごと片付ける（CI には手元のデータが無い）
+test-pg-ci:
+	$(COMPOSE_UP)
+	$(PG_TEST_ENV) bin/flix test; status=$$?; docker compose down -v; exit $$status
 
 db-up:
 	$(COMPOSE_UP)
@@ -71,7 +92,7 @@ gen-check:
 	cd $(FLIX_DB) && bin/flix run -- gen --check --scope project_id $(CURDIR)/migrations $(CURDIR)/queries $(CURDIR)/src/generated/sql
 
 # migrations/ を PG に当てる（db-up の後で。make run の前に 1 回）
-MIGRATE_ENV = SQLFX_DSN=jdbc:postgresql://127.0.0.1:5432/cms SQLFX_USER=cms SQLFX_PASSWORD=cms
+MIGRATE_ENV = SQLFX_DSN=jdbc:postgresql://127.0.0.1:5432/$(DEV_DB) SQLFX_USER=cms SQLFX_PASSWORD=cms
 
 migrate:
 	cd $(FLIX_DB) && $(MIGRATE_ENV) bin/flix run -- migrate $(CURDIR)/migrations
@@ -107,3 +128,45 @@ query:
 	curl -s -X POST localhost:8080/graphql -H 'Content-Type: application/json' \
 		-d '{"query": "{ __schema { queryType { fields { name } } } }"}'
 	@echo
+
+# ---- 管理画面（admin-ui。node は devbox が持つ）----
+
+UI := cd admin-ui && devbox run --
+
+ui-install: ## 管理画面の依存を入れる
+	$(UI) npm ci
+
+ui-gen: ## SDL → Elm の型（admin.graphql / account.graphql）
+	$(UI) npm run gen
+
+ui-gen-check: ## SDL と生成物のずれを見張る（CI）
+	$(UI) npm run gen
+	@git diff --exit-code -- admin-ui/generated || \
+	  (echo ""; echo "生成物が SDL とずれています。直し方: make ui-gen && git add admin-ui/generated"; exit 1)
+
+ui-dev: ## 管理画面の dev サーバ（CMS は別ターミナルで make run）
+	$(UI) npm run dev
+
+ui-check: ## elm-format の検査・elm-review・elm-test・tsc
+	$(UI) npm run check
+
+ui-contract: ## 実際の CMS に document を投げて通るか（CMS を上げてから）
+	$(UI) npm run contract
+
+ui-smoke: ## ブラウザで画面を触る（CMS と make ui-dev を上げてから）
+	$(UI) npm run smoke
+
+ui-audit: ## 各機能が仕様どおり動くかを一通り触って確かめる
+	$(UI) npm run audit
+
+ui-verify: ## ui-check + ui-contract + ui-smoke
+	$(UI) npm run verify
+
+ui-build: ## admin-ui/dist を作る
+	$(UI) npm run build
+
+ui-no-dev-headers: ## 本番のビルドに dev のヘッダが混ざっていないか（CI）
+	@! grep -ril "x-dev" admin-ui/dist || (echo "dist に dev のヘッダが残っています"; exit 1)
+	@echo "dist に dev のヘッダ無し"
+
+.PHONY: ui-install ui-gen ui-gen-check ui-dev ui-check ui-contract ui-smoke ui-audit ui-verify ui-build ui-no-dev-headers
