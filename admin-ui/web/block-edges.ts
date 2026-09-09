@@ -8,6 +8,7 @@
 //   - ブロックの間の余白を押す → そこにカーソル
 //   - 先頭のブロックの頭で ArrowUp / 末尾の尻で ArrowDown → その外へ
 //   - 区切り線や画像のような、中に入れないブロックを矢印で越える時 → その手前・その先へ
+//   - 先頭の空行で Backspace → その行を消して、次の行の頭へ
 //
 // **置くのは疑似行。** 空の段落を 1 つ入れてそこに入り、打たずに離れたら消える。
 // 本文にも取り消しの履歴にも残さず、`docchange` も出さない（触っていないのに
@@ -133,6 +134,31 @@ function boundaryOfClick(view: EditorView, event: MouseEvent): number | null {
   return null;
 }
 
+// 先頭の空行で Backspace。**その行を消して、次の行の頭へ。**
+//
+// 先頭には手前が無いので、ProseMirror の Backspace（`joinBackward`）は何もしない。
+// 上に付いた空行を消す道が無く、選んで消すしかなかった（実際に消せなかった）。
+function eatFirstEmptyLine(view: EditorView): boolean {
+  const state = view.state;
+  const selection = state.selection;
+  if (!selection.empty || !(selection instanceof TextSelection)) return false;
+
+  const $from = selection.$from;
+  // 一番外側の行の、先頭の行の、頭にいるか。
+  if ($from.depth !== 1 || $from.before(1) !== 0 || $from.parentOffset !== 0) return false;
+
+  const first = $from.parent;
+  if (first.type.name !== "paragraph" || first.content.size !== 0) return false;
+  // **最後の 1 行は消さない**（本文がノードを 1 つも持たない形は作れない）。
+  if (state.doc.childCount < 2) return false;
+
+  const tr = state.tr.delete(0, first.nodeSize);
+  tr.setSelection(TextSelection.near(tr.doc.resolve(0), 1));
+  tr.setMeta(key, { pos: null } satisfies Pending);
+  view.dispatch(tr.scrollIntoView());
+  return true;
+}
+
 // 中に入れないブロック（区切り線・画像・埋め込み・数式）。
 // **中に入れる物（表・リスト・引用）は素の動きに任せる。** 矢印で中へ入るのが自然で、
 // ここで止めると表に入れなくなる。
@@ -186,6 +212,8 @@ export const BlockEdges = Extension.create({
           },
 
           handleKeyDown(view, event) {
+            if (event.key === "Backspace") return eatFirstEmptyLine(view);
+
             const up = event.key === "ArrowUp";
             const down = event.key === "ArrowDown";
             if (!up && !down) return false;
