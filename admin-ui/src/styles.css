@@ -177,6 +177,24 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 .tt-body h1 { font-size: 1.4rem; font-weight: 600; }
 .tt-body h2 { font-size: 1.2rem; font-weight: 600; }
 .tt-body h3 { font-size: 1.05rem; font-weight: 600; }
+/* **見出し 4 は本文と同じ大きさだが、太さで分ける。** 何も指定しないと 14px / 400 で
+   本文と 1px も違わず、道具の帯で「見出し 4」を選んでも何も起きていないように見えた。 */
+.tt-body h4 { font-size: 1rem; font-weight: 600; }
+
+/* **行の中のコードは背景で分ける。** 等幅にするだけでは、日本語の字は形が変わらないので
+   素の文章と見分けが付かない（実際に付かなかった）。 */
+.tt-body :not(pre) > code {
+  background: var(--color-well);
+  border: 1px solid var(--color-edge);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+
+/* **打ち消しと下線は線を太らせる。** 既定の 1px は 14px の字に対して細く、
+   暗いテーマだと引いたのかどうか読み取れない（実際に読み取れなかった）。 */
+.tt-body s { text-decoration-thickness: 2px; }
+.tt-body u { text-decoration-thickness: 2px; text-underline-offset: 2px; }
+
 .tt-body ul { list-style: disc; padding-left: 1.4rem; }
 .tt-body ol { list-style: decimal; padding-left: 1.4rem; }
 .tt-body blockquote { border-left: 3px solid var(--color-edge); padding-left: 0.8rem; color: var(--color-ink-soft); }
