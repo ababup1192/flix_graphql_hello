@@ -113,6 +113,9 @@ type alias Model =
 
     {- レールは先頭だけ出す。全部はここを開いて見せる。 -}
     , historyOpen : Bool
+
+    {- 本文を画面いっぱいに広げている項目の apiId。**1 つだけ。** -}
+    , expanded : Maybe String
     , schedulesOpen : Bool
 
     {- 本文からリンクを張る時の候補。型をまたいで探す。 -}
@@ -193,6 +196,7 @@ type Msg
     | ReferrersOpened
     | ReferrersClosed
     | HistoryToggled Bool
+    | ExpandToggled (Maybe String)
     | RestoreOpened Model.EntryVersion
     | RestoreWanted
     | GotVersionSaved (Result Api.Problem String)
@@ -243,6 +247,7 @@ init project apiId entryId =
     , referrers = Loaded.Loading
     , referrersOpen = False
     , historyOpen = False
+    , expanded = Nothing
     , schedulesOpen = False
     , linkCandidates = []
     , richPicking = Nothing
@@ -377,6 +382,9 @@ update ctx msg model =
 
         HistoryToggled open ->
             ( { model | historyOpen = open }, [] )
+
+        ExpandToggled apiId ->
+            ( { model | expanded = apiId }, [] )
 
         RestoreOpened version ->
             ( { model | asking = AskingRestore version, actionError = Nothing }, [] )
@@ -2228,7 +2236,7 @@ viewField args model field =
                 textArea "min-h-24" typed (FieldValue.Text >> FieldTyped field.apiId)
 
             "RICH_TEXT" ->
-                richEditor model field.apiId current
+                viewRich model field current
 
             "NUMBER" ->
                 Ui.input
@@ -2315,15 +2323,95 @@ slugPlaceholder model field =
             "half-width-letters-and-hyphens"
 
 
+{-| 本文の欄。**広げるかどうかだけを外側で決める。**
+
+長い記事を書く時、フォームの中の 12rem の枠では前後が見えない。
+Contentful は欄の右上の展開ボタン、Sanity は全画面、Notion は幅を広げるトグルを持つ。
+ここは Contentful に寄せて、**欄の右上のボタンで画面いっぱいにする**。
+
+WhyNot: 広げる時に `tiptap-editor` を別の親へ動かさない。カスタム要素なので、
+親が変わると作り直しになり、書いていた履歴（取り消し）が消える。
+**同じ場所に置いたまま、外側の div を `fixed inset-0` にする。**
+
+WhyNot: Esc で閉じない。本文の中では Esc をコードブロックやリンクの面が先に使うので、
+ここで拾うと、面を閉じたつもりが画面ごと閉じる。
+
+-}
+viewRich : Model -> FieldDef -> Value -> Html Msg
+viewRich model field current =
+    let
+        big : Bool
+        big =
+            model.expanded == Just field.apiId
+    in
+    div
+        [ class
+            (if big then
+                "fixed inset-0 z-40 flex flex-col gap-2 bg-app p-4"
+
+             else
+                "flex flex-col gap-1.5"
+            )
+        ]
+        [ div [ class "flex items-center gap-2" ]
+            [ if big then
+                span [ class "truncate text-[13px] font-semibold text-ink" ] [ text field.name ]
+
+              else
+                text ""
+
+            -- **広げている間も保存できるようにする。** 覆いが上の帯を隠すので、
+            -- 置かないと書いた物を保存するのに一度畳む事になる（実際に押せなかった）。
+            , if big then
+                span [ class "ml-auto text-xs text-ink-soft" ] [ text (saveText model.save) ]
+
+              else
+                text ""
+            , if big then
+                Ui.ghostButton
+                    [ onClick SaveWanted
+                    , Html.Attributes.disabled (not (unsaved model))
+                    , Html.Attributes.title "Command + S"
+                    ]
+                    [ text "下書き保存" ]
+
+              else
+                text ""
+            , Ui.ghostButton
+                [ class "ml-auto"
+                , onClick
+                    (ExpandToggled
+                        (if big then
+                            Nothing
+
+                         else
+                            Just field.apiId
+                        )
+                    )
+                ]
+                [ text
+                    (if big then
+                        "元の大きさに戻す"
+
+                     else
+                        "広げて書く"
+                    )
+                ]
+            ]
+        , richEditor big model field.apiId current
+        ]
+
+
 {-| リッチエディタ。TipTap を包んだ custom element に doc を渡し、変わったら受け取る。
 
 Elm は TipTap を知らない（`web/tiptap-editor.ts` が閉じている）。
 
 -}
-richEditor : Model -> String -> Value -> Html Msg
-richEditor model apiId current =
+richEditor : Bool -> Model -> String -> Value -> Html Msg
+richEditor big model apiId current =
     Html.node "tiptap-editor"
-        [ Html.Attributes.attribute "doc" (FieldValue.toDocJson current)
+        [ Html.Attributes.classList [ ( "is-big", big ) ]
+        , Html.Attributes.attribute "doc" (FieldValue.toDocJson current)
 
         -- **リンク先の候補は Elm が引く。** エディタは API を知らない
         -- （URL もヘッダも `js/api.ts` と Elm が持つ）。打った文字が `linksearch` で来て、

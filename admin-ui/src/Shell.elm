@@ -156,52 +156,73 @@ typeApiIdOf route =
             Nothing
 
 
+{-| 上のバー。**左に居場所、中央に検索、右に自分。**
+
+**検索を中央に置く。** Contentful / Sanity / Strapi / GitHub が揃ってここに置いていて、
+右端に寄せると自分のメニューと並んで「設定の一種」に見える。検索は画面のどこからでも
+使う物なので、左右のどちらの持ち物でもない場所に出す。
+
+3 列の格子にして、真ん中の列を中央に置く。**絶対位置で中央に置かない**（狭い画面で
+プロジェクト名の上に重なる。格子なら重ならずに左右が縮む）。
+
+真ん中の列は `minmax(0, 18rem)`。**上限だけ決めて、狭ければ縮む。**
+`w-72` を欄に直に置くと 390 幅で 18rem が譲らず、プロジェクト名の上に乗った。
+
+-}
 topBar : Config msg -> Html msg
 topBar config =
-    div [ class "relative flex h-12 shrink-0 items-center gap-2.5 border-b border-edge bg-panel px-3" ]
+    div [ class "relative grid h-12 shrink-0 grid-cols-[minmax(min-content,1fr)_minmax(0,18rem)_minmax(min-content,1fr)] items-center gap-2.5 border-b border-edge bg-panel px-3" ]
         [ -- メニューの外を押したら閉じる。開いている間だけ敷く。
           if config.menu == NoMenu then
             text ""
 
           else
             Ui.dismissLayer (config.onMenu NoMenu)
-        , Html.button
-            [ class "flex h-7 w-7 items-center justify-center rounded-md text-ink-soft hover:bg-well"
-            , Html.Events.onClick config.onToggleSidebar
-            , Html.Attributes.title "サイドバーを畳む"
-            ]
-            [ Icon.view Icon.panel ]
-        , Html.button
-            [ class "flex items-center gap-2 rounded-md bg-well px-2.5 py-1.5 text-[13px] font-semibold text-ink hover:bg-edge"
-            , Html.Events.onClick (config.onMenu (toggledProjectMenu config.menu))
-            ]
-            [ viewProjectMark config.project
-            , span [ class "max-w-40 truncate", Html.Attributes.title (projectName config) ] [ text (projectName config) ]
-            , Icon.view Icon.caret
-            ]
-        , case config.menu of
-            ProjectMenu query ->
-                viewProjectMenu config query
+        , div [ class "flex min-w-0 items-center gap-2.5" ]
+            [ Html.button
+                [ class "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-soft hover:bg-well"
+                , Html.Events.onClick config.onToggleSidebar
+                , Html.Attributes.title "サイドバーを畳む"
+                ]
+                [ Icon.view Icon.panel ]
+            , Html.button
+                [ class "flex min-w-0 items-center gap-2 rounded-md bg-well px-2.5 py-1.5 text-[13px] font-semibold text-ink hover:bg-edge"
+                , Html.Events.onClick (config.onMenu (toggledProjectMenu config.menu))
+                ]
+                [ viewProjectMark config.project
+                , span [ class "max-w-40 truncate", Html.Attributes.title (projectName config) ] [ text (projectName config) ]
+                , Icon.view Icon.caret
+                ]
+            , case config.menu of
+                ProjectMenu query ->
+                    viewProjectMenu config query
 
-            _ ->
-                text ""
+                _ ->
+                    text ""
+            ]
         , Html.button
-            [ class "ml-auto flex w-72 items-center gap-2 rounded-md border border-edge bg-raised px-2.5 py-1.5 text-left text-xs text-ink-faint hover:border-ink-faint"
+            [ class "flex w-full min-w-0 items-center gap-2 rounded-md border border-edge bg-raised px-2.5 py-1.5 text-left text-xs text-ink-faint hover:border-ink-faint"
             , Html.Events.onClick config.onOpenSearch
+            , Html.Attributes.title "API・コンテンツ・メディア・設定を検索"
             ]
-            [ text "API・コンテンツ・メディア・設定を検索"
-            , span [ class "ml-auto rounded border border-edge px-1 py-0.5 text-[10px]" ] [ text "⌘K" ]
+            -- **狭い画面では虫眼鏡だけ残す。** 文字と ⌘K を残すと 18rem が譲らず、
+            -- プロジェクト名の上に乗る（390 幅で乗った）。
+            [ span [ class "shrink-0" ] [ Icon.view Icon.search ]
+            , span [ class "hidden truncate sm:inline" ] [ text "API・コンテンツ・メディア・設定を検索" ]
+            , span [ class "ml-auto hidden shrink-0 rounded border border-edge px-1 py-0.5 text-[10px] sm:inline" ] [ text "⌘K" ]
             ]
-        , Html.button
-            [ class "flex items-center gap-2 text-xs text-ink-soft"
-            , Html.Events.onClick (config.onMenu (toggleMenu SelfMenu config.menu))
-            ]
-            [ text config.person.email, Ui.avatar config.person.email ]
-        , if config.menu == SelfMenu then
-            viewSelfMenu config
+        , div [ class "flex min-w-0 items-center justify-end gap-2.5" ]
+            [ Html.button
+                [ class "flex min-w-0 items-center gap-2 text-xs text-ink-soft"
+                , Html.Events.onClick (config.onMenu (toggleMenu SelfMenu config.menu))
+                ]
+                [ span [ class "truncate" ] [ text config.person.email ], Ui.avatar config.person.email ]
+            , if config.menu == SelfMenu then
+                viewSelfMenu config
 
-          else
-            text ""
+              else
+                text ""
+            ]
         ]
 
 

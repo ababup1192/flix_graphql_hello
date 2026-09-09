@@ -9,6 +9,7 @@ module Ui.Icon exposing
     , ofKind
     , panel
     , project
+    , search
     , stage
     , view
     )
@@ -260,6 +261,13 @@ entry =
 caret : List (Svg msg)
 caret =
     [ path "M6 9l6 6 6-6" ]
+
+
+{-| 検索。上のバーの中央の欄に置く。**狭い画面ではこれだけが残る。**
+-}
+search : List (Svg msg)
+search =
+    [ circle "11" "11" "7", path "M20 20l-4.3-4.3" ]
 
 
 {-| 選んでいる物の印。行の右端に置く。

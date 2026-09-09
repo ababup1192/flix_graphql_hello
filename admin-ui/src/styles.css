@@ -142,6 +142,28 @@ tiptap-editor {
   border-radius: 6px;
   background: var(--color-panel);
 }
+/* 広げて書く。**画面いっぱいの時だけ、本文が伸びて中で送る**
+   （伸ばさないと 12rem のままで、周りが余白になる）。 */
+tiptap-editor.is-big {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+tiptap-editor.is-big .tt-bar { flex: 0 0 auto; }
+tiptap-editor.is-big .tt-mount {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* **行の長さを止める。** 1440 幅いっぱいに伸ばすと 1 行が 150 字を超えて、
+   目が次の行の頭に戻れない。Notion / Contentful / Medium と同じ帯の幅にする。 */
+tiptap-editor.is-big .tt-body {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 6rem;
+}
+
 .tt-body {
   min-height: 12rem;
   padding: 0.9rem 1rem;
