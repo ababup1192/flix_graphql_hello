@@ -2358,7 +2358,12 @@ viewRich model field current =
                 "flex flex-col gap-1.5"
             )
         ]
-        [ div [ class "flex items-center gap-2" ]
+        [ div
+            [ class "flex items-center gap-2"
+
+            -- 帯も本文と同じ幅に揃える（揃えないと畳む印だけが画面の端に離れる）。
+            , Html.Attributes.classList [ ( "mx-auto w-full max-w-[53rem]", big ) ]
+            ]
             [ if big then
                 span [ class "truncate text-[13px] font-semibold text-ink" ] [ text field.name ]
 

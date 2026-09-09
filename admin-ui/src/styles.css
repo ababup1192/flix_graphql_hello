@@ -149,6 +149,12 @@ tiptap-editor.is-big {
   flex: 1;
   min-height: 0;
   flex-direction: column;
+  /* **通常と同じ幅（53rem = 848px）に収める。** 画面いっぱいに広げると、道具の帯だけが
+     端まで伸びて本文が真ん中に浮き、通常サイズと文字の始まる位置が変わる。
+     広げて増やすのは高さで、幅は増やさない。 */
+  width: 100%;
+  max-width: 53rem;
+  margin: 0 auto;
 }
 tiptap-editor.is-big .tt-bar { flex: 0 0 auto; }
 tiptap-editor.is-big .tt-mount {
@@ -156,13 +162,8 @@ tiptap-editor.is-big .tt-mount {
   min-height: 0;
   overflow-y: auto;
 }
-/* **行の長さを止める。** 1440 幅いっぱいに伸ばすと 1 行が 150 字を超えて、
-   目が次の行の頭に戻れない。Notion / Contentful / Medium と同じ帯の幅にする。 */
-tiptap-editor.is-big .tt-body {
-  max-width: 46rem;
-  margin: 0 auto;
-  padding: 1.5rem 1rem 6rem;
-}
+/* 広げている間は下にも余白を置く（最後の行が画面の底に貼り付かない）。 */
+tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 
 .tt-body {
   min-height: 12rem;
