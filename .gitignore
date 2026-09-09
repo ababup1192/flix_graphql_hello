@@ -5,3 +5,8 @@ counter.db
 deploy/.env
 deploy/backups/
 import/microcms/contents/
+admin-ui/node_modules/
+admin-ui/elm-stuff/
+admin-ui/review/elm-stuff/
+admin-ui/dist/
+admin-ui/.devbox/
