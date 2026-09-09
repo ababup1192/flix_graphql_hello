@@ -24,7 +24,7 @@ import { CodeEditing } from "./code-editing";
 import { MarkdownRules } from "./markdown-rules";
 import { LinkDialog, type Candidate, type LinkChoice } from "./link-dialog";
 import { dismissOn } from "./dismiss";
-import { tableHandles } from "./table-drag";
+import { isDraggingTable, tableHandles } from "./table-drag";
 import { type Align, alignColumn, columnAlign, resizeTable, tableSize } from "./table-tools";
 import { MathBlock, MathMark } from "./math";
 import { AssetStore, galleryNode, imageDropExtension, imageNode, insertionOf, UploadingImage } from "./image-node";
@@ -536,6 +536,8 @@ class TiptapEditor extends HTMLElement {
   //
   private paintTableTools(hovered?: HTMLTableElement | null) {
     if (!this.editor) return;
+    // 動かしている最中は描き直さない（掴んだ物と塊と線を消してしまう）。
+    if (isDraggingTable()) return;
     const mount = this.querySelector<HTMLElement>(".tt-mount");
     if (!mount) return;
     let layer = this.querySelector<HTMLElement>(".tt-grips");

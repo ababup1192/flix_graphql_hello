@@ -16,6 +16,17 @@ import { moveColumn, moveRow } from "./table-tools";
 
 type Kind = "col" | "row";
 
+// 動かしている最中か。
+//
+// **描き直しを止めるために要る。** 覆いの層は描き直しで中身を丸ごと入れ替えるので、
+// 動かしている間に表からカーソルが外れて描き直しが走ると、掴んだ物も塊も線も消える
+// （実際に、表の外に少しずれただけで動きが止まった）。
+let dragging = false;
+
+export function isDraggingTable(): boolean {
+  return dragging;
+}
+
 type Args = {
   editor: Editor;
   table: HTMLTableElement;
@@ -134,6 +145,7 @@ function startDrag(args: Args, kind: Kind, index: number, event: MouseEvent) {
   line.className = `tt-move-line tt-move-line-${kind}`;
 
   layer.append(source, ghost, line);
+  dragging = true;
   document.body.classList.add(kind === "col" ? "tt-dragging-col" : "tt-dragging-row");
 
   const grabbed = kind === "col" ? event.clientX - held.start : event.clientY - held.start;
@@ -163,6 +175,7 @@ function startDrag(args: Args, kind: Kind, index: number, event: MouseEvent) {
   const stop = () => {
     document.removeEventListener("mousemove", move);
     document.removeEventListener("mouseup", stop);
+    dragging = false;
     document.body.classList.remove("tt-dragging-col", "tt-dragging-row");
     source.remove();
     ghost.remove();
