@@ -271,12 +271,12 @@ Contentful / Notion / Sanity / Google ドキュメントが揃ってこの形を
 -}
 expand : List (Svg msg)
 expand =
-    [ path "M14 4h6v6", path "M10 20H4v-6", path "M20 4l-7 7", path "M4 20l7-7" ]
+    [ path "M15 3h6v6", path "M9 21H3v-6", path "M21 3l-7 7", path "M3 21l7-7" ]
 
 
 collapse : List (Svg msg)
 collapse =
-    [ path "M14 10h6V4", path "M10 14H4v6", path "M20 4l-7 7", path "M4 20l7-7" ]
+    [ path "M20 10h-6V4", path "M4 14h6v6", path "M21 3l-7 7", path "M3 21l7-7" ]
 
 
 {-| 検索。上のバーの中央の欄に置く。**狭い画面ではこれだけが残る。**
