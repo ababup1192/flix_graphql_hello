@@ -98,7 +98,7 @@ mod Accounts {
     /// WhyNot: 権限の証明を取らないのは、組織の owner の操作（Organizations.addMemberByEmail が requireOwner で守る）の部品で、users はプロジェクトに属さず Permission の腕に無いため。
     ///
     pub def findByEmail(email: String): Option[User] \ DbRead + CmsErr =
-        match AuthQueries.listUsersByEmail(String.toLowerCase(String.trim(email))) {
+        match AuthQueries.listUsersByEmail(Email.normalize(email)) {
             case Nil        => None
             case row :: Nil => Some(AuthRows.toUser(row))
             case _          => CmsErr.invalid(Violation.Violation("email", "'${email}' のユーザーが複数います。発行元を 1 つにしてください") :: Nil)

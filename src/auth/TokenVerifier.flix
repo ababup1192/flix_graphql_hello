@@ -56,13 +56,17 @@ mod TokenVerifier {
 
     ///
     /// 開発モード。トークンを email として信じる。Main が 127.0.0.1 と CMS_VERSION=dev の時にしか選ばない。
+    /// subject も正規化した email にする（`Editor@Example.com` と `editor@example.com` を別人にしない）。
     ///
     pub def runDev(f: Unit -> a \ ef): a \ ef - TokenVerifier =
         run f() with handler TokenVerifier {
             def verify(token, resume) = resume(
-                if (String.contains(substr = "@", token)) Ok({ issuer = "dev", subject = token, email = token, name = "" })
+                if (String.contains(substr = "@", token)) Ok(devPrincipal(Email.normalize(token)))
                 else Err("開発モードでは X-Dev-User に email を入れてください"))
         }
+
+    /// 開発モードの本人。email を鍵にする。
+    def devPrincipal(email: String): Principal = { issuer = "dev", subject = email, email = email, name = "" }
 
     ///
     /// 検証の本体。鍵が無ければ取り、kid が合わなければ 1 回だけ取り直す。
@@ -122,7 +126,7 @@ mod TokenVerifier {
         match (claims#email, claims#emailVerified) {
             case (None, _)            => Err("JWT に email がありません")
             case (Some(_), Some(false)) => Err("JWT の email が確認されていません")
-            case (Some(email), _)     => Ok({ issuer = claims#issuer, subject = claims#subject, email = email, name = claims#name |> Option.getWithDefault("") })
+            case (Some(email), _)     => Ok(Principal.normalized({ issuer = claims#issuer, subject = claims#subject, email = email, name = claims#name |> Option.getWithDefault("") }))
         }
 
 }

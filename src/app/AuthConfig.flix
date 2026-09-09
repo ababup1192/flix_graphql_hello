@@ -44,7 +44,7 @@ mod AuthConfig {
         ) yield {
             mode = mode,
             tokenHeader = Sys.Env.getVar("CMS_AUTH_HEADER") |> Option.getWithDefault("Cf-Access-Jwt-Assertion"),
-            bootstrap = { ownerEmail = Sys.Env.getVar("CMS_BOOTSTRAP_OWNER") |> Option.map(String.toLowerCase) },
+            bootstrap = { ownerEmail = Sys.Env.getVar("CMS_BOOTSTRAP_OWNER") |> Option.map(Email.normalize) },
             signup = signup,
             pepper = Sys.Env.getVar("CMS_API_KEY_PEPPER") |> Option.map(secret -> { pepperId = Sys.Env.getVar("CMS_API_KEY_PEPPER_ID") |> Option.getWithDefault("v1"), secret = secret })
         }

@@ -21,12 +21,32 @@ mod Members {
     /// WhyNot: email でユーザーを探して直接付けるのを「同じ発行元のユーザーだけ」に限らないのは、招待は owner の明示の操作で、
     /// 発行元は環境で 1 つに決まっているため。
     ///
-    pub def invite(proof: Granted[ManageMembers], email: String, role: Role): Invitation \ Db + CmsErr + IdGen + Tenant + Session =
-        let normalized = String.toLowerCase(String.trim(email));
+    pub def invite(proof: Granted[ManageMembers], email: String, role: Role): Invitation \ Db + CmsErr + IdGen + Tenant + Session + Time.Clock.Clock =
+        let normalized = Email.normalize(email);
         CmsErr.raiseIfAny(if (String.isMatch(regex = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", normalized)) Nil else Violation.Violation("email", "'${email}' は email の形ではありません") :: Nil);
         let inviter = Session.currentUser();
-        discard AuthQueries.upsertInvitation({ publicId = IdGen.freshPublicId(), projectId = Tenant.currentId(), email = normalized, role = Role.text(role), invitedBy = UserId.toInt64(inviter) });
-        invitations(proof) |> List.find(invitation -> invitation#email == normalized) |> CmsErr.orNotFound(Entity.Invitation, normalized)
+        match Accounts.findByEmail(normalized) {
+            case Some(user) => addNow(normalized, role, user)
+            case None       => placeInvitation(proof, normalized, role, inviter)
+        }
+
+    ///
+    /// 既にログインした事のある人はその場でメンバーにする。招待の行は作らない。
+    ///
+    /// WhyNot: 招待の行も一緒に置かないのは、その人は初回ログインを済ませていて招待を受け入れる機会がもう無く、
+    /// 招待の一覧に残り続けるため。
+    ///
+    /// WhyNot: 戻りの publicId を空にしないのは、GraphQL の Invitation.id が ID! で、空の id をクライアントに配ると
+    /// 「取り消せる招待」として画面に出てしまうため。行が無いので、この id での cancelInvitation は notFound になる。
+    ///
+    def addNow(email: String, role: Role, user: User): Invitation \ DbWrite + IdGen + Tenant + Time.Clock.Clock =
+        discard AuthQueries.upsertMembership({ userId = UserId.toInt64(user#id), projectId = Tenant.currentId(), role = Role.text(role) });
+        { id = 0i64, publicId = IdGen.freshPublicId(), email = email, role = role, createdAt = Timestamp.fromEpochMillis(Time.Clock.now()) }
+
+    /// まだログインした事のない人は招待として置く。初回ログイン（Accounts.acceptInvitations）で membership に写る。
+    def placeInvitation(proof: Granted[ManageMembers], email: String, role: Role, inviter: UserId): Invitation \ Db + CmsErr + IdGen + Tenant =
+        discard AuthQueries.upsertInvitation({ publicId = IdGen.freshPublicId(), projectId = Tenant.currentId(), email = email, role = Role.text(role), invitedBy = UserId.toInt64(inviter) });
+        invitations(proof) |> List.find(invitation -> invitation#email == email) |> CmsErr.orNotFound(Entity.Invitation, email)
 
     ///
     /// 役割を変える。最後の owner を降格させる事はできない。

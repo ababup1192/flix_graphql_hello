@@ -68,6 +68,48 @@ mod TestAuthPg {
                 Err("role: 最後の owner は外せません。先に別の owner を付けてください")))),
             result)
 
+    /// dev の検証（X-Dev-User）を通した本人。email でなければテストの前提が壊れている。
+    def devPrincipal(token: String): Principal = match TokenVerifier.runDev(() -> TokenVerifier.verify(token)) {
+        case Ok(found)    => found
+        case Err(message) => bug!(message)
+    }
+
+    ///
+    /// 既にログインした事のある人を招待すると、その場でメンバーになり招待の行は残らない。
+    /// まだログインした事のない人は今まで通り招待として置かれる。
+    ///
+    ///   known（ログイン済み）─▶ memberships
+    ///   later（未ログイン）  ─▶ invitations
+    ///
+    @Test
+    def testPgInviteExistingUserBecomesMember(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> {
+            discard Accounts.resolveUser(bootstrap(), principal("u-k", "known@test.dev"));
+            PgTestSupport.asOwner(() -> {
+                discard Members.invite(Session.grant(), "Known@Test.dev", Role.Editor);
+                discard Members.invite(Session.grant(), "later@test.dev", Role.Writer)
+            });
+            (PgTestSupport.asOwner(() -> Members.list(Session.grant()) |> List.map(member -> (member#email, member#role))),
+             PgTestSupport.asOwner(() -> Members.invitations(Session.grant()) |> List.map(invitation -> invitation#email)))
+        });
+        Assert.assertEq(
+            expected = Ok(Ok((List#{ ("known@test.dev", Role.Editor) }, List#{ "later@test.dev" }))),
+            result)
+
+    ///
+    /// 招待は小文字で置く。ログインの email が大文字混じりでも正規化されるので、招待が当たって membership に写る。
+    ///
+    @Test
+    def testPgLoginEmailIsNormalized(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> {
+            PgTestSupport.asOwner(() -> discard Members.invite(Session.grant(), "editor@example.com", Role.Editor));
+            let user = Accounts.resolveUser(bootstrap(), devPrincipal("Editor@Example.com"));
+            (user#email, PgTestSupport.asOwner(() -> Members.list(Session.grant()) |> List.map(member -> (member#email, member#role))))
+        });
+        Assert.assertEq(
+            expected = Ok(Ok(("editor@example.com", List#{ ("editor@example.com", Role.Editor) }))),
+            result)
+
     ///
     /// API キー。発行した鍵はこのプロジェクトでだけ解決でき（他のプロジェクトでは Unknown）、失効すれば Revoked、他の鍵の文字列は Unknown。
     ///

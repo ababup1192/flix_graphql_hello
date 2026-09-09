@@ -44,6 +44,34 @@ mod OrgId {
 pub type alias Principal = { issuer = String, subject = String, email = String, name = String }
 
 ///
+/// email の正規化。招待（Members.invite）もログインも検索もこの形に揃えてから突き合わせる。
+/// 突き合わせは SQL の完全一致（WHERE email = :email）なので、揃える場所が 1 つでないと当たらない。
+///
+mod Email {
+
+    ///
+    /// 小文字 + 前後の空白落とし。
+    ///
+    /// WhyNot: local part（@ の左）を大文字小文字を区別する物として残さないのは、RFC 上は区別しうるが
+    /// 実際の IdP（Google / Microsoft / Cloudflare Access）が区別せず、同じ人が別人として入ってしまうため。
+    ///
+    pub def normalize(email: String): String = String.toLowerCase(String.trim(email))
+
+}
+
+mod Principal {
+
+    ///
+    /// email を正規化した本人。IdP が大文字混じりの email を返しても、招待と bootstrap の突き合わせが当たるようにする。
+    ///
+    /// WhyNot: issuer / subject を触らないのは、発行元にとって意味のある不透明な文字列で、こちらで形を変えると同じ人を別人にするため。
+    ///
+    pub def normalized(principal: Principal): Principal =
+        { email = Email.normalize(principal#email) | principal }
+
+}
+
+///
 /// ユーザー。
 ///
 pub type alias User = { id = UserId, publicId = String, issuer = String, subject = String, email = String, name = String }
