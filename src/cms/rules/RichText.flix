@@ -37,7 +37,16 @@ mod RichText {
     pub def maxGalleryColumns(): Int32 = 4
 
     /// text に付けられるマーク。link は attrs.href（外部）か attrs.entryId（この CMS の entry）。math は text を TeX として持つ。
-    pub def markNames(): List[String] = "bold" :: "italic" :: "strike" :: "underline" :: "code" :: "link" :: "math" :: Nil
+    ///
+    /// 文字に付けられる印。**中身であって飾りではない物だけ**。
+    ///
+    /// WhyNot: 文字色と文字サイズを入れない。ヘッドレス CMS の役割は中身で、見た目はサイトが決める。
+    /// 本文に色や大きさを埋めると、サイトのデザインより本文が強くなり、リニューアルと
+    /// 暗いテーマで壊れる（白い背景で選んだ濃紺は暗い背景で読めない）。
+    /// 「注意」「強調」の意図は callout と highlight で持つ。
+    ///
+    pub def markNames(): List[String] =
+        "bold" :: "italic" :: "strike" :: "underline" :: "code" :: "link" :: "math" :: "sub" :: "sup" :: "highlight" :: Nil
 
     /// callout の種類。html では data-kind に出る。
     pub def calloutKinds(): List[String] = "note" :: "tip" :: "warning" :: Nil
@@ -539,6 +548,10 @@ mod RichText {
             case Some("strike")    => "<s>${acc}</s>"
             case Some("underline") => "<u>${acc}</u>"
             case Some("code")      => "<code>${acc}</code>"
+            case Some("sub")       => "<sub>${acc}</sub>"
+            case Some("sup")       => "<sup>${acc}</sup>"
+            // 色はサイトが決める。**役割だけを渡す。**
+            case Some("highlight") => "<mark>${acc}</mark>"
             case Some("math")      => "<span data-math=\"inline\">${acc}</span>"
             case Some("link")      => match (attrString("href", mark), attrString("entryId", mark) |> Option.flatMap(EntryId.parse)) {
                 case (Some(href), _) if isSafeHref(href) => "<a href=\"${escape(href)}\" target=\"_blank\" rel=\"noopener noreferrer\">${acc}</a>"

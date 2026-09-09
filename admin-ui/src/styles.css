@@ -201,6 +201,9 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 .tt-body pre { background: var(--color-well); border-radius: 6px; padding: 0.7rem 0.9rem; font-size: 12px; overflow-x: auto; }
 .tt-body code { font-family: ui-monospace, monospace; font-size: 0.9em; }
 .tt-body a { color: var(--color-link); text-decoration: underline; }
+/* 蛍光ペン。**色はサイトが決める**ので、ここは編集中に見分けが付けば足りる。 */
+.tt-body mark { background: var(--color-warn-bg); color: inherit; border-radius: 2px; padding: 0 1px; }
+.tt-body sub, .tt-body sup { font-size: 0.72em; line-height: 0; }
 .tt-body img { max-width: 100%; border-radius: 4px; }
 .tt-body ul[data-type="taskList"] { list-style: none; padding-left: 0.2rem; }
 .tt-body ul[data-type="taskList"] li { display: flex; gap: 0.5rem; align-items: flex-start; }

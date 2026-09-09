@@ -243,10 +243,10 @@ mod McpTools {
 
     ///
     /// RICH_TEXT に渡す Markdown の方言（Markdown.flix の冒頭の要約）。create_entry / update_entry の description に載せる。
-    /// 説明は仕様として扱うので、書ける物は全部書き、無い物（文字色・寄せ）も書く。
+    /// 説明は仕様として扱うので、書ける物は全部書き、無い物（文字色・文字サイズ）も書く。
     ///
     pub def markdownGuide(): String =
-        "RICH_TEXT の Markdown は GFM + 次の方言だけ（文字色・文字の寄せ・生の HTML は無い）: "
+        "RICH_TEXT の Markdown は GFM + 次の方言だけ（文字色・文字サイズ・生の HTML は無い）: "
         ++ "見出しの id は `## 見出し {#id}`。"
         ++ "callout は `> [!NOTE]` / `> [!TIP]` / `> [!WARNING]`（`> **ポイント:**` は callout にならない）。"
         ++ "折りたたみは `<details><summary>要約</summary>` から `</details>` の行まで。"
@@ -257,7 +257,7 @@ mod McpTools {
         ++ "他の entry へのリンクは `[text](entry:ID)`。"
         ++ "タスクは `- [ ]` / `- [x]`。"
         ++ "URL だけの行は YouTube / Vimeo / X なら embed、他は linkCard。"
-        ++ "下線は `<u>…</u>`。入れ子は 2 空白"
+        ++ "下線は `<u>…</u>`、下付きは `~x~`、上付きは `^x^`、蛍光ペンは `==x==`。入れ子は 2 空白"
 
     ///
     /// 値の形の決まり（description に載せる）。試用で AI が迷った所だけ。

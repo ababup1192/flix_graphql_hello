@@ -125,6 +125,10 @@ mod TestMarkdown {
             tableRow(List#{ alignedHeader("left", List#{ plain("名") }), alignedHeader("center", List#{ plain("印") }), alignedHeader("right", List#{ plain("額") }) }),
             tableRow(List#{ alignedCell("left", List#{ plain("a") }), alignedCell("center", List#{ plain("b") }), alignedCell("right", List#{ plain("c") }) }) }) }),
          "| 名 | 印 | 額 |\n| :--- | :---: | ---: |\n| a | b | c |"),
+        // 上付き・下付き・蛍光ペン。**マークダウンに広く通っている書き方に寄せる。**
+        (doc(List#{ paragraph(List#{ plain("H"), marked("sub", "2"), plain("O") }) }), "H~2~O"),
+        (doc(List#{ paragraph(List#{ plain("m"), marked("sup", "2") }) }), "m^2^"),
+        (doc(List#{ paragraph(List#{ plain("ここが "), marked("highlight", "大事"), plain(" です") }) }), "ここが ==大事== です"),
         // callout: GitHub alerts
         (doc(List#{ callout("note", List#{ simpleParagraph("補足") }) }), "> [!NOTE]\n> 補足"),
         (doc(List#{ callout("tip", List#{ simpleParagraph("ヒント") }) }), "> [!TIP]\n> ヒント"),

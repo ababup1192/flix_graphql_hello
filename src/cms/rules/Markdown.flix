@@ -4,7 +4,7 @@
 /// 方言は GFM + 決め事: 見出しの id は `## 見出し {#id}`、callout は GitHub alerts（`> [!NOTE]`）、image は `![alt](asset:ID "caption"){width=W height=H}`、
 /// gallery は 1 行に image を空白区切りで 2 つ以上（枚数と違う columns は行末に `{columns=N}`）、embed と linkCard は URL だけの段落（提供元が判れば embed）、
 /// codeBlock は ```` ```言語:ファイル名 {1,3-5} ````、details は `<details><summary>…</summary>` から `</details>` の行まで、
-/// entry へのリンクは `[text](entry:ID)`、underline は `<u>…</u>`。入れ子は 2 空白、番号は 1 から振り直す。
+/// entry へのリンクは `[text](entry:ID)`、underline は `<u>…</u>`、下付きは `~x~`、上付きは `^x^`、蛍光ペンは `==x==`。入れ子は 2 空白、番号は 1 から振り直す。
 /// 数式は `$…$`（math マーク。TeX はそのまま）と `$$` の行で囲む mathBlock、text の `$` は `\$`。タスクリストは `- [ ]` `- [x]`（orderedList でも `1. [ ]`）。
 /// video は `@[video](asset:ID "caption"){poster=asset:ID}`。Mermaid は language が mermaid の codeBlock で、Markdown では普通のフェンス。
 /// 読む時は少し広く受け（`*` の箇条書き、`1)`、`***`、`__` と `*`、行末 2 空白、summary の無い `<details>`、`- [X]`）、
@@ -93,6 +93,9 @@ mod Markdown {
         case Code
         case Link(LinkTarget)
         case Math
+        case Sub
+        case Sup
+        case Highlight
     }
 
     /// link の先。外部の URL か、この CMS の entry。
@@ -176,6 +179,9 @@ mod Markdown {
         case Some("code")      => Some(Mark.Code)
         case Some("link")      => linkTargetOf(mark) |> Option.map(Mark.Link)
         case Some("math")      => Some(Mark.Math)
+        case Some("sub")       => Some(Mark.Sub)
+        case Some("sup")       => Some(Mark.Sup)
+        case Some("highlight") => Some(Mark.Highlight)
         case _                 => None
     }
 
@@ -267,6 +273,9 @@ mod Markdown {
         case Mark.Link(LinkTarget.Href(href))     => leafNode("link", ("href", Json.JString(href)) :: Nil)
         case Mark.Link(LinkTarget.Entry(entryId)) => leafNode("link", ("entryId", Json.JString(entryId)) :: Nil)
         case Mark.Math                            => leafNode("math", Nil)
+        case Mark.Sub                             => leafNode("sub", Nil)
+        case Mark.Sup                             => leafNode("sup", Nil)
+        case Mark.Highlight                       => leafNode("highlight", Nil)
     }
 
     /// 子を持つノード。content は空でも付ける（doc と空の段落の形）。attrs は空なら付けない。
@@ -435,6 +444,9 @@ mod Markdown {
         case Mark.Code      => "`"
         case Mark.Link(_)   => "["
         case Mark.Math      => "$"
+        case Mark.Sub       => "~"
+        case Mark.Sup       => "^"
+        case Mark.Highlight => "=="
     }
 
     def closeMark(mark: Mark): String = match mark {
@@ -446,6 +458,9 @@ mod Markdown {
         case Mark.Link(LinkTarget.Href(href))     => "](${href})"
         case Mark.Link(LinkTarget.Entry(entryId)) => "](entry:${entryId})"
         case Mark.Math                            => "$"
+        case Mark.Sub                             => "~"
+        case Mark.Sup                             => "^"
+        case Mark.Highlight                       => "=="
     }
 
     ///
@@ -829,6 +844,8 @@ mod Markdown {
         case '*'  => delimiterStep(marks, text, pos)
         case '_'  => delimiterStep(marks, text, pos)
         case '~'  => delimiterStep(marks, text, pos)
+        case '^'  => delimiterStep(marks, text, pos)
+        case '='  => delimiterStep(marks, text, pos)
         case c    => Step.Literal(c, pos + 1)
     }
 
@@ -916,9 +933,11 @@ mod Markdown {
         let spaces = String.sliceRight(start = pos, text) |> String.takeWhile(c -> c == ' ') |> String.length;
         if (spaces >= 2 and String.nth(pos + spaces, text) == Some('\n')) Step.Break(pos + spaces + 1) else Step.Literal(' ', pos + 1)
 
-    /// `**` `__` `~~` `*` `_`。閉じが無ければ文字。`_` は単語の途中では開かない。
+    /// `**` `__` `~~` `==` `*` `_` `~` `^`。閉じが無ければ文字。`_` は単語の途中では開かない。
+    /// **長い記号から見る**（`~~` を `~` 2 つと読まない）。
     def delimiterStep(marks: List[Mark], text: String, pos: Int32): Step =
-        List#{ ("**", Mark.Bold), ("__", Mark.Bold), ("~~", Mark.Strike), ("*", Mark.Italic), ("_", Mark.Italic) }
+        List#{ ("**", Mark.Bold), ("__", Mark.Bold), ("~~", Mark.Strike), ("==", Mark.Highlight),
+               ("*", Mark.Italic), ("_", Mark.Italic), ("~", Mark.Sub), ("^", Mark.Sup) }
             |> List.findMap(match (delimiter, mark) -> delimited(marks, text, pos, delimiter, mark))
             |> Option.getWithDefault(Step.Literal(String.charAt(pos, text), pos + 1))
 

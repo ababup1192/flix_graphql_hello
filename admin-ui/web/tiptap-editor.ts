@@ -25,6 +25,7 @@ import { MarkdownRules } from "./markdown-rules";
 import { LinkDialog, type Candidate, type LinkChoice } from "./link-dialog";
 import { dismissOn } from "./dismiss";
 import { isDraggingTable, tableHandles } from "./table-drag";
+import { Highlight, Subscript, Superscript } from "./text-marks";
 import { type Align, alignColumn, columnAlign, resizeTable, tableSize } from "./table-tools";
 import { MathBlock, MathMark } from "./math";
 import { AssetStore, galleryNode, imageDropExtension, imageNode, insertionOf, UploadingImage } from "./image-node";
@@ -89,6 +90,9 @@ const ICONS = {
   alignLeft: '<path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h13"/>',
   alignCenter: '<path d="M4 6h16"/><path d="M7 12h10"/><path d="M6 18h12"/>',
   alignRight: '<path d="M4 6h16"/><path d="M10 12h10"/><path d="M7 18h13"/>',
+  sub: '<path d="M4 5l8 10"/><path d="M12 5l-8 10"/><path d="M20 20h-4c0-2 4-2 4-4a2 2 0 0 0-4 0"/>',
+  sup: '<path d="M4 9l8 10"/><path d="M12 9l-8 10"/><path d="M20 8h-4c0-2 4-2 4-4a2 2 0 0 0-4 0"/>',
+  highlight: '<path d="M4 20h16"/><path d="M6 16l8-8 3 3-8 8z"/><path d="M12 6l3-3 3 3-3 3z"/>',
   trash: '<path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="m4 17 4.5-4.5 3 3L15 12l5 5"/>',
   // WhyNot: 丸い矢印（rotate-ccw / rotate-cw）にしない。16px では左右の違いが読めず、
@@ -280,6 +284,9 @@ class TiptapEditor extends HTMLElement {
       TaskList,
       TaskItem.configure({ nested: true }),
       Underline,
+      Subscript,
+      Superscript,
+      Highlight,
       // WhyNot: resizable を on にしない。CMS の richText は tableCell の colwidth を
       // 持たず、HTML にも幅を出さない。画面でだけ動く幅は保存されず、消えたように見える。
       Table.configure({ resizable: false, renderWrapper: true }),
@@ -333,6 +340,9 @@ class TiptapEditor extends HTMLElement {
       { kind: "button", label: "I", title: "斜体", run: () => chain().toggleItalic().run(), active: is("italic") },
       { kind: "button", icon: ICONS.underline, title: "下線", run: () => chain().toggleUnderline().run(), active: is("underline") },
       { kind: "button", label: "S", title: "打ち消し", run: () => chain().toggleStrike().run(), active: is("strike") },
+      { kind: "button", icon: ICONS.highlight, title: "蛍光ペン", run: () => chain().toggleMark("highlight").run(), active: is("highlight") },
+      { kind: "button", icon: ICONS.sup, title: "上付き", run: () => chain().toggleMark("sup").run(), active: is("sup") },
+      { kind: "button", icon: ICONS.sub, title: "下付き", run: () => chain().toggleMark("sub").run(), active: is("sub") },
       { kind: "button", icon: ICONS.code, title: "コード（文の中）", run: () => chain().toggleCode().run(), active: is("code") },
       { kind: "divider" },
       { kind: "button", icon: ICONS.link, title: "リンク", run: () => this.link(), active: is("link") },

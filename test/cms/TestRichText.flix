@@ -198,6 +198,17 @@ mod TestRichText {
                 ++ "<p><a href=\"#entry:b2\" data-entry-id=\"b2\">関連</a></p>",
             RichText.toHtml(images, doc))
 
+    /// 上付き・下付き・蛍光ペン。中身であって飾りではないので HTML の要素で出す。
+    @Test
+    def testToHtmlSubSupHighlight(): Unit \ Assert =
+        let doc = node("doc", List#{ node("paragraph", List#{
+            text("H"), marked("2", List#{ mark("sub") }), text("O は m"), marked("2", List#{ mark("sup") }),
+            text(" で "), marked("大事", List#{ mark("highlight") })
+        }) });
+        Assert.assertEq(
+            expected = "<p>H<sub>2</sub>O は m<sup>2</sup> で <mark>大事</mark></p>",
+            RichText.toHtml(Map.empty(), doc))
+
     /// 表の HTML。見出しだけの先頭行は thead、残りは tbody。colspan / rowspan は 2 以上の時だけ出す。
     @Test
     def testToHtmlTable(): Unit \ Assert =
