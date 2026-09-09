@@ -699,6 +699,9 @@ type ContentType {
   plural: String!
   """管理画面のプレビューが開く URL。{id} を entry の id に置き換える"""
   previewUrl: String
+  """管理画面のサイドバーに出すアイコンの識別子（"book" / "tag"）。絵柄は管理画面が決める。
+  英小文字・数字・- を 32 文字まで（先頭は英小文字）。省いて作れば kind ごとの既定（COLLECTION は list、SINGLETON は file）"""
+  icon: String!
   """最上位のフィールド。position 順。子は children"""
   fields: [FieldDef!]!
   createdAt: String!
@@ -755,6 +758,8 @@ input ContentTypeInput {
   """省くと apiId から導く"""
   plural: String
   previewUrl: String
+  """省くと kind ごとの既定（COLLECTION は list、SINGLETON は file）"""
+  icon: String
 }
 
 """触らない項目は省く"""
@@ -763,6 +768,8 @@ input ContentTypePatch {
   singular: String
   plural: String
   previewUrl: String
+  """サイドバーのアイコンの識別子。何度でも選び直せる"""
+  icon: String
 }
 
 input FieldInput {

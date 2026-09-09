@@ -423,7 +423,7 @@ mod GeneratedAdmin {
             forM (v0 <- Arg.decodeField(f0, fields); v1 <- Arg.decodeField(f1, fields)) yield { field = v0, direction = v1 }) |> GqlCodec.describe("並び順。field は id / publishedAt / updatedAt / createdAt かフィールドの apiId（配列でない物）")
 
     /// input ContentTypeInput
-    pub type alias ContentTypeInput = { apiId = String, kind = Option[TypeKind], name = String, singular = Option[String], plural = Option[String], previewUrl = Option[String] }
+    pub type alias ContentTypeInput = { apiId = String, kind = Option[TypeKind], name = String, singular = Option[String], plural = Option[String], previewUrl = Option[String], icon = Option[String] }
 
     /// ContentTypeInput の Codec
     pub def contentTypeInputCodec(): GqlCodec[ContentTypeInput] =
@@ -433,11 +433,12 @@ mod GeneratedAdmin {
         let f3 = Schema.arg("singular", GqlCodec.option(GqlCodec.string())) |> Arg.withDescription("省くと apiId から導く");
         let f4 = Schema.arg("plural", GqlCodec.option(GqlCodec.string())) |> Arg.withDescription("省くと apiId から導く");
         let f5 = Schema.arg("previewUrl", GqlCodec.option(GqlCodec.string()));
-        GqlCodec.inputObject("ContentTypeInput", Arg.info(f0) :: Arg.info(f1) :: Arg.info(f2) :: Arg.info(f3) :: Arg.info(f4) :: Arg.info(f5) :: Nil, fields ->
-            forM (v0 <- Arg.decodeField(f0, fields); v1 <- Arg.decodeField(f1, fields); v2 <- Arg.decodeField(f2, fields); v3 <- Arg.decodeField(f3, fields); v4 <- Arg.decodeField(f4, fields); v5 <- Arg.decodeField(f5, fields)) yield { apiId = v0, kind = v1, name = v2, singular = v3, plural = v4, previewUrl = v5 })
+        let f6 = Schema.arg("icon", GqlCodec.option(GqlCodec.string())) |> Arg.withDescription("省くと kind ごとの既定（COLLECTION は list、SINGLETON は file）");
+        GqlCodec.inputObject("ContentTypeInput", Arg.info(f0) :: Arg.info(f1) :: Arg.info(f2) :: Arg.info(f3) :: Arg.info(f4) :: Arg.info(f5) :: Arg.info(f6) :: Nil, fields ->
+            forM (v0 <- Arg.decodeField(f0, fields); v1 <- Arg.decodeField(f1, fields); v2 <- Arg.decodeField(f2, fields); v3 <- Arg.decodeField(f3, fields); v4 <- Arg.decodeField(f4, fields); v5 <- Arg.decodeField(f5, fields); v6 <- Arg.decodeField(f6, fields)) yield { apiId = v0, kind = v1, name = v2, singular = v3, plural = v4, previewUrl = v5, icon = v6 })
 
     /// input ContentTypePatch
-    pub type alias ContentTypePatch = { name = Option[String], singular = Option[String], plural = Option[String], previewUrl = Option[String] }
+    pub type alias ContentTypePatch = { name = Option[String], singular = Option[String], plural = Option[String], previewUrl = Option[String], icon = Option[String] }
 
     /// ContentTypePatch の Codec
     pub def contentTypePatchCodec(): GqlCodec[ContentTypePatch] =
@@ -445,8 +446,9 @@ mod GeneratedAdmin {
         let f1 = Schema.arg("singular", GqlCodec.option(GqlCodec.string()));
         let f2 = Schema.arg("plural", GqlCodec.option(GqlCodec.string()));
         let f3 = Schema.arg("previewUrl", GqlCodec.option(GqlCodec.string()));
-        GqlCodec.inputObject("ContentTypePatch", Arg.info(f0) :: Arg.info(f1) :: Arg.info(f2) :: Arg.info(f3) :: Nil, fields ->
-            forM (v0 <- Arg.decodeField(f0, fields); v1 <- Arg.decodeField(f1, fields); v2 <- Arg.decodeField(f2, fields); v3 <- Arg.decodeField(f3, fields)) yield { name = v0, singular = v1, plural = v2, previewUrl = v3 }) |> GqlCodec.describe("触らない項目は省く")
+        let f4 = Schema.arg("icon", GqlCodec.option(GqlCodec.string())) |> Arg.withDescription("サイドバーのアイコンの識別子。何度でも選び直せる");
+        GqlCodec.inputObject("ContentTypePatch", Arg.info(f0) :: Arg.info(f1) :: Arg.info(f2) :: Arg.info(f3) :: Arg.info(f4) :: Nil, fields ->
+            forM (v0 <- Arg.decodeField(f0, fields); v1 <- Arg.decodeField(f1, fields); v2 <- Arg.decodeField(f2, fields); v3 <- Arg.decodeField(f3, fields); v4 <- Arg.decodeField(f4, fields)) yield { name = v0, singular = v1, plural = v2, previewUrl = v3, icon = v4 }) |> GqlCodec.describe("触らない項目は省く")
 
     /// input FieldInput
     pub type alias FieldInput = { apiId = String, name = String, kind = FieldKind, many = Option[Bool], required = Option[Bool], unique = Option[Bool], localized = Option[Bool], targetTypeId = Option[Id], parentFieldId = Option[Id], config = Option[FieldConfigInput] }
@@ -897,6 +899,8 @@ mod GeneratedAdmin {
     pub type alias ContentTypePluralResolver[ef: Eff] = Context -> ContentType -> Result[FieldError, String] \ ef
     /// ContentType.previewUrl
     pub type alias ContentTypePreviewUrlResolver[ef: Eff] = Context -> ContentType -> Result[FieldError, Option[String]] \ ef
+    /// ContentType.icon
+    pub type alias ContentTypeIconResolver[ef: Eff] = Context -> ContentType -> Result[FieldError, String] \ ef
     /// ContentType.fields
     pub type alias ContentTypeFieldsResolver[ef: Eff] = Context -> ContentType -> Result[FieldError, List[FieldDef]] \ ef
     /// ContentType.createdAt
@@ -1282,6 +1286,7 @@ mod GeneratedAdmin {
         singular = ContentTypeSingularResolver[ef],
         plural = ContentTypePluralResolver[ef],
         previewUrl = ContentTypePreviewUrlResolver[ef],
+        icon = ContentTypeIconResolver[ef],
         fields = ContentTypeFieldsResolver[ef],
         createdAt = ContentTypeCreatedAtResolver[ef],
         updatedAt = ContentTypeUpdatedAtResolver[ef]
@@ -1710,8 +1715,9 @@ mod GeneratedAdmin {
         singular = Context -> { singular = String | r4 } -> Result[FieldError, String] \ ef,
         plural = Context -> { plural = String | r5 } -> Result[FieldError, String] \ ef,
         previewUrl = Context -> { previewUrl = Option[String] | r6 } -> Result[FieldError, Option[String]] \ ef,
-        createdAt = Context -> { createdAt = String | r7 } -> Result[FieldError, String] \ ef,
-        updatedAt = Context -> { updatedAt = String | r8 } -> Result[FieldError, String] \ ef
+        icon = Context -> { icon = String | r7 } -> Result[FieldError, String] \ ef,
+        createdAt = Context -> { createdAt = String | r8 } -> Result[FieldError, String] \ ef,
+        updatedAt = Context -> { updatedAt = String | r9 } -> Result[FieldError, String] \ ef
     } = {
         id = (_context, src) -> Ok(src#id),
         apiId = (_context, src) -> Ok(src#apiId),
@@ -1720,6 +1726,7 @@ mod GeneratedAdmin {
         singular = (_context, src) -> Ok(src#singular),
         plural = (_context, src) -> Ok(src#plural),
         previewUrl = (_context, src) -> Ok(src#previewUrl),
+        icon = (_context, src) -> Ok(src#icon),
         createdAt = (_context, src) -> Ok(src#createdAt),
         updatedAt = (_context, src) -> Ok(src#updatedAt)
     }
@@ -2878,6 +2885,10 @@ mod GeneratedAdmin {
             {
                 Schema.fieldRaw("previewUrl", Nil, Out.option(Out.string()), (context, src, _args) ->
                     (resolvers#contentType#previewUrl)(context, src)) |> Field.withDescription("管理画面のプレビューが開く URL。{id} を entry の id に置き換える")
+            } ::
+            {
+                Schema.fieldRaw("icon", Nil, Out.string(), (context, src, _args) ->
+                    (resolvers#contentType#icon)(context, src)) |> Field.withDescription("管理画面のサイドバーに出すアイコンの識別子（\"book\" / \"tag\"）。絵柄は管理画面が決める。\n英小文字・数字・- を 32 文字まで（先頭は英小文字）。省いて作れば kind ごとの既定（COLLECTION は list、SINGLETON は file）")
             } ::
             {
                 Schema.fieldRaw("fields", Nil, Out.list(Out.obj(fieldDefType(resolvers))), (context, src, _args) ->

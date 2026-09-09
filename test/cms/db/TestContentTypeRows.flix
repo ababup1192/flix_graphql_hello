@@ -2,7 +2,7 @@
 /// ContentTypeRows: content_types / content_fields の行とドメインの値の往復。純粋（DbErr は Result に落として見る）。
 ///
 /// 観点:
-/// - 往復: Draft → INSERT の引数 → 行 → ContentType / FieldDef（kind の全 case、previewUrl の None ↔ ""、target / parent の None / Some、config）
+/// - 往復: Draft → INSERT の引数 → 行 → ContentType / FieldDef（kind の全 case、previewUrl の None ↔ ""、icon の指定と kind ごとの既定、target / parent の None / Some、config）
 /// - 境界: kind / apiId / singular / plural が規則の外なら DbErr。config は壊れていても落ちない
 /// - UPDATE の Changes: Some の項目だけ SET に出る
 ///
@@ -24,14 +24,14 @@ mod TestContentTypeRows {
     def flattenConfig(config: FieldConfig): (Option[Int32], Option[ApiId], Option[Float64], Option[Float64], Option[Bool], List[String]) =
         (config#maxLength, config#sourceField, config#min, config#max, config#integer, config#options)
 
-    def flattenType(found: ContentType): (TypeId, ApiId, TypeKind, String, TypeName, ApiId, Option[String], Int32, Timestamp.Timestamp, Timestamp.Timestamp) =
-        (found#id, found#apiId, found#kind, found#name, found#singular, found#plural, found#previewUrl, List.length(found#fields), found#createdAt, found#updatedAt)
+    def flattenType(found: ContentType): (TypeId, ApiId, TypeKind, String, TypeName, ApiId, Option[String], String, Int32, Timestamp.Timestamp, Timestamp.Timestamp) =
+        (found#id, found#apiId, found#kind, found#name, found#singular, found#plural, found#previewUrl, found#icon, List.length(found#fields), found#createdAt, found#updatedAt)
 
     def flattenField(field: FieldDef): (FieldId, TypeId, ApiId, String, FieldKind, Bool, Bool, Bool, Bool, Option[TypeId], Option[FieldId], Int32, (Option[Int32], Option[ApiId], Option[Float64], Option[Float64], Option[Bool], List[String])) =
         (field#id, field#typeId, field#apiId, field#name, field#kind, field#many, field#required, field#unique, field#localized, field#target, field#parent, field#position, flattenConfig(field#config))
 
     /// content_types の行。INSERT の引数に id と時刻を足す。
-    def typeRow(names: Naming.TypeNames, draft: ContentTypeDraft): { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp } =
+    def typeRow(names: Naming.TypeNames, draft: ContentTypeDraft): { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, icon = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp } =
         { +id = 5i64, +createdAt = at(1725000000123i64), +updatedAt = at(1725000000456i64) | ContentTypeRows.typeInsert(names, draft) }
 
     /// content_fields の行。INSERT の引数に id と、後追いの UPDATE で入る target / parent を足す。
@@ -41,16 +41,21 @@ mod TestContentTypeRows {
 
     // ---- content_types ----
 
-    /// Draft → typeInsert → 行 → ContentType で apiId / kind / 名前 / previewUrl / 時刻が同じ。previewUrl の None は列では "" で、読めば None に戻る。
+    /// Draft → typeInsert → 行 → ContentType で apiId / kind / 名前 / previewUrl / icon / 時刻が同じ。previewUrl の None は列では "" で、読めば None に戻る。
+    /// icon を省いた Draft は kind ごとの既定（collection は list、singleton は file）が列に入る。
     @Test
     def testContentTypeRoundTrip(): Unit \ Assert =
         let names = CmsTestKit.names("blog", "Blog", "blogs");
-        let table = List#{(TypeKind.Collection, None), (TypeKind.Singleton, Some("https://example.com/preview/{id}"))};
-        let expected = table |> List.map(match (kind, previewUrl) ->
-            Ok((TypeId.TypeId(5i64), names#apiId, kind, "ブログ", names#singular, names#plural, previewUrl, 1, at(1725000000123i64), at(1725000000456i64))));
+        let table = List#{
+            (TypeKind.Collection, None, None, "list"),
+            (TypeKind.Singleton, Some("https://example.com/preview/{id}"), None, "file"),
+            (TypeKind.Collection, None, Some("book-open"), "book-open")
+        };
+        let expected = table |> List.map(match (kind, previewUrl, _icon, storedIcon) ->
+            Ok((TypeId.TypeId(5i64), names#apiId, kind, "ブログ", names#singular, names#plural, previewUrl, storedIcon, 1, at(1725000000123i64), at(1725000000456i64))));
         Assert.assertEq(expected = expected,
-            table |> List.map(match (kind, previewUrl) -> {
-                let draft = { kind = kind, previewUrl = previewUrl | CmsTestKit.typeDraft("blog", "ブログ") };
+            table |> List.map(match (kind, previewUrl, icon, _storedIcon) -> {
+                let draft = { kind = kind, previewUrl = previewUrl, icon = icon | CmsTestKit.typeDraft("blog", "ブログ") };
                 DbErr.runWithResult(() -> ContentTypeRows.toContentType(typeRow(names, draft), List#{CmsTestKit.fieldDef("title", FieldKind.Text)}) |> flattenType)
             }))
 
@@ -111,13 +116,13 @@ mod TestContentTypeRows {
 
     // ---- UPDATE の Changes ----
 
-    /// 型の変更は Some の列だけが SET に出て、順番は name / singular / plural / preview_url。全部 None なら空。
+    /// 型の変更は Some の列だけが SET に出て、順番は name / singular / plural / preview_url / icon。全部 None なら空。
     @Test
     def testTypeChangesSql(): Unit \ Assert =
-        let all = { name = Some("N"), singular = Some(CmsTestKit.typeName("Post")), plural = Some(CmsTestKit.apiId("posts")), previewUrl = Some("") };
-        let some = { name = None, singular = None, plural = Some(CmsTestKit.apiId("posts")), previewUrl = None };
-        let none = { name = None, singular = None, plural = None, previewUrl = None };
-        Assert.assertEq(expected = (("name = $1, singular = $2, plural = $3, preview_url = $4", List#{SqlValue.Str("N"), SqlValue.Str("Post"), SqlValue.Str("posts"), SqlValue.Str("")}),
+        let all = { name = Some("N"), singular = Some(CmsTestKit.typeName("Post")), plural = Some(CmsTestKit.apiId("posts")), previewUrl = Some(""), icon = Some("tag") };
+        let some = { name = None, singular = None, plural = Some(CmsTestKit.apiId("posts")), previewUrl = None, icon = None };
+        let none = { name = None, singular = None, plural = None, previewUrl = None, icon = None };
+        Assert.assertEq(expected = (("name = $1, singular = $2, plural = $3, preview_url = $4, icon = $5", List#{SqlValue.Str("N"), SqlValue.Str("Post"), SqlValue.Str("posts"), SqlValue.Str(""), SqlValue.Str("tag")}),
                                     ("plural = $1", List#{SqlValue.Str("posts")}),
                                     true),
             (Fragment.appendChanges(ContentTypeRows.typeChanges(all), Nil),

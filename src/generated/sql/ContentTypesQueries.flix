@@ -7,12 +7,12 @@ mod ContentTypesQueries {
     ///
     /// 生成元 content_types.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -183989845
+    pub def sourceHash(): Int32 = 527131494
 
     ///
     /// listContentTypes の 1 行。
     ///
-    pub type alias ListContentTypesRow = { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp }
+    pub type alias ListContentTypesRow = { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, icon = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp }
 
     def listContentTypesDecoder(): Decoder[ListContentTypesRow] =
         forA (
@@ -23,22 +23,23 @@ mod ContentTypesQueries {
             singular <- Decoder.str("singular");
             plural <- Decoder.str("plural");
             previewUrl <- Decoder.str("preview_url");
+            icon <- Decoder.str("icon");
             createdAt <- Decoder.timestamp("created_at");
             updatedAt <- Decoder.timestamp("updated_at")
-        ) yield { id = id, apiId = apiId, kind = kind, name = name, singular = singular, plural = plural, previewUrl = previewUrl, createdAt = createdAt, updatedAt = updatedAt }
+        ) yield { id = id, apiId = apiId, kind = kind, name = name, singular = singular, plural = plural, previewUrl = previewUrl, icon = icon, createdAt = createdAt, updatedAt = updatedAt }
 
     ///
-    /// listContentTypes: SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at FROM content_types WHERE project_id = $1 ORDER BY api_id
+    /// listContentTypes: SELECT id, api_id, kind, name, singular, plural, preview_url, icon, created_at, updated_at FROM content_types WHERE project_id = $1 ORDER BY api_id
     ///
     pub def listContentTypes(projectId: Int64): List[ListContentTypesRow] \ DbRead =
-        let sql = "SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at\n    FROM content_types WHERE project_id = $1 ORDER BY api_id";
+        let sql = "SELECT id, api_id, kind, name, singular, plural, preview_url, icon, created_at, updated_at\n    FROM content_types WHERE project_id = $1 ORDER BY api_id";
         let params = List#{SqlValue.Int64(projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listContentTypesDecoder(), sql, params))
 
     ///
     /// findContentType の 1 行。
     ///
-    pub type alias FindContentTypeRow = { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp }
+    pub type alias FindContentTypeRow = { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, icon = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp }
 
     def findContentTypeDecoder(): Decoder[FindContentTypeRow] =
         forA (
@@ -49,22 +50,23 @@ mod ContentTypesQueries {
             singular <- Decoder.str("singular");
             plural <- Decoder.str("plural");
             previewUrl <- Decoder.str("preview_url");
+            icon <- Decoder.str("icon");
             createdAt <- Decoder.timestamp("created_at");
             updatedAt <- Decoder.timestamp("updated_at")
-        ) yield { id = id, apiId = apiId, kind = kind, name = name, singular = singular, plural = plural, previewUrl = previewUrl, createdAt = createdAt, updatedAt = updatedAt }
+        ) yield { id = id, apiId = apiId, kind = kind, name = name, singular = singular, plural = plural, previewUrl = previewUrl, icon = icon, createdAt = createdAt, updatedAt = updatedAt }
 
     ///
-    /// findContentType: SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at FROM content_types WHERE id = $1 AND project_id = $2
+    /// findContentType: SELECT id, api_id, kind, name, singular, plural, preview_url, icon, created_at, updated_at FROM content_types WHERE id = $1 AND project_id = $2
     ///
     pub def findContentType(args: { id = Int64, projectId = Int64 }): Option[FindContentTypeRow] \ DbRead =
-        let sql = "SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at\n    FROM content_types WHERE id = $1 AND project_id = $2";
+        let sql = "SELECT id, api_id, kind, name, singular, plural, preview_url, icon, created_at, updated_at\n    FROM content_types WHERE id = $1 AND project_id = $2";
         let params = List#{SqlValue.Int64(args#id), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findContentTypeDecoder(), sql, params))
 
     ///
     /// findContentTypeByApiId の 1 行。
     ///
-    pub type alias FindContentTypeByApiIdRow = { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp }
+    pub type alias FindContentTypeByApiIdRow = { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, icon = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp }
 
     def findContentTypeByApiIdDecoder(): Decoder[FindContentTypeByApiIdRow] =
         forA (
@@ -75,15 +77,16 @@ mod ContentTypesQueries {
             singular <- Decoder.str("singular");
             plural <- Decoder.str("plural");
             previewUrl <- Decoder.str("preview_url");
+            icon <- Decoder.str("icon");
             createdAt <- Decoder.timestamp("created_at");
             updatedAt <- Decoder.timestamp("updated_at")
-        ) yield { id = id, apiId = apiId, kind = kind, name = name, singular = singular, plural = plural, previewUrl = previewUrl, createdAt = createdAt, updatedAt = updatedAt }
+        ) yield { id = id, apiId = apiId, kind = kind, name = name, singular = singular, plural = plural, previewUrl = previewUrl, icon = icon, createdAt = createdAt, updatedAt = updatedAt }
 
     ///
-    /// findContentTypeByApiId: SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at FROM content_types WHERE project_id = $1 AND api_id = $2
+    /// findContentTypeByApiId: SELECT id, api_id, kind, name, singular, plural, preview_url, icon, created_at, updated_at FROM content_types WHERE project_id = $1 AND api_id = $2
     ///
     pub def findContentTypeByApiId(args: { projectId = Int64, apiId = String }): Option[FindContentTypeByApiIdRow] \ DbRead =
-        let sql = "SELECT id, api_id, kind, name, singular, plural, preview_url, created_at, updated_at\n    FROM content_types WHERE project_id = $1 AND api_id = $2";
+        let sql = "SELECT id, api_id, kind, name, singular, plural, preview_url, icon, created_at, updated_at\n    FROM content_types WHERE project_id = $1 AND api_id = $2";
         let params = List#{SqlValue.Int64(args#projectId), SqlValue.Str(args#apiId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findContentTypeByApiIdDecoder(), sql, params))
 
@@ -98,11 +101,11 @@ mod ContentTypesQueries {
         ) yield { id = id }
 
     ///
-    /// insertContentType: INSERT INTO content_types (project_id, api_id, kind, name, singular, plural, preview_url) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+    /// insertContentType: INSERT INTO content_types (project_id, api_id, kind, name, singular, plural, preview_url, icon) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id
     ///
-    pub def insertContentType(args: { projectId = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String }): Option[InsertContentTypeRow] \ DbWrite =
-        let sql = "INSERT INTO content_types (project_id, api_id, kind, name, singular, plural, preview_url)\n    VALUES ($1, $2, $3, $4, $5, $6, $7)\n    RETURNING id";
-        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Str(args#apiId), SqlValue.Str(args#kind), SqlValue.Str(args#name), SqlValue.Str(args#singular), SqlValue.Str(args#plural), SqlValue.Str(args#previewUrl)};
+    pub def insertContentType(args: { projectId = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, icon = String }): Option[InsertContentTypeRow] \ DbWrite =
+        let sql = "INSERT INTO content_types (project_id, api_id, kind, name, singular, plural, preview_url, icon)\n    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n    RETURNING id";
+        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Str(args#apiId), SqlValue.Str(args#kind), SqlValue.Str(args#name), SqlValue.Str(args#singular), SqlValue.Str(args#plural), SqlValue.Str(args#previewUrl), SqlValue.Str(args#icon)};
         RawSql.runWithAllow(() -> Sql.executeReturningOneAs(insertContentTypeDecoder(), sql, params))
 
     ///

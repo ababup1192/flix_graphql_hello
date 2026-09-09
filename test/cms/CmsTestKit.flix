@@ -43,7 +43,7 @@ mod CmsTestKit {
     /// collection の型の入力。singular / plural は導出に任せる。
     ///
     pub def typeDraft(api: String, name: String): ContentTypeDraft =
-        { apiId = apiId(api), kind = TypeKind.Collection, name = name, singular = None, plural = None, previewUrl = None }
+        { apiId = apiId(api), kind = TypeKind.Collection, name = name, singular = None, plural = None, previewUrl = None, icon = None }
 
     ///
     /// フィールドの入力。many / required / unique / localized は全部 false。
@@ -65,7 +65,7 @@ mod CmsTestKit {
     pub def contentType(id: Int64, api: String, kind: TypeKind, name: String, fields: List[FieldDef]): ContentType =
         let at = Timestamp.at("2026-09-01T00:00:00Z");
         { id = TypeId.TypeId(id), apiId = apiId(api), kind = kind, name = name,
-          singular = Naming.deriveSingular(apiId(api)), plural = Naming.derivePlural(apiId(api)), previewUrl = None,
+          singular = Naming.deriveSingular(apiId(api)), plural = Naming.derivePlural(apiId(api)), previewUrl = None, icon = Naming.deriveIcon(kind),
           fields = fields |> List.map(field -> { typeId = TypeId.TypeId(id) | field }), createdAt = at, updatedAt = at }
 
     ///

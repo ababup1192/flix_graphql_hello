@@ -45,7 +45,7 @@ mod TestApiSurface {
                 "Asset: id url fileName mime size width height alt status createdAt usedBy" ::
                 "AssetEdge: cursor node" ::
                 "AssetPage: nodes edges pageInfo totalCount" ::
-                "ContentType: id apiId kind name singular plural previewUrl fields createdAt updatedAt" ::
+                "ContentType: id apiId kind name singular plural previewUrl icon fields createdAt updatedAt" ::
                 "DiffLine: kind text" ::
                 "Entry: id typeId version stage fields publishedAt createdAt updatedAt versions diff" ::
                 "EntryEdge: cursor node" ::

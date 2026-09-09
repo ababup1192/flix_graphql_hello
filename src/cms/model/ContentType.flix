@@ -111,6 +111,7 @@ mod Children {
 /// - singular: コンテンツ API の型名（"Blog"）
 /// - plural: コンテンツ API の一覧クエリ名（"blogs"）
 /// - previewUrl: 管理画面のプレビューが開く URL。無ければ None
+/// - icon: 管理画面が絵を選ぶための短い識別子（"book"）。省いて作れば kind ごとの既定
 /// - fields: position 順のフィールド
 /// - createdAt / updatedAt: 作成と更新の時刻
 ///
@@ -122,20 +123,21 @@ pub type alias ContentType = {
     singular = TypeName,
     plural = ApiId,
     previewUrl = Option[String],
+    icon = String,
     fields = List[FieldDef],
     createdAt = Timestamp.Timestamp,
     updatedAt = Timestamp.Timestamp
 }
 
 ///
-/// 作る content type。singular / plural を省けば apiId から導く。
+/// 作る content type。singular / plural を省けば apiId から導き、icon を省けば kind ごとの既定。
 ///
-pub type alias ContentTypeDraft = { apiId = ApiId, kind = TypeKind, name = String, singular = Option[TypeName], plural = Option[ApiId], previewUrl = Option[String] }
+pub type alias ContentTypeDraft = { apiId = ApiId, kind = TypeKind, name = String, singular = Option[TypeName], plural = Option[ApiId], previewUrl = Option[String], icon = Option[String] }
 
 ///
 /// content type の変更。None は「触らない」。
 ///
-pub type alias ContentTypeChanges = { name = Option[String], singular = Option[TypeName], plural = Option[ApiId], previewUrl = Option[String] }
+pub type alias ContentTypeChanges = { name = Option[String], singular = Option[TypeName], plural = Option[ApiId], previewUrl = Option[String], icon = Option[String] }
 
 ///
 /// 足すフィールド。

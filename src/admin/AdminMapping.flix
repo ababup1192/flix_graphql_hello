@@ -522,7 +522,8 @@ mod AdminMapping {
             name       = input#name,
             singular   = input#singular |> Option.map(typeName("singular")),
             plural     = input#plural |> Option.map(apiId("plural")),
-            previewUrl = input#previewUrl
+            previewUrl = input#previewUrl,
+            icon       = input#icon
         }
 
     ///
@@ -533,7 +534,8 @@ mod AdminMapping {
             name       = patch#name,
             singular   = patch#singular |> Option.map(typeName("singular")),
             plural     = patch#plural |> Option.map(apiId("plural")),
-            previewUrl = patch#previewUrl
+            previewUrl = patch#previewUrl,
+            icon       = patch#icon
         }
 
     ///

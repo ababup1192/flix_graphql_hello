@@ -71,7 +71,7 @@ mod ContentTypes {
         let derived = Option.isEmpty(draft#singular) and Option.isEmpty(draft#plural);
         // 既存の全型と突き合わせて名前の規則を検査する。導いた名前の違反は apiId の物にする
         let others = listAll();
-        CmsErr.raiseIfAny(typeNameViolations(others, names, Nil) |> List.map(violation -> if (derived) blameApiId(violation) else violation));
+        CmsErr.raiseIfAny((typeNameViolations(others, names, Nil) |> List.map(violation -> if (derived) blameApiId(violation) else violation)) ::: iconViolations(draft#icon));
         // 行を作り、型の変更を知らせる
         let inserted = ContentTypesQueries.insertContentType({ +projectId = Tenant.currentId() | ContentTypeRows.typeInsert(names, draft) }) |> Rows.expectId;
         Publishing.notify(PublishingEvent.SchemaChanged(names#apiId));
@@ -108,7 +108,7 @@ mod ContentTypes {
         };
         // 自分を除いた全型と突き合わせて名前の規則を検査する（生える型名は自分のフィールドまで見る）
         let others = listAll() |> List.filter(other -> other#id != id);
-        CmsErr.raiseIfAny(typeNameViolations(others, names, existing#fields));
+        CmsErr.raiseIfAny(typeNameViolations(others, names, existing#fields) ::: iconViolations(changes#icon));
         // 触った項目だけ UPDATE し、型の変更を知らせる
         discard ContentTypesQueries.updateContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() }, ContentTypeRows.typeChanges(changes));
         Publishing.notify(PublishingEvent.SchemaChanged(existing#apiId));
@@ -220,6 +220,12 @@ mod ContentTypes {
             case Nil        => Naming.validateSchemaTypeNames(List.flatMap(schemaTypeNamesOf, others), names#singular, fields)
             case violations => violations
         }
+
+    ///
+    /// 渡された時だけアイコンの識別子を検査する。省けば作る時は kind ごとの既定、直す時は今の値のまま。
+    ///
+    def iconViolations(icon: Option[String]): List[Violation] =
+        icon |> Option.map(text -> Naming.validateIcon("icon", text)) |> Option.getWithDefault(Nil)
 
     def namesOf(contentType: ContentType): Naming.TypeNames =
         { apiId = contentType#apiId, singular = contentType#singular, plural = contentType#plural }

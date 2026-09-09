@@ -289,6 +289,7 @@ mod ContentTypesTable {
     pub def createdAt(): Fragment.Col[ContentTypesTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("created_at", SqlValue.ofTimestamp)
     pub def updatedAt(): Fragment.Col[ContentTypesTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("updated_at", SqlValue.ofTimestamp)
     pub def projectId(): Fragment.Col[ContentTypesTable, Int64, Fragment.NotNull] = Fragment.Col.Col("project_id", SqlValue.Int64)
+    pub def icon(): Fragment.Col[ContentTypesTable, String, Fragment.NotNull] = Fragment.Col.Col("icon", SqlValue.Str)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
@@ -300,6 +301,8 @@ mod ContentTypesTable {
         case ProjectIdFkey
         /// content_types_project_api_id_key (unique)
         case ProjectApiIdKey
+        /// content_types_icon_check (check)
+        case IconCheck
     }
 
     ///
@@ -317,12 +320,14 @@ mod ContentTypesTable {
         case Constraint.KindCheck => DbErr.checkViolation("content_types_kind_check")
         case Constraint.ProjectIdFkey => DbErr.foreignKeyViolation("content_types_project_id_fkey")
         case Constraint.ProjectApiIdKey => DbErr.uniqueViolation("content_types_project_api_id_key")
+        case Constraint.IconCheck => DbErr.checkViolation("content_types_icon_check")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
         case "content_types_kind_check" => Some(Constraint.KindCheck)
         case "content_types_project_id_fkey" => Some(Constraint.ProjectIdFkey)
         case "content_types_project_api_id_key" => Some(Constraint.ProjectApiIdKey)
+        case "content_types_icon_check" => Some(Constraint.IconCheck)
         case _ => None
     }
 

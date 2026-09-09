@@ -66,7 +66,7 @@ mod ContentTypeRows {
     /// content_types の行とそのフィールド（木）から ContentType を組む。
     /// kind や apiId が規則に合わない行（DDL と管理 API が守るので起きない）は DbErr にする。
     ///
-    pub def toContentType(row: { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp | r }, fields: List[FieldDef]): ContentType \ DbErr =
+    pub def toContentType(row: { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, icon = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp | r }, fields: List[FieldDef]): ContentType \ DbErr =
         {
             id         = TypeId.TypeId(row#id),
             apiId      = apiIdOrRaise("content_types.api_id", row#apiId),
@@ -75,6 +75,7 @@ mod ContentTypeRows {
             singular   = TypeName.parse(row#singular) |> Rows.orRaise("content_types.singular", row#singular),
             plural     = apiIdOrRaise("content_types.plural", row#plural),
             previewUrl = previewUrlFromDb(row#previewUrl),
+            icon       = row#icon,
             fields     = fields,
             createdAt  = row#createdAt,
             updatedAt  = row#updatedAt
@@ -111,14 +112,15 @@ mod ContentTypeRows {
     ///
     /// insertContentType の引数。
     ///
-    pub def typeInsert(names: Naming.TypeNames, draft: ContentTypeDraft): { apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String } =
+    pub def typeInsert(names: Naming.TypeNames, draft: ContentTypeDraft): { apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, icon = String } =
         {
             apiId      = ApiId.text(names#apiId),
             kind       = typeKindToDb(draft#kind),
             name       = draft#name,
             singular   = TypeName.text(names#singular),
             plural     = ApiId.text(names#plural),
-            previewUrl = previewUrlToDb(draft#previewUrl)
+            previewUrl = previewUrlToDb(draft#previewUrl),
+            icon       = draft#icon |> Option.getWithDefault(Naming.deriveIcon(draft#kind))
         }
 
     ///
@@ -130,6 +132,7 @@ mod ContentTypeRows {
             |> Fragment.setIfSome(ContentTypesTable.singular(), changes#singular |> Option.map(TypeName.text))
             |> Fragment.setIfSome(ContentTypesTable.plural(), changes#plural |> Option.map(ApiId.text))
             |> Fragment.setIfSome(ContentTypesTable.previewUrl(), changes#previewUrl)
+            |> Fragment.setIfSome(ContentTypesTable.icon(), changes#icon)
 
     ///
     /// insertField の引数。target と parent は後追いの UPDATE（setFieldTarget / setFieldParent）で入れる。
