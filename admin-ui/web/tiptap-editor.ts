@@ -19,6 +19,7 @@ import TableHeader from "@tiptap/extension-table-header";
 import { Node } from "@tiptap/core";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { codeBlockView, ensureUsed } from "./code-block";
+import { BlockEdges, hasPendingLine } from "./block-edges";
 import { CodeEditing } from "./code-editing";
 import { LinkDialog, type Candidate, type LinkChoice } from "./link-dialog";
 import { dismissOn } from "./dismiss";
@@ -224,6 +225,7 @@ class TiptapEditor extends HTMLElement {
       TableHeader,
       TableCell,
       CodeEditing,
+      BlockEdges,
       MathMark,
       MathBlock,
       Passthrough,
@@ -911,6 +913,9 @@ class TiptapEditor extends HTMLElement {
 
   private emit() {
     if (!this.editor) return;
+    // **疑似行がある間は出さない。** 打たずに離れれば消える行なので、
+    // 出すと触っていないのに「未保存」になる。
+    if (hasPendingLine(this.editor.state)) return;
     const doc = unfold(this.editor.getJSON());
     const text = JSON.stringify(doc);
     if (text === this.lastSent) return;
