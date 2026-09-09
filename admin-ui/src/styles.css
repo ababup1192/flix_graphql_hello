@@ -556,7 +556,10 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 /* 候補の題は 1 行に収める。
    WhyNot: .tt-link-title の nowrap と ellipsis だけでは効かない。flex の子は
    min-width: auto で中身より縮まないので、長い題が行を押し広げて折り返す。 */
-.tt-link-item { min-width: 0; overflow: hidden; }
+/* WhyNot: 縦にも縮ませない。**overflow: hidden を付けると縦の最小の高さも 0 になる**ので、
+   候補が 10 件を超えると 1 行 10px に潰れて字が切れた（実際に切れた）。入る分だけ出して
+   残りは中で流す。 */
+.tt-link-item { min-width: 0; overflow: hidden; flex: 0 0 auto; }
 .tt-link-title { min-width: 0; }
 .tt-link-kind { flex: 0 0 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
