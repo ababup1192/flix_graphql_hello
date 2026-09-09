@@ -174,6 +174,11 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
   color: var(--color-ink);
 }
 .tt-body > * + * { margin-top: 0.7rem; }
+
+/* 塊（表・画像・並べた画像・コードブロック）の上下。
+   **文章より広く、上下は同じ値。** 塊は前後の文と地続きに読む物ではないので、
+   文と文の間（0.7rem）では窮屈になる。1 か所で決めて全部の塊が同じ値を使う。 */
+.tt-body { --tt-block-gap: 28px; }
 .tt-body h1 { font-size: 1.4rem; font-weight: 600; }
 .tt-body h2 { font-size: 1.2rem; font-weight: 600; }
 .tt-body h3 { font-size: 1.05rem; font-weight: 600; }
@@ -266,7 +271,7 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 /* コードブロック。言語は帯の中で選ぶ（GitHub と同じ） */
 .tt-code {
   position: relative;
-  margin: 12px 0;
+  margin: var(--tt-block-gap) 0;
   border: 1px solid var(--color-edge);
   border-radius: 6px;
   background: var(--color-well);
@@ -484,7 +489,7 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 .tt-diagram svg { max-width: 100%; height: auto; }
 
 /* 本文の画像。**知らない id は枠だけ出す**（読み込みの途中と、消された asset がある）。 */
-.tt-image { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.tt-image { position: relative; margin: var(--tt-block-gap) 0; display: flex; flex-direction: column; gap: 4px; }
 .tt-image img { max-width: 100%; border-radius: 4px; }
 .tt-image.is-unknown {
   border: 1px dashed var(--color-edge);
@@ -498,6 +503,7 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 
 /* 画像の横並び。列の数はブロックの上で選ぶ。 */
 .tt-gallery {
+  margin: var(--tt-block-gap) 0;
   border: 1px solid var(--color-edge);
   border-radius: 6px;
   background: var(--color-raised);
@@ -522,6 +528,10 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 .tt-gallery-cols:hover { border-color: var(--color-edge); background: var(--color-panel); color: var(--color-ink); }
 .tt-gallery-grid { display: grid; gap: 8px; padding: 8px; }
 .tt-gallery-grid .tt-image img { width: 100%; object-fit: cover; }
+/* 並べた画像の中の 1 枚は塊ではない。上下の余白は枠が持つ。
+   WhyNot: 代替テキストをここでは浮かせない。下の段の画像に重なる。 */
+.tt-gallery-grid .tt-image { margin: 0; }
+.tt-gallery-grid .tt-image-alt { position: static; margin-top: 0; }
 
 /* 送っている間の仮の見た目。保存には出さない。 */
 .tt-uploading {
@@ -559,7 +569,7 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
    style も戻すので、状態を持たせられない（実際に戻された）。
    掴みを消したので、上と左に取っていた padding はここへ回す。
    **上下は同じ幅にする。** 帯のぶんだけ上を広げると、表が下にずれて見える。 */
-.tt-body .tableWrapper { display: flex; overflow-x: auto; margin: 28px 0; }
+.tt-body .tableWrapper { display: flex; overflow-x: auto; margin: var(--tt-block-gap) 0; }
 /* flex の子にして、狭い表は枠いっぱいに伸び、広い表は枠を越えて横に流れるようにする
    WhyNot: min-width: 100% で伸ばさない。table には拡張が min-width の style を直に付けるので
    後から CSS で上書きできない。 */
@@ -702,7 +712,16 @@ body.tt-dragging-row, body.tt-dragging-row * { cursor: ns-resize !important; }
 .tt-image-alt { color: var(--color-ink-faint); font-size: 11px; }
 .tt-image-caption:focus, .tt-image-alt:focus { border-bottom-color: var(--color-accent); }
 .tt-image-caption::placeholder, .tt-image-alt::placeholder { color: var(--color-ink-faint); }
-.tt-image-alt { visibility: hidden; }
+/* WhyNot: visibility: hidden で隠さない。**隠れていても行の高さを取る**ので、画像の下だけ
+   1 行分（20px）広くなり、上下の余白が揃わない（実際に揃わなかった）。流れから外して
+   下の余白の中に重ねる。出る・出ないで本文がずれない。 */
+.tt-image-alt {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+  visibility: hidden;
+}
 .tt-image:hover .tt-image-alt,
 .tt-image:focus-within .tt-image-alt,
 .tt-image.ProseMirror-selectednode .tt-image-alt { visibility: visible; }

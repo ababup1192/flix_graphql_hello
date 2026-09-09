@@ -25,7 +25,7 @@ import { MarkdownRules } from "./markdown-rules";
 import { LinkDialog, type Candidate, type LinkChoice } from "./link-dialog";
 import { dismissOn } from "./dismiss";
 import { isDraggingTable, tableHandles } from "./table-drag";
-import { Highlight, Subscript, Superscript } from "./text-marks";
+import { Highlight, RaisedCaret, Subscript, Superscript } from "./text-marks";
 import { type Align, alignColumn, columnAlign, resizeTable, tableSize } from "./table-tools";
 import { MathBlock, MathMark } from "./math";
 import { AssetStore, galleryNode, imageDropExtension, imageNode, insertionOf, UploadingImage } from "./image-node";
@@ -287,6 +287,7 @@ class TiptapEditor extends HTMLElement {
       Subscript,
       Superscript,
       Highlight,
+      RaisedCaret,
       // WhyNot: resizable を on にしない。CMS の richText は tableCell の colwidth を
       // 持たず、HTML にも幅を出さない。画面でだけ動く幅は保存されず、消えたように見える。
       Table.configure({ resizable: false, renderWrapper: true }),
@@ -343,8 +344,8 @@ class TiptapEditor extends HTMLElement {
       { kind: "button", icon: ICONS.underline, title: "下線", run: () => chain().toggleUnderline().run(), active: is("underline") },
       { kind: "button", label: "S", title: "打ち消し", run: () => chain().toggleStrike().run(), active: is("strike") },
       { kind: "button", icon: ICONS.highlight, title: "蛍光ペン", run: () => chain().toggleMark("highlight").run(), active: is("highlight") },
-      { kind: "button", icon: ICONS.sup, title: "上付き", run: () => this.toggleRaised("sup"), active: is("sup") },
-      { kind: "button", icon: ICONS.sub, title: "下付き", run: () => this.toggleRaised("sub"), active: is("sub") },
+      { kind: "button", icon: ICONS.sup, title: "上付き", run: () => chain().toggleMark("sup").run(), active: is("sup") },
+      { kind: "button", icon: ICONS.sub, title: "下付き", run: () => chain().toggleMark("sub").run(), active: is("sub") },
       { kind: "button", icon: ICONS.code, title: "コード（文の中）", run: () => chain().toggleCode().run(), active: is("code") },
       { kind: "divider" },
       { kind: "button", icon: ICONS.link, title: "リンク", run: () => this.link(), active: is("link") },
@@ -435,33 +436,6 @@ class TiptapEditor extends HTMLElement {
       else chain.toggleHeading({ level: Number(select.value.slice(1)) as 1 | 2 | 3 | 4 }).run();
     });
     return select;
-  }
-
-  //
-  // 上付き・下付きの切り替え。**外した後、カーソルをその要素の外へ出す。**
-  //
-  // ProseMirror は印を外しても DOM の位置を動かさない（外へ出すのは変換入力の時だけ）。
-  // 小さい字の中にカーソルが立ったままになり、外れたのかどうか見て分からない
-  // （実際に、解除しても細く低いカーソルのままだった）。
-  //
-  // 打つ位置は変わらない。動かすのは見た目の位置だけで、本文には何も入れない。
-  //
-  private toggleRaised(name: "sub" | "sup") {
-    if (!this.editor) return;
-    this.editor.chain().focus().toggleMark(name).run();
-    if (this.editor.isActive(name)) return;
-
-    const selection = window.getSelection();
-    const node = selection?.anchorNode;
-    if (!selection || !node) return;
-    const element = node.nodeType === 3 ? node.parentElement : (node as Element);
-    const raised = element?.closest?.(name);
-    if (!raised?.parentNode) return;
-    const range = document.createRange();
-    range.setStartAfter(raised);
-    range.collapse(true);
-    selection.removeAllRanges();
-    selection.addRange(range);
   }
 
   // 今の位置に合わせて、押されている物に印を付ける。ドロップダウンも今の種類に合わせる。
