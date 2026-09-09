@@ -595,7 +595,7 @@ class TiptapEditor extends HTMLElement {
     bar.className = "tt-tablebar";
     const at = table.getBoundingClientRect();
     bar.style.left = `${Math.max(at.left, clip.left) - base.left}px`;
-    bar.style.top = `${at.top - base.top - 33}px`;
+    bar.style.top = `${at.top - base.top - 26}px`;
     bar.style.width = `${Math.min(at.right, clip.right) - Math.max(at.left, clip.left)}px`;
 
     const left = document.createElement("div");
