@@ -137,14 +137,15 @@ function moved<T>(list: T[], from: number, to: number): T[] {
 }
 
 /**
- * 行を入れ替える。**見出しの行は動かさない**（1 行目が見出しの型を持つので、
- * 入れ替えると見出しが本文の途中に出る）。
+ * 行を入れ替える。
+ *
+ * **見出しは place であって行ではない。** 1 行目を下へ動かすと、そこにあった行の中身が
+ * 見出しになり、見出しだった中身が本文の行になる。見出しの席は常に 1 行目に残る。
  */
 export function moveRow(editor: Editor, from: number, to: number): boolean {
   const found = tableAt(editor);
   if (!found || from === to) return false;
   const { grid, header } = gridOf(found.node);
-  if (header && (from === 0 || to === 0)) return false;
   if (from < 0 || to < 0 || from >= grid.length || to >= grid.length) return false;
   return writeGrid(editor, found, moved(grid, from, to), header);
 }

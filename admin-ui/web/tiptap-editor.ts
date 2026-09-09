@@ -566,7 +566,6 @@ class TiptapEditor extends HTMLElement {
     const base = mount.getBoundingClientRect();
     const wrap = (table.closest(".tableWrapper") as HTMLElement | null) ?? table;
     const clip = wrap.getBoundingClientRect();
-    const headerRow = !!table.rows[0] && Array.from(table.rows[0].cells).every((cell) => cell.tagName === "TH");
     layer.replaceChildren(
       this.tableBar(table, base, clip),
       ...tableHandles({
@@ -575,7 +574,6 @@ class TiptapEditor extends HTMLElement {
         layer,
         base,
         clip,
-        headerRow,
         onDone: () => this.paintTableTools(),
       })
     );

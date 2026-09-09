@@ -33,7 +33,6 @@ type Args = {
   layer: HTMLElement;
   base: DOMRect;
   clip: DOMRect;
-  headerRow: boolean;
   onDone: () => void;
 };
 
@@ -80,7 +79,7 @@ function edgeOf(bands: Array<{ start: number; end: number }>, held: number, inse
 
 /** 掴みを作る。表の上端（列）と左端（行）に敷く。 */
 export function tableHandles(args: Args): HTMLElement[] {
-  const { table, headerRow } = args;
+  const { table } = args;
   const at = table.getBoundingClientRect();
   const made: HTMLElement[] = [];
 
@@ -94,8 +93,6 @@ export function tableHandles(args: Args): HTMLElement[] {
   });
 
   bandsOf(table, "row").forEach((band, index) => {
-    // 見出しの行は動かせない。
-    if (headerRow && index === 0) return;
     made.push(handle(args, "row", index, { left: at.left - 10, top: band.start, width: 10, height: band.end - band.start }));
   });
 
@@ -157,7 +154,6 @@ function startDrag(args: Args, kind: Kind, index: number, event: MouseEvent) {
     else ghost.style.top = `${start - base.top}px`;
 
     target = targetOf(bands, index, start + (held.end - held.start) / 2);
-    if (args.headerRow && kind === "row" && target === 0) target = 1;
     const to = edgeOf(bands, index, target);
     if (kind === "col") line.style.left = `${to - base.left}px`;
     else line.style.top = `${to - base.top}px`;
