@@ -21,6 +21,7 @@ import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { codeBlockView, ensureUsed } from "./code-block";
 import { BlockEdges, hasPendingLine } from "./block-edges";
 import { CodeEditing } from "./code-editing";
+import { MarkdownRules } from "./markdown-rules";
 import { LinkDialog, type Candidate, type LinkChoice } from "./link-dialog";
 import { dismissOn } from "./dismiss";
 import { MathBlock, MathMark } from "./math";
@@ -115,6 +116,45 @@ function unfold(node: any): any {
     next.content = node.content.filter((child: any) => child?.type !== "uploading").map(unfold);
   }
   return dropEmptyAttrs(next);
+}
+
+// チェックリストの形を、CMS と TipTap の間で写す。
+//
+// **CMS は `bulletList > listItem(attrs.checked)`、TipTap は `taskList > taskItem`。**
+// 写さないと、ツールバーのチェックリストも `- [ ] ` も「知らないノード 'taskList' です」で
+// 断られ、書いた物が保存できない（実際に断られた）。
+//
+// **項目のどれか 1 つでも checked を持っていたら、そのリストごとチェックリストにする。**
+// TipTap にも CMS にも「一部だけチェックの付いた箇条書き」は無い。
+function toTaskList(node: any): any {
+  if (!node || typeof node !== "object") return node;
+  const next = Array.isArray(node.content) ? { ...node, content: node.content.map(toTaskList) } : { ...node };
+  if (next.type !== "bulletList" || !Array.isArray(next.content)) return next;
+  if (!next.content.some((item: any) => typeof item?.attrs?.checked === "boolean")) return next;
+  return {
+    ...next,
+    type: "taskList",
+    content: next.content.map((item: any) => ({
+      ...item,
+      type: "taskItem",
+      attrs: { ...(item?.attrs ?? {}), checked: item?.attrs?.checked === true },
+    })),
+  };
+}
+
+function fromTaskList(node: any): any {
+  if (!node || typeof node !== "object") return node;
+  const next = Array.isArray(node.content) ? { ...node, content: node.content.map(fromTaskList) } : { ...node };
+  if (next.type !== "taskList" || !Array.isArray(next.content)) return next;
+  return {
+    ...next,
+    type: "bulletList",
+    content: next.content.map((item: any) => ({
+      ...item,
+      type: "listItem",
+      attrs: { ...(item?.attrs ?? {}), checked: item?.attrs?.checked === true },
+    })),
+  };
 }
 
 // **値の無い attrs を落とす。**
@@ -226,6 +266,7 @@ class TiptapEditor extends HTMLElement {
       TableCell,
       CodeEditing,
       BlockEdges,
+      MarkdownRules,
       MathMark,
       MathBlock,
       Passthrough,
@@ -890,7 +931,7 @@ class TiptapEditor extends HTMLElement {
     try {
       const parsed = JSON.parse(raw);
       if (!parsed || parsed.type !== "doc") return EMPTY_DOC;
-      return foldUnknown(parsed, this.knownNames(extensions));
+      return toTaskList(foldUnknown(parsed, this.knownNames(extensions)));
     } catch {
       return EMPTY_DOC;
     }
@@ -916,7 +957,7 @@ class TiptapEditor extends HTMLElement {
     // **疑似行がある間は出さない。** 打たずに離れれば消える行なので、
     // 出すと触っていないのに「未保存」になる。
     if (hasPendingLine(this.editor.state)) return;
-    const doc = unfold(this.editor.getJSON());
+    const doc = fromTaskList(unfold(this.editor.getJSON()));
     const text = JSON.stringify(doc);
     if (text === this.lastSent) return;
     this.lastSent = text;
