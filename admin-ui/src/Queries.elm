@@ -35,8 +35,10 @@ module Queries exposing
     , removeField
     , removeMember
     , reorderFields
+    , restoreVersion
     , revokeApiKey
     , revokePersonalToken
+    , saveVersion
     , schedulePublish
     , schedules
     , unpublishEntry
@@ -849,6 +851,25 @@ unpublishEntry : String -> Slug -> String -> ( Api.Request, D.Decoder EntryRow )
 unpublishEntry id project entryId =
     Api.mutation { id = id, kind = "unpublishEntry", project = project }
         (AdminMutation.unpublishEntry { id = entryId } entryRow)
+
+
+{-| 今の下書きを版として積む。**戻す前に呼ぶ**ので、戻した物も戻せる。
+-}
+saveVersion : String -> Slug -> String -> ( Api.Request, D.Decoder String )
+saveVersion id project entryId =
+    Api.mutation { id = id, kind = "saveVersion", project = project }
+        (AdminMutation.saveVersion { id = entryId } EntryVersion.id)
+
+
+{-| 版の中身を下書きに戻す。`expectedVersion` は下書きを直すのと同じ楽観ロック。
+-}
+restoreVersion : String -> Slug -> { entryId : String, versionId : String, expectedVersion : Int } -> ( Api.Request, D.Decoder EntryRow )
+restoreVersion id project args =
+    Api.mutation { id = id, kind = "restoreVersion", project = project }
+        (AdminMutation.restoreVersion
+            { id = args.entryId, versionId = args.versionId, expectedVersion = args.expectedVersion }
+            entryRow
+        )
 
 
 {-| 変更履歴。新しい順に全件返る（ページングは無い）。

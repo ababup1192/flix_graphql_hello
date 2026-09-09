@@ -140,6 +140,7 @@ type Asking
     = NotAsking
     | AskingPublish
     | AskingUnpublish
+    | AskingRestore Model.EntryVersion
 
 
 type Msg
@@ -192,6 +193,10 @@ type Msg
     | ReferrersOpened
     | ReferrersClosed
     | HistoryToggled Bool
+    | RestoreOpened Model.EntryVersion
+    | RestoreWanted
+    | GotVersionSaved (Result Api.Problem String)
+    | GotRestored (Result Api.Problem EntryRow)
     | SchedulesToggled Bool
     | RichPickerOpened String
     | RichInsertWanted
@@ -372,6 +377,73 @@ update ctx msg model =
 
         HistoryToggled open ->
             ( { model | historyOpen = open }, [] )
+
+        RestoreOpened version ->
+            ( { model | asking = AskingRestore version, actionError = Nothing }, [] )
+
+        RestoreWanted ->
+            -- **戻す前に、今の下書きを版として積む。** 積まないと、戻した瞬間に
+            -- 今書いていた物がどこにも残らない（戻すのを取り消せない）。
+            case model.entryId of
+                Just entryId ->
+                    ( { model | publishing = True, actionError = Nothing }
+                    , [ Api.call (\id -> Queries.saveVersion id ctx.project entryId) GotVersionSaved ]
+                    )
+
+                Nothing ->
+                    ( model, [] )
+
+        GotVersionSaved (Ok _) ->
+            case ( model.entryId, model.asking ) of
+                ( Just entryId, AskingRestore version ) ->
+                    ( model
+                    , [ Api.call
+                            (\id ->
+                                Queries.restoreVersion id
+                                    ctx.project
+                                    { entryId = entryId, versionId = version.id, expectedVersion = model.version }
+                            )
+                            GotRestored
+                      ]
+                    )
+
+                _ ->
+                    ( { model | publishing = False }, [] )
+
+        GotVersionSaved (Err problem) ->
+            ( { model | publishing = False, actionError = Just (Api.problemToText problem).message }, [] )
+
+        GotRestored (Ok row) ->
+            let
+                next : Model
+                next =
+                    sync
+                        { model
+                            | row = Just row
+                            , version = row.version
+                            , stage = row.stage
+                            , save = Saved
+                            , touched = False
+                            , publishing = False
+                            , asking = NotAsking
+                            , actionError = Nothing
+                            , report = Nothing
+                        }
+            in
+            ( next
+            , refLabelCalls { project = ctx.project } next
+                ++ assetCalls { project = ctx.project } next
+                ++ (case model.entryId of
+                        Just entryId ->
+                            [ Api.call (\id -> Queries.versions id ctx.project entryId) GotHistory ]
+
+                        Nothing ->
+                            []
+                   )
+            )
+
+        GotRestored (Err problem) ->
+            ( { model | publishing = False, actionError = Just (Api.problemToText problem).message }, [] )
 
         SchedulesToggled open ->
             ( { model | schedulesOpen = open }, [] )
@@ -1366,6 +1438,9 @@ viewForm args model detail =
             AskingUnpublish ->
                 viewUnpublishDialog model
 
+            AskingRestore version ->
+                viewRestoreDialog model version
+
             NotAsking ->
                 text ""
         ]
@@ -1479,6 +1554,32 @@ viewActionError model =
 keepOpen : Html.Attribute Msg
 keepOpen =
     Html.Events.stopPropagationOn "click" (D.succeed ( Ignored, True ))
+
+
+{-| 戻すの確認。
+
+**今の下書きも版に残る事を書く。** 書かないと「戻すと今書いている物が消える」と読めて、
+押せない（実際に、公開を終える確認と同じ重さに見えた）。
+
+-}
+viewRestoreDialog : Model -> Model.EntryVersion -> Html Msg
+viewRestoreDialog model version =
+    Ui.overlay PublishClosed
+        [ class "items-center" ]
+        [ Ui.card
+            [ class "flex w-[440px] flex-col gap-3 p-5", keepOpen ]
+            [ Ui.subheading ("v" ++ String.fromInt version.version ++ " の内容に戻しますか")
+            , span [ class "text-[13px] text-ink-soft" ]
+                [ text (byText version ++ "（" ++ Ui.DateTime.formatLocal model.zone version.createdAt ++ "）") ]
+            , Ui.note [ text "今の下書きも版として残るので、戻した後でここから元に戻せます。公開中の内容は変わりません。" ]
+            , viewActionError model
+            , div [ class "flex gap-2" ]
+                [ Ui.button [ onClick RestoreWanted, Html.Attributes.disabled model.publishing ]
+                    [ text (publishText model "戻す") ]
+                , Ui.ghostButton [ onClick PublishClosed ] [ text "やめる" ]
+                ]
+            ]
+        ]
 
 
 {-| 取り下げの確認。**何が起きるかを言葉で出してから実行する**（ボードと同じ文言）。
@@ -1858,7 +1959,7 @@ viewHistory model =
             div [ class "flex flex-col gap-2 border-t border-edge pt-4" ]
                 [ span [ class "text-[11px] font-semibold tracking-wide text-ink-soft" ]
                     [ text ("バージョン履歴（" ++ String.fromInt (List.length all) ++ "）") ]
-                , div [ class "flex flex-col gap-1.5" ] (List.map (viewVersion model.zone) (List.take historyLimit all))
+                , div [ class "flex flex-col gap-1.5" ] (List.map (viewVersion model) (List.take historyLimit all))
 
                 -- **切った事を出す。** 出さないと、8 版しか無いように見える。
                 , if List.length all > historyLimit then
@@ -1892,19 +1993,45 @@ viewHistoryDrawer model =
                 , onClose = HistoryToggled False
                 , onIgnore = Ignored
                 }
-                [ div [ class "flex flex-col gap-1.5" ] (List.map (viewVersion model.zone) all) ]
+                [ div [ class "flex flex-col gap-1.5" ] (List.map (viewVersion model) all) ]
 
         _ ->
             text ""
 
 
-viewVersion : Time.Zone -> Model.EntryVersion -> Html Msg
-viewVersion zone version =
+{-| 履歴の 1 行。**「いつ・誰が・何をした」を 1 行に収める。**
+
+**「戻す」はその行に置く。** 版を選んでから別の場所の「戻す」を押す形にすると、
+どの版に戻るのかが押す瞬間に見えない。Contentful / Sanity / WordPress も行に置いている。
+
+WhyNot: 今の下書きの行（`v` が最大の物）にも「戻す」を出す。**出しても害が無く、
+隠すと「なぜこの行だけ無いのか」を説明する物が要る。**戻せば同じ中身が入るだけ。
+
+-}
+viewVersion : Model -> Model.EntryVersion -> Html Msg
+viewVersion model version =
     div [ class "flex items-center gap-2 text-xs text-ink-soft" ]
         [ span [ class "font-semibold text-ink" ] [ text ("v" ++ String.fromInt version.version) ]
-        , text (reasonText version.reason)
-        , span [ class "ml-auto font-mono text-[10px] text-ink-faint" ] [ text (Ui.DateTime.formatLocal zone version.createdAt) ]
+        , span [ class "min-w-0 truncate" ] [ text (byText version) ]
+        , span [ class "ml-auto shrink-0 font-mono text-[10px] text-ink-faint" ]
+            [ text (Ui.DateTime.formatLocal model.zone version.createdAt) ]
+        , Ui.actionLink [ class "shrink-0", onClick (RestoreOpened version) ] [ text "戻す" ]
         ]
+
+
+{-| 「誰が何をしたか」。
+
+WhyNot: 名前が空の時に「不明」と書かない。API キーや取り込みで積まれた版は
+人が押した物ではないので、「不明」だと調べれば分かるように読める。
+
+-}
+byText : Model.EntryVersion -> String
+byText version =
+    if String.isEmpty (String.trim version.author) then
+        reasonText version.reason
+
+    else
+        version.author ++ " が" ++ reasonText version.reason
 
 
 {-| その行がどの操作で積まれたか。
