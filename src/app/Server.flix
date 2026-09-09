@@ -25,7 +25,7 @@ mod Server {
     ///
     /// - POST /graphql, /admin/graphql, /account/graphql: ボディ {"query": "...", "variables": {...}, "operationName": "..."} を実行して {"data": ..., "errors": [...]} を返す
     /// - GET /graphql, /admin/graphql ?query=...&variables=...&operationName=...: query だけ（mutation は 405）。コンテンツ API は身元無しなら Cache-Control と ETag で CDN に乗せられ、If-None-Match が合えば 304
-    /// - GET /health: DB に届けば 200、届かなければ 503。jobs にワーカーの最終実行時刻と待ち・失敗の件数（数えられなければ -1）
+    /// - GET /health: DB に届けば 200、届かなければ 503。プールが張り付いていれば 200 のまま status が degraded。jobs にワーカーの最終実行時刻と待ち・失敗の件数（数えられなければ -1）
     /// - POST /jobs/tick: 外部トリガー。X-Jobs-Token が設定と一致すればワーカーを 1 tick回す（無ければ 404）
     /// - POST /mcp: MCP サーバ（JSON-RPC。tools だけ）。管理 API のエンジンへの GraphQL クライアントとして動く
     ///
@@ -130,6 +130,7 @@ mod Server {
     ///
     /// GET /health。DB に届けば {"status": "ok", "version": "...", "jobs": {"lastTickAt": ...}, "connections": {"active": 1, "max": 256}, "pool": {"active": 1, ...}}、届かなければ 503 で理由を付ける。
     /// DB に届いても、仕事のtickかwatchのtickが止まっていれば 503 で reason（`jobs stalled` / `watch stalled`）を付ける。
+    /// DB に届いてtickも動いていて、DB の接続プールだけが張り付いていれば 200 のまま status を degraded にして reason（`pool saturated (…%)`）を付ける。
     /// connections は HTTP の接続、pool は DB の接続プール（別の物）。
     /// 最初に DB へ 1 回だけ届くかを見て、その結果で自己回復の判断を 1 回進める（プールが壊れたまま戻らないと決まれば、この中でプロセスが終わる）。
     ///
@@ -146,14 +147,17 @@ mod Server {
         // 仕事の tick と watch が止まっていないか（stall）。止まっていればリクエストの行に経過を積む
         let stall = (health#stall)();
         Option.forEach(found -> Observe.note(Log.Fields.empty() |> Log.Fields.int(Health.stallKey(found), Health.stallMs(found))), stall);
-        // 503 にする理由（DB に届かない・止まった tick）をリクエストの行にも
-        Option.forEach(reason -> Observe.note(Log.Fields.empty() |> Log.Fields.str("reason", reason)), healthReason(db, stall));
         // 本文に出す値（ワーカーのまとめ・HTTP の接続数・DB のプール）を読む。DB に届いていなければ件数は数えない
         let summary = (health#jobsSummary)(db);
         let connected = (health#connections)();
         let stats = (health#poolStats)();
+        // プールが張り付いていないか。張り付いていればリクエストの行に割合を積む
+        let saturation = Health.saturation(stats);
+        Option.forEach(percent -> Observe.note(Log.Fields.empty() |> Log.Fields.int(Health.saturationKey(), Int32.toInt64(percent))), saturation);
+        // status を ok から外す理由（DB に届かない・止まった tick・プールの張り付き）をリクエストの行にも
+        Option.forEach(reason -> Observe.note(Log.Fields.empty() |> Log.Fields.str("reason", reason)), healthReason(db, stall, saturation));
         // status と理由を足して応答にする
-        healthResponse(healthBody(version, summary, connected, stats), db, stall)
+        healthResponse(healthBody(version, summary, connected, stats), db, stall, saturation)
 
     ///
     /// /health の本文のうち、status 以外の部分（version / jobs / connections / pool）を組む。
@@ -173,21 +177,29 @@ mod Server {
         Map#{ "version" => Value.Str(version), "jobs" => jobs, "connections" => connections, "pool" => pool }
 
     ///
-    /// /health を 503 にする理由。DB に届かなければその文言、届いていて tick が止まっていれば `jobs stalled` / `watch stalled`。200 なら None。
+    /// /health の status を ok から外す理由。DB に届かなければその文言、届いていて tick が止まっていれば `jobs stalled` / `watch stalled`、
+    /// どちらも無くてプールが張り付いていれば `pool saturated (…%)`。ok なら None。
     ///
-    pub def healthReason(db: Result[String, Unit], stall: Option[Health.Stall]): Option[String] =
+    pub def healthReason(db: Result[String, Unit], stall: Option[Health.Stall], saturation: Option[Int32]): Option[String] =
         match (db, stall) {
             case (Err(message), _)     => Some(message)
             case (Ok(()), Some(found)) => Some(Health.stallReason(found))
-            case (Ok(()), None)        => None
+            case (Ok(()), None)        => saturation |> Option.map(Health.saturationReason)
         }
 
     ///
-    /// /health の応答。DB に届いて stall が無ければ 200 と status ok、stall があれば 503 と reason、DB に届かなければ 503 と db の理由。
+    /// /health の応答。DB に届いて stall も張り付きも無ければ 200 と status ok、stall があれば 503 と reason、DB に届かなければ 503 と db の理由。
+    /// プールが張り付いているだけなら 200 のまま status を degraded にして reason を付ける。
     ///
-    def healthResponse(base: Map[String, Value], db: Result[String, Unit], stall: Option[Health.Stall]): HttpResponse =
+    /// WhyNot: 張り付きを 503 にしないのは、負荷が高いだけの時にロードバランサから外れて、残った側に負荷が寄り事態が悪くなるため。
+    /// 目的は監視から見える事なので、status が ok でなくなれば足りる。
+    ///
+    def healthResponse(base: Map[String, Value], db: Result[String, Unit], stall: Option[Health.Stall], saturation: Option[Int32]): HttpResponse =
         match (db, stall) {
-            case (Ok(()), None)          => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map.insert("status", Value.Str("ok"), base))) }
+            case (Ok(()), None)          => match saturation {
+                case None          => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(Map.insert("status", Value.Str("ok"), base))) }
+                case Some(percent) => { status = 200, headers = Nil, body = JsonValue.toJsonString(Value.Obj(base |> Map.insert("status", Value.Str("degraded")) |> Map.insert("reason", Value.Str(Health.saturationReason(percent))))) }
+            }
             case (Ok(()), Some(found))   => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(base |> Map.insert("status", Value.Str("error")) |> Map.insert("reason", Value.Str(Health.stallReason(found))))) }
             case (Err(message), _)       => { status = 503, headers = Nil, body = JsonValue.toJsonString(Value.Obj(base |> Map.insert("status", Value.Str("error")) |> Map.insert("db", Value.Str(message)))) }
         }

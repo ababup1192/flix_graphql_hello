@@ -35,4 +35,11 @@ mod HealthFake {
     pub def stalled(): Health[{}] =
         { stall = _ -> Some(Health.Stall.Jobs(120000i64)) | ok() }
 
+    ///
+    /// DB には届き tick も動いているが、接続が漏れてプールが張り付いている（10 本のうち 9 本が使われたまま）。
+    /// idle が 1 本残っているので ping は通る。
+    ///
+    pub def saturated(): Health[{}] =
+        { poolStats = _ -> { active = 9, idle = 1, waiting = 0, total = 10, max = 10 } | ok() }
+
 }

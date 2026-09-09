@@ -327,6 +327,17 @@ mod TestServer {
         Assert.assertEq(expected = (503, Ok(Value.Str("jobs stalled"))),
             (response#status, JsonValue.parse(response#body) |> Result.map(body -> match body { case Value.Obj(fields) => Map.get("reason", fields) |> Option.getWithDefault(Value.Null) case _ => Value.Null })))
 
+    /// DB に届き tick も動いていて、接続が漏れてプールだけが張り付いていれば、200 のまま status が degraded で reason が付く。
+    @Test
+    def testServerHealthSaturated(): Unit \ Assert =
+        let response = GraphqlFake.runWithEcho(() ->
+            serve(Server.defaultConfig(), HealthFake.saturated(), Credential.Missing, { version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" }));
+        Assert.assertEq(expected = (200, Ok((Value.Str("degraded"), Value.Str("pool saturated (90%)")))),
+            (response#status, JsonValue.parse(response#body) |> Result.map(body -> match body {
+                case Value.Obj(fields) => (Map.get("status", fields) |> Option.getWithDefault(Value.Null), Map.get("reason", fields) |> Option.getWithDefault(Value.Null))
+                case _ => (Value.Null, Value.Null)
+            })))
+
     /// /health への POST は 405 で Allow: GET。
     @Test
     def testServerHealthPostNotAllowed(): Unit \ Assert =

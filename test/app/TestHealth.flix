@@ -53,18 +53,58 @@ mod TestHealth {
             expected = cases |> List.map(snd),
             cases |> List.map(match (interval, _) -> Health.stallLimitMs(interval)))
 
-    /// /health を 503 にする理由（リクエストの行の reason）。DB に届かなければその文言が先、届いていれば止まった tick、どちらも無ければ無し。
+    /// 上限 max 本のうち active 本を使っているプール。待ちは無い。
+    def pool(active: Int32, max: Int32): Pool.PoolStats =
+        { active = active, idle = max - active, waiting = 0, total = max, max = max }
+
+    ///
+    /// Health.saturation: DB の接続プールが張り付いていれば、使用中の割合（パーセント）。
+    /// 接続が漏れると active が max の近くに居座るが、idle が 1 本でも残っていれば ping は通るので checkDb では気づけない。
+    ///
     @Test
-    def testHealthReasonTable(): Unit \ Assert =
+    def testSaturationTable(): Unit \ Assert =
         let cases = List#{
-            ((Err("timeout"), None),                              Some("timeout")),
-            ((Err("timeout"), Some(Health.Stall.Jobs(1i64))),     Some("timeout")),
-            ((Ok(()), Some(Health.Stall.Watch(1i64))),            Some("watch stalled")),
-            ((Ok(()), None),                                      None)
+            // 10 本のうち 1 本だけ使っている
+            (pool(1, 10),   None),
+            // 8 割はまだ張り付きとしない
+            (pool(8, 10),   None),
+            // 9 割ちょうどから張り付き（接続が漏れた実例。idle が 1 本残るので ping は通る）
+            (pool(9, 10),   Some(90)),
+            // 満杯
+            (pool(10, 10),  Some(100)),
+            // 小さいプールでも割合で見る
+            (pool(4, 4),    Some(100)),
+            // まだプールができていない（max が 0）
+            (pool(0, 0),    None)
         };
         Assert.assertEq(
             expected = cases |> List.map(snd),
-            cases |> List.map(match ((db, stall), _) -> Server.healthReason(db, stall)))
+            cases |> List.map(match (stats, _) -> Health.saturation(stats)))
+
+    /// 張り付きは /health の reason とリクエストの行のキーになる。
+    @Test
+    def testSaturationNamesTable(): Unit \ Assert =
+        let cases = List#{
+            (90,  "pool saturated (90%)"),
+            (100, "pool saturated (100%)")
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd),
+            cases |> List.map(match (percent, _) -> Health.saturationReason(percent)))
+
+    /// /health の status を ok から外す理由（リクエストの行の reason）。DB に届かなければその文言が先、次に止まった tick、次にプールの張り付き。
+    @Test
+    def testHealthReasonTable(): Unit \ Assert =
+        let cases = List#{
+            ((Err("timeout"), None, None),                              Some("timeout")),
+            ((Err("timeout"), Some(Health.Stall.Jobs(1i64)), Some(95)), Some("timeout")),
+            ((Ok(()), Some(Health.Stall.Watch(1i64)), Some(95)),        Some("watch stalled")),
+            ((Ok(()), None, Some(95)),                                  Some("pool saturated (95%)")),
+            ((Ok(()), None, None),                                      None)
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd),
+            cases |> List.map(match ((db, stall, saturation), _) -> Server.healthReason(db, stall, saturation)))
 
     /// 止まった tick は /health の reason とリクエストの行のキーになる。
     @Test

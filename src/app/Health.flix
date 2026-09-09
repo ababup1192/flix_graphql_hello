@@ -92,6 +92,33 @@ mod Health {
         Int64.max(intervalMs * 3i64, 30000i64)
 
     ///
+    /// プールが張り付いたと見なす、使用中の割合（パーセント）。
+    ///
+    pub def saturationLimitPercent(): Int32 = 90
+
+    ///
+    /// DB の接続プールが張り付いていれば、使用中の割合（パーセント）。max が 0（まだプールができていない）なら見ない。
+    ///
+    /// WhyNot: checkDb だけで足りないのは、接続が漏れて active が max の近くに居座っても、idle が 1 本でも残っていれば
+    /// ping は通り、status が ok の 200 のままになるため（漏れの実例は active=9 / idle=1）。
+    ///
+    /// WhyNot: ここで接続を借りて確かめないのは、DB が止まっている間に /health 自体が借り待ちで返らなくなるため。
+    /// Pool.stats は Hikari が持っている数字を読むだけで、待ちが増えない。
+    ///
+    pub def saturation(stats: Pool.PoolStats): Option[Int32] =
+        if (stats#max <= 0) None
+        else {
+            let percent = stats#active * 100 / stats#max;
+            if (percent >= saturationLimitPercent()) Some(percent) else None
+        }
+
+    /// /health の本文の reason に出す語。
+    pub def saturationReason(percent: Int32): String = "pool saturated (${percent}%)"
+
+    /// リクエストの行に積むキー。
+    pub def saturationKey(): String = "pool.used_percent"
+
+    ///
     /// プールとワーカーと Listener の状態で答える。runJobs は仕事の行（Log）を出す。
     /// startedAt はプロセスが起動した時刻、jobsOn は CMS_JOBS、heal は自己回復のwatch（CMS_SELF_HEAL=off なら None）、
     /// borrowTimeoutMs は checkDb が接続を借りるのを待つ上限（CMS_DB_BORROW_TIMEOUT_SECONDS）。
