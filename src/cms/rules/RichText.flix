@@ -439,10 +439,10 @@ mod RichText {
                     let fileName = attrString("fileName", fields) |> Option.filter(isFileName) |> Option.map(found -> " data-file-name=\"${escape(found)}\"") |> Option.getWithDefault("");
                     let highlightLines = attrString("highlightLines", fields) |> Option.filter(isHighlightLines) |> Option.map(found -> " data-highlight-lines=\"${found}\"") |> Option.getWithDefault("");
                     "<pre${diagram}${fileName}${highlightLines}><code${language}>${inner()}</code></pre>"
-                case Some("table")          => "<table>${inner()}</table>"
+                case Some("table")          => tableHtml(images, fields)
                 case Some("tableRow")       => "<tr>${inner()}</tr>"
-                case Some("tableCell")      => "<td>${inner()}</td>"
-                case Some("tableHeader")    => "<th>${inner()}</th>"
+                case Some("tableCell")      => "<td${spanAttrs(fields)}>${inner()}</td>"
+                case Some("tableHeader")    => "<th${spanAttrs(fields)}>${inner()}</th>"
                 case Some("callout")        => "<aside data-kind=\"${escape(attrString("kind", fields) |> Option.getWithDefault("note"))}\">${inner()}</aside>"
                 case Some("horizontalRule") => "<hr>"
                 case Some("hardBreak")      => "<br>"
@@ -571,6 +571,50 @@ mod RichText {
 
     def attrString(name: String, fields: Map[String, Json]): Option[String] =
         Map.get(name, attrs(fields)) |> Option.flatMap(EntryValue.asString)
+
+    ///
+    /// 表。**見出しだけの先頭行は thead、残りは tbody に入れる。**
+    /// tr を table の直下に置くと HTML として不正で、読む側が thead / tbody で見分けられない
+    /// （サイト側の CSS が `thead th` で書けない）。
+    ///
+    def tableHtml(images: Map[AssetId, ImageRef], fields: Map[String, Json]): String =
+        let rows = children(fields);
+        let render = list -> list |> List.map(htmlOf(images)) |> List.join("");
+        match rows {
+            case Nil          => "<table></table>"
+            case head :: rest =>
+                if (isHeaderRow(head)) {
+                    let body = if (List.isEmpty(rest)) "" else "<tbody>${render(rest)}</tbody>";
+                    "<table><thead>${htmlOf(images, head)}</thead>${body}</table>"
+                } else {
+                    "<table><tbody>${render(rows)}</tbody></table>"
+                }
+        }
+
+    /// セルが 1 つ以上あって、全部が tableHeader の行。
+    def isHeaderRow(row: Json): Bool = match row {
+        case Json.JObject(rowFields) =>
+            let cells = children(rowFields);
+            not List.isEmpty(cells) and List.forAll(isHeaderCell, cells)
+        case _ => false
+    }
+
+    def isHeaderCell(cell: Json): Bool = match cell {
+        case Json.JObject(cellFields) => typeOf(cellFields) == Some("tableHeader")
+        case _                        => false
+    }
+
+    ///
+    /// セルの結合。**2 以上の時だけ出す。**
+    /// エディタは結合していないセルにも colspan / rowspan を 1 で付けるので、そのまま出すと
+    /// 全セルに意味の無い属性が並ぶ。落とすと、API や取り込みが入れた結合が消えて表が崩れる。
+    ///
+    def spanAttrs(fields: Map[String, Json]): String =
+        spanAttr("colspan", fields) ++ spanAttr("rowspan", fields)
+
+    def spanAttr(name: String, fields: Map[String, Json]): String =
+        attrInt(name, fields) |> Option.filter(count -> count > 1)
+            |> Option.map(count -> " ${name}=\"${count}\"") |> Option.getWithDefault("")
 
     def attrInt(name: String, fields: Map[String, Json]): Option[Int32] =
         Map.get(name, attrs(fields)) |> Option.flatMap(EntryValue.asInt32)

@@ -565,7 +565,10 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
   /* 折り返せない長い英語でも枠を押し広げない */
   overflow-wrap: anywhere;
 }
-.tt-body table th { background: var(--color-well); font-weight: 600; text-align: left; }
+/* **見出しの行は太字だけ。背景は塗らない。**
+   塗ると、サイト側の CSS で色を決める時に管理画面の見た目が正になってしまう。
+   編集中に見分けが付けば足りる。 */
+.tt-body table th { font-weight: 700; text-align: left; }
 .tt-body table .selectedCell { background: var(--color-well); }
 
 /* 行と列の掴み。セルにカーソルがある時か、表にマウスが乗っている時だけ出る

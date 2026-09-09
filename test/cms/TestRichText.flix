@@ -190,13 +190,51 @@ mod TestRichText {
         });
         let images = Map#{ AssetId.AssetId("asset001") => { url = "u", width = None, height = None } };
         Assert.assertEq(
-            expected = "<table><tr><th><p>h</p></th><td><p>c</p></td></tr></table>"
+            expected = "<table><tbody><tr><th><p>h</p></th><td><p>c</p></td></tr></tbody></table>"
                 ++ "<aside data-kind=\"warning\"><p>注意</p></aside>"
                 ++ "<figure><img src=\"u\" alt=\"a\"><figcaption>図 1</figcaption></figure>"
                 ++ "<figure data-embed=\"youtube\"><iframe src=\"https://www.youtube.com/embed/dQw4w9WgXcQ\" loading=\"lazy\" allowfullscreen allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture\"></iframe></figure>"
                 ++ "<figure data-embed=\"x\"><blockquote class=\"twitter-tweet\"><a href=\"https://x.com/flixlang/status/1234567890\">https://x.com/flixlang/status/1234567890</a></blockquote></figure>"
                 ++ "<p><a href=\"#entry:b2\" data-entry-id=\"b2\">関連</a></p>",
             RichText.toHtml(images, doc))
+
+    /// 表の HTML。見出しだけの先頭行は thead、残りは tbody。colspan / rowspan は 2 以上の時だけ出す。
+    @Test
+    def testToHtmlTable(): Unit \ Assert =
+        let body = s -> List#{ node("paragraph", List#{ text(s) }) };
+        let cell = (kind, spans, s) -> nodeWith(kind, spans, body(s));
+        let row = cells -> node("tableRow", cells);
+        let table = rows -> node("doc", List#{ node("table", rows) });
+        let span = (name, n) -> (name, CmsTestKit.intJson(n));
+        let cases = List#{
+            // 見出しの行と本文の行
+            (table(List#{
+                row(List#{ node("tableHeader", body("h")) }),
+                row(List#{ node("tableCell", body("c")) })
+            }),
+             "<table><thead><tr><th><p>h</p></th></tr></thead><tbody><tr><td><p>c</p></td></tr></tbody></table>"),
+
+            // 見出しの行が無い
+            (table(List#{ row(List#{ node("tableCell", body("c")) }) }),
+             "<table><tbody><tr><td><p>c</p></td></tr></tbody></table>"),
+
+            // 見出しと本文が混ざった行は thead にしない
+            (table(List#{ row(List#{ node("tableHeader", body("h")), node("tableCell", body("c")) }) }),
+             "<table><tbody><tr><th><p>h</p></th><td><p>c</p></td></tr></tbody></table>"),
+
+            // colspan / rowspan は 2 以上の時だけ
+            (table(List#{
+                row(List#{ cell("tableHeader", List#{ span("colspan", 2), span("rowspan", 1) }, "h") }),
+                row(List#{ cell("tableCell", List#{ span("colspan", 1), span("rowspan", 3) }, "c") })
+            }),
+             "<table><thead><tr><th colspan=\"2\"><p>h</p></th></tr></thead><tbody><tr><td rowspan=\"3\"><p>c</p></td></tr></tbody></table>"),
+
+            // 行が 1 つも無い
+            (table(Nil), "<table></table>")
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd),
+            cases |> List.map(entry -> RichText.toHtml(Map.empty(), fst(entry))))
 
     /// 埋め込みの URL の判定。知らない提供元と任意の iframe は通らない。
     @Test
