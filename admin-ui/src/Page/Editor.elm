@@ -34,6 +34,7 @@ import Route
 import Time
 import Ui
 import Ui.DateTime
+import Ui.Icon as Icon
 
 
 type alias Model =
@@ -2329,6 +2330,10 @@ slugPlaceholder model field =
 Contentful は欄の右上の展開ボタン、Sanity は全画面、Notion は幅を広げるトグルを持つ。
 ここは Contentful に寄せて、**欄の右上のボタンで画面いっぱいにする**。
 
+**印は斜めの矢印 2 つで、文字を出さない。**（Contentful / Notion / Sanity /
+Google ドキュメントが揃ってこの形。）文字で「広げて書く」と書くと、
+本文の欄の頭に本文でない言葉が並んで、項目の名前と読み違える。
+
 WhyNot: 広げる時に `tiptap-editor` を別の親へ動かさない。カスタム要素なので、
 親が変わると作り直しになり、書いていた履歴（取り消し）が消える。
 **同じ場所に置いたまま、外側の div を `fixed inset-0` にする。**
@@ -2377,8 +2382,12 @@ viewRich model field current =
 
               else
                 text ""
-            , Ui.ghostButton
-                [ class "ml-auto"
+            , Html.button
+                [ class "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-soft hover:bg-well hover:text-ink"
+
+                -- 広げている時は左隣の保存が右へ寄せているので、ここで 2 度寄せない
+                -- （寄せると保存だけが真ん中に取り残される）。
+                , Html.Attributes.classList [ ( "ml-auto", not big ) ]
                 , onClick
                     (ExpandToggled
                         (if big then
@@ -2388,13 +2397,20 @@ viewRich model field current =
                             Just field.apiId
                         )
                     )
-                ]
-                [ text
+                , Html.Attributes.title
                     (if big then
                         "元の大きさに戻す"
 
                      else
                         "広げて書く"
+                    )
+                ]
+                [ Icon.view
+                    (if big then
+                        Icon.collapse
+
+                     else
+                        Icon.expand
                     )
                 ]
             ]

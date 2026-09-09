@@ -3,7 +3,9 @@ module Ui.Icon exposing
     , caret
     , check
     , choices
+    , collapse
     , entry
+    , expand
     , grip
     , media
     , ofKind
@@ -261,6 +263,20 @@ entry =
 caret : List (Svg msg)
 caret =
     [ path "M6 9l6 6 6-6" ]
+
+
+{-| 広げる / 畳む。**斜めの矢印 2 つ。**
+外向き（左下と右上へ出る）が広げる、内向きが元に戻す。
+Contentful / Notion / Sanity / Google ドキュメントが揃ってこの形を使っている。
+-}
+expand : List (Svg msg)
+expand =
+    [ path "M14 4h6v6", path "M10 20H4v-6", path "M20 4l-7 7", path "M4 20l7-7" ]
+
+
+collapse : List (Svg msg)
+collapse =
+    [ path "M14 10h6V4", path "M10 14H4v6", path "M20 4l-7 7", path "M4 20l7-7" ]
 
 
 {-| 検索。上のバーの中央の欄に置く。**狭い画面ではこれだけが残る。**
