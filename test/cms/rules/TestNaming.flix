@@ -102,6 +102,14 @@ mod TestNaming {
              CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.Select, many = true, unique = true })),
              CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.Date, many = true, unique = true }))))
 
+    /// DATE_ONLY は unique にできる。形が 1 通り（"2026-09-09"）しかないので、同じ日は必ず同じ文字列になり、JSONB の `=` で見る一意が正しく効く。
+    @Test
+    def testNamingValidateFlagsDateOnlyUnique(): Unit \ Assert =
+        Assert.assertEq(expected = (Nil, Nil, List#{"unique"}),
+            (CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.DateOnly, many = false, unique = true })),
+             CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.DateOnly, many = true, unique = false })),
+             CmsTestKit.violationPaths(Naming.validateFlags({ kind = FieldKind.DateOnly, many = true, unique = true }))))
+
     // ---- config ----
 
     /// SLUG は sourceField が要り、それは同じ型にあるフィールドでなければならない。
@@ -140,6 +148,49 @@ mod TestNaming {
     def testNamingValidateName(): Unit \ Assert =
         let cases = List#{ ("", List#{"name"}), ("   ", List#{"name"}), ("\t\n", List#{"name"}), ("記事", Nil), ("a", Nil) };
         Assert.assertEq(expected = cases, cases |> List.map(match (text, _) -> (text, CmsTestKit.violationPaths(Naming.validateName("name", text)))))
+
+    // ---- アイコン ----
+
+    /// アイコンの識別子は英小文字始まりの [a-z][a-z0-9-]*。大文字・数字始まり・空・_・空白・絵文字・記号は通らない。
+    @Test
+    def testNamingValidateIcon(): Unit \ Assert =
+        let cases = List#{
+            ("book", Nil),
+            ("tag", Nil),
+            ("book-open", Nil),
+            ("h1", Nil),
+            ("a", Nil),
+            ("", List#{"icon"}),
+            ("Book", List#{"icon"}),
+            ("2book", List#{"icon"}),
+            ("-book", List#{"icon"}),
+            ("book_open", List#{"icon"}),
+            ("book open", List#{"icon"}),
+            ("book/open", List#{"icon"}),
+            ("📚", List#{"icon"})
+        };
+        Assert.assertEq(expected = cases, cases |> List.map(match (text, _) -> (text, CmsTestKit.violationPaths(Naming.validateIcon("icon", text)))))
+
+    /// 長さは maxIconLength まで。ちょうどは通り、1 文字超えると invalid。
+    @Test
+    def testNamingValidateIconLength(): Unit \ Assert =
+        let limit = Naming.maxIconLength();
+        let icon = size -> "a" + String.repeat(size - 1, "b");
+        let cases = List#{ (limit - 1, Nil), (limit, Nil), (limit + 1, List#{"icon"}) };
+        Assert.assertEq(expected = cases, cases |> List.map(match (size, _) -> (size, CmsTestKit.violationPaths(Naming.validateIcon("icon", icon(size))))))
+
+    /// 違反の path は呼び出し側が渡した物になる（入力の項目名に合わせられる）。
+    @Test
+    def testNamingValidateIconPath(): Unit \ Assert =
+        Assert.assertEq(expected = List#{"input.icon"}, CmsTestKit.violationPaths(Naming.validateIcon("input.icon", "BOOK")))
+
+    /// 既定のアイコンは kind ごと。COLLECTION は list、SINGLETON は file。どちらも規則を通る。
+    @Test
+    def testNamingDeriveIcon(): Unit \ Assert =
+        let kinds = List#{TypeKind.Collection, TypeKind.Singleton};
+        Assert.assertEq(expected = (List#{"list", "file"}, List#{Nil, Nil}),
+            (kinds |> List.map(Naming.deriveIcon),
+             kinds |> List.map(kind -> CmsTestKit.violationPaths(Naming.validateIcon("icon", Naming.deriveIcon(kind))))))
 
     /// 参照先は REFERENCE に要り、REFERENCE 以外には付けられない。
     @Test

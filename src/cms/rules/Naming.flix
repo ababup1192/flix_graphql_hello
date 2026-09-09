@@ -147,6 +147,34 @@ mod Naming {
         if (String.isEmpty(String.trim(text))) Violation.Violation(path, "名前を付けてください") :: Nil else Nil
 
     ///
+    /// アイコンの識別子の上限の長さ。DDL の CHECK と揃える。
+    ///
+    pub def maxIconLength(): Int32 = 32
+
+    ///
+    /// アイコンの識別子の規則の説明。エラーメッセージ用。
+    ///
+    pub def iconRule(): String = "英小文字・数字・- を ${maxIconLength()} 文字まで（先頭は英小文字）"
+
+    ///
+    /// content type のアイコン。管理画面が絵を選ぶための短い識別子（"book" / "tag"）で、絵柄そのものは持たない。
+    ///
+    /// WhyNot: ApiId のような型で包まないのは、コンテンツ API の名前にならず、管理画面の見た目だけの値のため。
+    ///
+    pub def validateIcon(path: String, text: String): List[Violation] =
+        if (String.length(text) > maxIconLength()) Violation.Violation(path, "アイコンは ${iconRule()}") :: Nil
+        else if (not String.isMatch(regex = "^[a-z][a-z0-9-]*$", text)) Violation.Violation(path, "アイコンは ${iconRule()}") :: Nil
+        else Nil
+
+    ///
+    /// kind ごとの既定のアイコン。省いて作った型と、この列を足す前からある行に入る値。
+    ///
+    pub def deriveIcon(kind: TypeKind): String = match kind {
+        case TypeKind.Collection => "list"
+        case TypeKind.Singleton  => "file"
+    }
+
+    ///
     /// フィールドの性質の組み合わせ。unique は配列・OBJECT・BLOCKS・ASSET・RICH_TEXT に付けられない（値ごとの一意を DB で守れない）。
     /// BLOCKS は常に配列、RICH_TEXT は配列にできない。
     ///

@@ -394,7 +394,17 @@ mod ContentSchemaBuilder {
     def leafArgs(owner: ContentType): List[LeafArg] =
         idLeaf("id_eq", EntryId.parse, Condition.IdEq) ::
         idsLeaf("id_in", EntryId.parse, Condition.IdIn) ::
+        systemDateLeaves() :::
         List.flatMap(fieldLeafArgs(TypeName.text(owner#singular)), owner#fields)
+
+    ///
+    /// システムの日時（createdAt / updatedAt / publishedAt）の範囲の葉。`publishedAt_gte` の形で、前回の同期からの差分を引くための物。
+    /// 名前は SortKey の組み込みと同じで、Naming が予約しているのでフィールドの apiId とはぶつからない。
+    ///
+    def systemDateLeaves(): List[LeafArg] =
+        SystemDate.all() |> List.flatMap(key ->
+            RangeOp.all() |> List.map(op ->
+                dateLeaf("${SystemDate.toText(key)}_${RangeOp.toText(op)}", at -> Condition.SystemDateCmp(key, op, at))))
 
     def fieldLeafArgs(prefix: String, field: FieldDef): List[LeafArg] =
         let name = ApiId.text(field#apiId);
@@ -414,6 +424,7 @@ mod ContentSchemaBuilder {
             case FieldKind.Number    => Nil
             case FieldKind.Boolean   => Nil
             case FieldKind.Date      => Nil
+            case FieldKind.DateOnly  => Nil
             case FieldKind.Reference => idLeaf(name, EntryId.parse, found -> Condition.ArrayContains(apiId, EntryId.text(found))) :: Nil
             case FieldKind.Asset     => idLeaf(name, AssetId.parse, found -> Condition.ArrayContains(apiId, AssetId.text(found))) :: Nil
             case FieldKind.Select    => leafArg(name, selectCodec(prefix, field), text -> Condition.ArrayContains(apiId, text) :: Nil) :: Nil
@@ -437,6 +448,7 @@ mod ContentSchemaBuilder {
             case FieldKind.Select    => equalityLeaves(name, apiId, selectCodec(prefix, field))
             case FieldKind.Number    => numberLeaves(name, apiId)
             case FieldKind.Date      => dateLeaves(name, apiId)
+            case FieldKind.DateOnly  => dateOnlyLeaves(name, apiId)
             case FieldKind.Boolean   => leafArg("${name}_eq", GqlCodec.bool(), b -> Condition.BoolEq(apiId, b) :: Nil) :: Nil
             case _                   => equalityLeaves(name, apiId, GqlCodec.string()) ::: searchLeaves(name, apiId)
         }
@@ -471,6 +483,16 @@ mod ContentSchemaBuilder {
 
     def dateLeaf(name: String, make: Timestamp.Timestamp -> Condition): LeafArg =
         leafArg(name, GqlCodec.string(), text -> (DateValues.parse(text) |> Option.map(make) |> Option.getWithDefault(Condition.Never)) :: Nil)
+
+    ///
+    /// DATE_ONLY の `_eq` と範囲の 4 つ。値は日付（"2026-09-09"）。時刻付きの引数は UTC で見た日付として読む。読めない文字列は Never（何にも合わない）に倒す。
+    ///
+    def dateOnlyLeaves(name: String, apiId: ApiId): List[LeafArg] =
+        dateOnlyLeaf("${name}_eq", on -> Condition.DateOnlyEq(apiId, on)) ::
+        (RangeOp.all() |> List.map(op -> dateOnlyLeaf("${name}_${RangeOp.toText(op)}", on -> Condition.DateOnlyCmp(apiId, op, on))))
+
+    def dateOnlyLeaf(name: String, make: Date.Date -> Condition): LeafArg =
+        leafArg(name, GqlCodec.string(), text -> (DateOnlyValues.parse(text) |> Option.map(make) |> Option.getWithDefault(Condition.Never)) :: Nil)
 
     ///
     /// ID を 1 つ受ける葉。規則（parse）に合わない id は Never（何にも合わない）に倒す。

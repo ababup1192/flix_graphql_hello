@@ -87,6 +87,69 @@ mod TestMcpTools {
                 List#{"properties", "from", "properties", "versionId", "type"},
                 List#{"properties", "to", "type"}}, schema))
 
+    ///
+    /// 配列の引数の inputSchema: where.fields と orderBy は array で、items に入れ子の object の schema が入る。
+    /// 中身を検査しない値（EntryFieldCondition の value）は型を書かず、説明だけの schema。
+    ///
+    @Test
+    def testInputSchemaArrayAndAny(): Unit \ Assert =
+        let schema = McpTools.inputSchema(McpTools.definitionOf(Tool.SearchEntries)#args);
+        Assert.assertEq(
+            expected = List#{
+                Value.Str("array"),
+                Value.Str("object"),
+                Value.Str("string"),
+                Value.Str("array"),
+                Value.List(Value.Str("ASC") :: Value.Str("DESC") :: Nil),
+                Value.Obj(Map#{ "description" => Value.Str("比べる値") }) },
+            GraphqlTestKit.pick(List#{
+                List#{"properties", "where", "properties", "fields", "type"},
+                List#{"properties", "where", "properties", "fields", "items", "type"},
+                List#{"properties", "where", "properties", "id_in", "items", "type"},
+                List#{"properties", "orderBy", "type"},
+                List#{"properties", "orderBy", "items", "properties", "direction", "enum"},
+                List#{"properties", "where", "properties", "fields", "items", "properties", "value"}}, schema))
+
+    ///
+    /// MCP の stage（3 値）を、サーバ側で絞る分とページの中で分ける分に割る。
+    /// DRAFT はサーバ側で絞り切れる。CHANGED は SQL の上では公開中の部分集合なので、PUBLISHED まで絞ってからページで分ける。
+    ///
+    @Test
+    def testStageSplitTable(): Unit \ Assert =
+        let cases = List#{
+            (Some("DRAFT"),     (Some("DRAFT"), None)),
+            (Some("PUBLISHED"), (Some("PUBLISHED"), Some("PUBLISHED"))),
+            (Some("CHANGED"),   (Some("PUBLISHED"), Some("CHANGED"))),
+            (None,              (None, None))
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd),
+            cases |> List.map(match (stage, _) -> (McpTools.serverStage(stage), McpTools.pageStage(stage))))
+
+    ///
+    /// 一覧の本文の写し方。full は平文のまま、excerpt は 200 文字で切って、切った印と元の長さを末尾に置く。
+    /// 200 文字以下はどちらも同じ。
+    ///
+    @Test
+    def testListConverterTable(): Unit \ Assert =
+        let doc = text -> obj(List#{ ("type", Value.Str("doc")), ("content", Value.List(
+            obj(List#{ ("type", Value.Str("paragraph")), ("content", Value.List(
+                obj(List#{ ("type", Value.Str("text")), ("text", Value.Str(text)) }) :: Nil)) }) :: Nil)) });
+        let short = "みじかい本文";
+        let long = String.repeat(60, "あいうえお");
+        let cases = List#{
+            // 短い本文は full でも excerpt でも同じ
+            ((McpTools.Body.Full, short),    Value.Str(short)),
+            ((McpTools.Body.Excerpt, short), Value.Str(short)),
+            // 長い本文は full なら全部
+            ((McpTools.Body.Full, long),     Value.Str(long)),
+            // excerpt は 200 文字 + 印（全 300 文字）
+            ((McpTools.Body.Excerpt, long),  Value.Str(String.takeLeft(200, long) ++ "…（先頭 200 文字。全 300 文字。全文は get_entry で）"))
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd),
+            cases |> List.map(match ((body, text), _) -> McpTools.listConverter(body)(doc(text))))
+
     // ---- 引数の復号（表駆動）----
 
     /// 必須欠け・型違い・enum 外・入れ子のオブジェクトの中の誤りは Err、合っていれば Ok（省略した任意の引数は入らない）。
@@ -182,13 +245,17 @@ mod TestMcpTools {
                 McpTools.impactRequest("e1", "UNPUBLISH") } |> List.map(variablesOf))
 
     /// 全ツールの GraphQL 文書は「Mcp + ツール名の UpperCamel」の操作名を持つ（リクエストの行の graphql.operation.name に乗る）。種類は読む物が query、書く物が mutation。
+    /// entries の問い合わせ 1 つ（絞り込みも並び順も付けない、一番素の形）。
+    def entriesQuery(): EntriesQuery =
+        { typeId = "t1", search = None, filter = None, orderBy = None, first = 20, skip = 0, after = None }
+
     @Test
     def testOperationNameTable(): Unit \ Assert =
         let versionRef = obj(List#{ ("stage", Value.Str("DRAFT")) });
         let cases = List#{
             (McpTools.listTypesRequest(),                       ("query", Some("McpListTypes"))),
             (McpTools.typeRequest("blog"),                      ("query", Some("McpGetType"))),
-            (McpTools.entriesRequest("t1", None, 20, 0, None),  ("query", Some("McpSearchEntries"))),
+            (McpTools.entriesRequest(entriesQuery()),           ("query", Some("McpSearchEntries"))),
             (McpTools.entryRequest("e1", false),                ("query", Some("McpGetEntry"))),
             (McpTools.diffRequest("e1", versionRef, versionRef), ("query", Some("McpDiffEntry"))),
             (McpTools.createEntryRequest("t1", obj(Nil)),       ("mutation", Some("McpCreateEntry"))),

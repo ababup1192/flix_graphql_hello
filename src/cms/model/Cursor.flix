@@ -9,6 +9,8 @@ pub enum CursorValue with Eq, Order, ToString {
     case Bool(Bool)
     /// 時刻。epoch からのマイクロ秒
     case Micros(Int64)
+    /// 日付。epoch からの日数
+    case Day(Int32)
 }
 
 ///
@@ -75,6 +77,7 @@ mod Cursor {
             case Some(FieldKind.Number)  => EntryValue.number(apiId, entry#data) |> Option.map(CursorValue.Number) |> Option.getWithDefault(CursorValue.Null)
             case Some(FieldKind.Boolean) => EntryValue.bool(apiId, entry#data) |> Option.map(CursorValue.Bool) |> Option.getWithDefault(CursorValue.Null)
             case Some(FieldKind.Date)    => EntryValue.text(apiId, entry#data) |> Option.flatMap(DateValues.parse) |> Option.map(at -> CursorValue.Micros(Timestamp.toEpochMicros(at))) |> Option.getWithDefault(CursorValue.Null)
+            case Some(FieldKind.DateOnly) => EntryValue.text(apiId, entry#data) |> Option.filter(DateOnlyValues.isCanonical) |> Option.flatMap(DateOnlyValues.parse) |> Option.map(on -> CursorValue.Day(Date.toEpochDay(on))) |> Option.getWithDefault(CursorValue.Null)
             case _                       => EntryValue.text(apiId, entry#data) |> Option.map(CursorValue.Text) |> Option.getWithDefault(CursorValue.Null)
         }
     }
@@ -118,7 +121,7 @@ mod Cursor {
             "id" => Json.JString(id(cursor))
         })
 
-    /// キー 1 つ。{ "key": 名前, "dir": ASC / DESC, 値（s / n / b / t のどれか。無ければ null）}。
+    /// キー 1 つ。{ "key": 名前, "dir": ASC / DESC, 値（s / n / b / t / d のどれか。無ければ null）}。
     def keyToJson(term: (SortKey, Direction, CursorValue)): Json =
         let (key, direction, value) = term;
         let base = Map#{ "key" => Json.JString(SortKey.toText(key)), "dir" => Json.JString(Direction.toText(direction)) };
@@ -128,6 +131,7 @@ mod Cursor {
             case CursorValue.Number(x)      => Map.insert("n", Float64.tryToBigDecimal(x) |> Option.map(Json.JNumber) |> Option.getWithDefault(Json.JNull), base)
             case CursorValue.Bool(b)        => Map.insert("b", Json.JBool(b), base)
             case CursorValue.Micros(micros) => Map.insert("t", Json.JNumber(Int64.toBigDecimal(micros)), base)
+            case CursorValue.Day(days)      => Map.insert("d", Json.JNumber(Int32.toBigDecimal(days)), base)
         })
 
     def fromJson(json: Json): Result[String, Cursor] = match json {
@@ -154,15 +158,16 @@ mod Cursor {
         case _ => Err("キーがオブジェクトではない")
     }
 
-    /// s / n / b / t のどれか 1 つ。どれも無ければ Null。形が違えば Err。
+    /// s / n / b / t / d のどれか 1 つ。どれも無ければ Null。形が違えば Err。
     def valueFromJson(fields: Map[String, Json]): Result[String, CursorValue] =
-        match (Map.get("s", fields), Map.get("n", fields), Map.get("b", fields), Map.get("t", fields)) {
-            case (Some(s), None, None, None) => EntryValue.asString(s) |> Option.map(CursorValue.Text) |> Option.toOk("s が文字列ではない")
-            case (None, Some(n), None, None) => EntryValue.asFloat64(n) |> Option.map(CursorValue.Number) |> Option.toOk("n が数ではない")
-            case (None, None, Some(b), None) => EntryValue.asBool(b) |> Option.map(CursorValue.Bool) |> Option.toOk("b が真偽値ではない")
-            case (None, None, None, Some(t)) => asInt64(t) |> Option.map(CursorValue.Micros) |> Option.toOk("t が整数ではない")
-            case (None, None, None, None)    => Ok(CursorValue.Null)
-            case _                           => Err("値が 2 つ以上ある")
+        match (Map.get("s", fields), Map.get("n", fields), Map.get("b", fields), Map.get("t", fields), Map.get("d", fields)) {
+            case (Some(s), None, None, None, None) => EntryValue.asString(s) |> Option.map(CursorValue.Text) |> Option.toOk("s が文字列ではない")
+            case (None, Some(n), None, None, None) => EntryValue.asFloat64(n) |> Option.map(CursorValue.Number) |> Option.toOk("n が数ではない")
+            case (None, None, Some(b), None, None) => EntryValue.asBool(b) |> Option.map(CursorValue.Bool) |> Option.toOk("b が真偽値ではない")
+            case (None, None, None, Some(t), None) => asInt64(t) |> Option.map(CursorValue.Micros) |> Option.toOk("t が整数ではない")
+            case (None, None, None, None, Some(d)) => asInt64(d) |> Option.flatMap(Int64.tryToInt32) |> Option.map(CursorValue.Day) |> Option.toOk("d が整数ではない")
+            case (None, None, None, None, None)    => Ok(CursorValue.Null)
+            case _                                 => Err("値が 2 つ以上ある")
         }
 
     def asInt64(json: Json): Option[Int64] = match json {

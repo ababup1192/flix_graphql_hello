@@ -65,6 +65,7 @@ mod EntryFilterSql {
         case CursorValue.Number(x)      => SqlValue.Float64(x)
         case CursorValue.Bool(b)        => SqlValue.Bool(b)
         case CursorValue.Micros(micros) => SqlValue.Timestamp(micros)
+        case CursorValue.Day(days)      => SqlValue.Date(days)
     }
 
     ///
@@ -95,7 +96,8 @@ mod EntryFilterSql {
         case SortKey.ByField(apiId) => match List.find(field -> field#apiId == apiId, fields) |> Option.map(field -> field#kind) {
             case Some(FieldKind.Number)  => numberExpr(apiId)
             case Some(FieldKind.Boolean) => boolExpr(apiId)
-            case Some(FieldKind.Date)    => dateExpr(apiId)
+            case Some(FieldKind.Date)     => dateExpr(apiId)
+            case Some(FieldKind.DateOnly) => dateOnlyExpr(apiId)
             case _                       => textExpr(apiId)
         }
     }
@@ -120,6 +122,8 @@ mod EntryFilterSql {
         case Condition.NumberLt(apiId, x)        => Pred.Compare(numberExpr(apiId), CompareOp.Lt, SqlValue.Float64(x))
         case Condition.NumberLte(apiId, x)       => Pred.Compare(numberExpr(apiId), CompareOp.Le, SqlValue.Float64(x))
         case Condition.BoolEq(apiId, b)          => Pred.Compare(boolExpr(apiId), CompareOp.Eq, SqlValue.Bool(b))
+        case Condition.DateOnlyEq(apiId, on)     => Pred.Compare(dateOnlyExpr(apiId), CompareOp.Eq, dateValue(on))
+        case Condition.DateOnlyCmp(apiId, op, on) => Pred.Compare(dateOnlyExpr(apiId), compareOp(op), dateValue(on))
         case Condition.DateEq(apiId, at)         => Pred.Compare(dateExpr(apiId), CompareOp.Eq, timestampValue(at))
         case Condition.DateGt(apiId, at)         => Pred.Compare(dateExpr(apiId), CompareOp.Gt, timestampValue(at))
         case Condition.DateGte(apiId, at)        => Pred.Compare(dateExpr(apiId), CompareOp.Ge, timestampValue(at))
@@ -137,6 +141,15 @@ mod EntryFilterSql {
         // WhyNot: Fragment.any(Nil) は「絞り込み無し（TRUE）」なので使えない。空の IN が FALSE になるのを借りる
         case Condition.Never                     => never()
         case Condition.StageEq(stage)            => Pred.Compare("e.stage", CompareOp.Eq, SqlValue.Str(EntryRows.stageToDb(stage)))
+        // WhyNot: JSONB でなく entries の列で比べるのは、created_at / updated_at / published_at が列であり、索引が効くため
+        case Condition.SystemDateCmp(key, op, at) => Pred.Compare(SystemDate.column(key), compareOp(op), timestampValue(at))
+    }
+
+    def compareOp(op: RangeOp): CompareOp = match op {
+        case RangeOp.Gt  => CompareOp.Gt
+        case RangeOp.Gte => CompareOp.Ge
+        case RangeOp.Lt  => CompareOp.Lt
+        case RangeOp.Lte => CompareOp.Le
     }
 
     def never(): Pred[EntryContentsTable.EntryContentsTable] = Pred.In("e.id", Nil)
@@ -165,7 +178,18 @@ mod EntryFilterSql {
     def dateExpr(apiId: ApiId): String =
         "((CASE WHEN (c.data->>'${ApiId.text(apiId)}') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN c.data->>'${ApiId.text(apiId)}' END)::timestamptz)"
 
+    ///
+    /// 日付として取り出す式。日付の形（YYYY-MM-DD ちょうど。書く時に断るので、それ以外は古い値だけ）でない値は NULL。
+    ///
+    /// WhyNot: 文字列なら何でも ::date にしないのは、同じ apiId で作り直した DATE_ONLY に古い値が残っていると
+    /// キャストで PG の例外になり、一覧のクエリ全体が落ちるため。形を見てから落とす
+    ///
+    def dateOnlyExpr(apiId: ApiId): String =
+        "((CASE WHEN (c.data->>'${ApiId.text(apiId)}') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN c.data->>'${ApiId.text(apiId)}' END)::date)"
+
     def timestampValue(at: Timestamp.Timestamp): SqlValue = SqlValue.Timestamp(Timestamp.toEpochMicros(at))
+
+    def dateValue(on: Date.Date): SqlValue = SqlValue.Date(Date.toEpochDay(on))
 
     def typedExpr(apiId: ApiId, jsonType: String): String =
         "(CASE WHEN jsonb_typeof(c.data->'${ApiId.text(apiId)}') = '${jsonType}' THEN c.data->>'${ApiId.text(apiId)}' END)"

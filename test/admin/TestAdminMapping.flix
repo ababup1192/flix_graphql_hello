@@ -85,12 +85,28 @@ mod TestAdminMapping {
     @Test
     def testAdminMappingEntryWhere(): Unit \ Assert =
         let given = { stage = Some(GeneratedAdmin.ContentStage.Published), id_in = Some(Id.Id("a") :: Id.Id("bad id!") :: Nil),
-                      fields = Some(condition("title", GeneratedAdmin.FieldConditionOp.Eq, Some(Value.Str("x"))) :: Nil) };
+                      fields = Some(condition("title", GeneratedAdmin.FieldConditionOp.Eq, Some(Value.Str("x"))) :: Nil),
+                      createdAt = None, updatedAt = None, publishedAt = None };
         Assert.assertEq(
             expected = (Ok(Condition.StageEq(Stage.Published) :: Condition.IdIn(CmsTestKit.entryIds(List#{"a"})) :: Condition.TextEq(CmsTestKit.apiId("title"), "x") :: Nil), Ok(Nil), (true, false)),
             (CmsTestKit.runWithResult(() -> AdminMapping.entryWhere(fields(), Some(given))),
              CmsTestKit.runWithResult(() -> AdminMapping.entryWhere(fields(), None)),
              (AdminMapping.whereNeedsFields(Some(given)), AdminMapping.whereNeedsFields(Some({ fields = None | given })))))
+
+    /// システムの日時は書いた口だけが条件になる。値は日付だけでもオフセット付きでも読み、読めない値は Never（何にも合わない）。
+    @Test
+    def testAdminMappingEntryWhereSystemDates(): Unit \ Assert =
+        let filter = { gt = None, gte = Some("2026-09-01"), lt = None, lte = Some("2026-09-09T09:00:00+09:00") };
+        let given = { stage = None, id_in = None, fields = None,
+                      createdAt = None, updatedAt = Some(filter), publishedAt = Some({ gte = Some("someday") | noRange() }) };
+        Assert.assertEq(
+            expected = Ok(Condition.SystemDateCmp(SystemDate.UpdatedAt, RangeOp.Gte, Timestamp.at("2026-09-01T00:00:00Z")) ::
+                          Condition.SystemDateCmp(SystemDate.UpdatedAt, RangeOp.Lte, Timestamp.at("2026-09-09T00:00:00Z")) ::
+                          Condition.Never :: Nil),
+            CmsTestKit.runWithResult(() -> AdminMapping.entryWhere(fields(), Some(given))))
+
+    /// 何も書いていない範囲の入力。
+    def noRange(): GeneratedAdmin.DateTimeFilter = { gt = None, gte = None, lt = None, lte = None }
 
     /// orderBy の field は組み込みの名前かフィールドの apiId、direction は ASC / DESC。規則外の field は invalid（orderBy.field）。
     @Test

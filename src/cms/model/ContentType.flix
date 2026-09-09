@@ -34,8 +34,10 @@ pub enum FieldKind with Eq, Order, ToString {
     case Asset
     /// 構造化した本文（ProseMirror の doc）。コンテンツ API では RichText（json / html / text）
     case RichText
-    /// 日時。値は ISO 8601 の文字列（"2026-09-08T09:00:00Z"）。日付だけ（"2026-09-08"）は書く時に UTC の 0 時に揃える
+    /// 日時（瞬間）。値は UTC の ISO 8601 の文字列（"2026-09-09T00:00:00Z"）ちょうど 1 通り
     case Date
+    /// 日付だけ。値は "2026-09-09" ちょうど 1 通り。時刻を持たないので、読む側のタイムゾーンで日がずれない
+    case DateOnly
 }
 
 ///

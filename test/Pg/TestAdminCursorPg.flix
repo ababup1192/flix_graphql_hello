@@ -48,6 +48,26 @@ mod TestAdminCursorPg {
             outcome)
 
     ///
+    /// where のシステムの日時。createdAt / updatedAt / publishedAt を entries の列で比べる。
+    /// 未公開の entry は published_at が NULL なので publishedAt の条件にはどれも合わない（b2 と b4 だけ）。
+    /// 読めない値を渡すと 0 件（黙って全件に広がらない）。
+    ///
+    @Test
+    def testPgAdminEntriesSystemDateFilter(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withAdminApi(seed, (api, _) -> {
+            let ask = PgTestSupport.askOwner(api);
+            let typeId = GraphqlTestKit.stringAt(List#{"contentType", "id"}, ask("{ contentType(apiId: \"blogs\") { id } }"));
+            let total = filter -> Value.path(List#{"entries", "totalCount"},
+                fst(ask("{ entries(typeId: \"${typeId}\", where: ${filter}) { totalCount } }"))) |> Value.asInt;
+            (total("{ createdAt: { gte: \"2000-01-01T00:00:00Z\" } }"),
+             total("{ createdAt: { gte: \"2999-01-01T00:00:00Z\" } }"),
+             total("{ updatedAt: { gt: \"2000-01-01\", lte: \"2999-01-01T00:00:00Z\" } }"),
+             total("{ publishedAt: { gte: \"2000-01-01T00:00:00Z\" } }"),
+             total("{ createdAt: { gte: \"someday\" } }"))
+        });
+        Assert.assertEq(expected = (Some(5), Some(0), Some(5), Some(2), Some(0)), outcome)
+
+    ///
     /// assets の after。3 件を作り、first: 2 → endCursor → 残りの 1 件。after と skip の同時指定は INVALID。
     ///
     @Test

@@ -71,8 +71,22 @@ pub enum ArgType {
     case Int
     case Bool
     case Json
+    /// 中身を検査しない値（EntryFieldCondition の value のように、op と kind で型が決まる物）
+    case Any
     case Enum(List[String])
     case Obj(List[ArgDef])
+    case Arr(ArgType)
+}
+
+///
+/// entries の問い合わせに渡す物。filter（GraphQL の where）と orderBy は管理 API の入力の形そのまま（渡さなければ None）。
+///
+/// WhyNot: フィールドを where と呼ばないのは、where が Flix の予約語で、レコードのフィールド名でも
+/// パースエラー（Expected '}' before '='）になるため。GraphQL の変数名は where のまま。
+///
+pub type alias EntriesQuery = {
+    typeId = String, search = Option[String], filter = Option[Value], orderBy = Option[Value],
+    first = Int32, skip = Int32, after = Option[String]
 }
 
 ///
@@ -166,6 +180,30 @@ mod McpTools {
     /// search_entries の stage の絞り込み（GraphQL の EntryStage と同じ綴り）。
     def entryStages(): List[String] = "DRAFT" :: "PUBLISHED" :: "CHANGED" :: Nil
 
+    ///
+    /// 一覧で返す本文（RICH_TEXT）の量。
+    ///
+    pub enum Body with Eq {
+        case Full
+        case Excerpt
+    }
+
+    /// body の名前と値の対応。
+    def bodies(): List[(String, Body)] = ("full", Body.Full) :: ("excerpt", Body.Excerpt) :: Nil
+
+    /// 名前に戻す（応答の body に出す）。
+    def bodyName(body: Body): String = match body {
+        case Body.Full    => "full"
+        case Body.Excerpt => "excerpt"
+    }
+
+    /// excerpt にする時の文字数。
+    def excerptChars(): Int32 = 200
+
+    /// フィールドの条件の比べ方（GraphQL の FieldConditionOp と同じ綴り）。
+    def fieldConditionOps(): List[String] =
+        "EQ" :: "IN" :: "CONTAINS" :: "STARTS_WITH" :: "GT" :: "GTE" :: "LT" :: "LTE" :: "IS_NULL" :: "ARRAY_CONTAINS" :: Nil
+
     /// 名前 → 値の表から引く。
     def lookup(table: List[(String, a)], text: String): Option[a] =
         table |> List.find(pair -> fst(pair) == text) |> Option.map(snd)
@@ -175,6 +213,28 @@ mod McpTools {
     def entryIdArg(): ArgDef = ArgDef.ArgDef("id", "entry の id", true, ArgType.Str)
 
     def typeArg(): ArgDef = ArgDef.ArgDef("type", "content type の apiId（list_types の apiId）", true, ArgType.Str)
+
+    ///
+    /// 一覧の絞り込み（管理 API の EntryWhere と同じ形をそのまま渡す）。
+    ///
+    def whereArg(): ArgDef =
+        ArgDef.ArgDef("where", "絞り込み。fields の value は op と kind で型が決まる（IN は配列、IS_NULL は真偽値、GT 〜 LTE は数値か日時の文字列）", false,
+            ArgType.Obj(
+                ArgDef.ArgDef("stage", "公開中か下書きか（PUBLISHED は公開後に下書きが進んだ物も含む）", false, ArgType.Enum(readStages() |> List.map(fst))) ::
+                ArgDef.ArgDef("id_in", "この id のどれか", false, ArgType.Arr(ArgType.Str)) ::
+                ArgDef.ArgDef("fields", "フィールドの値の条件（複数なら全部に当たる物）", false, ArgType.Arr(ArgType.Obj(
+                    ArgDef.ArgDef("apiId", "フィールドの apiId", true, ArgType.Str) ::
+                    ArgDef.ArgDef("op", "比べ方", true, ArgType.Enum(fieldConditionOps())) ::
+                    ArgDef.ArgDef("value", "比べる値", false, ArgType.Any) :: Nil))) :: Nil))
+
+    ///
+    /// 一覧の並び順（管理 API の EntryOrderBy と同じ形）。
+    ///
+    def orderByArg(): ArgDef =
+        ArgDef.ArgDef("orderBy", "並び順（先頭が優先）。既定は更新が新しい順。field はフィールドの apiId か updatedAt / createdAt / publishedAt", false,
+            ArgType.Arr(ArgType.Obj(
+                ArgDef.ArgDef("field", "並べる物", true, ArgType.Str) ::
+                ArgDef.ArgDef("direction", "昇順か降順か", true, ArgType.Enum("ASC" :: "DESC" :: Nil)) :: Nil)))
 
     def versionRefArg(name: String, description: String): ArgDef =
         ArgDef.ArgDef(name, description, true, ArgType.Obj(
@@ -205,7 +265,7 @@ mod McpTools {
     pub def fieldValueGuide(): String =
         "値の形: SLUG は config.sourceField があっても自動生成しない（create 時に自分で入れる。required なら無いと公開できない）。"
         ++ "REFERENCE は entry の id の文字列で、存在しない id でも下書きには通り、publish_check で参照先の消失として出る。"
-        ++ "DATE は ISO 8601 の文字列で、日付だけ（2026-09-08）は UTC の 0 時に揃える。ASSET と本文の画像は asset の id だけ（外部 URL は使えない）。"
+        ++ "DATE は UTC の ISO 8601 ちょうど 1 通り（2026-09-09T00:00:00Z）。オフセット付き・ミリ秒付き・日付だけは断る。DATE_ONLY は日付だけ（2026-09-09）で、時刻付きは断る。ASSET と本文の画像は asset の id だけ（外部 URL は使えない）。"
 
     ///
     /// 全ツールの定義。tools/list の inputSchema も引数の復号もこの表から出す（二重管理しない）。並びは Tool.all。
@@ -244,15 +304,19 @@ mod McpTools {
           args = ArgDef.ArgDef("apiId", "content type の apiId", true, ArgType.Str) :: Nil, readOnlyHint = true, destructiveHint = false, idempotentHint = true }
 
     def searchEntriesDef(): ToolDef =
-        { tool = Tool.SearchEntries, description = "型の entry を検索する。更新が新しい順。RICH_TEXT の値は平文にして全文返す（長い本文はそのまま大きい）。"
-                                                   ++ "stage はサーバでは絞らず、取ってきたこのページの中から DRAFT / PUBLISHED / CHANGED を残す（skip と組み合わせると 2 ページ目が 0 件になりうる。サーバ側の絞り込みは次の段で足す）。"
-                                                   ++ "totalCount は stage で絞る前の件数、count はこのページに残った件数。next_cursor が null でなければ、それを after に渡して続きを読める",
+        { tool = Tool.SearchEntries, description = "型の entry を検索する。where で絞り、orderBy で並べる（既定は更新が新しい順）。"
+                                                   ++ "RICH_TEXT の値は平文で返す。既定の body: full は本文を全部返すので、一覧を見るだけなら body: \"excerpt\" を渡し、全文は get_entry で読む（60 KB の本文が並ぶと応答が上限に当たる）。"
+                                                   ++ "stage は DRAFT ならサーバ側で絞り切る。PUBLISHED / CHANGED は公開中をサーバ側で絞ってから、このページの中で分ける（CHANGED は SQL の上では公開中に含まれるため）。where.stage を一緒に渡した時は stage が勝つ。"
+                                                   ++ "totalCount はサーバ側で絞った後・ページの中で分ける前の件数、count はこのページに残った件数。next_cursor が null でなければ、それを after に渡して続きを読める",
           args = typeArg() ::
                  ArgDef.ArgDef("search", "下書きの中身に含む文字列（本文・タグの値にも当たる）", false, ArgType.Str) ::
+                 whereArg() ::
+                 orderByArg() ::
                  ArgDef.ArgDef("first", "件数（既定 20、最大 100）", false, ArgType.Int) ::
                  ArgDef.ArgDef("skip", "読み飛ばす件数（既定 0）。after とは同時に渡せない", false, ArgType.Int) ::
                  ArgDef.ArgDef("after", "前の応答の next_cursor。その次から読む", false, ArgType.Str) ::
-                 ArgDef.ArgDef("stage", "entry の状態で絞る（このページの中だけ）", false, ArgType.Enum(entryStages())) :: Nil,
+                 ArgDef.ArgDef("stage", "entry の状態で絞る", false, ArgType.Enum(entryStages())) ::
+                 ArgDef.ArgDef("body", "RICH_TEXT の返し方（既定 full）。一覧では excerpt を勧める", false, ArgType.Enum(bodies() |> List.map(fst))) :: Nil,
           readOnlyHint = true, destructiveHint = false, idempotentHint = true }
 
     def getEntryDef(): ToolDef =
@@ -354,8 +418,10 @@ mod McpTools {
         case ArgType.Int         => Value.Obj(Map#{ "type" => Value.Str("integer") })
         case ArgType.Bool        => Value.Obj(Map#{ "type" => Value.Str("boolean") })
         case ArgType.Json        => Value.Obj(Map#{ "type" => Value.Str("object") })
+        case ArgType.Any         => Value.Obj(Map.empty())
         case ArgType.Enum(names) => Value.Obj(Map#{ "type" => Value.Str("string"), "enum" => Value.List(names |> List.map(Value.Str)) })
         case ArgType.Obj(args)   => inputSchema(args)
+        case ArgType.Arr(inner)  => Value.Obj(Map#{ "type" => Value.Str("array"), "items" => typeSchema(inner) })
     }
 
     // ---- 引数の復号 ----
@@ -388,8 +454,10 @@ mod McpTools {
         case (ArgType.Int, Value.Int(_))    => Ok(value)
         case (ArgType.Bool, Value.Bool(_))  => Ok(value)
         case (ArgType.Json, Value.Obj(_))   => Ok(value)
+        case (ArgType.Any, _)               => Ok(value)
         case (ArgType.Enum(names), Value.Str(text)) if List.memberOf(text, names) => Ok(value)
         case (ArgType.Obj(args), Value.Obj(_)) => decodeArgs(args, value) |> Result.map(Value.Obj)
+        case (ArgType.Arr(inner), Value.List(items)) => Result.traverse(item -> checkType(name, inner, item), items) |> Result.map(Value.List)
         case _                              => Err("引数 '${name}' は ${expectedText(argType)}で渡してください")
     }
 
@@ -399,8 +467,10 @@ mod McpTools {
         case ArgType.Int         => "整数"
         case ArgType.Bool        => "真偽値"
         case ArgType.Json        => "オブジェクト"
+        case ArgType.Any         => "値"
         case ArgType.Enum(names) => "${List.join(" / ", names)} のどれか"
         case ArgType.Obj(_)      => "オブジェクト"
+        case ArgType.Arr(inner)  => "${expectedText(inner)}の配列"
     }
 
     // ---- 復号済みの引数を読む ----
@@ -456,10 +526,19 @@ mod McpTools {
     pub def typeRequest(apiId: String): GraphqlRequest =
         request("query McpGetType($apiId: String!) { contentType(apiId: $apiId) { ${typeSelection()} } }", Map#{ "apiId" => Value.Str(apiId) })
 
-    pub def entriesRequest(typeId: String, search: Option[String], first: Int32, skip: Int32, after: Option[String]): GraphqlRequest =
-        request("query McpSearchEntries($typeId: ID!, $search: String, $first: Int, $skip: Int, $after: String) { entries(typeId: $typeId, search: $search, first: $first, skip: $skip, after: $after) { totalCount pageInfo { hasNextPage endCursor } nodes { ${entrySummarySelection()} fields } } }",
-            Map#{ "typeId" => Value.Str(typeId), "search" => search |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null), "first" => Value.Int(first), "skip" => Value.Int(skip),
-                  "after" => after |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null) })
+    ///
+    /// entries の問い合わせ。where と orderBy は管理 API の入力をそのまま変数に載せる（形は decodeArgs が検査済み）。
+    ///
+    pub def entriesRequest(entriesQuery: EntriesQuery): GraphqlRequest =
+        request("query McpSearchEntries($typeId: ID!, $search: String, $where: EntryWhere, $orderBy: [EntryOrderBy!], $first: Int, $skip: Int, $after: String) "
+                ++ "{ entries(typeId: $typeId, search: $search, where: $where, orderBy: $orderBy, first: $first, skip: $skip, after: $after) "
+                ++ "{ totalCount pageInfo { hasNextPage endCursor } nodes { ${entrySummarySelection()} fields } } }",
+            Map#{ "typeId" => Value.Str(entriesQuery#typeId),
+                  "search" => entriesQuery#search |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null),
+                  "where" => entriesQuery#filter |> Option.getWithDefault(Value.Null),
+                  "orderBy" => entriesQuery#orderBy |> Option.getWithDefault(Value.Null),
+                  "first" => Value.Int(entriesQuery#first), "skip" => Value.Int(entriesQuery#skip),
+                  "after" => entriesQuery#after |> Option.map(Value.Str) |> Option.getWithDefault(Value.Null) })
 
     /// EntryVersion の中身以外（get_entry の versions に出す物）。
     def versionSummarySelection(): String = "id version reason author createdAt"
@@ -586,21 +665,79 @@ mod McpTools {
 
     /// search_entries。型を引いてから entries。RICH_TEXT は平文に。stage があればこのページの中から絞る。after は管理 API の cursor をそのまま通す。
     def searchEntries(args: Map[String, Value], execute: GraphqlRequest -> GraphqlResponse \ ef): Result[Failure, Value] \ ef =
-        let first = Int32.min(100, Int32.max(1, intArg("first", 20, args)));
-        let skip = Int32.max(0, intArg("skip", 0, args));
         let stage = optStrArg("stage", args);
+        let body = enumArg("body", bodies(), Body.Full, args);
         getType(strArg("type", args), execute) |> Result.flatMap(typeDef ->
-            ask(execute, entriesRequest(Value.field("id", typeDef) |> Value.asStr |> Option.getWithDefault(""), optStrArg("search", args), first, skip, optStrArg("after", args)))
-                |> Result.map(data -> pageOf(fieldsOf(typeDef), stage, Value.field("entries", data))))
+            ask(execute, entriesRequest({
+                    typeId = Value.field("id", typeDef) |> Value.asStr |> Option.getWithDefault(""),
+                    search = optStrArg("search", args),
+                    filter = withServerStage(stage, Map.get("where", args)),
+                    orderBy = Map.get("orderBy", args),
+                    first = Int32.min(100, Int32.max(1, intArg("first", 20, args))),
+                    skip = Int32.max(0, intArg("skip", 0, args)),
+                    after = optStrArg("after", args) }))
+                |> Result.map(data -> pageOf(fieldsOf(typeDef), pageStage(stage), body, Value.field("entries", data))))
 
-    /// entries の応答を { totalCount, count, nodes, next_cursor } に。nodes は stage で絞り、fields の RICH_TEXT を平文に。
+    ///
+    /// MCP の stage（3 値）を where.stage（2 値）に写して where に載せる。stage を渡していなければ where はそのまま。
+    ///
+    /// WhyNot: CHANGED をそのまま送らないのは、SQL の上では CHANGED が「公開中で下書きが進んだ物」＝ PUBLISHED の
+    /// 部分集合で、where.stage が PUBLISHED / DRAFT の 2 値しか持たないため。上位集合まではサーバ側で絞れる。
+    ///
+    /// WhyNot: where.stage を優先しないのは、stage の方が細かい 3 値で、両方渡された時に細かい側を捨てると
+    /// 絞り込みが緩む（利用者が意図した以上に返る）ため。
+    ///
+    def withServerStage(stage: Option[String], filter: Option[Value]): Option[Value] =
+        match serverStage(stage) {
+            case None       => filter
+            case Some(text) =>
+                let base = filter |> Option.flatMap(value -> match value { case Value.Obj(fields) => Some(fields) case _ => None }) |> Option.getWithDefault(Map.empty());
+                Some(Value.Obj(Map.insert("stage", Value.Str(text), base)))
+        }
+
+    /// サーバ側で絞れる stage。CHANGED は公開中の部分集合なので PUBLISHED まで絞る。
+    pub def serverStage(stage: Option[String]): Option[String] = match stage {
+        case Some("DRAFT")     => Some("DRAFT")
+        case Some("PUBLISHED") => Some("PUBLISHED")
+        case Some("CHANGED")   => Some("PUBLISHED")
+        case _                 => None
+    }
+
+    /// ページの中でさらに分ける必要がある stage。DRAFT はサーバ側で絞り切れているので None。
+    pub def pageStage(stage: Option[String]): Option[String] = match stage {
+        case Some("DRAFT") => None
+        case other         => other
+    }
+
+    /// entries の応答を { totalCount, count, body, nodes, next_cursor } に。nodes は残りの stage で分け、fields の RICH_TEXT を平文に。
     /// next_cursor は次のページがあれば endCursor、無ければ null。
-    def pageOf(defs: List[Value], stage: Option[String], page: Value): Value =
+    def pageOf(defs: List[Value], stage: Option[String], body: Body, page: Value): Value =
         let nodes = listOf(Value.field("nodes", page))
             |> List.filter(node -> stage |> Option.forAll(wanted -> Value.field("stage", node) == Value.Str(wanted)))
-            |> List.map(withFields(defs, readConverter(Format.Text)));
+            |> List.map(withFields(defs, listConverter(body)));
         let nextCursor = if (Value.path(List#{"pageInfo", "hasNextPage"}, page) == Value.Bool(true)) Value.path(List#{"pageInfo", "endCursor"}, page) else Value.Null;
-        Value.Obj(Map#{ "totalCount" => Value.field("totalCount", page), "count" => Value.Int(List.length(nodes)), "nodes" => Value.List(nodes), "next_cursor" => nextCursor })
+        Value.Obj(Map#{ "totalCount" => Value.field("totalCount", page), "count" => Value.Int(List.length(nodes)),
+                        "body" => Value.Str(bodyName(body)), "nodes" => Value.List(nodes), "next_cursor" => nextCursor })
+
+    ///
+    /// 一覧の RICH_TEXT の写し方。full は平文のまま、excerpt は先頭 200 文字に切って、切った印と元の長さを本文の末尾に置く。
+    ///
+    /// WhyNot: 切った印を別のフィールドにしないのは、値だけを読むエージェントが切り詰めに気付かず、
+    /// 200 文字を全文と思って要約や重複の判定を誤るため。本文の中に書けば必ず目に入る。
+    ///
+    pub def listConverter(body: Body): Value -> Value = match body {
+        case Body.Full    => readConverter(Format.Text)
+        case Body.Excerpt => value -> excerptOf(readConverter(Format.Text)(value))
+    }
+
+    /// 平文を先頭 200 文字に切る。収まっていればそのまま。
+    def excerptOf(value: Value): Value = match value {
+        case Value.Str(text) =>
+            let length = String.length(text);
+            if (length <= excerptChars()) value
+            else Value.Str(String.takeLeft(excerptChars(), text) ++ "…（先頭 ${excerptChars()} 文字。全 ${length} 文字。全文は get_entry で）")
+        case other => other
+    }
 
     /// get_entry。stage が PUBLISHED なら公開時のバージョンの中身。RICH_TEXT を format で写す。versions は中身を落として付ける。
     def getEntry(args: Map[String, Value], execute: GraphqlRequest -> GraphqlResponse \ ef): Result[Failure, Value] \ ef =

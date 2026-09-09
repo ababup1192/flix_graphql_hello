@@ -32,7 +32,7 @@ mod MicrocmsImport {
         let singular = Naming.deriveSingular(api#apiId);
         let singularQuery = String.toLowerCase(String.takeLeft(1, TypeName.text(singular))) + String.dropLeft(1, TypeName.text(singular));
         let plural = if (singularQuery == ApiId.text(api#apiId)) ApiId.parse("${ApiId.text(api#apiId)}List") else None;
-        { apiId = api#apiId, kind = TypeKind.Collection, name = api#endpoint, singular = Some(singular), plural = plural, previewUrl = None }
+        { apiId = api#apiId, kind = TypeKind.Collection, name = api#endpoint, singular = Some(singular), plural = plural, previewUrl = None, icon = None }
 
     def addFields(types: Types, api: Api): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let typeId = Map.get(api#endpoint, types) |> Option.getWithDefault(TypeId.TypeId(0i64));

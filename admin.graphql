@@ -167,7 +167,8 @@ type Mutation {
 
   """今のプロジェクトの公開範囲（owner だけ）"""
   updateProjectVisibility(visibility: Visibility!): Project!
-  """email で招待する（owner だけ）。初回ログインで役割が付く"""
+  """email で招待する（owner だけ）。既にログインした事のある人はその場でメンバーになり、
+  まだの人は招待として置かれて初回ログインで役割が付く"""
   inviteMember(email: String!, role: Role!): Invitation!
   cancelInvitation(id: ID!): ID!
   """役割を変える（owner だけ）。最後の owner は降格できない"""
@@ -616,6 +617,20 @@ input EntryWhere {
   id_in: [ID!]
   """フィールドの値の条件。コンテンツ API の <Singular>Where の葉（title_contains など）と同じ意味を apiId と op で書く"""
   fields: [EntryFieldCondition!]
+  """作った時刻（entries の列）で絞る"""
+  createdAt: DateTimeFilter
+  """最後に直した時刻（entries の列）で絞る"""
+  updatedAt: DateTimeFilter
+  """公開した時刻（entries の列）で絞る。未公開の entry は NULL なのでどの条件にも合わない"""
+  publishedAt: DateTimeFilter
+}
+
+"""システムの日時の範囲。書いた物は全部に合う（AND）。値は ISO 8601（"2026-09-09T00:00:00Z" / "2026-09-09"）。読めない値は何にも合わない"""
+input DateTimeFilter {
+  gt: String
+  gte: String
+  lt: String
+  lte: String
 }
 
 """フィールド 1 つの条件。value の型は op と kind で決まる（EQ は kind の型、IN は文字列の配列、GT 〜 LTE は数値か日時の文字列、IS_NULL は真偽値、ARRAY_CONTAINS は文字列）"""
@@ -681,8 +696,12 @@ enum FieldKind {
   ASSET
   """構造化した本文。値は ProseMirror の doc（{ type: "doc", content: [...] }）。配列にできない。コンテンツ API では json / html / text"""
   RICH_TEXT
-  """日時。値は ISO 8601 の文字列（"2026-09-08T09:00:00Z"）。日付だけ（"2026-09-08"）は UTC の 0 時に揃える。コンテンツ API では _eq / _gt / _gte / _lt / _lte で絞れ、並び替えできる"""
+  """日時。保存する値は UTC の ISO 8601 ちょうど 1 通り（"2026-09-09T00:00:00Z"。秒まで必須・ミリ秒なし・オフセット付きは断る）。
+  絞り込みの引数は日付だけ（"2026-09-09"）やオフセット付きでも読む。コンテンツ API では _eq / _gt / _gte / _lt / _lte で絞れ、並び替えできる"""
   DATE
+  """日付だけ。値は "2026-09-09" ちょうど 1 通り（時刻付きは断る）。時刻を持たないので読む側のタイムゾーンで日がずれない。
+  誕生日・発行日・締切のような「その日」を指す物に使う。コンテンツ API では _eq / _gt / _gte / _lt / _lte で絞れ、並び替えできる"""
+  DATE_ONLY
 }
 
 """content type。apiId がコンテンツ API のクエリ名の元になる"""

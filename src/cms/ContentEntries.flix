@@ -105,10 +105,9 @@ mod ContentEntries {
     /// id はゴミ箱の物とも重ねられない（PK が残っている）。
     ///
     pub def create(proof: Granted[WriteEntries], typeId: TypeId, givenId: Option[EntryId], given: EntryData): Entry \ Db + CmsErr + IdGen + Tenant =
-        // 型を引き、中身を揃えて下書きの規則（と singleton の件数）で検査する
+        // 型を引き、下書きの規則（と singleton の件数）で検査する
         let owner = ContentTypes.get(Session.readDraftOfWriter(proof), typeId);
-        let data = EntryValidation.normalize(owner#fields, given);
-        CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data) ::: singletonViolations(owner));
+        CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, given) ::: singletonViolations(owner));
         // id を決める。渡されていればそれ、無ければ振る
         // WhyNot: Option.getWithDefault(IdGen.freshEntryId()) にしないのは、引数が先に評価されて id を渡した時も 1 つ消費するため
         let id = match givenId {
@@ -118,7 +117,7 @@ mod ContentEntries {
         ensureIdFree(id);
         // entry の行を作り、下書きの中身を置く
         discard EntriesQueries.insertEntry({ id = EntryId.text(id), typeId = TypeId.toInt64(typeId), projectId = Tenant.currentId() });
-        writeContent(id, Stage.Draft, owner, data);
+        writeContent(id, Stage.Draft, owner, given);
         load(id)
 
     ///
@@ -409,9 +408,8 @@ mod ContentEntries {
     def writeDraft(owner: ContentType, existing: Entry, given: EntryData, expectedVersion: Int32): Entry \ Db + CmsErr + Tenant =
         let id = existing#id;
         if (existing#version != expectedVersion) CmsErr.conflict(Entity.Entry, EntryId.text(id), expectedVersion, existing#version) else ();
-        let data = EntryValidation.normalize(owner#fields, given);
-        CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, data));
-        writeContent(id, Stage.Draft, owner, data);
+        CmsErr.raiseIfAny(EntryValidation.draft(owner#fields, given));
+        writeContent(id, Stage.Draft, owner, given);
         let advanced = EntriesQueries.bumpEntryVersion({ id = EntryId.text(id), expected = expectedVersion, projectId = Tenant.currentId() });
         // 0 行なら読んでから書くまでに誰かが進めた（またはゴミ箱に入った）。今の版は読み直して報告する
         if (advanced == 0) CmsErr.conflict(Entity.Entry, EntryId.text(id), expectedVersion, load(id)#version) else ();

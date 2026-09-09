@@ -267,6 +267,7 @@ mod AdminMapping {
         case GeneratedAdmin.FieldKind.Asset    => FieldKind.Asset
         case GeneratedAdmin.FieldKind.RichText => FieldKind.RichText
         case GeneratedAdmin.FieldKind.Date     => FieldKind.Date
+        case GeneratedAdmin.FieldKind.DateOnly => FieldKind.DateOnly
     }
 
     pub def fieldKindToGql(kind: FieldKind): GeneratedAdmin.FieldKind = match kind {
@@ -282,6 +283,7 @@ mod AdminMapping {
         case FieldKind.Asset    => GeneratedAdmin.FieldKind.Asset
         case FieldKind.RichText => GeneratedAdmin.FieldKind.RichText
         case FieldKind.Date     => GeneratedAdmin.FieldKind.Date
+        case FieldKind.DateOnly => GeneratedAdmin.FieldKind.DateOnly
     }
 
     ///
@@ -408,6 +410,7 @@ mod AdminMapping {
 
     ///
     /// where の入力を絞り込みに。stage は entries.stage、id_in は規則に合う id だけ、fields は op と kind で Condition に写す。
+    /// createdAt / updatedAt / publishedAt は entries の列で比べる。
     /// 型に無い apiId、op と kind の組み合わせにない物、value の型が違う物は invalid。
     ///
     pub def entryWhere(fields: List[FieldDef], input: Option[GeneratedAdmin.EntryWhere]): Where \ CmsErr = match input {
@@ -416,8 +419,25 @@ mod AdminMapping {
             let stage = given#stage |> Option.map(contentStageOf) |> Option.map(Condition.StageEq) |> Option.toList;
             let ids = given#id_in |> Option.map(idList -> Condition.IdIn(idList |> List.filterMap(id -> { let Id.Id(text) = id; EntryId.parse(text) }))) |> Option.toList;
             let conditions = given#fields |> Option.getWithDefault(Nil) |> List.map(fieldCondition(fields));
-            stage ::: ids ::: conditions
+            stage ::: ids ::: conditions ::: systemDates(given)
     }
+
+    ///
+    /// システムの日時の絞り込み。書いた口だけが条件になる。読めない値は Never（何にも合わない）に倒す。
+    ///
+    def systemDates(given: GeneratedAdmin.EntryWhere): Where =
+        List.flatMap(match (key, filter) -> systemDateConditions(key, filter),
+            (SystemDate.CreatedAt, given#createdAt) :: (SystemDate.UpdatedAt, given#updatedAt) :: (SystemDate.PublishedAt, given#publishedAt) :: Nil)
+
+    def systemDateConditions(key: SystemDate, filter: Option[GeneratedAdmin.DateTimeFilter]): Where = match filter {
+        case None       => Nil
+        case Some(given) =>
+            ((RangeOp.Gt, given#gt) :: (RangeOp.Gte, given#gte) :: (RangeOp.Lt, given#lt) :: (RangeOp.Lte, given#lte) :: Nil)
+                |> List.filterMap(match (op, text) -> Option.map(systemDateCondition(key, op), text))
+    }
+
+    def systemDateCondition(key: SystemDate, op: RangeOp, text: String): Condition =
+        DateValues.parse(text) |> Option.map(at -> Condition.SystemDateCmp(key, op, at)) |> Option.getWithDefault(Condition.Never)
 
     pub def contentStageOf(stage: GeneratedAdmin.ContentStage): Stage = match stage {
         case GeneratedAdmin.ContentStage.Draft     => Stage.Draft
@@ -449,7 +469,7 @@ mod AdminMapping {
             case None        => Err(Violation.Violation(path, "'${input#apiId}' はこの型にありません"))
             case Some(field) =>
                 let apiId = field#apiId;
-                let textual = not List.memberOf(field#kind, FieldKind.Number :: FieldKind.Boolean :: FieldKind.Date :: FieldKind.Object :: FieldKind.Blocks :: FieldKind.RichText :: Nil);
+                let textual = not List.memberOf(field#kind, FieldKind.Number :: FieldKind.Boolean :: FieldKind.Date :: FieldKind.DateOnly :: FieldKind.Object :: FieldKind.Blocks :: FieldKind.RichText :: Nil);
                 match input#op {
                     case GeneratedAdmin.FieldConditionOp.IsNull => match value {
                         case Value.Null    => Ok(Condition.IsNull(apiId, true))
@@ -475,22 +495,24 @@ mod AdminMapping {
                             case FieldKind.Number  => numberOnly(wrong, value, x -> Condition.NumberEq(apiId, x))
                             case FieldKind.Boolean => match value { case Value.Bool(b) => Ok(Condition.BoolEq(apiId, b)) case _ => wrong("真偽値") }
                             case FieldKind.Date    => dateOnly(wrong, value, at -> Condition.DateEq(apiId, at))
+                            case FieldKind.DateOnly => dayOnly(wrong, value, on -> Condition.DateOnlyEq(apiId, on))
                             case _                 => if (textual) textOnly(wrong, value, text -> Condition.TextEq(apiId, text)) else unsupported()
                         }
-                    case GeneratedAdmin.FieldConditionOp.Gt  => rangeOf(field, wrong, unsupported, value, x -> Condition.NumberGt(apiId, x), at -> Condition.DateGt(apiId, at))
-                    case GeneratedAdmin.FieldConditionOp.Gte => rangeOf(field, wrong, unsupported, value, x -> Condition.NumberGte(apiId, x), at -> Condition.DateGte(apiId, at))
-                    case GeneratedAdmin.FieldConditionOp.Lt  => rangeOf(field, wrong, unsupported, value, x -> Condition.NumberLt(apiId, x), at -> Condition.DateLt(apiId, at))
-                    case GeneratedAdmin.FieldConditionOp.Lte => rangeOf(field, wrong, unsupported, value, x -> Condition.NumberLte(apiId, x), at -> Condition.DateLte(apiId, at))
+                    case GeneratedAdmin.FieldConditionOp.Gt  => rangeOf(field, wrong, unsupported, value, x -> Condition.NumberGt(apiId, x), at -> Condition.DateGt(apiId, at), on -> Condition.DateOnlyCmp(apiId, RangeOp.Gt, on))
+                    case GeneratedAdmin.FieldConditionOp.Gte => rangeOf(field, wrong, unsupported, value, x -> Condition.NumberGte(apiId, x), at -> Condition.DateGte(apiId, at), on -> Condition.DateOnlyCmp(apiId, RangeOp.Gte, on))
+                    case GeneratedAdmin.FieldConditionOp.Lt  => rangeOf(field, wrong, unsupported, value, x -> Condition.NumberLt(apiId, x), at -> Condition.DateLt(apiId, at), on -> Condition.DateOnlyCmp(apiId, RangeOp.Lt, on))
+                    case GeneratedAdmin.FieldConditionOp.Lte => rangeOf(field, wrong, unsupported, value, x -> Condition.NumberLte(apiId, x), at -> Condition.DateLte(apiId, at), on -> Condition.DateOnlyCmp(apiId, RangeOp.Lte, on))
                 }
         }
 
-    /// 範囲の比較。NUMBER は数、DATE は日時、それ以外は使えない。
+    /// 範囲の比較。NUMBER は数、DATE は日時、DATE_ONLY は日付、それ以外は使えない。
     def rangeOf(field: FieldDef, wrong: String -> Result[Violation, Condition], unsupported: Unit -> Result[Violation, Condition], value: Value,
-                number: Float64 -> Condition, date: Timestamp.Timestamp -> Condition): Result[Violation, Condition] =
+                number: Float64 -> Condition, date: Timestamp.Timestamp -> Condition, day: Date.Date -> Condition): Result[Violation, Condition] =
         if (field#many) unsupported() else match field#kind {
-            case FieldKind.Number => numberOnly(wrong, value, number)
-            case FieldKind.Date   => dateOnly(wrong, value, date)
-            case _                => unsupported()
+            case FieldKind.Number   => numberOnly(wrong, value, number)
+            case FieldKind.Date     => dateOnly(wrong, value, date)
+            case FieldKind.DateOnly => dayOnly(wrong, value, day)
+            case _                  => unsupported()
         }
 
     def textOnly(wrong: String -> Result[Violation, Condition], value: Value, make: String -> Condition): Result[Violation, Condition] = match value {
@@ -508,6 +530,12 @@ mod AdminMapping {
     def dateOnly(wrong: String -> Result[Violation, Condition], value: Value, make: Timestamp.Timestamp -> Condition): Result[Violation, Condition] = match value {
         case Value.Str(text) => Ok(DateValues.parse(text) |> Option.map(make) |> Option.getWithDefault(Condition.Never))
         case _               => wrong("日時の文字列")
+    }
+
+    /// 日付の文字列。読めなければ Never（何にも合わない）。
+    def dayOnly(wrong: String -> Result[Violation, Condition], value: Value, make: Date.Date -> Condition): Result[Violation, Condition] = match value {
+        case Value.Str(text) => Ok(DateOnlyValues.parse(text) |> Option.map(make) |> Option.getWithDefault(Condition.Never))
+        case _               => wrong("日付の文字列")
     }
 
     // ---- 入力 → ドメイン ----

@@ -142,22 +142,33 @@ mod TestEntryValidation {
 
     // ---- DATE ----
 
-    /// DATE は ISO 8601 の日時（offset 付き）と日付だけの形が通る。offset の無い日時・文字列でない値・でたらめは落ちる。
+    /// DATE は UTC の ISO 8601 ちょうど 1 通りだけ通る。offset 付き・ミリ秒付き・日付だけ・offset の無い日時・文字列でない値は落ちる。
     @Test
     def testEntryValidationDate(): Unit \ Assert =
         let fields = CmsTestKit.fieldDef("publishOn", FieldKind.Date) :: Nil;
         let check = value -> CmsTestKit.violationPaths(EntryValidation.draft(fields, CmsTestKit.entryData(List#{("publishOn", value)})));
-        Assert.assertEq(expected = (Nil, Nil, Nil, List#{"fields.publishOn"}, List#{"fields.publishOn"}, List#{"fields.publishOn"}),
+        let bad = List#{"fields.publishOn"};
+        Assert.assertEq(expected = (Nil, bad, bad, bad, bad, bad, bad),
             (check(Json.JString("2026-09-08T09:00:00Z")),
              check(Json.JString("2026-09-08T18:00:00+09:00")),
+             check(Json.JString("2026-09-08T09:00:00.000Z")),
              check(Json.JString("2026-09-08")),
              check(Json.JString("2026-09-08T09:00:00")),
              check(CmsTestKit.intJson(20260908)),
              check(Json.JString("next week"))))
 
-    /// normalize は日付だけの DATE を UTC の 0 時の日時にする。日時はそのまま（offset も残す）。配列と入れ子（Object / Blocks）の中も揃え、他の kind は触らない。
+    /// 断る言い分には、送るべき値（直した形）が載る。
     @Test
-    def testEntryValidationNormalizeDate(): Unit \ Assert =
+    def testEntryValidationDateMessage(): Unit \ Assert =
+        let fields = CmsTestKit.fieldDef("publishOn", FieldKind.Date) :: Nil;
+        Assert.assertEq(
+            expected = List#{"'publishOn' は UTC の日時（例: 2026-09-09T00:00:00Z）で送ってください。受け取った値: 2026-09-08T18:00:00+09:00 → 2026-09-08T09:00:00Z"},
+            EntryValidation.draft(fields, CmsTestKit.entryData(List#{("publishOn", Json.JString("2026-09-08T18:00:00+09:00"))}))
+                |> List.map(match Violation.Violation(_, message) -> message))
+
+    /// 断りは配列の要素と入れ子（Object / Blocks）の中まで届く。正しい形の物と他の kind は通る。
+    @Test
+    def testEntryValidationDateNested(): Unit \ Assert =
         let hero = { children = Children.Children(CmsTestKit.fieldDef("at", FieldKind.Date) :: Nil) | CmsTestKit.fieldDef("hero", FieldKind.Object) };
         let fields = CmsTestKit.fieldDef("publishOn", FieldKind.Date) ::
                      { many = true | CmsTestKit.fieldDef("dates", FieldKind.Date) } ::
@@ -165,19 +176,38 @@ mod TestEntryValidation {
                      { many = true, children = Children.Children(hero :: Nil) | CmsTestKit.fieldDef("sections", FieldKind.Blocks) } ::
                      CmsTestKit.fieldDef("title", FieldKind.Text) :: Nil;
         let given = CmsTestKit.entryData(List#{
-            ("publishOn", Json.JString("2026-09-08")),
-            ("dates", Json.JArray(Vector#{Json.JString("2026-01-01"), Json.JString("2026-09-08T18:00:00+09:00")})),
+            ("publishOn", Json.JString("2026-09-08T00:00:00Z")),
+            ("dates", Json.JArray(Vector#{Json.JString("2026-01-01T00:00:00Z"), Json.JString("2026-09-08T18:00:00+09:00")})),
             ("meta", Json.JObject(Map#{ "at" => Json.JString("2026-02-02") })),
-            ("sections", Json.JArray(Vector#{Json.JObject(Map#{ "blockType" => Json.JString("hero"), "at" => Json.JString("2026-03-03") })})),
+            ("sections", Json.JArray(Vector#{Json.JObject(Map#{ "blockType" => Json.JString("hero"), "at" => Json.JString("2026-03-03T00:00:00.000Z") })})),
             ("title", Json.JString("2026-09-08"))});
+        Assert.assertEq(expected = List#{"fields.dates[1]", "fields.meta.at", "fields.sections[0].at"},
+            CmsTestKit.violationPaths(EntryValidation.draft(fields, given)) |> List.sort)
+
+    // ---- DATE_ONLY ----
+
+    /// DATE_ONLY は `2026-09-09` の形ちょうどだけ通る。時刻付き・ゼロ詰めなし・暦にない日・文字列でない値は落ちる。
+    @Test
+    def testEntryValidationDateOnly(): Unit \ Assert =
+        let fields = CmsTestKit.fieldDef("birthday", FieldKind.DateOnly) :: Nil;
+        let check = value -> CmsTestKit.violationPaths(EntryValidation.draft(fields, CmsTestKit.entryData(List#{("birthday", value)})));
+        let bad = List#{"fields.birthday"};
+        Assert.assertEq(expected = (Nil, bad, bad, bad, bad, bad),
+            (check(Json.JString("2026-09-09")),
+             check(Json.JString("2026-09-09T00:00:00Z")),
+             check(Json.JString("2026-9-9")),
+             check(Json.JString("2023-02-29")),
+             check(CmsTestKit.intJson(20260909)),
+             check(Json.JString("someday"))))
+
+    /// 断る言い分には、送るべき値（直した形）が載る。
+    @Test
+    def testEntryValidationDateOnlyMessage(): Unit \ Assert =
+        let fields = CmsTestKit.fieldDef("birthday", FieldKind.DateOnly) :: Nil;
         Assert.assertEq(
-            expected = CmsTestKit.entryData(List#{
-                ("publishOn", Json.JString("2026-09-08T00:00:00Z")),
-                ("dates", Json.JArray(Vector#{Json.JString("2026-01-01T00:00:00Z"), Json.JString("2026-09-08T18:00:00+09:00")})),
-                ("meta", Json.JObject(Map#{ "at" => Json.JString("2026-02-02T00:00:00Z") })),
-                ("sections", Json.JArray(Vector#{Json.JObject(Map#{ "blockType" => Json.JString("hero"), "at" => Json.JString("2026-03-03T00:00:00Z") })})),
-                ("title", Json.JString("2026-09-08"))}),
-            EntryValidation.normalize(fields, given))
+            expected = List#{"'birthday' は日付（例: 2026-09-09）で送ってください。受け取った値: 2026-09-09T00:00:00Z → 2026-09-09"},
+            EntryValidation.draft(fields, CmsTestKit.entryData(List#{("birthday", Json.JString("2026-09-09T00:00:00Z"))}))
+                |> List.map(match Violation.Violation(_, message) -> message))
 
     // ---- 複数選択の SELECT ----
 

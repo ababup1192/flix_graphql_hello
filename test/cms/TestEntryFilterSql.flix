@@ -13,7 +13,8 @@ mod TestEntryFilterSql {
         CmsTestKit.fieldDef("views", FieldKind.Number) ::
         CmsTestKit.fieldDef("flag", FieldKind.Boolean) ::
         { many = true | CmsTestKit.fieldDef("tags", FieldKind.Text) } ::
-        CmsTestKit.fieldDef("publishOn", FieldKind.Date) :: Nil
+        CmsTestKit.fieldDef("publishOn", FieldKind.Date) ::
+        CmsTestKit.fieldDef("birthday", FieldKind.DateOnly) :: Nil
 
     /// 条件は式とプレースホルダになる。値は SQL の文面に出ない。数値と真偽値は jsonb_typeof で見てからキャストする（型の違う古い値で落ちない）。
     @Test
@@ -77,6 +78,8 @@ mod TestEntryFilterSql {
 
     def dateExpr(): String = "((CASE WHEN (c.data->>'publishOn') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN c.data->>'publishOn' END)::timestamptz)"
 
+    def dateOnlyExpr(): String = "((CASE WHEN (c.data->>'birthday') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN c.data->>'birthday' END)::date)"
+
     /// Condition の全 case が SQL の断片と引数になる。値は全部プレースホルダで、文面に入るのは apiId だけ。
     /// contains / startsWith は小文字にして LIKE の記号をエスケープ、AnyValueContains は ILIKE で大文字小文字を残す。
     @Test
@@ -88,6 +91,9 @@ mod TestEntryFilterSql {
         let tags = CmsTestKit.apiId("tags");
         let at = Timestamp.at("2026-09-08T00:00:00Z");
         let atValue = SqlValue.Timestamp(Timestamp.toEpochMicros(at));
+        let birthday = CmsTestKit.apiId("birthday");
+        let on = Date.at("2026-09-08");
+        let onValue = SqlValue.Date(Date.toEpochDay(on));
         let cases = List#{
             (Condition.IdEq(CmsTestKit.entryId("a")),                          ("(e.id = $1)", List#{SqlValue.Str("a")})),
             (Condition.IdIn(CmsTestKit.entryIds(List#{"a", "b"})),             ("(e.id IN ($1, $2))", List#{SqlValue.Str("a"), SqlValue.Str("b")})),
@@ -113,7 +119,16 @@ mod TestEntryFilterSql {
                                                                                ("((${textExpr()} = $1) OR (${boolExpr()} = $2))", List#{SqlValue.Str("x"), SqlValue.Bool(true)})),
             (Condition.AnyValueContains("100%"),                               ("(EXISTS (SELECT 1 FROM jsonb_each_text(c.data) AS kv WHERE kv.value ILIKE $1))", List#{SqlValue.Str("%100\\%%")})),
             (Condition.Never,                                                  ("FALSE", Nil)),
-            (Condition.StageEq(Stage.Published),                               ("(e.stage = $1)", List#{SqlValue.Str("published")}))
+            (Condition.StageEq(Stage.Published),                               ("(e.stage = $1)", List#{SqlValue.Str("published")})),
+            (Condition.SystemDateCmp(SystemDate.CreatedAt, RangeOp.Gt, at),    ("(e.created_at > $1)", List#{atValue})),
+            (Condition.SystemDateCmp(SystemDate.UpdatedAt, RangeOp.Gte, at),   ("(e.updated_at >= $1)", List#{atValue})),
+            (Condition.SystemDateCmp(SystemDate.PublishedAt, RangeOp.Lt, at),  ("(e.published_at < $1)", List#{atValue})),
+            (Condition.SystemDateCmp(SystemDate.PublishedAt, RangeOp.Lte, at), ("(e.published_at <= $1)", List#{atValue})),
+            (Condition.DateOnlyEq(birthday, on),                               ("(${dateOnlyExpr()} = $1)", List#{onValue})),
+            (Condition.DateOnlyCmp(birthday, RangeOp.Gt, on),                  ("(${dateOnlyExpr()} > $1)", List#{onValue})),
+            (Condition.DateOnlyCmp(birthday, RangeOp.Gte, on),                 ("(${dateOnlyExpr()} >= $1)", List#{onValue})),
+            (Condition.DateOnlyCmp(birthday, RangeOp.Lt, on),                  ("(${dateOnlyExpr()} < $1)", List#{onValue})),
+            (Condition.DateOnlyCmp(birthday, RangeOp.Lte, on),                 ("(${dateOnlyExpr()} <= $1)", List#{onValue}))
         };
         Assert.assertEq(expected = cases, cases |> List.map(match (condition, _) -> (condition, render(condition))))
 
@@ -127,6 +142,8 @@ mod TestEntryFilterSql {
             ((SortKey.ByField(CmsTestKit.apiId("views")), Direction.Asc),      "ORDER BY ${numberExpr()} ASC, e.id ASC"),
             ((SortKey.ByField(CmsTestKit.apiId("flag")), Direction.Desc),      "ORDER BY (${boolExpr()} IS NULL) ASC, ${boolExpr()} DESC, e.id ASC"),
             ((SortKey.ByField(CmsTestKit.apiId("publishOn")), Direction.Asc),  "ORDER BY ${dateExpr()} ASC, e.id ASC"),
+            ((SortKey.ByField(CmsTestKit.apiId("birthday")), Direction.Asc),   "ORDER BY ${dateOnlyExpr()} ASC, e.id ASC"),
+            ((SortKey.ByField(CmsTestKit.apiId("birthday")), Direction.Desc),  "ORDER BY (${dateOnlyExpr()} IS NULL) ASC, ${dateOnlyExpr()} DESC, e.id ASC"),
             ((SortKey.ByField(CmsTestKit.apiId("unknown")), Direction.Asc),    "ORDER BY (c.data->>'unknown') ASC, e.id ASC"),
             ((SortKey.ByPublishedAt, Direction.Desc),                          "ORDER BY (e.published_at IS NULL) ASC, e.published_at DESC, e.id ASC"),
             ((SortKey.ByPublishedAt, Direction.Asc),                           "ORDER BY e.published_at ASC, e.id ASC"),

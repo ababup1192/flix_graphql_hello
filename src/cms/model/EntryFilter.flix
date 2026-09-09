@@ -97,6 +97,26 @@ pub enum PageStart with Eq, ToString {
 }
 
 ///
+/// システムの日時。entries の列なので、JSONB でなく列で比べる（索引が効く）。
+///
+pub enum SystemDate with Eq, Order, ToString {
+    case CreatedAt
+    case UpdatedAt
+    /// 未公開なら NULL。どの比較にも合わない
+    case PublishedAt
+}
+
+///
+/// 大小の比較。
+///
+pub enum RangeOp with Eq, Order, ToString {
+    case Gt
+    case Gte
+    case Lt
+    case Lte
+}
+
+///
 /// 絞り込みの 1 条件。コンテンツ API の <Singular>Where の 1 項目に対応する。
 ///
 pub enum Condition with Eq, Order, ToString {
@@ -120,6 +140,9 @@ pub enum Condition with Eq, Order, ToString {
     case DateGte(ApiId, Timestamp.Timestamp)
     case DateLt(ApiId, Timestamp.Timestamp)
     case DateLte(ApiId, Timestamp.Timestamp)
+    /// DATE_ONLY の比較。値は date にして比べる
+    case DateOnlyEq(ApiId, Date.Date)
+    case DateOnlyCmp(ApiId, RangeOp, Date.Date)
     /// true なら値が無い物、false なら値がある物
     case IsNull(ApiId, Bool)
     /// 配列のフィールド（文字列・select・reference）がこの値を含む
@@ -132,6 +155,54 @@ pub enum Condition with Eq, Order, ToString {
     case Never
     /// entry の状態（entries.stage）。管理 API の一覧で公開中の物だけを見る
     case StageEq(Stage)
+    /// システムの日時（entries の列）の大小。「先週更新された記事」を引くための物
+    case SystemDateCmp(SystemDate, RangeOp, Timestamp.Timestamp)
+}
+
+mod SystemDate {
+
+    ///
+    /// GraphQL に出す名前。SortKey の組み込みの名前と同じ物を使う（並び替えられる物は絞り込める）。
+    ///
+    pub def toText(key: SystemDate): String = match key {
+        case SystemDate.CreatedAt   => "createdAt"
+        case SystemDate.UpdatedAt   => "updatedAt"
+        case SystemDate.PublishedAt => "publishedAt"
+    }
+
+    ///
+    /// entries の列名。
+    ///
+    pub def column(key: SystemDate): String = match key {
+        case SystemDate.CreatedAt   => "e.created_at"
+        case SystemDate.UpdatedAt   => "e.updated_at"
+        case SystemDate.PublishedAt => "e.published_at"
+    }
+
+    ///
+    /// 全部。SDL の入力と葉の引数を組む所が舐める。
+    ///
+    pub def all(): List[SystemDate] = SystemDate.CreatedAt :: SystemDate.UpdatedAt :: SystemDate.PublishedAt :: Nil
+
+}
+
+mod RangeOp {
+
+    ///
+    /// 引数の名前に付ける接尾辞。
+    ///
+    pub def toText(op: RangeOp): String = match op {
+        case RangeOp.Gt  => "gt"
+        case RangeOp.Gte => "gte"
+        case RangeOp.Lt  => "lt"
+        case RangeOp.Lte => "lte"
+    }
+
+    ///
+    /// 全部。先に厳しい方（gt / gte）を置く。
+    ///
+    pub def all(): List[RangeOp] = RangeOp.Gt :: RangeOp.Gte :: RangeOp.Lt :: RangeOp.Lte :: Nil
+
 }
 
 ///
