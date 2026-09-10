@@ -3,14 +3,15 @@ module Page.Schema exposing (Model, Msg, init, load, update, view)
 {-| API スキーマ（型の定義）。フィールドの追加・編集・並び替え・削除。
 
 **種類（kind）は後から変えられない**（CMS 側に更新の口が無い）。作る時にそう伝える。
-`removeField` は影響を検査しないので、消す前に確認を出す。
+消す前に `fieldImpact` で影響を引き、実際の件数を見せてから押させる。押す時は見た影響を
+`expected` として送り、その間に増えていればサーバが止める。
 
 -}
 
 import Api
 import Api.Admin.Enum.FieldKind as FieldKind exposing (FieldKind)
 import Html exposing (Html, div, span, text)
-import Html.Attributes exposing (class, placeholder, value)
+import Html.Attributes exposing (class, disabled, placeholder, value)
 import Html.Events exposing (onClick, onInput)
 import Json.Decode as D
 import Loaded exposing (Loaded(..))
@@ -36,6 +37,7 @@ type alias Model =
     , detail : Loaded ContentTypeDetail
     , panel : Panel
     , confirmRemove : Maybe FieldDef
+    , removeImpact : Loaded Model.SchemaImpact
     , errors : List String
     , busy : Bool
     , newType : NewType
@@ -155,6 +157,7 @@ type Msg
     | RemoveAsked FieldDef
     | RemoveCancelled
     | RemoveConfirmed
+    | GotRemoveImpact (Result Api.Problem Model.SchemaImpact)
     | GotRemoved (Result Api.Problem String)
     | Grabbed FieldDef
     | Released
@@ -175,6 +178,7 @@ init project apiId =
     , detail = Loaded.Loading
     , panel = Closed
     , confirmRemove = Nothing
+    , removeImpact = Loaded.Loading
     , errors = []
     , busy = False
     , newType = { name = "", apiId = "", singleton = False }
@@ -346,17 +350,27 @@ update ctx msg model =
                     ( model, [] )
 
         RemoveAsked field ->
-            ( { model | confirmRemove = Just field }, [] )
+            ( { model | confirmRemove = Just field, removeImpact = Loaded.Loading }
+            , [ Api.call (\id -> Queries.removeFieldImpact id ctx.project field.id) GotRemoveImpact ]
+            )
+
+        GotRemoveImpact result ->
+            ( { model | removeImpact = Loaded.fromResult (Result.map Just result) }, [] )
 
         RemoveCancelled ->
-            ( { model | confirmRemove = Nothing }, [] )
+            ( { model | confirmRemove = Nothing, removeImpact = Loaded.Loading }, [] )
 
         RemoveConfirmed ->
             case model.confirmRemove of
                 Just field ->
-                    ( { model | busy = True, confirmRemove = Nothing }
-                    , [ Api.call (\id -> Queries.removeField id ctx.project field.id) GotRemoved ]
-                    )
+                    case Loaded.toMaybe model.removeImpact of
+                        Just impact ->
+                            ( { model | busy = True, confirmRemove = Nothing }
+                            , [ Api.call (\id -> Queries.removeField id ctx.project { fieldId = field.id, expected = impact }) GotRemoved ]
+                            )
+
+                        Nothing ->
+                            ( model, [] )
 
                 Nothing ->
                     ( model, [] )
@@ -1059,7 +1073,10 @@ slugSourcesOf detail =
 
 
 {-| 削除。**危ない操作は下に離す**（保存を押しに来て間違えて押さないように）。
-CMS は影響を検査しないので、何が起きるかを言葉で伝える。
+
+押す前に `fieldImpact` を引いて、実際に当たるコンテンツの件数を出す。数えている間は
+押させない（0 件と 4000 件で人がする判断が違う）。
+
 -}
 viewRemove : Model -> EditForm -> Html Msg
 viewRemove model form =
@@ -1068,14 +1085,16 @@ viewRemove model form =
             if asked.id == form.id then
                 Ui.callout Ui.toneWarn
                     [ class "gap-2 p-3" ]
-                    [ Ui.subheading ("「" ++ form.name ++ "」を削除しますか")
-                    , Ui.note
-                        [ text "このフィールドを使っているコンテンツの値は残りますが、API から見えなくなります。元に戻すには同じフィールド ID で作り直します。" ]
-                    , div [ class "flex gap-2" ]
-                        [ Ui.button [ onClick RemoveConfirmed ] [ text (busyText model "削除する") ]
-                        , Ui.ghostButton [ onClick RemoveCancelled ] [ text "やめる" ]
-                        ]
-                    ]
+                    (Ui.subheading ("「" ++ form.name ++ "」を削除しますか")
+                        :: viewImpact model.removeImpact
+                        ++ [ div [ class "flex gap-2" ]
+                                [ Ui.button
+                                    [ onClick RemoveConfirmed, disabled (Loaded.toMaybe model.removeImpact == Nothing) ]
+                                    [ text (busyText model "削除する") ]
+                                , Ui.ghostButton [ onClick RemoveCancelled ] [ text "やめる" ]
+                                ]
+                           ]
+                    )
 
             else
                 text ""
@@ -1083,6 +1102,68 @@ viewRemove model form =
         Nothing ->
             div [ class "border-t border-edge pt-3" ]
                 [ Ui.dangerLink (RemoveAsked (removable form)) "このフィールドを削除…" ]
+
+
+{-| 押すと何が起きるか。**サーバが数えた件数をそのまま出す。**
+
+`safe` なら「影響はありません」。効果があるなら 1 行ずつ、当たるコンテンツの件数を添える。
+
+-}
+viewImpact : Loaded Model.SchemaImpact -> List (Html Msg)
+viewImpact loaded =
+    case loaded of
+        Loaded.Loading ->
+            [ Ui.note [ text "影響を調べています…" ] ]
+
+        Loaded.Failed problem ->
+            [ Ui.note [ text ("影響を調べられませんでした（" ++ problem ++ "）。もう一度お試しください") ] ]
+
+        Loaded.Missing ->
+            [ Ui.note [ text "影響を調べられませんでした。もう一度お試しください" ] ]
+
+        Loaded.Present impact ->
+            if impact.safe then
+                [ Ui.note [ text "このフィールドに値を入れているコンテンツはありません。消しても配信は変わりません" ] ]
+
+            else
+                List.map viewEffect impact.effects
+
+
+{-| 影響 1 行。
+-}
+viewEffect : Model.SchemaEffect -> Html Msg
+viewEffect effect =
+    Ui.note [ text (effectText effect.kind ++ "（下書き " ++ String.fromInt effect.draft ++ " 件 / 公開中 " ++ String.fromInt effect.published ++ " 件）") ]
+
+
+{-| 影響の種類の言い方。サーバの enum に 1 対 1 で当てる。
+-}
+effectText : String -> String
+effectText kind =
+    case kind of
+        "VALUES_HIDDEN" ->
+            "値が API から見えなくなります（DB には残ります）"
+
+        "REFERENCES_HIDDEN" ->
+            "参照が API から見えなくなります"
+
+        "ASSETS_HIDDEN" ->
+            "メディアの参照が API から見えなくなります"
+
+        "VALUES_RESURRECTED" ->
+            "消したはずの値が API に戻ります"
+
+        "PUBLISH_BLOCKED" ->
+            "公開中のコンテンツが再公開できなくなります"
+
+        "DRAFT_BLOCKED" ->
+            "下書きの保存が通らなくなります"
+
+        "ENTRIES_REMOVED" ->
+            "型と一緒にコンテンツが消えます"
+
+        other ->
+            other
 
 
 {-| 削除の確認は行そのものを持つ。下書きから id と名前だけ作る。

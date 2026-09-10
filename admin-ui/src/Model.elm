@@ -1,4 +1,4 @@
-module Model exposing (ApiKeyRow, AssetList, AssetRow, ContentTypeDetail, ContentTypeSummary, EntryList, EntryRow, EntryVersion, FieldConfig, FieldDef, Invite, IssuedKey, IssuedPat, LinkCandidate, MemberRow, Org, PatRow, Person, Project, PublishReport, Referrer, ScheduleRow, Slug, Upload, ViewerInfo, Violation, WebhookRow)
+module Model exposing (ApiKeyRow, AssetList, AssetRow, ContentTypeDetail, ContentTypeSummary, EntryList, EntryRow, EntryVersion, FieldConfig, FieldDef, Invite, IssuedKey, IssuedPat, LinkCandidate, MemberRow, Org, PatRow, Person, Project, PublishReport, Referrer, ScheduleRow, SchemaEffect, SchemaImpact, Slug, Upload, ViewerInfo, Violation, WebhookRow)
 
 {-| API から来る値の形。Html を作らない。
 
@@ -71,6 +71,31 @@ type alias Invite =
     { id : String
     , email : String
     , role : String
+    }
+
+
+{-| スキーマを変えると既存のデータに何が起きるか 1 つ。
+
+`field` は効くフィールドの apiId。型ごとの影響（entry ごと消える）なら `Nothing`。
+
+-}
+type alias SchemaEffect =
+    { kind : String
+    , field : Maybe String
+    , draft : Int
+    , published : Int
+    }
+
+
+{-| 押す前に見た影響。`safe` なら確認なしで押せる。
+
+押す時はこの `effects` から `expected` を組んで送る。見た時より種類が増えるか
+公開中の件数が増えていれば、サーバが止める。
+
+-}
+type alias SchemaImpact =
+    { safe : Bool
+    , effects : List SchemaEffect
     }
 
 

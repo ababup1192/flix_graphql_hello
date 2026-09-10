@@ -48,17 +48,34 @@ updateContentType requiredArgs____ object____ =
     Object.selectionForCompositeField "updateContentType" [ Argument.required "id" requiredArgs____.id (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId), Argument.required "input" requiredArgs____.input Api.Admin.InputObject.encodeContentTypePatch ] object____ Basics.identity
 
 
+type alias DeleteContentTypeOptionalArguments =
+    { expected : OptionalArgument Api.Admin.InputObject.SchemaImpactInput }
+
+
 type alias DeleteContentTypeRequiredArguments =
     { id : ScalarCodecs.Id }
 
 
-{-| フィールドごと消す
+{-| フィールドごと消す。expected は fieldImpact で見た影響
 -}
 deleteContentType :
-    DeleteContentTypeRequiredArguments
+    (DeleteContentTypeOptionalArguments -> DeleteContentTypeOptionalArguments)
+    -> DeleteContentTypeRequiredArguments
     -> SelectionSet ScalarCodecs.Id RootMutation
-deleteContentType requiredArgs____ =
-    Object.selectionForField "ScalarCodecs.Id" "deleteContentType" [ Argument.required "id" requiredArgs____.id (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId) ] (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapCodecs |> .codecId |> .decoder)
+deleteContentType fillInOptionals____ requiredArgs____ =
+    let
+        filledInOptionals____ =
+            fillInOptionals____ { expected = Absent }
+
+        optionalArgs____ =
+            [ Argument.optional "expected" filledInOptionals____.expected Api.Admin.InputObject.encodeSchemaImpactInput ]
+                |> List.filterMap Basics.identity
+    in
+    Object.selectionForField "ScalarCodecs.Id" "deleteContentType" (optionalArgs____ ++ [ Argument.required "id" requiredArgs____.id (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId) ]) (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapCodecs |> .codecId |> .decoder)
+
+
+type alias AddFieldOptionalArguments =
+    { expected : OptionalArgument Api.Admin.InputObject.SchemaImpactInput }
 
 
 type alias AddFieldRequiredArguments =
@@ -67,14 +84,27 @@ type alias AddFieldRequiredArguments =
     }
 
 
-{-| 末尾に足す
+{-| 末尾に足す。消した apiId で足し直すと残った値が配信に戻るので、その時は expected が要る
 -}
 addField :
-    AddFieldRequiredArguments
+    (AddFieldOptionalArguments -> AddFieldOptionalArguments)
+    -> AddFieldRequiredArguments
     -> SelectionSet decodesTo Api.Admin.Object.FieldDef
     -> SelectionSet decodesTo RootMutation
-addField requiredArgs____ object____ =
-    Object.selectionForCompositeField "addField" [ Argument.required "typeId" requiredArgs____.typeId (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId), Argument.required "input" requiredArgs____.input Api.Admin.InputObject.encodeFieldInput ] object____ Basics.identity
+addField fillInOptionals____ requiredArgs____ object____ =
+    let
+        filledInOptionals____ =
+            fillInOptionals____ { expected = Absent }
+
+        optionalArgs____ =
+            [ Argument.optional "expected" filledInOptionals____.expected Api.Admin.InputObject.encodeSchemaImpactInput ]
+                |> List.filterMap Basics.identity
+    in
+    Object.selectionForCompositeField "addField" (optionalArgs____ ++ [ Argument.required "typeId" requiredArgs____.typeId (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId), Argument.required "input" requiredArgs____.input Api.Admin.InputObject.encodeFieldInput ]) object____ Basics.identity
+
+
+type alias UpdateFieldOptionalArguments =
+    { expected : OptionalArgument Api.Admin.InputObject.SchemaImpactInput }
 
 
 type alias UpdateFieldRequiredArguments =
@@ -83,23 +113,49 @@ type alias UpdateFieldRequiredArguments =
     }
 
 
+{-| expected は fieldImpact で見た影響
+-}
 updateField :
-    UpdateFieldRequiredArguments
+    (UpdateFieldOptionalArguments -> UpdateFieldOptionalArguments)
+    -> UpdateFieldRequiredArguments
     -> SelectionSet decodesTo Api.Admin.Object.FieldDef
     -> SelectionSet decodesTo RootMutation
-updateField requiredArgs____ object____ =
-    Object.selectionForCompositeField "updateField" [ Argument.required "id" requiredArgs____.id (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId), Argument.required "input" requiredArgs____.input Api.Admin.InputObject.encodeFieldPatch ] object____ Basics.identity
+updateField fillInOptionals____ requiredArgs____ object____ =
+    let
+        filledInOptionals____ =
+            fillInOptionals____ { expected = Absent }
+
+        optionalArgs____ =
+            [ Argument.optional "expected" filledInOptionals____.expected Api.Admin.InputObject.encodeSchemaImpactInput ]
+                |> List.filterMap Basics.identity
+    in
+    Object.selectionForCompositeField "updateField" (optionalArgs____ ++ [ Argument.required "id" requiredArgs____.id (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId), Argument.required "input" requiredArgs____.input Api.Admin.InputObject.encodeFieldPatch ]) object____ Basics.identity
+
+
+type alias RemoveFieldOptionalArguments =
+    { expected : OptionalArgument Api.Admin.InputObject.SchemaImpactInput }
 
 
 type alias RemoveFieldRequiredArguments =
     { id : ScalarCodecs.Id }
 
 
+{-| expected は fieldImpact で見た影響
+-}
 removeField :
-    RemoveFieldRequiredArguments
+    (RemoveFieldOptionalArguments -> RemoveFieldOptionalArguments)
+    -> RemoveFieldRequiredArguments
     -> SelectionSet ScalarCodecs.Id RootMutation
-removeField requiredArgs____ =
-    Object.selectionForField "ScalarCodecs.Id" "removeField" [ Argument.required "id" requiredArgs____.id (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId) ] (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapCodecs |> .codecId |> .decoder)
+removeField fillInOptionals____ requiredArgs____ =
+    let
+        filledInOptionals____ =
+            fillInOptionals____ { expected = Absent }
+
+        optionalArgs____ =
+            [ Argument.optional "expected" filledInOptionals____.expected Api.Admin.InputObject.encodeSchemaImpactInput ]
+                |> List.filterMap Basics.identity
+    in
+    Object.selectionForField "ScalarCodecs.Id" "removeField" (optionalArgs____ ++ [ Argument.required "id" requiredArgs____.id (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId) ]) (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapCodecs |> .codecId |> .decoder)
 
 
 type alias ReorderFieldsRequiredArguments =

@@ -26,10 +26,17 @@ mod AdminMutationResolvers {
 
     /// Mutation.addField
     pub def addField(): GeneratedAdmin.MutationAddFieldResolver[AdminEff] =
-        (_context, typeId, input) -> Ok(addFieldTo(typeId, input))
+        (_context, typeId, input, expected) -> Ok(addFieldTo(typeId, input, expected))
 
-    def addFieldTo(typeId: Id, input: GeneratedAdmin.FieldInput): FieldDef \ Db + CmsErr + IdGen + Tenant + Session =
-        ContentTypes.addField(Session.grant(), AdminMapping.typeId("typeId", typeId), AdminMapping.fieldDraft(input))
+    ///
+    /// 足すだけなら影響は空なので expected は要らない。要るのは消した apiId で足し直す時だけで、
+    /// その時は残っている値が配信に戻る。
+    ///
+    /// WhyNot: microCMS の取り込みはここを通らない（ContentTypes.addField を直に呼ぶ）。
+    /// 取り込みが作るのは新しい型のフィールドなので、通しても影響は空になる。
+    ///
+    def addFieldTo(typeId: Id, input: GeneratedAdmin.FieldInput, expected: Option[GeneratedAdmin.SchemaImpactInput]): FieldDef \ Db + CmsErr + IdGen + Tenant + Session =
+        guarded(expected, () -> ContentTypes.addField(Session.grant(), AdminMapping.typeId("typeId", typeId), AdminMapping.fieldDraft(input)))
 
     /// Mutation.updateField
     pub def updateField(): GeneratedAdmin.MutationUpdateFieldResolver[AdminEff] =

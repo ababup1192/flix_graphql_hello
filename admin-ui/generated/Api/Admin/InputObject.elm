@@ -7,6 +7,8 @@ module Api.Admin.InputObject exposing (..)
 import Api.Admin.Enum.ContentStage
 import Api.Admin.Enum.FieldConditionOp
 import Api.Admin.Enum.FieldKind
+import Api.Admin.Enum.SchemaAction
+import Api.Admin.Enum.SchemaEffectKind
 import Api.Admin.Enum.SortDirection
 import Api.Admin.Enum.TypeKind
 import Api.Admin.Enum.WebhookEvent
@@ -461,6 +463,79 @@ encodeFieldPatch : FieldPatch -> Value
 encodeFieldPatch input____ =
     Encode.maybeObject
         [ ( "name", Encode.string |> Encode.optional input____.name ), ( "required", Encode.bool |> Encode.optional input____.required ), ( "unique", Encode.bool |> Encode.optional input____.unique ), ( "localized", Encode.bool |> Encode.optional input____.localized ), ( "config", encodeFieldConfigInput |> Encode.optional input____.config ) ]
+
+
+buildSchemaChangeInput :
+    SchemaChangeInputRequiredFields
+    -> (SchemaChangeInputOptionalFields -> SchemaChangeInputOptionalFields)
+    -> SchemaChangeInput
+buildSchemaChangeInput required____ fillOptionals____ =
+    let
+        optionals____ =
+            fillOptionals____
+                { fieldId = Absent, typeId = Absent, patch = Absent, field = Absent }
+    in
+    { action = required____.action, fieldId = optionals____.fieldId, typeId = optionals____.typeId, patch = optionals____.patch, field = optionals____.field }
+
+
+type alias SchemaChangeInputRequiredFields =
+    { action : Api.Admin.Enum.SchemaAction.SchemaAction }
+
+
+type alias SchemaChangeInputOptionalFields =
+    { fieldId : OptionalArgument ScalarCodecs.Id
+    , typeId : OptionalArgument ScalarCodecs.Id
+    , patch : OptionalArgument FieldPatch
+    , field : OptionalArgument FieldInput
+    }
+
+
+{-| Type for the SchemaChangeInput input object.
+-}
+type alias SchemaChangeInput =
+    { action : Api.Admin.Enum.SchemaAction.SchemaAction
+    , fieldId : OptionalArgument ScalarCodecs.Id
+    , typeId : OptionalArgument ScalarCodecs.Id
+    , patch : OptionalArgument FieldPatch
+    , field : OptionalArgument FieldInput
+    }
+
+
+{-| Encode a SchemaChangeInput into a value that can be used as an argument.
+-}
+encodeSchemaChangeInput : SchemaChangeInput -> Value
+encodeSchemaChangeInput input____ =
+    Encode.maybeObject
+        [ ( "action", Encode.enum Api.Admin.Enum.SchemaAction.toString input____.action |> Just ), ( "fieldId", (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId) |> Encode.optional input____.fieldId ), ( "typeId", (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId) |> Encode.optional input____.typeId ), ( "patch", encodeFieldPatch |> Encode.optional input____.patch ), ( "field", encodeFieldInput |> Encode.optional input____.field ) ]
+
+
+buildSchemaImpactInput :
+    SchemaImpactInputRequiredFields
+    -> SchemaImpactInput
+buildSchemaImpactInput required____ =
+    { kinds = required____.kinds, published = required____.published }
+
+
+type alias SchemaImpactInputRequiredFields =
+    { kinds : List Api.Admin.Enum.SchemaEffectKind.SchemaEffectKind
+    , published : Int
+    }
+
+
+{-| Type for the SchemaImpactInput input object.
+-}
+type alias SchemaImpactInput =
+    { kinds : List Api.Admin.Enum.SchemaEffectKind.SchemaEffectKind
+    , published : Int
+    }
+
+
+{-| Encode a SchemaImpactInput into a value that can be used as an argument.
+-}
+encodeSchemaImpactInput : SchemaImpactInput -> Value
+encodeSchemaImpactInput input____ =
+    Encode.maybeObject
+        [ ( "kinds", (Encode.enum Api.Admin.Enum.SchemaEffectKind.toString |> Encode.list) input____.kinds |> Just ), ( "published", Encode.int input____.published |> Just ) ]
 
 
 buildUploadInput :

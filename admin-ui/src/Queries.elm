@@ -33,6 +33,7 @@ module Queries exposing
     , publishEntry
     , referrers
     , removeField
+    , removeFieldImpact
     , removeMember
     , reorderFields
     , restoreVersion
@@ -85,6 +86,8 @@ import Api.Admin.Enum.ImpactAction as ImpactAction
 import Api.Admin.Enum.Role as AdminRole
 import Api.Admin.Enum.ScheduleAction as ScheduleAction
 import Api.Admin.Enum.ScheduleStatus as ScheduleStatus
+import Api.Admin.Enum.SchemaAction as SchemaAction
+import Api.Admin.Enum.SchemaEffectKind as SchemaEffectKind
 import Api.Admin.Enum.SortDirection as SortDirection
 import Api.Admin.Enum.TypeKind as TypeKind
 import Api.Admin.Enum.VersionReason as VersionReason
@@ -111,6 +114,8 @@ import Api.Admin.Object.Project as AdminProject
 import Api.Admin.Object.PublishReport as PublishReport
 import Api.Admin.Object.Referrer as Referrer
 import Api.Admin.Object.Schedule as Schedule
+import Api.Admin.Object.SchemaEffect as SchemaEffect
+import Api.Admin.Object.SchemaImpact as SchemaImpact
 import Api.Admin.Object.Upload as Upload
 import Api.Admin.Object.Viewer as Viewer
 import Api.Admin.Object.Violation as Violation
@@ -441,6 +446,7 @@ addField : String -> Slug -> NewField -> ( Api.Request, D.Decoder FieldDef )
 addField id project args =
     Api.mutation { id = id, kind = "addField", project = project }
         (AdminMutation.addField
+            identity
             { typeId = args.typeId
             , input =
                 { apiId = args.apiId
@@ -498,10 +504,17 @@ type alias FieldPatch =
     }
 
 
+{-| フィールドを直す。
+
+**expected をまだ送っていない。** 影響のある変更（required や unique を立てる、選択肢を減らす）は
+サーバが止め、何件に当たるかを violations で返す。確認の画面が付くまでは、値を埋めてから直す事になる。
+
+-}
 updateField : String -> Slug -> FieldPatch -> ( Api.Request, D.Decoder FieldDef )
 updateField id project args =
     Api.mutation { id = id, kind = "updateField", project = project }
         (AdminMutation.updateField
+            identity
             { id = args.fieldId
             , input =
                 { name = Opt.Present args.name
@@ -533,10 +546,65 @@ presentOr value =
             Opt.Absent
 
 
-removeField : String -> Slug -> String -> ( Api.Request, D.Decoder String )
-removeField id project fieldId =
+{-| フィールドを消すと既存のデータに何が起きるか。**書き込まない。**
+
+`safe` なら確認なしで押せる。押す時は `effects` から組んだ `expected` を渡す。
+
+-}
+removeFieldImpact : String -> Slug -> String -> ( Api.Request, D.Decoder Model.SchemaImpact )
+removeFieldImpact id project fieldId =
+    Api.query { id = id, kind = "fieldImpact", project = project }
+        (Api.Admin.Query.fieldImpact
+            { input =
+                { action = SchemaAction.RemoveField
+                , fieldId = Opt.Present fieldId
+                , typeId = Opt.Absent
+                , patch = Opt.Absent
+                , field = Opt.Absent
+                }
+            }
+            (SS.map2 Model.SchemaImpact
+                SchemaImpact.safe
+                (SchemaImpact.effects
+                    (SS.map4 Model.SchemaEffect
+                        (SchemaEffect.kind |> SS.map SchemaEffectKind.toString)
+                        SchemaEffect.field
+                        SchemaEffect.draft
+                        SchemaEffect.published
+                    )
+                )
+            )
+        )
+
+
+{-| フィールドを消す。`expected` は `removeFieldImpact` で見た影響。
+
+見た時より種類が増えるか公開中の件数が増えていれば、サーバが止める。
+
+-}
+removeField : String -> Slug -> { fieldId : String, expected : Model.SchemaImpact } -> ( Api.Request, D.Decoder String )
+removeField id project args =
     Api.mutation { id = id, kind = "removeField", project = project }
-        (AdminMutation.removeField { id = fieldId })
+        (AdminMutation.removeField
+            (\optional -> { optional | expected = Opt.Present (expectedOf args.expected) })
+            { id = args.fieldId }
+        )
+
+
+{-| 見た影響を、押す時に送る形にする。
+-}
+expectedOf : Model.SchemaImpact -> Input.SchemaImpactInput
+expectedOf impact =
+    { kinds = impact.effects |> List.map .kind |> List.filterMap kindOf
+    , published = impact.effects |> List.map .published |> List.sum
+    }
+
+
+{-| 種類の名前を enum に戻す。読めない物は落とす（サーバが数え直すので、落ちても止まるだけ）。
+-}
+kindOf : String -> Maybe SchemaEffectKind.SchemaEffectKind
+kindOf name =
+    SchemaEffectKind.list |> List.filter (\kind -> SchemaEffectKind.toString kind == name) |> List.head
 
 
 reorderFields : String -> Slug -> { typeId : String, ids : List String } -> ( Api.Request, D.Decoder ContentTypeDetail )
@@ -1165,4 +1233,4 @@ updateContentType id project args =
 deleteContentType : String -> Slug -> String -> ( Api.Request, D.Decoder String )
 deleteContentType id project typeId =
     Api.mutation { id = id, kind = "deleteContentType", project = project }
-        (AdminMutation.deleteContentType { id = typeId })
+        (AdminMutation.deleteContentType identity { id = typeId })

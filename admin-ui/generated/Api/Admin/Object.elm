@@ -21,6 +21,10 @@ type AssetPage
     = AssetPage
 
 
+type AuditEvent
+    = AuditEvent
+
+
 type ContentType
     = ContentType
 
@@ -123,6 +127,14 @@ type Referrer
 
 type Schedule
     = Schedule
+
+
+type SchemaEffect
+    = SchemaEffect
+
+
+type SchemaImpact
+    = SchemaImpact
 
 
 type Upload

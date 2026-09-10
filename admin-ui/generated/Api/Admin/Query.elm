@@ -304,3 +304,42 @@ schedules fillInOptionals____ object____ =
                 |> List.filterMap Basics.identity
     in
     Object.selectionForCompositeField "schedules" optionalArgs____ object____ (Basics.identity >> Decode.list)
+
+
+type alias AuditEventsOptionalArguments =
+    { first : OptionalArgument Int
+    , after : OptionalArgument ScalarCodecs.Id
+    }
+
+
+{-| 監査の記録。新しい順（owner だけ）。誰が・いつ・何を変えたか。after は前のページの最後の id
+-}
+auditEvents :
+    (AuditEventsOptionalArguments -> AuditEventsOptionalArguments)
+    -> SelectionSet decodesTo Api.Admin.Object.AuditEvent
+    -> SelectionSet (List decodesTo) RootQuery
+auditEvents fillInOptionals____ object____ =
+    let
+        filledInOptionals____ =
+            fillInOptionals____ { first = Absent, after = Absent }
+
+        optionalArgs____ =
+            [ Argument.optional "first" filledInOptionals____.first Encode.int, Argument.optional "after" filledInOptionals____.after (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId) ]
+                |> List.filterMap Basics.identity
+    in
+    Object.selectionForCompositeField "auditEvents" optionalArgs____ object____ (Basics.identity >> Decode.list)
+
+
+type alias FieldImpactRequiredArguments =
+    { input : Api.Admin.InputObject.SchemaChangeInput }
+
+
+{-| スキーマを変える前の影響。書き込まない。safe なら確認なしで押せる。
+押す時は effects から組んだ expected を渡す（渡さずに押すと、影響がある操作は止まる）
+-}
+fieldImpact :
+    FieldImpactRequiredArguments
+    -> SelectionSet decodesTo Api.Admin.Object.SchemaImpact
+    -> SelectionSet decodesTo RootQuery
+fieldImpact requiredArgs____ object____ =
+    Object.selectionForCompositeField "fieldImpact" [ Argument.required "input" requiredArgs____.input Api.Admin.InputObject.encodeSchemaChangeInput ] object____ Basics.identity

@@ -184,8 +184,8 @@ type Mutation {
   updateContentType(id: ID!, input: ContentTypePatch!): ContentType!
   """フィールドごと消す。expected は fieldImpact で見た影響"""
   deleteContentType(id: ID!, expected: SchemaImpactInput): ID!
-  """末尾に足す"""
-  addField(typeId: ID!, input: FieldInput!): FieldDef!
+  """末尾に足す。消した apiId で足し直すと残った値が配信に戻るので、その時は expected が要る"""
+  addField(typeId: ID!, input: FieldInput!, expected: SchemaImpactInput): FieldDef!
   """expected は fieldImpact で見た影響"""
   updateField(id: ID!, input: FieldPatch!, expected: SchemaImpactInput): FieldDef!
   """expected は fieldImpact で見た影響"""
