@@ -14,6 +14,7 @@ mod TestAudit {
     @Test
     def testAuditRowOfTable(): Unit \ Assert =
         let blogs = CmsTestKit.apiId("blogs");
+        let was = Json.JString("変更前");
         let table = List#{
             (AuditChange.MemberInvited("a@example.com", Role.Editor),        ("member.invited", "member", "a@example.com")),
             (AuditChange.MemberRoleChanged(UserId.UserId(7i64), Role.Owner), ("member.role_changed", "member", "7")),
@@ -22,12 +23,12 @@ mod TestAudit {
             (AuditChange.ApiKeyCreated("ak_1", "CI"),                        ("api_key.created", "api_key", "ak_1")),
             (AuditChange.ApiKeyRevoked("ak_1"),                              ("api_key.revoked", "api_key", "ak_1")),
             (AuditChange.TypeCreated(blogs),                                 ("type.created", "type", "blogs")),
-            (AuditChange.TypeUpdated(blogs),                                 ("type.updated", "type", "blogs")),
-            (AuditChange.TypeDeleted(blogs),                                 ("type.deleted", "type", "blogs")),
+            (AuditChange.TypeUpdated(blogs, was),                            ("type.updated", "type", "blogs")),
+            (AuditChange.TypeDeleted(blogs, was),                            ("type.deleted", "type", "blogs")),
             (AuditChange.FieldAdded(blogs, "title"),                         ("field.added", "field", "blogs.title")),
-            (AuditChange.FieldUpdated(blogs, "title"),                       ("field.updated", "field", "blogs.title")),
-            (AuditChange.FieldRemoved(blogs, "title"),                       ("field.removed", "field", "blogs.title")),
-            (AuditChange.FieldsReordered(blogs),                             ("fields.reordered", "type", "blogs"))
+            (AuditChange.FieldUpdated(blogs, "title", was),                  ("field.updated", "field", "blogs.title")),
+            (AuditChange.FieldRemoved(blogs, "title", was),                  ("field.removed", "field", "blogs.title")),
+            (AuditChange.FieldsReordered(blogs, was),                        ("fields.reordered", "type", "blogs"))
         };
         Assert.assertEq(
             expected = table |> List.map(snd),
@@ -36,16 +37,19 @@ mod TestAudit {
                 (row#action, row#targetKind, row#targetId)
             }))
 
-    /// 役割の変わる出来事だけが detail に role を持つ。他は空の JSON。
+    /// detail は、役割・名前の付く出来事と、スキーマの変更前を持つ出来事だけが中身を持つ。
     @Test
     def testAuditDetailTable(): Unit \ Assert =
         let blogs = CmsTestKit.apiId("blogs");
+        let was = Json.JString("変更前");
         let table = List#{
             (AuditChange.MemberInvited("a@example.com", Role.Editor),        Json.JObject(Map#{ "role" => Json.JString("editor") })),
             (AuditChange.MemberRoleChanged(UserId.UserId(7i64), Role.Owner), Json.JObject(Map#{ "role" => Json.JString("owner") })),
             (AuditChange.ApiKeyCreated("ak_1", "CI"),                        Json.JObject(Map#{ "name" => Json.JString("CI") })),
             (AuditChange.MemberRemoved(UserId.UserId(7i64)),                 Json.JObject(Map.empty())),
-            (AuditChange.TypeDeleted(blogs),                                 Json.JObject(Map.empty()))
+            (AuditChange.TypeCreated(blogs),                                 Json.JObject(Map.empty())),
+            (AuditChange.TypeDeleted(blogs, was),                            Json.JObject(Map#{ "before" => was })),
+            (AuditChange.FieldRemoved(blogs, "title", was),                  Json.JObject(Map#{ "before" => was }))
         };
         Assert.assertEq(
             expected = table |> List.map(snd),
@@ -56,6 +60,6 @@ mod TestAudit {
     def testAuditRowKeepsActor(): Unit \ Assert =
         Assert.assertEq(
             expected = "api-key:CI",
-            Audit.rowOf("api-key:CI", AuditChange.TypeDeleted(CmsTestKit.apiId("blogs")))#actor)
+            Audit.rowOf("api-key:CI", AuditChange.TypeDeleted(CmsTestKit.apiId("blogs"), Json.JNull))#actor)
 
 }

@@ -4,7 +4,7 @@
 /// WhyNot: entry の変更をここに入れないのは、`entry_versions` が誰が・いつ・どんな中身にしたかを版として全部持っていて、
 /// 監査としてはそちらの方が強いため。二重に持つと、片方だけ残る形が作れてしまう。
 ///
-pub enum AuditChange with Eq, Order {
+pub enum AuditChange with Eq {
     /// 招待した（既にログイン済みの人はその場でメンバーになる）
     case MemberInvited(String, Role)
     /// メンバーの役割を変えた
@@ -17,16 +17,16 @@ pub enum AuditChange with Eq, Order {
     case ApiKeyCreated(String, String)
     /// API キーを失効させた
     case ApiKeyRevoked(String)
-    /// content type を作った / 直した / 消した
+    /// content type を作った / 直した / 消した。直した・消した物は変更前の姿を持つ（SchemaSnapshot）
     case TypeCreated(ApiId)
-    case TypeUpdated(ApiId)
-    case TypeDeleted(ApiId)
-    /// フィールドを足した / 直した / 消した（型の apiId, フィールドの apiId）
+    case TypeUpdated(ApiId, Util.Json.Json)
+    case TypeDeleted(ApiId, Util.Json.Json)
+    /// フィールドを足した / 直した / 消した（型の apiId, フィールドの apiId, 変更前の姿）
     case FieldAdded(ApiId, String)
-    case FieldUpdated(ApiId, String)
-    case FieldRemoved(ApiId, String)
-    /// 最上位のフィールドを並べ替えた
-    case FieldsReordered(ApiId)
+    case FieldUpdated(ApiId, String, Util.Json.Json)
+    case FieldRemoved(ApiId, String, Util.Json.Json)
+    /// 最上位のフィールドを並べ替えた（変更前の並び）
+    case FieldsReordered(ApiId, Util.Json.Json)
 }
 
 ///
@@ -62,8 +62,11 @@ mod Audit {
     ///
     /// 出来事 → 積む行。action は `<対象>.<した事>`、targetId は後から人が引ける値。
     ///
-    /// WhyNot: 変更前の値を detail に入れないのは、それを持つには各ユースケースが変更前を読み直す必要があり、
-    /// 型の変更では読み直しが 1 回増えるため。誰が何を触ったかは追えるので、中身の差分が要るなら版のある entry と同じ形を別に足す。
+    /// スキーマの変更は detail に変更前の姿（SchemaSnapshot）を持つ。消した型・フィールドはここからしか組み直せない
+    /// （entry と違って版が無い）。作った・足した物は持たない（元に戻すのは消す事なので、要る物が無い）。
+    ///
+    /// WhyNot: メンバーや API キーの変更前を入れない。役割は 3 通りしか無く action と targetId から読めて、
+    /// 鍵は値を二度と出せないため。
     ///
     pub def rowOf(actor: String, change: AuditChange): AuditRow = match change {
         case AuditChange.MemberInvited(email, role)      => row(actor, "member.invited", "member", email, roleDetail(role))
@@ -73,12 +76,12 @@ mod Audit {
         case AuditChange.ApiKeyCreated(publicId, name)   => row(actor, "api_key.created", "api_key", publicId, Json.JObject(Map#{ "name" => Json.JString(name) }))
         case AuditChange.ApiKeyRevoked(publicId)         => row(actor, "api_key.revoked", "api_key", publicId, empty())
         case AuditChange.TypeCreated(apiId)              => row(actor, "type.created", "type", "${apiId}", empty())
-        case AuditChange.TypeUpdated(apiId)              => row(actor, "type.updated", "type", "${apiId}", empty())
-        case AuditChange.TypeDeleted(apiId)              => row(actor, "type.deleted", "type", "${apiId}", empty())
+        case AuditChange.TypeUpdated(apiId, was)         => row(actor, "type.updated", "type", "${apiId}", before(was))
+        case AuditChange.TypeDeleted(apiId, was)         => row(actor, "type.deleted", "type", "${apiId}", before(was))
         case AuditChange.FieldAdded(apiId, field)        => row(actor, "field.added", "field", "${apiId}.${field}", empty())
-        case AuditChange.FieldUpdated(apiId, field)      => row(actor, "field.updated", "field", "${apiId}.${field}", empty())
-        case AuditChange.FieldRemoved(apiId, field)      => row(actor, "field.removed", "field", "${apiId}.${field}", empty())
-        case AuditChange.FieldsReordered(apiId)          => row(actor, "fields.reordered", "type", "${apiId}", empty())
+        case AuditChange.FieldUpdated(apiId, field, was) => row(actor, "field.updated", "field", "${apiId}.${field}", before(was))
+        case AuditChange.FieldRemoved(apiId, field, was) => row(actor, "field.removed", "field", "${apiId}.${field}", before(was))
+        case AuditChange.FieldsReordered(apiId, was)     => row(actor, "fields.reordered", "type", "${apiId}", before(was))
     }
 
     /// 行を組む。
@@ -87,6 +90,9 @@ mod Audit {
 
     /// 役割の付く出来事の詳細。
     def roleDetail(role: Role): Json = Json.JObject(Map#{ "role" => Json.JString(Role.text(role)) })
+
+    /// 変更前の姿を持つ出来事。キーを 1 つに決めておけば、後から読む側が種類ごとに探さずに済む。
+    def before(was: Json): Json = Json.JObject(Map#{ "before" => was })
 
     /// 詳細の無い出来事。
     def empty(): Json = Json.JObject(Map.empty())

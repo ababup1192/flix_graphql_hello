@@ -90,6 +90,11 @@ mod ContentTypeRows {
     pub def typeIdOf(row: { id = Int64 | r }): TypeId = TypeId.TypeId(row#id)
 
     ///
+    /// content_types の行の apiId。
+    ///
+    pub def typeApiIdOf(row: { apiId = String | r }): ApiId \ DbErr = apiIdOrRaise("content_types.api_id", row#apiId)
+
+    ///
     /// content_fields の行から FieldDef を組む。children は空（木にするのは FieldTree.build）。
     ///
     pub def toFieldDef(row: { id = Int64, typeId = Int64, parentFieldId = Option[Int64], apiId = String, name = String, kind = String, isMany = Bool, isRequired = Bool, isUnique = Bool, isLocalized = Bool, targetTypeId = Option[Int64], config = Json, position = Int32 | r }): FieldDef \ DbErr =

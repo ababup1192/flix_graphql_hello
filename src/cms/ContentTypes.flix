@@ -17,6 +17,17 @@ mod ContentTypes {
     pub def list(_proof: Granted[ReadDraft]): List[ContentType] \ DbRead + Tenant =
         listAll()
 
+    ///
+    /// 監査に残す姿が参照先を apiId で持つための、型 id → apiId。
+    ///
+    /// 参照するフィールドが 1 本も無ければ引かない。REFERENCE の無い型を直すたびに SELECT が 1 本増えるのを避ける。
+    ///
+    def targetNames(fields: List[FieldDef]): Map[TypeId, ApiId] \ DbRead + Tenant =
+        if (FieldTree.flatten(fields) |> List.forAll(field -> Option.isEmpty(field#target))) Map.empty()
+        else ContentTypesQueries.listContentTypes(Tenant.currentId())
+                |> List.map(row -> (ContentTypeRows.typeIdOf(row), ContentTypeRows.typeApiIdOf(row)))
+                |> List.toMap
+
     /// 全 content type。権限は見ない（ユースケースの内部で使う）。
     def listAll(): List[ContentType] \ DbRead + Tenant =
         let fieldsByType = ContentFieldsQueries.listAllFields(Tenant.currentId()) |> List.map(ContentTypeRows.toFieldDef) |> FieldTree.byType;
@@ -107,7 +118,7 @@ mod ContentTypes {
         // 触った項目だけ UPDATE し、型の変更を知らせる
         discard ContentTypesQueries.updateContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() }, ContentTypeRows.typeChanges(changes));
         Publishing.notify(PublishingEvent.SchemaChanged(existing#apiId));
-        Audit.record(AuditChange.TypeUpdated(existing#apiId));
+        Audit.record(AuditChange.TypeUpdated(existing#apiId, SchemaSnapshot.ofType(existing)));
         load(id)
 
     ///
@@ -124,7 +135,7 @@ mod ContentTypes {
         discard EntriesQueries.purgeDeletedEntries({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() });
         discard ContentTypesQueries.deleteContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() });
         Publishing.notify(PublishingEvent.SchemaChanged(existing#apiId));
-        Audit.record(AuditChange.TypeDeleted(existing#apiId))
+        Audit.record(AuditChange.TypeDeleted(existing#apiId, SchemaSnapshot.ofTypeWithFields(targetNames(existing#fields), existing)))
 
     // ---- フィールド ----
 
@@ -157,7 +168,7 @@ mod ContentTypes {
         let required = changes#required |> Option.getWithDefault(existing#required);
         CmsErr.raiseIfAny(Naming.validateFlags({ unique = unique | existing }) ::: Naming.validateChildFlags({ hasParent = Option.nonEmpty(existing#parent), required = required, unique = unique }) ::: Naming.validateConfig(taken, existing#kind, config));
         discard ContentFieldsQueries.updateField({ id = FieldId.toInt64(id), projectId = Tenant.currentId() }, ContentTypeRows.fieldChanges(changes));
-        Audit.record(AuditChange.FieldUpdated(touch(existing#typeId), "${existing#apiId}"));
+        Audit.record(AuditChange.FieldUpdated(touch(existing#typeId), "${existing#apiId}", SchemaSnapshot.ofField(targetNames(existing :: Nil), existing)));
         loadField(id)
 
     ///
@@ -165,8 +176,10 @@ mod ContentTypes {
     ///
     pub def removeField(_proof: Granted[ManageTypes], id: FieldId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let existing = loadField(id);
+        // 消す前に姿を撮る（子ごと消えるので、後から組み直せるのはここに残した物だけ）
+        let was = SchemaSnapshot.ofField(targetNames(existing :: Nil), existing);
         discard ContentFieldsQueries.deleteField({ id = FieldId.toInt64(id), projectId = Tenant.currentId() });
-        Audit.record(AuditChange.FieldRemoved(touch(existing#typeId), "${existing#apiId}"))
+        Audit.record(AuditChange.FieldRemoved(touch(existing#typeId), "${existing#apiId}", was))
 
     ///
     /// ids の順に並べ直す。最上位のフィールドを過不足なく渡さなければ invalid。object / blocks の子は対象外。
@@ -178,7 +191,7 @@ mod ContentTypes {
         CmsErr.raiseIfAny(if (sameSet) Nil else Violation.Violation("ids", "最上位のフィールドの id を過不足なく、重複なく渡してください") :: Nil);
         List.forEachWithIndex((index, id) -> discard ContentFieldsQueries.setFieldPosition({ id = FieldId.toInt64(id), position = index, projectId = Tenant.currentId() }), ids);
         discard touch(typeId);
-        Audit.record(AuditChange.FieldsReordered(owner#apiId));
+        Audit.record(AuditChange.FieldsReordered(owner#apiId, SchemaSnapshot.ofOrder(owner#fields)));
         load(typeId)
 
     // ---- 部品 ----
