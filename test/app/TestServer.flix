@@ -301,22 +301,22 @@ mod TestServer {
              statusOf({ version = "HTTP/1.1", method = "POST", path = "/graphql", headers = Nil, body = "{\"query\":\"{ x }\"}" }),
              statusOf({ version = "HTTP/1.1", method = "POST", path = "/graphql", headers = ("content-type", "APPLICATION/JSON") :: Nil, body = "{\"query\":\"{ x }\"}" })))
 
-    /// DB に届けば 200 と {"status": "ok"}。クエリ文字列が付いていても同じ。
+    /// DB に届けば 200 と {"status": "ok"}。クエリ文字列が付いていても同じ。行ごとの段は components に出る（送り先が無いので cdnPurge の行は出ない）。
     @Test
     def testServerHealthOk(): Unit \ Assert =
-        Assert.assertEq(expected = ((200, Ok(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str("dev"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }), "pool" => Value.Obj(Map#{ "active" => Value.Int(1), "idle" => Value.Int(2), "waiting" => Value.Int(0), "total" => Value.Int(3), "max" => Value.Int(10) }) }))), 200),
+        Assert.assertEq(expected = ((200, Ok(Value.Obj(Map#{ "status" => Value.Str("ok"), "version" => Value.Str("dev"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(0), "failedSchedules" => Value.Int(0), "pendingDeliveries" => Value.Int(0), "failedDeliveries" => Value.Int(0), "overdueSchedules" => Value.Int(0), "overdueDeliveries" => Value.Int(0) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }), "pool" => Value.Obj(Map#{ "active" => Value.Int(1), "idle" => Value.Int(2), "waiting" => Value.Int(0), "total" => Value.Int(3), "max" => Value.Int(10) }), "components" => Value.Obj(Map#{ "api" => Value.Obj(Map#{ "status" => Value.Str("operational") }), "schedule" => Value.Obj(Map#{ "status" => Value.Str("operational") }), "webhook" => Value.Obj(Map#{ "status" => Value.Str("operational") }) }) }))), 200),
             GraphqlFake.runWithEcho(() -> {
                 let response = handle({ version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" });
                 ((response#status, JsonValue.parse(response#body)),
                  handle({ version = "HTTP/1.1", method = "GET", path = "/health?probe=1", headers = Nil, body = "" })#status)
             }))
 
-    /// DB に届かなければ 503 で、理由を db に入れる。件数は数えない（-1）ので、jobsSummary には checkDb の結果がそのまま渡る。
+    /// DB に届かなければ 503 で、理由を db に入れる。件数は数えない（-1）ので、jobsSummary には checkDb の結果がそのまま渡る。components は全行が major_outage。
     @Test
     def testServerHealthFailure(): Unit \ Assert =
         let response = GraphqlFake.runWithEcho(() ->
             serve(Server.defaultConfig(), HealthFake.failing("connection refused"), Credential.Missing, { version = "HTTP/1.1", method = "GET", path = "/health", headers = Nil, body = "" }));
-        Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(-1), "failedSchedules" => Value.Int(-1), "pendingDeliveries" => Value.Int(-1), "failedDeliveries" => Value.Int(-1) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }), "pool" => Value.Obj(Map#{ "active" => Value.Int(1), "idle" => Value.Int(2), "waiting" => Value.Int(0), "total" => Value.Int(3), "max" => Value.Int(10) }) }))),
+        Assert.assertEq(expected = (503, Ok(Value.Obj(Map#{ "status" => Value.Str("error"), "version" => Value.Str("dev"), "db" => Value.Str("connection refused"), "jobs" => Value.Obj(Map#{ "lastTickAt" => Value.Null, "pendingSchedules" => Value.Int(-1), "failedSchedules" => Value.Int(-1), "pendingDeliveries" => Value.Int(-1), "failedDeliveries" => Value.Int(-1), "overdueSchedules" => Value.Int(-1), "overdueDeliveries" => Value.Int(-1) }), "connections" => Value.Obj(Map#{ "active" => Value.Int(1), "max" => Value.Int(256) }), "pool" => Value.Obj(Map#{ "active" => Value.Int(1), "idle" => Value.Int(2), "waiting" => Value.Int(0), "total" => Value.Int(3), "max" => Value.Int(10) }), "components" => Value.Obj(Map#{ "api" => Value.Obj(Map#{ "status" => Value.Str("major_outage"), "reason" => Value.Str("db unreachable") }), "schedule" => Value.Obj(Map#{ "status" => Value.Str("major_outage"), "reason" => Value.Str("db unreachable") }), "webhook" => Value.Obj(Map#{ "status" => Value.Str("major_outage"), "reason" => Value.Str("db unreachable") }) }) }))),
             (response#status, JsonValue.parse(response#body)))
 
     /// DB に届いても仕事の tick が止まっていれば 503 で、reason に止まった tick を入れる。

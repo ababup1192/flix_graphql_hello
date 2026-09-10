@@ -707,7 +707,7 @@ update ctx msg model =
             ( { model
                 | linkCandidates =
                     model.linkCandidates
-                        ++ List.map (\row -> { id = row.id, title = EntryLabel.forRow row, typeName = typeName }) page.nodes
+                        ++ List.map (\row -> { id = row.id, title = EntryLabel.forRow row, typeName = typeName, stage = row.stage }) page.nodes
               }
             , []
             )
@@ -2502,6 +2502,7 @@ encodeCandidate candidate =
         [ ( "id", E.string candidate.id )
         , ( "title", E.string candidate.title )
         , ( "type", E.string candidate.typeName )
+        , ( "stage", E.string candidate.stage )
         ]
 
 

@@ -7,7 +7,7 @@
 /// - runJobs: 外部トリガーから 1 tick回す。失敗した所の説明（空なら全部通った）
 /// - connections: HTTP の同時接続の今の数と上限
 /// - poolStats: DB の接続プールの数字（HTTP の接続数とは別）
-/// - stall: 仕事のtickかwatchのtickが止まっていれば、その理由（止まっていなければ None）
+/// - liveness: tickの生死を読むための値（止まっているかは Health.stalled、行ごとの段は Health.componentLevels が出す）
 /// - heal: checkDb の結果を渡して自己回復の判断を 1 回進める（Exit が決まればこの中でプロセスが終わる）
 ///
 /// WhyNot: effect にしないのは、入力（プール・ワーカー・Listener）が起動時に固定で、読む所が Server の直下なので
@@ -20,7 +20,7 @@ pub type alias Health[ef: Eff] = {
     runJobs     = Unit -> List[String] \ ef,
     connections = Unit -> HttpServer.Connections \ ef,
     poolStats   = Unit -> Pool.PoolStats \ ef,
-    stall       = Unit -> Option[Health.Stall] \ ef,
+    liveness    = Unit -> Health.Liveness \ ef,
     heal        = Result[String, Unit] -> Unit \ ef
 }
 
@@ -62,11 +62,15 @@ mod Health {
     /// - jobsOn: プロセス内のワーカーを回す設定か（CMS_JOBS）
     /// - jobsIntervalMs / watchIntervalMs: それぞれのtickの間隔
     /// - lastTickAt / lastWatchAt: それぞれのtickが最後に回った時刻
+    /// - purgeOn: CDN の purge の送り先があるか（無ければ purge の行を出さない）
+    /// - lastScheduleAt / lastWebhookAt / lastPurgeAt: tickの部分ごとに、最後に失敗せずに通った時刻
     ///
     pub type alias Liveness = {
         now = Int64, startedAt = Int64, jobsOn = Bool,
         jobsIntervalMs = Int64, lastTickAt = Option[Int64],
-        watchIntervalMs = Int64, lastWatchAt = Option[Int64]
+        watchIntervalMs = Int64, lastWatchAt = Option[Int64],
+        purgeOn = Bool,
+        lastScheduleAt = Option[Int64], lastWebhookAt = Option[Int64], lastPurgeAt = Option[Int64]
     }
 
     ///
@@ -119,6 +123,63 @@ mod Health {
     pub def saturationKey(): String = "pool.used_percent"
 
     ///
+    /// 行ごとの段。ステータスページの色に写す（Statuspage の 4 段と同じ並び）。
+    ///
+    pub enum Level with Eq, ToString {
+        case Operational
+        case Degraded
+        case PartialOutage
+        case MajorOutage
+    }
+
+    /// /health の JSON に出す語。
+    pub def levelJson(level: Level): String = match level {
+        case Level.Operational   => "operational"
+        case Level.Degraded      => "degraded"
+        case Level.PartialOutage => "partial_outage"
+        case Level.MajorOutage   => "major_outage"
+    }
+
+    /// DB に届かない時に全行に付ける理由。
+    pub def unreachableReason(): String = "db unreachable"
+
+    ///
+    /// 行ごとの段と理由。DB に届かなければ全行が major_outage、部分の最終成功時刻が上限より古ければその行だけ partial_outage、
+    /// 期限を過ぎた仕事が残っていれば degraded。仕事を回さないプロセス（CMS_JOBS=off）と送り先の無い purge は行を出さない。
+    ///
+    /// WhyNot: コンテンツ / 管理 / Account を 3 行に割らないのは、同じプロセスの同じ DB の上で、内側から見える壊れ方が
+    /// 3 つに同時に効くため。割っても必ず同じ色になる。3 行の差は外形（実際にその経路を叩く）でしか出ない。
+    ///
+    /// WhyNot: この段を稼働率の根拠にしないのは、ここで見ているのが「プロセスと DB が生きている」だけで、
+    /// リゾルバが壊れて 200 のまま誤答する形を拾えないため。稼働率は外形の実応答で塗る。
+    ///
+    pub def componentLevels(live: Liveness, summary: BackgroundJobs.Summary, dbOk: Bool, saturation: Option[Int32]): List[(String, Level, Option[String])] =
+        let api =
+            if (not dbOk) ("api", Level.MajorOutage, Some(unreachableReason()))
+            else match saturation {
+                case Some(percent) => ("api", Level.Degraded, Some(saturationReason(percent)))
+                case None          => ("api", Level.Operational, None)
+            };
+        let jobs =
+            if (not live#jobsOn) Nil
+            else {
+                let purge = if (live#purgeOn) partLevel(live, "cdnPurge", live#lastPurgeAt, 0i64, dbOk) :: Nil else Nil;
+                partLevel(live, "schedule", live#lastScheduleAt, summary#overdueSchedules, dbOk) ::
+                partLevel(live, "webhook", live#lastWebhookAt, summary#overdueDeliveries, dbOk) :: purge
+            };
+        api :: jobs
+
+    /// tickの 1 部分の段。止まっている（時刻が古い）が先で、捌けていない（overdue）が次。
+    def partLevel(live: Liveness, name: String, lastAt: Option[Int64], overdue: Int64, dbOk: Bool): (String, Level, Option[String]) =
+        if (not dbOk) (name, Level.MajorOutage, Some(unreachableReason()))
+        else match elapsedOver(live, live#jobsIntervalMs, lastAt) {
+            case Some(_) => (name, Level.PartialOutage, Some("${name} stalled"))
+            case None    =>
+                if (overdue > 0i64) (name, Level.Degraded, Some("${name} behind (${overdue})"))
+                else (name, Level.Operational, None)
+        }
+
+    ///
     /// プールとワーカーと Listener の状態で答える。runJobs は仕事の行（Log）を出す。
     /// startedAt はプロセスが起動した時刻、jobsOn は CMS_JOBS、heal は自己回復のwatch（CMS_SELF_HEAL=off なら None）、
     /// borrowTimeoutMs は checkDb が接続を借りるのを待つ上限（CMS_DB_BORROW_TIMEOUT_SECONDS）。
@@ -134,14 +195,16 @@ mod Health {
           runJobs     = _ -> BackgroundJobs.tick(pool, jobs),
           connections = _ -> HttpServer.connections(listener),
           poolStats   = _ -> Pool.stats(pool),
-          stall       = _ -> stalled(liveness(jobs, startedAt, jobsOn)),
+          liveness    = _ -> liveness(jobs, startedAt, jobsOn),
           heal        = db -> BackgroundJobs.healCheck(pool, jobs, heal, Result.isOk(db)) }
 
     /// 今のtickの生死を読む。
     def liveness(jobs: BackgroundJobs.State, startedAt: Int64, jobsOn: Bool): Liveness \ IO =
         { now = System.currentTimeMillis(), startedAt = startedAt, jobsOn = jobsOn,
           jobsIntervalMs = BackgroundJobs.intervalMs(), lastTickAt = Ref.get(jobs#lastTick),
-          watchIntervalMs = BackgroundJobs.healIntervalMs(), lastWatchAt = Ref.get(jobs#lastWatch) }
+          watchIntervalMs = BackgroundJobs.healIntervalMs(), lastWatchAt = Ref.get(jobs#lastWatch),
+          purgeOn = Option.nonEmpty(jobs#purge),
+          lastScheduleAt = Ref.get(jobs#lastSchedule), lastWebhookAt = Ref.get(jobs#lastWebhook), lastPurgeAt = Ref.get(jobs#lastPurge) }
 
     ///
     /// プールから接続を 1 本借りて SELECT 1 を投げる。借りられない・届かないは理由付きの Err。

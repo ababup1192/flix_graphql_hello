@@ -7,7 +7,7 @@ mod SchedulesQueries {
     ///
     /// 生成元 schedules.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -905558366
+    pub def sourceHash(): Int32 = -263824162
 
     ///
     /// insertSchedule: INSERT INTO scheduled_actions (id, project_id, entry_id, action, run_at, with_dependencies, requested_by) VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -210,19 +210,20 @@ mod SchedulesQueries {
     ///
     /// countSchedules の 1 行。
     ///
-    pub type alias CountSchedulesRow = { pending = Option[Int64], failed = Option[Int64] }
+    pub type alias CountSchedulesRow = { pending = Option[Int64], failed = Option[Int64], overdue = Option[Int64] }
 
     def countSchedulesDecoder(): Decoder[CountSchedulesRow] =
         forA (
             pending <- Decoder.opt(Decoder.int64("pending"));
-            failed <- Decoder.opt(Decoder.int64("failed"))
-        ) yield { pending = pending, failed = failed }
+            failed <- Decoder.opt(Decoder.int64("failed"));
+            overdue <- Decoder.opt(Decoder.int64("overdue"))
+        ) yield { pending = pending, failed = failed, overdue = overdue }
 
     ///
-    /// countSchedules: SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending, count(*) FILTER (WHERE status = 'failed')::bigint AS failed FROM scheduled_actions
+    /// countSchedules: SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending, count(*) FILTER (WHERE status = 'failed')::bigint AS failed, count(*) FILTER (WHERE status = 'pending' AND run_at < now() - interval '60 seconds')::bigint AS overdue FROM scheduled_actions
     ///
     pub def countSchedules(): Option[CountSchedulesRow] \ DbRead =
-        let sql = "SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending, count(*) FILTER (WHERE status = 'failed')::bigint AS failed FROM scheduled_actions";
+        let sql = "SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending,\n           count(*) FILTER (WHERE status = 'failed')::bigint AS failed,\n           count(*) FILTER (WHERE status = 'pending' AND run_at < now() - interval '60 seconds')::bigint AS overdue\n    FROM scheduled_actions";
         let params = Nil;
         RawSql.runWithAllow(() -> Sql.fetchOneAs(countSchedulesDecoder(), sql, params))
 

@@ -5,7 +5,15 @@ mod HealthFake {
 
     /// まだ 1 度も回っておらず、仕事も無い。
     pub def idle(): BackgroundJobs.Summary =
-        { lastTickAt = None, pendingSchedules = 0i64, failedSchedules = 0i64, pendingDeliveries = 0i64, failedDeliveries = 0i64 }
+        { lastTickAt = None, pendingSchedules = 0i64, failedSchedules = 0i64, pendingDeliveries = 0i64, failedDeliveries = 0i64,
+          overdueSchedules = 0i64, overdueDeliveries = 0i64 }
+
+    /// tick も部分も直前に回っている。起動は 0 ミリ秒、今は 100 秒、間隔は 2 秒（止まったと見なすのは 30 秒）。
+    pub def live(): Health.Liveness =
+        { now = 100000i64, startedAt = 0i64, jobsOn = true,
+          jobsIntervalMs = 2000i64, lastTickAt = Some(99000i64),
+          watchIntervalMs = 2000i64, lastWatchAt = Some(99000i64),
+          purgeOn = false, lastScheduleAt = Some(99000i64), lastWebhookAt = Some(99000i64), lastPurgeAt = Some(99000i64) }
 
     /// 上限 256 のうち 1 本（自分の /health）がつないでいる。
     pub def busy(): HttpServer.Connections =
@@ -21,7 +29,7 @@ mod HealthFake {
     ///
     pub def ok(): Health[{}] =
         { checkDb = _ -> Ok(()), jobsSummary = _ -> idle(), runJobs = _ -> Nil, connections = _ -> busy(), poolStats = _ -> pool(),
-          stall = _ -> None, heal = _ -> () }
+          liveness = _ -> live(), heal = _ -> () }
 
     ///
     /// checkDb が常に message の Err を返す。jobsSummary は checkDb の結果をそのまま受けた印に、届いていなければ件数を -1 にする（本物と同じ形）。
@@ -33,7 +41,7 @@ mod HealthFake {
     /// DB には届くが、仕事の tick が止まっている。
     ///
     pub def stalled(): Health[{}] =
-        { stall = _ -> Some(Health.Stall.Jobs(120000i64)) | ok() }
+        { liveness = _ -> { lastTickAt = None, lastScheduleAt = None, lastWebhookAt = None, lastPurgeAt = None | live() } | ok() }
 
     ///
     /// DB には届き tick も動いているが、接続が漏れてプールが張り付いている（10 本のうち 9 本が使われたまま）。

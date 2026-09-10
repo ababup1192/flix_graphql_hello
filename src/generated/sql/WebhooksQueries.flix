@@ -7,7 +7,7 @@ mod WebhooksQueries {
     ///
     /// 生成元 webhooks.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 1659694210
+    pub def sourceHash(): Int32 = -941292954
 
     ///
     /// insertWebhook の 1 行。
@@ -269,19 +269,20 @@ mod WebhooksQueries {
     ///
     /// countDeliveries の 1 行。
     ///
-    pub type alias CountDeliveriesRow = { pending = Option[Int64], failed = Option[Int64] }
+    pub type alias CountDeliveriesRow = { pending = Option[Int64], failed = Option[Int64], overdue = Option[Int64] }
 
     def countDeliveriesDecoder(): Decoder[CountDeliveriesRow] =
         forA (
             pending <- Decoder.opt(Decoder.int64("pending"));
-            failed <- Decoder.opt(Decoder.int64("failed"))
-        ) yield { pending = pending, failed = failed }
+            failed <- Decoder.opt(Decoder.int64("failed"));
+            overdue <- Decoder.opt(Decoder.int64("overdue"))
+        ) yield { pending = pending, failed = failed, overdue = overdue }
 
     ///
-    /// countDeliveries: SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending, count(*) FILTER (WHERE status = 'failed')::bigint AS failed FROM webhook_deliveries
+    /// countDeliveries: SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending, count(*) FILTER (WHERE status = 'failed')::bigint AS failed, count(*) FILTER (WHERE status = 'pending' AND next_attempt_at < now() - interval '60 seconds')::bigint AS overdue FROM webhook_deliveries
     ///
     pub def countDeliveries(): Option[CountDeliveriesRow] \ DbRead =
-        let sql = "SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending, count(*) FILTER (WHERE status = 'failed')::bigint AS failed FROM webhook_deliveries";
+        let sql = "SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending,\n           count(*) FILTER (WHERE status = 'failed')::bigint AS failed,\n           count(*) FILTER (WHERE status = 'pending' AND next_attempt_at < now() - interval '60 seconds')::bigint AS overdue\n    FROM webhook_deliveries";
         let params = Nil;
         RawSql.runWithAllow(() -> Sql.fetchOneAs(countDeliveriesDecoder(), sql, params))
 

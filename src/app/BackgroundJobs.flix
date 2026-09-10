@@ -28,6 +28,7 @@ mod BackgroundJobs {
     /// ワーカーの状態。/health と停止処理が読む。
     ///
     /// - lastTick: 最後に 1 tickが終わった時刻（UNIX ミリ秒）
+    /// - lastSchedule / lastWebhook / lastPurge: その部分が最後に失敗せずに通った時刻（UNIX ミリ秒）
     /// - lastWatch: watchのスレッドが最後に 1 tickを回した時刻（UNIX ミリ秒）
     /// - stopping: 停止が始まった。新しいtickを始めない
     /// - inTick: 1 tickの途中
@@ -39,10 +40,12 @@ mod BackgroundJobs {
     /// WhyNot: lastWatch を /health からの step で更新しないのは、この値が指すのは「watchのスレッドが生きているか」で、
     /// リクエストのスレッドが進めた事を混ぜると、死んだスレッドを生きていると読ませてしまうため。
     ///
-    pub type alias State = { lastTick = Ref[Option[Int64], Static], lastWatch = Ref[Option[Int64], Static], stopping = Ref[Bool, Static], inTick = Ref[Bool, Static], drainMs = Int64, purge = Option[PurgeTarget], http = HttpClient, scheduler = Scheduler.Config }
+    pub type alias State = { lastTick = Ref[Option[Int64], Static], lastWatch = Ref[Option[Int64], Static], stopping = Ref[Bool, Static], inTick = Ref[Bool, Static], drainMs = Int64, purge = Option[PurgeTarget], http = HttpClient, scheduler = Scheduler.Config,
+                             lastSchedule = Ref[Option[Int64], Static], lastWebhook = Ref[Option[Int64], Static], lastPurge = Ref[Option[Int64], Static] }
 
     pub def createState(drainSeconds: Int64, purge: Option[PurgeTarget], http: HttpClient, scheduler: Scheduler.Config): State \ IO =
-        { lastTick = Ref.fresh(Static, None), lastWatch = Ref.fresh(Static, None), stopping = Ref.fresh(Static, false), inTick = Ref.fresh(Static, false), drainMs = drainSeconds * 1000i64, purge = purge, http = http, scheduler = scheduler }
+        { lastTick = Ref.fresh(Static, None), lastWatch = Ref.fresh(Static, None), stopping = Ref.fresh(Static, false), inTick = Ref.fresh(Static, false), drainMs = drainSeconds * 1000i64, purge = purge, http = http, scheduler = scheduler,
+          lastSchedule = Ref.fresh(Static, None), lastWebhook = Ref.fresh(Static, None), lastPurge = Ref.fresh(Static, None) }
 
     ///
     /// 止まらずに回す。失敗はログに出して次のtickへ。停止が始まったら抜ける。tickごとに Log を sink で入れ直す（spawn の中なので Main の handler は届かない）。
@@ -253,12 +256,29 @@ mod BackgroundJobs {
             let scheduled = guardedPart("予約公開", () -> Scheduler.tickWith(state#scheduler, pool));
             let delivered = OutboundHttp.runWith(state#http, () -> guardedPart("Webhook", () -> WebhookDispatcher.tick(pool)));
             let purged = purgeTick(pool, state);
-            // lastTick（heartbeat）を更新し、inTick フラグを下ろす
-            Ref.put(Some(System.currentTimeMillis()), state#lastTick);
+            // 部分ごとの最終成功時刻と lastTick（heartbeat）を更新し、inTick フラグを下ろす
+            let at = System.currentTimeMillis();
+            markPart(state#lastSchedule, at, scheduled);
+            markPart(state#lastWebhook, at, delivered);
+            markPart(state#lastPurge, at, purged);
+            Ref.put(Some(at), state#lastTick);
             Ref.put(false, state#inTick);
             // 失敗した部分の説明だけを集める
             List#{ recovered |> Result.map(_ -> ()), scheduled |> Result.map(_ -> ()), delivered |> Result.map(_ -> ()), purged |> Result.map(_ -> ()) }
                 |> List.filterMap(outcome -> match outcome { case Ok(()) => None case Err(message) => Some(message) })
+        }
+
+    ///
+    /// 部分が通った（Ok）ときだけ、その部分の最終成功時刻を at にする。失敗なら据え置き（時刻が古いままになる）。
+    ///
+    /// WhyNot: 失敗した時に時刻を残さないのは、この値で見たいのが「その部分が例外で死んでいないか」だけのため。
+    /// 受け手が 500 を返し続けても Webhook の tick は Ok を返す（再試行に積むのが正しい振る舞い）ので、
+    /// 捌けているかは Summary の overdue で見る。
+    ///
+    pub def markPart(cell: Ref[Option[Int64], Static], at: Int64, outcome: Result[String, Int32]): Unit \ IO =
+        match outcome {
+            case Ok(_)  => Ref.put(Some(at), cell)
+            case Err(_) => ()
         }
 
     ///
@@ -272,9 +292,13 @@ mod BackgroundJobs {
     }
 
     ///
-    /// /health 用のまとめ。最終実行時刻と、待ち・失敗の件数。
+    /// /health 用のまとめ。最終実行時刻と、待ち・失敗・期限を過ぎた件数。
     ///
-    pub type alias Summary = { lastTickAt = Option[String], pendingSchedules = Int64, failedSchedules = Int64, pendingDeliveries = Int64, failedDeliveries = Int64 }
+    /// WhyNot: overdue を pending と別に持つのは、pending が未来の予約と再試行待ちを含み、
+    /// 溜まっている事が異常を意味しないため。捌けていないかは overdue でしか分からない。
+    ///
+    pub type alias Summary = { lastTickAt = Option[String], pendingSchedules = Int64, failedSchedules = Int64, pendingDeliveries = Int64, failedDeliveries = Int64,
+                               overdueSchedules = Int64, overdueDeliveries = Int64 }
 
     ///
     /// ワーカーのまとめ。dbReachable（/health の ping の結果）が false なら件数の SQL を出さず -1 にする。
@@ -297,8 +321,10 @@ mod BackgroundJobs {
         match counts {
             case Some((Some(schedules), Some(deliveries))) =>
                 { lastTickAt = lastTickAt, pendingSchedules = schedules#pending |> Option.getWithDefault(0i64), failedSchedules = schedules#failed |> Option.getWithDefault(0i64),
-                  pendingDeliveries = deliveries#pending |> Option.getWithDefault(0i64), failedDeliveries = deliveries#failed |> Option.getWithDefault(0i64) }
-            case _ => { lastTickAt = lastTickAt, pendingSchedules = -1i64, failedSchedules = -1i64, pendingDeliveries = -1i64, failedDeliveries = -1i64 }
+                  pendingDeliveries = deliveries#pending |> Option.getWithDefault(0i64), failedDeliveries = deliveries#failed |> Option.getWithDefault(0i64),
+                  overdueSchedules = schedules#overdue |> Option.getWithDefault(0i64), overdueDeliveries = deliveries#overdue |> Option.getWithDefault(0i64) }
+            case _ => { lastTickAt = lastTickAt, pendingSchedules = -1i64, failedSchedules = -1i64, pendingDeliveries = -1i64, failedDeliveries = -1i64,
+                        overdueSchedules = -1i64, overdueDeliveries = -1i64 }
         }
 
 }

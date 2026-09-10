@@ -2,140 +2,129 @@
 
 microCMS の [status.microcms.io](https://status.microcms.io/)（Atlassian Statuspage）に並ぶ物を出すための設計。
 
-## 目的と非目標
+## 自作の範囲
 
-**目的**: コンポーネントごとの生死と、過去 90 日の稼働率を出せる材料をこのリポジトリの中に用意する。
+**自作するのは内側の材料だけ。** 外形のプローブ・記録・90 日の集計・ページ・購読の配信・障害中のインシデント更新は SaaS（外形監視と Statuspage）に預ける。
 
-**非目標**: ページそのものをここで動かす事。**ステータスページを CMS と同じ compose・同じホストに置くと、障害のときに一緒に落ちて何も出せない。**
-置き場は外（Statuspage か、別系統の静的ホスティング）で、ここで作るのはそこへ流し込む値と規則だけ。置き場の決めは Step 5 まで遅らせる。
+**WhyNot: 外形と集計まで自作しない。** 多地点からのプローブ・区間のまとめ・メンテナンスウィンドウ・障害の最中にスマホから更新できる導線は、
+1 人で運営する規模（顧客 300 人まで）では作る側も回す側も持たない。[hosting-and-externalized-risk.md](hosting-and-externalized-risk.md) の「取り返しのつかない部分は専門のサービスに預ける」がそのまま当たる。
+**逆に SaaS には作れないのが「内側の材料」**（部分ごとの最終成功時刻・期限を過ぎた仕事の件数）で、ここだけが自作の値打ち。ページと無関係に、夜に自分が気付くための値としても効く。
+
+**WhyNot: ステータスページを CMS と同じ compose・同じホストに置かない。** 障害のときに一緒に落ちて何も出せない。
+同じ理由で、**外形のプローブも監視対象と別の障害ドメインで走らせる**（同居させると、ホストごと落ちる最悪の全断で記録も止まり、後述の「不明」に化けて**一番重い障害だけが稼働率から抜ける**）。
+
+## `/health` の位置付け
+
+**`/health` は障害の切り分け材料であって、稼働率の根拠にしない。**
+
+**WhyNot: `/health` の自己申告で稼働率を出さない。** `/health` が見ているのは「プロセスと DB が生きている」だけで、
+AGENTS.md が名指ししている事故（リゾルバのラムダに effect を直に書くと JVM の VerifyError になり、そのフィールドを選ぶ query でだけ出る）は `/health` を素通りして通ってしまう。
+**200 なのに壊れている、という一番よくある形を構造的に拾えない。** 稼働率は外形が実際に叩いた結果（`data` が返り `errors` が無い）だけで塗る。
 
 ## コンポーネントの割り
 
-microCMS の 6 行に対応させると、この実装ではこうなる。**内側（`/health`）で分かる行と、外形でしか分からない行がある。**
+行は**利用者の体感**で割る。microCMS の 6 行の写しにはしない。
 
-| ページの行 | 外形で叩く物 | 内側（`/health`）で見る物 |
+| 行 | 外形で叩く物 | `/health` の components |
 |---|---|---|
-| コンテンツ API | `GET/POST /graphql` | （API 共通の `api` 行） |
-| 管理 API | `POST /admin/graphql` | 同上 |
-| Account API | `POST /account/graphql` | 同上 |
-| メディア配信 | 配信 URL の GET | **見ない**（後述） |
-| Webhook | — | `webhook` 行 |
-| 予約投稿 | — | `schedule` 行 |
+| コンテンツ API | `POST /graphql` | — |
+| 管理 API・管理画面 | `POST /admin/graphql` | — |
+| メディア | 配信 URL の GET | — |
+| Webhook | — | `webhook` |
+| 公開反映（予約公開 + CDN purge） | — | `schedule` / `cdnPurge` |
 
-**WhyNot: コンテンツ API / 管理 API / Account API を `/health` で 3 行に割らない。** 3 つとも同じプロセスの同じ DB の上に載っていて、内側から見える壊れ方（DB に届かない・プールが張り付く）は 3 つに同時に効く。
-割った所で 3 行が必ず同じ色になり、精度が上がったように見えて実は何も増えない。**3 行の差は外形（実際にその経路を叩く）でしか出ない。**
-`/health` は API をまとめて `api` の 1 行として出し、ページの 3 行は外形の結果で塗る。
+- **Account API は管理 API の行へ畳む。** 利用者が直接叩く経路ではない（管理画面と PAT の発行）ので、単独で赤くしても顧客が何をすればいいか分からない行が増えるだけ。外形では叩くが、ページの行にはしない
+- **CDN purge を行にする。** 止まると「公開したのにサイトが古いまま」で、顧客が真っ先に問い合わせてくる形。予約公開と合わせて「公開反映」の 1 行にする
+- **メディアは配信とアップロードの両方**。配信経路は CDN + R2 でプロセスの外を通るので、内側からは分からない（imgix 由来で落ちた microCMS の 9/2 の障害と同じ形）。`/health` では見ない
 
-**WhyNot: メディア配信を `/health` で見ない。** 本番の配信経路は CDN + R2 でプロセスの外を通るので、内側から `ObjectStore.head` を打っても「配信できるか」は分からない（imgix 由来で落ちた microCMS の 9/2 の障害と同じ形）。
-加えて `/health` は外形監視が定期的に叩く先で、ここに外向きの HTTP を 1 本足すと、R2 が遅いときに `/health` 自身が遅くなる。**メディア配信は外形だけで見る。**
+**WhyNot: `/health` で API を行に割らない。** コンテンツ / 管理 / Account は同じプロセスの同じ DB の上で、内側から見える壊れ方は 3 つに同時に効く。割っても必ず同じ色になる。
 
-## ステータスの段
+## 稼働率の定義（コードを書く前に固める）
 
-Statuspage は 4 段。`/health` は今 3 段（`ok` / `degraded` / 503 の `error`）で、これは外形監視と Docker の HEALTHCHECK が既に依っているので**意味を変えない**。行ごとの段は追加で出す。
+後から自分に都合よく曲がらないよう、先に決める。
 
-| ページの段 | この実装での判定 |
-|---|---|
-| Operational | その行に異常なし |
-| Degraded Performance | 動いてはいるが余裕が無い（プール 9 割以上の張り付き = 今の `degraded`） |
-| Partial Outage | その行だけ止まっている（Webhook の tick だけ止まった、など） |
-| Major Outage | DB に届かない・プロセスが応答しない（全行に効く） |
+| 決め | 値 | 理由 |
+|---|---|---|
+| 分母 | 記録がある時間だけ。**「不明」の割合をページに併記する** | 不明を分母から外せば嘘の 100%、含めれば嘘の大障害。どちらにも倒さず、不明のまま出す |
+| 表示する期間 | **「記録開始日からの n 日」**。90 日貯まるまで「過去 90 日」と書かない | 記録の無い期間を遡って白く塗らない |
+| degraded | **外形が失敗として観測した分は稼働率に数える** | プールが張り付いている間のリクエストは借り待ち 2 秒の後 INTERNAL に落ちている（利用者にとっては失敗）。内側の `pool` の割合は原因の注釈にだけ使う |
+| 計画停止 | 宣言したウィンドウは除外し、**除外した時間をページに明示** | 単一ホストの再起動は数十秒。無宣言なら記録する |
+| ダウンの区間 | 検知は連続 2 回の失敗、ただし**区間の開始は最初の失敗に戻す** | 1 回の取りこぼしで割らせない。同じ再起動が位相次第で 0 分にも 2 分にもなるのを防ぐ |
+| 復旧 | 連続 2 回の成功 | 1 回で戻すと、self-heal の再起動ループ（exit 3 の繰り返し）が毎回「1 回失敗」で消える |
+| フラッピング | 24 時間で n 回以上の単発失敗を別に集計して区間に出す | 短周期の断が全部消えるのを防ぐ |
 
-## Step 1: 部分ごとの最終成功時刻
+**インシデントは SaaS の UI を正**とし、リポジトリの JSON は事後の記録に限る。障害は深夜・移動中・自分の回線側からも来るので、git push が要る導線を正にすると「Major Outage のまま無言」になる。
 
-**問題**: `BackgroundJobs.State#lastTick` は tick 1 周（回復 → 予約公開 → Webhook → CDN purge）で 1 本しかない。
-`guardedPart` が部分ごとに失敗を捕まえてはいるが、その結果はログに流すだけで残らないので、「Webhook だけ止まっている」を行として出せない。
+## Step 1: 期限を過ぎた仕事を数える
 
-**やる事**: `State` に部分ごとの最終成功時刻を 3 本足す。
+**問題**: `countSchedules` の `pending` は `status = 'pending'` の総数で、**まだ時刻が来ていない予約も含む**（`queries/schedules.q:67`）。`countDeliveries` の `pending` も再試行待ちを含む。
+どちらも「溜まっている＝異常」ではないので、行の色を決められない。
 
-```
-lastSchedule = Ref[Option[Int64], Static]
-lastWebhook  = Ref[Option[Int64], Static]
-lastPurge    = Ref[Option[Int64], Static]
-```
+**やる事**: 既存の 2 つの query に `overdue` の列を足す。**新しい query を作らない**（`/health` は 10 秒ごとに叩かれる〔`Dockerfile:37`〕ので、往復を増やさない。同じ `SELECT` に `FILTER` を 1 本足すだけなら増えない）。
 
-`tick` の中で、その部分が `Ok` を返したときだけ更新する。`Err`（失敗・例外）なら据え置き、つまり時刻が古いままになる = 止まっている。
-CDN purge は送り先が無ければ何もしない（`Ok(0)`）ので、送り先が `None` のときは行そのものを出さない。
+- `scheduled_actions` … `status = 'pending' AND run_at < now() - interval '60 seconds'`（列は `run_at`。索引 `(status, run_at)` に乗る）
+- `webhook_deliveries` … `status = 'pending' AND next_attempt_at < now() - interval '60 seconds'`
 
-**判定は既存の `Health.stallLimitMs` を使い回す**（間隔の 3 倍、下限 30 秒）。新しい閾値を作らない。
+60 秒は tick の間隔（既定 2 秒）と 1 tick の伸び（`jobs tick slow` の閾値 15 秒）に対する余裕。ここが 0 より大きい状態が続く = ワーカーは回っているのに捌けていない → **Degraded**。
 
-## Step 2: 予約投稿の「遅れ」を数える
+## Step 2: 部分ごとの最終成功時刻（補助）
 
-**問題**: `countSchedules` の `pending` は `status = 'pending'` の総数で、**まだ公開時刻が来ていない予約も含む**。`countDeliveries` の `pending` も再試行待ちを含む。
-どちらも「溜まっている＝異常」ではないので、このままでは行の色を決められない。
+`BackgroundJobs.State#lastTick` は tick 1 周（回復 → 予約公開 → Webhook → CDN purge）で 1 本しかないので、`State` に部分ごとの時刻を 3 本足す。`tick` の中でその部分が `Ok` を返したときだけ更新する。
 
-**やる事**: 期限を過ぎた物だけを数える query を足す（`make gen`）。
+**WhyNot: これを行の色の主軸にしない。** `WebhookDispatcher.tick` も `Scheduler.tickWith` も、**`Err` を返すのは DB の失敗と例外だけ**で、受け手が 500 を返し続けても `Ok` を返す（再試行に積むのが正しい振る舞いなので）。
+つまり 3 本の時刻は DB が落ちれば揃って古くなり、差が出るのは片方だけで例外が飛んだときに限られる。**主軸は Step 1 の `overdue`、時刻は「その部分が例外で死んでいる」を拾う補助。**
 
-- `countOverdueSchedules` … `status = 'pending' AND scheduled_at < now() - interval`
-- `countOverdueDeliveries` … `status = 'pending' AND next_attempt_at < now() - interval`
-
-`interval` は tick の間隔と回復の猶予を足した幅。ここが 0 より大きい状態が続く = ワーカーは回っているのに捌けていない → **Degraded Performance**。
-`Summary` には既存の `pending` / `failed` を残したまま `overdue` を足す（`/health` の既存のキーを消さない）。
+判定は既存の `Health.stallLimitMs`（間隔の 3 倍、下限 30 秒）を使い回す。新しい閾値を作らない。
 
 ## Step 3: `/health` に components を足す
 
-`Server.healthBody` に `components` を足す。**既存のキー（`status` / `version` / `jobs` / `connections` / `pool` / `reason` / `db`）と HTTP の status code は据え置き。追加だけ。**
+`Server.healthBody` に `components` を足す。**既存のキー（`status` / `version` / `jobs` / `connections` / `pool` / `reason` / `db`）と HTTP の status code は据え置き、追加だけ。**
 
 ```json
 "components": {
-  "api":      {"status": "operational"},
-  "schedule": {"status": "operational", "lastSuccessAt": "..."},
-  "webhook":  {"status": "partial_outage", "lastSuccessAt": "...", "reason": "webhook stalled"}
+  "webhook":  {"status": "operational"},
+  "schedule": {"status": "degraded", "reason": "schedule behind (3)"},
+  "cdnPurge": {"status": "partial_outage", "reason": "cdnPurge stalled"}
 }
 ```
 
-判定は `Health` の純粋関数に置く（`Server` には組み立てだけ）。
+判定は `Health` の純粋関数に置き（`Server` は組み立てだけ）、`Health[ef]` の `stall` を `liveness` に差し替えて**生死の入力を 1 本にまとめる**。
+`Server` は `Health.stalled(live)` で今までどおりの 3 段を出し、同じ `live` から `componentLevels` を出す。
 
 ```
-pub enum Level { Operational, Degraded, PartialOutage, MajorOutage }
-pub def componentLevels(input: ComponentInput): List[(String, Level, Option[String])]
+pub enum Level with Eq, ToString { case Operational, Degraded, PartialOutage, MajorOutage }
+pub def levelJson(level: Level): String          // "operational" / "degraded" / …
+pub def componentLevels(live: Liveness, summary: Summary, dbOk: Bool, saturation: Option[Int32]): List[(String, Level, Option[String])]
 ```
 
-`ComponentInput` は `checkDb` の結果・`stall`・`saturation`・部分ごとの最終成功時刻・`overdue` の件数をまとめた値。
-**入力が全部値なので表駆動でテストできる**（`TestHealth` の既存の書き方をそのまま）。実装より先にテストの表を書く。
+`Liveness` に `purgeOn` と部分ごとの最終成功時刻 3 本を足す。**`now` / `startedAt` / `jobsOn` は既に `Liveness` にあり**、まだ 1 度も回っていない tick を起動からの経過で見る扱い（`elapsedOver`）もそのまま使える。
 
 判定の順（強い物が勝つ）:
 
-1. DB に届かない → 全行 `major_outage`
-2. その行の最終成功時刻が `stallLimitMs` を超えている → その行だけ `partial_outage`
-3. その行の `overdue` が 0 より大きい → `degraded`
-4. プールが 9 割以上 → `api` が `degraded`
+1. `dbOk` が false → 全行 `major_outage`
+2. `jobsOn` が false → 仕事の行を**出さない**（このプロセスは回していない）。`cdnPurge` は送り先が無ければ同じく出さない
+3. その部分の最終成功時刻が `stallLimitMs` を超えている → その行だけ `partial_outage`
+4. その部分の `overdue` が 0 より大きい → `degraded`
 5. それ以外 → `operational`
 
-## Step 4: 外形プローブと置き場
+**入力が全部値なので表駆動でテストできる**（`TestHealth` の既存の書き方）。実装より先にテストの表を書く。
 
-ページの 6 行を外から叩く。**Step 3 まで済んでいれば `/health` の 1 発で内側の 3 行が取れる**ので、プローブが叩くのは 4 つ。
+**壊れる物**（先に把握しておく）:
 
-| 叩く先 | 見る物 |
-|---|---|
-| `POST /graphql` | 軽い query が 200 で返るか |
-| `POST /admin/graphql` | 同上 |
-| `POST /account/graphql` | 同上 |
-| 配信 URL | 既知のオブジェクトが 200 で返るか |
-| `GET /health` | `components`（schedule / webhook / api） |
+- `test/app/TestServer.flix:307` と `:319` は `/health` の本文を**丸ごと**比較しているので、`components` を足した時点で落ちる。期待値に書き足す（出す / 出さないの切替は入れない）
+- `deploy/README.md:228` の外形監視の条件は「応答本文に `"status":"ok"` が含まれる事」。`components` の中に `"status": "operational"` が並ぶので、**「トップレベルの `status`」と書き換える**
+- `Health[ef]` の `stall` → `liveness` で `ofPool`（`Health.flix:132`）と `HealthFake`（`ok` / `stalled`）が波及
 
-**残っていた閾値の決め**（推し値。実測で動かす）:
+## Step 4 以降（SaaS 側）
 
-| 閾値 | 値 | 理由 |
-|---|---|---|
-| 叩く間隔 | 60 秒 | 90 日で 1 行あたり 13 万点。1 行 1 JSON でも数十 MB に収まる |
-| ダウンとみなす | 連続 2 回失敗 | 1 回の取りこぼしで 90 日の稼働率を割らせない。検知は最大 2 分遅れる |
-| degraded の扱い | 稼働率に数えず、別に「degraded だった時間」を出す | 稼働率が「落ちていた割合」の意味を保てる |
-| 復旧とみなす | 1 回の成功 | 落ちる側は慎重に、戻る側は速く |
+1. 外形監視の SaaS を契約し、**別の障害ドメインから** 4 経路（コンテンツ / 管理 / メディアの配信 / `/health`）を叩き始める。記録が貯まらないと閾値は永遠に推し値のまま
+2. 上の「稼働率の定義」でメンテナンスウィンドウと除外を設定する
+3. ページの公開は記録が 30 日貯まってから。「記録開始日からの n 日」で出す
 
-**置き場**: プローブの結果は 1 行 1 JSON の追記ファイル。CMS の DB に入れない（**DB が落ちている間こそ書きたい記録なので、DB に置くと肝心なときに書けない**）。
-
-## Step 5: 稼働率とページ
-
-プローブの記録から「過去 90 日の稼働率」と「ダウンだった区間」を出す純粋な規則。ここもテストファースト。
-
-- 連続 n 回の失敗をダウンの区間にまとめる
-- 記録が無い時間（プローブ自体が止まっていた）の扱い — **稼働率 100% に数えない。「不明」として区間に出す**
-- 期間の端の切り方、分単位の丸め
-
-インシデントは Statuspage の形（id・影響コンポーネント・段階 investigating → identified → monitoring → resolved・更新の列）に合わせた JSON でリポジトリに置く。
-自前ページにしても Statuspage を契約しても、そのまま流し込める。メール・Slack の購読は配信基盤が要るので SaaS 側に寄せる。
+自前の集計とページは、SaaS で足りないと実際に困ってから。今は着手しない。
 
 ## 順
 
-Step 1 → 2 → 3 が in-repo で完結し、`make test`（DB 無し）で確かめられる。4 と 5 は置き場の決めが要るので後。
-**3 まで済むと、外形と稼働率の閾値を実測で決められる**（今は推し値しか出せない）。
+Step 1 → 2 → 3。3 まで済むと外形の閾値を実測で決められる。
+Step 1 は `make gen` が要り、Ref の更新規則は `Pool` を握るので `make test`（DB 無し）では回らない（`test/Pg/` 行き）。
+**DB 無しで回せるのは `componentLevels` と `summaryOf` と「`Ok` のときだけ更新」を切り出した関数**なので、その 3 つを表駆動で押さえる。

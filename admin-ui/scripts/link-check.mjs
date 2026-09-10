@@ -164,6 +164,52 @@ try {
     fail("乗せた候補が選択位置になる", `候補が ${await all.count()} 件しかありません`);
   }
 
+  // 6. URL とコンテンツの見分けが付く（5 の面を開いたまま使う）
+  await page.locator(".tt-link-input").fill("");
+  await page.waitForTimeout(900);
+  check(
+    (await page.locator(".tt-link-head").allTextContents()).join("/") === "コンテンツ",
+    "コンテンツだけの時は見出しが 1 つ",
+    (await page.locator(".tt-link-head").allTextContents()).join("/")
+  );
+  const shown = await page.locator(".tt-link-item").count();
+  check(shown <= 8, "候補は 8 件までしか出さない", `${shown} 件`);
+  const more = page.locator(".tt-link-more");
+  if ((await more.count()) === 1) {
+    await more.click();
+    await page.waitForTimeout(300);
+    check((await page.locator(".tt-link-item").count()) > shown, "もっと見るで残りが出る", `${shown} 件のまま`);
+  } else {
+    note("候補が 8 件以下なので「もっと見る」は出ない");
+  }
+  const stages = await page.evaluate(() =>
+    Array.from(document.querySelectorAll(".tt-link-item:not(.is-url) .tt-link-kind")).map((el) => el.textContent ?? "")
+  );
+  check(
+    stages.every((kind) => /（?(下書き|公開中)/.test(kind) || kind.includes("下書き") || kind.includes("公開中")),
+    "候補に公開の状態が出る",
+    JSON.stringify(stages).slice(0, 200)
+  );
+  check(
+    (await page.locator(".tt-link-item:not(.is-url) .tt-link-icon svg").count()) > 0,
+    "候補の行に印が出る"
+  );
+
+  await page.locator(".tt-link-input").fill("https://example.com/z");
+  await page.waitForTimeout(700);
+  check(
+    (await page.locator(".tt-link-head").first().textContent()) === "URL",
+    "URL を打つと URL の見出しが先頭に出る",
+    (await page.locator(".tt-link-head").allTextContents()).join("/")
+  );
+  check(
+    (await page.locator(".tt-link-item.is-url .tt-link-kind").textContent()) === "外部のページ",
+    "URL の行は外部のページと出る",
+    (await page.locator(".tt-link-item.is-url .tt-link-kind").textContent()) ?? ""
+  );
+  await page.locator(".tt-link-input").fill("");
+  await page.waitForTimeout(800);
+
   // 6. 長い題で折り返さない・種類が出る
   for (const width of [1440, 768]) {
     await page.setViewportSize({ width, height: 900 });

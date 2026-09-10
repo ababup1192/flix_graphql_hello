@@ -25,7 +25,7 @@ mod Server {
     ///
     /// - POST /graphql, /admin/graphql, /account/graphql: ボディ {"query": "...", "variables": {...}, "operationName": "..."} を実行して {"data": ..., "errors": [...]} を返す
     /// - GET /graphql, /admin/graphql ?query=...&variables=...&operationName=...: query だけ（mutation は 405）。コンテンツ API は身元無しなら Cache-Control と ETag で CDN に乗せられ、If-None-Match が合えば 304
-    /// - GET /health: DB に届けば 200、届かなければ 503。プールが張り付いていれば 200 のまま status が degraded。jobs にワーカーの最終実行時刻と待ち・失敗の件数（数えられなければ -1）
+    /// - GET /health: DB に届けば 200、届かなければ 503。プールが張り付いていれば 200 のまま status が degraded。jobs にワーカーの最終実行時刻と待ち・失敗・期限を過ぎた件数（数えられなければ -1）、components に行ごとの段
     /// - POST /jobs/tick: 外部トリガー。X-Jobs-Token が設定と一致すればワーカーを 1 tick回す（無ければ 404）
     /// - POST /mcp: MCP サーバ（JSON-RPC。tools だけ）。管理 API のエンジンへの GraphQL クライアントとして動く
     ///
@@ -128,7 +128,7 @@ mod Server {
         }
 
     ///
-    /// GET /health。DB に届けば {"status": "ok", "version": "...", "jobs": {"lastTickAt": ...}, "connections": {"active": 1, "max": 256}, "pool": {"active": 1, ...}}、届かなければ 503 で理由を付ける。
+    /// GET /health。DB に届けば {"status": "ok", "version": "...", "jobs": {"lastTickAt": ...}, "connections": {"active": 1, "max": 256}, "pool": {"active": 1, ...}, "components": {"api": {"status": "operational"}, ...}}、届かなければ 503 で理由を付ける。
     /// DB に届いても、仕事のtickかwatchのtickが止まっていれば 503 で reason（`jobs stalled` / `watch stalled`）を付ける。
     /// DB に届いてtickも動いていて、DB の接続プールだけが張り付いていれば 200 のまま status を degraded にして reason（`pool saturated (…%)`）を付ける。
     /// connections は HTTP の接続、pool は DB の接続プール（別の物）。
@@ -145,7 +145,8 @@ mod Server {
         let db = (health#checkDb)();
         (health#heal)(db);
         // 仕事の tick と watch が止まっていないか（stall）。止まっていればリクエストの行に経過を積む
-        let stall = (health#stall)();
+        let live = (health#liveness)();
+        let stall = Health.stalled(live);
         Option.forEach(found -> Observe.note(Log.Fields.empty() |> Log.Fields.int(Health.stallKey(found), Health.stallMs(found))), stall);
         // 本文に出す値（ワーカーのまとめ・HTTP の接続数・DB のプール）を読む。DB に届いていなければ件数は数えない
         let summary = (health#jobsSummary)(db);
@@ -157,13 +158,13 @@ mod Server {
         // status を ok から外す理由（DB に届かない・止まった tick・プールの張り付き）をリクエストの行にも
         Option.forEach(reason -> Observe.note(Log.Fields.empty() |> Log.Fields.str("reason", reason)), healthReason(db, stall, saturation));
         // status と理由を足して応答にする
-        healthResponse(healthBody(version, summary, connected, stats), db, stall, saturation)
+        healthResponse(healthBody(version, summary, connected, stats, Health.componentLevels(live, summary, Result.isOk(db), saturation)), db, stall, saturation)
 
     ///
-    /// /health の本文のうち、status 以外の部分（version / jobs / connections / pool）を組む。
+    /// /health の本文のうち、status 以外の部分（version / jobs / connections / pool / components）を組む。
     /// 件数は Int32 に収める（数えられなかった -1 はそのまま）。
     ///
-    def healthBody(version: String, summary: BackgroundJobs.Summary, connected: HttpServer.Connections, stats: Pool.PoolStats): Map[String, Value] =
+    def healthBody(version: String, summary: BackgroundJobs.Summary, connected: HttpServer.Connections, stats: Pool.PoolStats, components: List[(String, Health.Level, Option[String])]): Map[String, Value] =
         let connections = Value.Obj(Map#{ "active" => Value.Int(connected#active), "max" => Value.Int(connected#max) });
         let pool = Value.Obj(Map#{
             "active" => Value.Int(stats#active), "idle" => Value.Int(stats#idle), "waiting" => Value.Int(stats#waiting),
@@ -173,8 +174,21 @@ mod Server {
             "pendingSchedules" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#pendingSchedules)),
             "failedSchedules" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedSchedules)),
             "pendingDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#pendingDeliveries)),
-            "failedDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedDeliveries)) });
-        Map#{ "version" => Value.Str(version), "jobs" => jobs, "connections" => connections, "pool" => pool }
+            "failedDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#failedDeliveries)),
+            "overdueSchedules" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#overdueSchedules)),
+            "overdueDeliveries" => Value.Int(Int64.clampToInt32(min = -1, max = 2147483647, summary#overdueDeliveries)) });
+        Map#{ "version" => Value.Str(version), "jobs" => jobs, "connections" => connections, "pool" => pool, "components" => componentsJson(components) }
+
+    ///
+    /// components の JSON。行ごとに段と、段が operational でなければ理由。
+    ///
+    def componentsJson(components: List[(String, Health.Level, Option[String])]): Value =
+        components
+            |> List.map(match (name, level, reason) ->
+                let fields = Map#{ "status" => Value.Str(Health.levelJson(level)) };
+                (name, Value.Obj(reason |> Option.map(text -> Map.insert("reason", Value.Str(text), fields)) |> Option.getWithDefault(fields))))
+            |> List.toMap
+            |> Value.Obj
 
     ///
     /// /health の status を ok から外す理由。DB に届かなければその文言、届いていて tick が止まっていれば `jobs stalled` / `watch stalled`、

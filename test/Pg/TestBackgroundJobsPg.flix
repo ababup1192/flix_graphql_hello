@@ -41,7 +41,7 @@ mod TestBackgroundJobsPg {
 
     ///
     /// 掃除は終わった記録（done / failed / cancelled、delivered / failed）で keepDays より古い物だけ消す。
-    /// 古くても pending は残り、終わっていても新しい物は残る。/health のまとめは残った物を数える。
+    /// 古くても pending は残り、終わっていても新しい物は残る。/health のまとめは残った物を数え、期限を過ぎた分（overdue）は別に数える。
     ///
     ///   予約  s1: done 40 日前 → 消える   s2: pending 40 日前 → 残る   s3: cancelled 10 日前 → 残る
     ///   配信  d1: delivered 40 日前 → 消える   d2: pending 40 日前（次の送信は明日）→ 残る   d3: failed 10 日前 → 残る
@@ -68,9 +68,12 @@ mod TestBackgroundJobsPg {
             (failures,
              scheduleIds(pool) == List#{s2, s3},
              deliveryIds(pool, webhookId) == List#{d2, d3},
-             (summary#pendingSchedules, summary#failedSchedules, summary#pendingDeliveries, summary#failedDeliveries, Option.nonEmpty(summary#lastTickAt)))
+             (summary#pendingSchedules, summary#failedSchedules, summary#pendingDeliveries, summary#failedDeliveries, Option.nonEmpty(summary#lastTickAt)),
+             // 期限を過ぎた物は無い（残った pending はどちらも未来）。部分ごとの最終成功時刻は 1 tick で全部埋まる
+             (summary#overdueSchedules, summary#overdueDeliveries,
+              Option.nonEmpty(Ref.get(jobs#lastSchedule)), Option.nonEmpty(Ref.get(jobs#lastWebhook)), Option.nonEmpty(Ref.get(jobs#lastPurge))))
         });
-        Assert.assertEq(expected = (Nil, true, true, (1i64, 0i64, 1i64, 1i64, true)), outcome)
+        Assert.assertEq(expected = (Nil, true, true, (1i64, 0i64, 1i64, 1i64, true), (0i64, 0i64, true, true, true)), outcome)
 
     ///
     /// 送っている最中に落ちた配信（sending のまま claimed_at が古い）は tick の回復で pending に戻り、同じ tick の dispatcher が送り直す

@@ -421,6 +421,29 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 .tt-link-item.is-url .tt-link-kind { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tt-link-title { flex: 1; color: var(--color-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tt-link-kind { color: var(--color-ink-faint); font-size: 10px; }
+/* 行の頭の印。外部か、この CMS のコンテンツか。 */
+.tt-link-icon { flex: 0 0 auto; display: flex; color: var(--color-ink-faint); }
+.tt-link-item.is-url .tt-link-icon { color: var(--color-link); }
+/* 種類の見出し。**1 本の欄でも、どちらを選ぼうとしているかを目で分ける。** */
+.tt-link-head {
+  padding: 6px 8px 2px;
+  color: var(--color-ink-faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.tt-link-more {
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-link);
+  font-size: 11px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tt-link-more:hover { background: var(--color-well); }
 .tt-link-note { padding: 8px; color: var(--color-ink-faint); font-size: 11px; }
 .tt-link-bottom { display: flex; padding: 0 8px 8px; }
 .tt-link-drop {
@@ -559,7 +582,7 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 /* WhyNot: 縦にも縮ませない。**overflow: hidden を付けると縦の最小の高さも 0 になる**ので、
    候補が 10 件を超えると 1 行 10px に潰れて字が切れた（実際に切れた）。入る分だけ出して
    残りは中で流す。 */
-.tt-link-item { min-width: 0; overflow: hidden; flex: 0 0 auto; }
+.tt-link-item { min-width: 0; overflow: hidden; flex: 0 0 auto; align-items: center; }
 .tt-link-title { min-width: 0; }
 .tt-link-kind { flex: 0 0 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

@@ -60,20 +60,33 @@ mod TestBackgroundJobs {
             expected = List#{(Log.Severity.Info, "ping", false), (Log.Severity.Error, "watch failed", true)},
             Ref.get(records) |> List.reverse |> List.map(record -> (record#severity, record#message, Map.memberOf("error.message", record#fields))))
 
+    ///
+    /// 部分ごとの最終成功時刻: 通った（Ok）部分だけ今の時刻になり、失敗した部分は古いまま残る。
+    ///
+    @Test
+    def testMarkPartKeepsFailedPartOld(): Unit \ {Assert, IO} =
+        let cells = List#{ Ok(1), Err("配信を拾えません"), Ok(0) } |> List.map(outcome -> {
+            let cell = Ref.fresh(Static, Some(10i64));
+            BackgroundJobs.markPart(cell, 99i64, outcome);
+            Ref.get(cell)
+        });
+        Assert.assertEq(expected = List#{ Some(99i64), Some(10i64), Some(99i64) }, cells)
+
     /// /health の jobs のまとめ: 件数の行がそろえば数字（無い値は 0）、数えなかった・数えられなかった（DB に届かない）なら -1。lastTickAt は ISO 8601。
+    /// overdue は期限を過ぎた pending の数で、pending とは別に運ぶ。
     @Test
     def testSummaryOfTable(): Unit \ Assert =
-        let counted = Some((Some({ pending = Some(2i64), failed = None }), Some({ pending = None, failed = Some(1i64) })));
+        let counted = Some((Some({ pending = Some(2i64), failed = None, overdue = Some(1i64) }), Some({ pending = None, failed = Some(1i64), overdue = None })));
         let cases = List#{
-            ((Some(0i64), counted), (Some("1970-01-01T00:00:00Z"), 2i64, 0i64, 0i64, 1i64)),
-            ((None, None),          (None, -1i64, -1i64, -1i64, -1i64)),
-            ((None, Some((None, None))), (None, -1i64, -1i64, -1i64, -1i64))
+            ((Some(0i64), counted), (Some("1970-01-01T00:00:00Z"), 2i64, 0i64, 0i64, 1i64, 1i64, 0i64)),
+            ((None, None),          (None, -1i64, -1i64, -1i64, -1i64, -1i64, -1i64)),
+            ((None, Some((None, None))), (None, -1i64, -1i64, -1i64, -1i64, -1i64, -1i64))
         };
         Assert.assertEq(
             expected = cases |> List.map(snd),
             cases |> List.map(match ((lastTick, counts), _) -> {
                 let summary = BackgroundJobs.summaryOf(lastTick, counts);
-                (summary#lastTickAt, summary#pendingSchedules, summary#failedSchedules, summary#pendingDeliveries, summary#failedDeliveries)
+                (summary#lastTickAt, summary#pendingSchedules, summary#failedSchedules, summary#pendingDeliveries, summary#failedDeliveries, summary#overdueSchedules, summary#overdueDeliveries)
             }))
 
     /// 2 秒の周期で、1 周に掛かった時間を引いた分だけ待つ。周期を超えた周（DB が詰まった時）の後は待たない。

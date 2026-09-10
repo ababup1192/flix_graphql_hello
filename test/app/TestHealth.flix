@@ -7,7 +7,8 @@ mod TestHealth {
     def live(lastTickAt: Option[Int64], lastWatchAt: Option[Int64]): Health.Liveness =
         { now = 100000i64, startedAt = 0i64, jobsOn = true,
           jobsIntervalMs = 2000i64, lastTickAt = lastTickAt,
-          watchIntervalMs = 2000i64, lastWatchAt = lastWatchAt }
+          watchIntervalMs = 2000i64, lastWatchAt = lastWatchAt,
+          purgeOn = true, lastScheduleAt = lastTickAt, lastWebhookAt = lastTickAt, lastPurgeAt = lastTickAt }
 
     /// 秒を UNIX ミリ秒に。
     def at(seconds: Int64): Option[Int64] = Some(seconds * 1000i64)
@@ -105,6 +106,78 @@ mod TestHealth {
         Assert.assertEq(
             expected = cases |> List.map(snd),
             cases |> List.map(match ((db, stall, saturation), _) -> Server.healthReason(db, stall, saturation)))
+
+    /// tick も部分も直前に通っていて、CDN の purge の送り先もある。
+    def alive(): Health.Liveness = live(at(99i64), at(99i64))
+
+    /// 期限を過ぎた件数だけを変えた jobs のまとめ。
+    def behind(schedules: Int64, deliveries: Int64): BackgroundJobs.Summary =
+        { lastTickAt = None, pendingSchedules = 0i64, failedSchedules = 0i64, pendingDeliveries = 0i64, failedDeliveries = 0i64,
+          overdueSchedules = schedules, overdueDeliveries = deliveries }
+
+    /// 行の名前と段と理由。
+    def levels(live: Health.Liveness, summary: BackgroundJobs.Summary, dbOk: Bool, saturation: Option[Int32]): List[(String, Health.Level, Option[String])] =
+        Health.componentLevels(live, summary, dbOk, saturation)
+
+    ///
+    /// Health.componentLevels: ステータスページの行ごとの段。DB に届かなければ全行が落ち、
+    /// 部分が止まっていればその行だけ partial_outage、捌けていなければ degraded。
+    ///
+    @Test
+    def testComponentLevelsTable(): Unit \ Assert =
+        let cases = List#{
+            // 全部順調
+            ((alive(), behind(0i64, 0i64), true, None),
+             List#{("api", Health.Level.Operational, None), ("schedule", Health.Level.Operational, None),
+                   ("webhook", Health.Level.Operational, None), ("cdnPurge", Health.Level.Operational, None)}),
+            // DB に届かない: 全行が major_outage
+            ((alive(), behind(0i64, 0i64), false, None),
+             List#{("api", Health.Level.MajorOutage, Some("db unreachable")), ("schedule", Health.Level.MajorOutage, Some("db unreachable")),
+                   ("webhook", Health.Level.MajorOutage, Some("db unreachable")), ("cdnPurge", Health.Level.MajorOutage, Some("db unreachable"))}),
+            // プールが張り付いているのは api だけの話
+            ((alive(), behind(0i64, 0i64), true, Some(95)),
+             List#{("api", Health.Level.Degraded, Some("pool saturated (95%)")), ("schedule", Health.Level.Operational, None),
+                   ("webhook", Health.Level.Operational, None), ("cdnPurge", Health.Level.Operational, None)}),
+            // Webhook の部分だけ 40 秒古い（例外で死んでいる）
+            (({ lastWebhookAt = at(60i64) | alive() }, behind(0i64, 0i64), true, None),
+             List#{("api", Health.Level.Operational, None), ("schedule", Health.Level.Operational, None),
+                   ("webhook", Health.Level.PartialOutage, Some("webhook stalled")), ("cdnPurge", Health.Level.Operational, None)}),
+            // 回ってはいるが予約が 3 件、配信が 1 件、期限を過ぎたまま残っている
+            ((alive(), behind(3i64, 1i64), true, None),
+             List#{("api", Health.Level.Operational, None), ("schedule", Health.Level.Degraded, Some("schedule behind (3)")),
+                   ("webhook", Health.Level.Degraded, Some("webhook behind (1)")), ("cdnPurge", Health.Level.Operational, None)}),
+            // 止まっている方が、捌けていないより強い
+            (({ lastWebhookAt = at(60i64) | alive() }, behind(0i64, 5i64), true, None),
+             List#{("api", Health.Level.Operational, None), ("schedule", Health.Level.Operational, None),
+                   ("webhook", Health.Level.PartialOutage, Some("webhook stalled")), ("cdnPurge", Health.Level.Operational, None)}),
+            // CDN の purge の送り先が無ければ、その行は出さない
+            (({ purgeOn = false | alive() }, behind(0i64, 0i64), true, None),
+             List#{("api", Health.Level.Operational, None), ("schedule", Health.Level.Operational, None),
+                   ("webhook", Health.Level.Operational, None)}),
+            // 仕事を回さないプロセス（CMS_JOBS=off）は api だけ
+            (({ jobsOn = false | alive() }, behind(0i64, 0i64), true, None),
+             List#{("api", Health.Level.Operational, None)}),
+            // まだ 1 度も回っていない（起動から 100 秒）
+            (({ lastScheduleAt = None, lastWebhookAt = None, lastPurgeAt = None | alive() }, behind(0i64, 0i64), true, None),
+             List#{("api", Health.Level.Operational, None), ("schedule", Health.Level.PartialOutage, Some("schedule stalled")),
+                   ("webhook", Health.Level.PartialOutage, Some("webhook stalled")), ("cdnPurge", Health.Level.PartialOutage, Some("cdnPurge stalled"))})
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd),
+            cases |> List.map(match ((live, summary, dbOk, saturation), _) -> levels(live, summary, dbOk, saturation)))
+
+    /// 段は JSON の語になる（Statuspage の 4 段と同じ並び）。
+    @Test
+    def testLevelJsonTable(): Unit \ Assert =
+        let cases = List#{
+            (Health.Level.Operational,   "operational"),
+            (Health.Level.Degraded,      "degraded"),
+            (Health.Level.PartialOutage, "partial_outage"),
+            (Health.Level.MajorOutage,   "major_outage")
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(snd),
+            cases |> List.map(match (level, _) -> Health.levelJson(level)))
 
     /// 止まった tick は /health の reason とリクエストの行のキーになる。
     @Test

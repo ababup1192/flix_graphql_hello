@@ -63,9 +63,13 @@ query purgeOldSchedules(keepDays: Int64) -> exec {
     DELETE FROM scheduled_actions WHERE status IN ('done', 'failed', 'cancelled') AND created_at < now() - make_interval(days => :keepDays::int)
 }
 
+// overdue を別に数えるのは、pending の総数が未来の予約を含み、滞留しているかが分からないため
 // unscoped: /health の件数
 query countSchedules() -> one {
-    SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending, count(*) FILTER (WHERE status = 'failed')::bigint AS failed FROM scheduled_actions
+    SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending,
+           count(*) FILTER (WHERE status = 'failed')::bigint AS failed,
+           count(*) FILTER (WHERE status = 'pending' AND run_at < now() - interval '60 seconds')::bigint AS overdue
+    FROM scheduled_actions
 }
 
 query markScheduleDone(id: String, projectId: Int64) -> exec {

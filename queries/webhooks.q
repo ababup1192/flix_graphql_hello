@@ -90,9 +90,13 @@ query purgeOldDeliveries(keepDays: Int64) -> exec {
     DELETE FROM webhook_deliveries WHERE status IN ('delivered', 'failed') AND created_at < now() - make_interval(days => :keepDays::int)
 }
 
+// overdue を別に数えるのは、pending の総数が再試行待ちの分を含み、滞留しているかが分からないため
 // unscoped: /health の件数
 query countDeliveries() -> one {
-    SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending, count(*) FILTER (WHERE status = 'failed')::bigint AS failed FROM webhook_deliveries
+    SELECT count(*) FILTER (WHERE status = 'pending')::bigint AS pending,
+           count(*) FILTER (WHERE status = 'failed')::bigint AS failed,
+           count(*) FILTER (WHERE status = 'pending' AND next_attempt_at < now() - interval '60 seconds')::bigint AS overdue
+    FROM webhook_deliveries
 }
 
 query markDelivered(id: String, projectId: Int64, lastStatus: Int32) -> exec {

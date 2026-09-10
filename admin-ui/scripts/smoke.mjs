@@ -182,12 +182,13 @@ try {
   await page.waitForTimeout(1500);
   if ((await page.locator(".tt-link-item").count()) > 0) {
     note("リンクの面にコンテンツの候補が出る");
-    // **URL を打つと一番上に「この URL にリンクする」が出る**（タブで切り替えない）
+    // **URL を打つと一番上に「URL」の見出しとその行が出る**（タブで切り替えない）
     await page.locator(".tt-link-input").fill("https://example.com");
     await page.waitForTimeout(600);
+    const head = await page.locator(".tt-link-head").first().textContent();
     const first = await page.locator(".tt-link-item").first().textContent();
-    if ((first ?? "").includes("この URL にリンクする")) note("URL を打つとその行が出る");
-    else fail("URL を打つとその行が出る", first ?? "");
+    if (head === "URL" && (first ?? "").includes("https://example.com")) note("URL を打つとその行が出る");
+    else fail("URL を打つとその行が出る", `${head} / ${first ?? ""}`);
 
     await page.locator(".tt-link-input").fill("");
     await page.waitForTimeout(1200);

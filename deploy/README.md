@@ -225,7 +225,11 @@ sum(count_over_time({service="cms"} | json | job_kind="webhook" | job_attempts >
 **外形監視で見るもの**（Loki ではなく Better Stack や UptimeRobot）:
 
 - `/health` が 503 → ワーカーか見張りが止まっている（`"reason": "jobs stalled"` / `"watch stalled"`）か、DB に届いていない
-- `/health` が 200 でも本文が `"status": "degraded"` → 接続プールが張り付いている（`"reason": "pool saturated (…%)"`）。**status code では拾えないので、応答本文に `"status":"ok"` が含まれることを条件にする**
+- `/health` が 200 でも本文が `"status": "degraded"` → 接続プールが張り付いている（`"reason": "pool saturated (…%)"`）。**status code では拾えないので、応答本文の<ruby>トップレベル<rt>最上位</rt></ruby>の `status` が `ok` である事を条件にする**（`components` の中にも行ごとの `status` が並ぶので、単純な部分一致にしない）
+
+`/health` の `components` は行ごとの段（`operational` / `degraded` / `partial_outage` / `major_outage`）で、ステータスページの色に写す物。
+`api`（DB とプール）・`schedule`（予約公開）・`webhook`（配信）と、CDN の purge の送り先があれば `cdnPurge` が並ぶ（`CMS_JOBS=off` なら仕事の行は出ない）。
+**この段は障害の切り分け用で、稼働率の根拠にはしない**（プロセスと DB が生きている事しか見ておらず、リゾルバが壊れて 200 のまま誤答する形は拾えない）。稼働率は外形が実際に叩いた結果で出す。詳しくは `docs/design/status-page.md`。
 
 `/health` の `connections` は `{"active": 今つないでいる数, "max": CMS_MAX_CONNECTIONS}`。active が max に張り付いていれば 503 が出ている。
 

@@ -137,6 +137,7 @@ type alias LinkCandidate =
     { id : String
     , title : String
     , typeName : String
+    , stage : String
     }
 
 
