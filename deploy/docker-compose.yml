@@ -107,7 +107,12 @@ services:
       mc anonymous set download local/${ASSET_BUCKET:-cms}
       "
 
-  # 毎晩 pg_dump を取り、7 日分残す。R2 へ送るなら backups/ を rclone 等で同期する
+  # 毎晩 pg_dump を取り、7 日分残す。R2 へ送るなら backups/ を rclone 等で同期する。
+  # 取れた物を確かめてから古い物を消す（gzip の整合 + 最小の大きさ）。失敗した周は書いた物を消し、古い物は残す。
+  #
+  # WhyNot: sh のままパイプで繋がないのは、pg_dump が落ちても gzip が空入力で成功し、
+  # 空の .sql.gz が「取れた物」として置かれた上に古い物が消えるため（7 日で全部が空になる）。
+  # dash は pipefail を持たないので bash で回す。
   backup:
     image: postgres:16
     restart: unless-stopped
@@ -119,10 +124,16 @@ services:
     volumes:
       - ./backups:/backups
     entrypoint: >
-      /bin/sh -c "
+      /bin/bash -c "
+      set -o pipefail;
       while true; do
-        pg_dump -h postgres -U ${POSTGRES_USER:-cms} ${POSTGRES_DB:-cms} | gzip > /backups/cms-$$(date +%Y%m%d-%H%M).sql.gz &&
-        find /backups -name 'cms-*.sql.gz' -mtime +7 -delete;
+        out=/backups/cms-$$(date +%Y%m%d-%H%M).sql.gz;
+        if pg_dump -h postgres -U ${POSTGRES_USER:-cms} ${POSTGRES_DB:-cms} | gzip > $$out && gzip -t $$out && [ $$(stat -c%s $$out) -gt 10000 ]; then
+          find /backups -name 'cms-*.sql.gz' -mtime +7 -delete;
+        else
+          echo backup failed: $$out >&2;
+          rm -f $$out;
+        fi;
         sleep 86400;
       done
       "

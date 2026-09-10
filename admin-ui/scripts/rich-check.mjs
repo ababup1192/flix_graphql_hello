@@ -19,6 +19,15 @@ const note = (step, detail = "") => steps.push(`  OK  ${step}${detail ? " — " 
 const fail = (step, detail) => problems.push(`  NG  ${step} — ${detail}`);
 const check = (ok, step, detail) => (ok ? note(step) : fail(step, detail));
 
+// **型の id は seed のたびに変わる。** 焼き付けず apiId から引く。
+const blogTypeId = await fetch(`${cms}/p/default/admin/graphql`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", "X-Dev-User": process.env.VITE_DEV_USER ?? "dev@localhost" },
+  body: JSON.stringify({ query: `query { contentTypes { id apiId } }` }),
+})
+  .then((response) => response.json())
+  .then((answer) => (answer.data?.contentTypes ?? []).find((type) => type.apiId === "blogs")?.id ?? "");
+
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
@@ -309,7 +318,7 @@ try {
   };
   for (const [name, doc] of Object.entries(badDocs)) {
     const answer = await send({
-      query: `mutation m($fields: JSON!) { createEntry(typeId: "5", fields: $fields) { id } }`,
+      query: `mutation m($fields: JSON!) { createEntry(typeId: "${blogTypeId}", fields: $fields) { id } }`,
       variables: { fields: { title: `nest ${marker} ${name}`, body: doc } },
     });
     const message = JSON.stringify(answer.errors ?? answer);
@@ -343,7 +352,7 @@ try {
   const found = await fetch(`${cms}/p/default/admin/graphql`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Dev-User": process.env.VITE_DEV_USER ?? "dev@localhost" },
-    body: JSON.stringify({ query: `query entries { entries(typeId: "5", first: 40) { nodes { id fields } } }` }),
+    body: JSON.stringify({ query: `query entries { entries(typeId: "${blogTypeId}", first: 40) { nodes { id fields } } }` }),
   }).then((response) => response.json());
   const saved = JSON.stringify(found.data?.entries?.nodes ?? found);
   check(saved.includes('"type":"underline"'), "CMS に underline の mark が入っている", saved.slice(0, 300));

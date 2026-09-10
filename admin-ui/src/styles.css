@@ -138,6 +138,8 @@ code, pre, .font-mono {
 /* リッチエディタ。見た目は管理画面のテーマに従う（公開サイトの見た目ではない）。 */
 tiptap-editor {
   display: block;
+  /* 吹き出しをこの箱を基準に置く。 */
+  position: relative;
   border: 1px solid var(--color-edge);
   border-radius: 6px;
   background: var(--color-panel);
@@ -421,6 +423,55 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 .tt-link-item.is-url .tt-link-kind { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tt-link-title { flex: 1; color: var(--color-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tt-link-kind { color: var(--color-ink-faint); font-size: 10px; }
+/* 今のリンク先。**面の頭に置く**（既にかかっているリンクを押した時に、
+   どこを指しているかを最初に見せる）。 */
+.tt-link-now {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 2px 6px;
+  margin: 8px 8px 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--color-well);
+  font-size: 12px;
+}
+.tt-link-now-label {
+  grid-column: 1 / -1;
+  color: var(--color-ink-faint);
+  font-size: 10px;
+  font-weight: 600;
+}
+.tt-link-now-body { color: var(--color-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-link-now.is-bad { background: var(--color-bad-bg); }
+.tt-link-now.is-bad .tt-link-now-body,
+.tt-link-now.is-bad .tt-link-icon { color: var(--color-bad); }
+
+/* リンクに乗せた時の吹き出し。**本文の DOM の外に出す**
+   （ProseMirror は編集できる所の中の知らない DOM を戻す）。 */
+.tt-link-tip {
+  position: absolute;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 26rem;
+  padding: 4px 8px;
+  border: 1px solid var(--color-edge);
+  border-radius: 4px;
+  background: var(--color-panel);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
+  color: var(--color-ink);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.tt-link-tip .tt-link-icon svg { width: 13px; height: 13px; }
+.tt-link-tip.is-bad { border-color: var(--color-bad); color: var(--color-bad); }
+.tt-link-tip.is-bad .tt-link-icon { color: var(--color-bad); }
+
 /* 行の頭の印。外部か、この CMS のコンテンツか。 */
 .tt-link-icon { flex: 0 0 auto; display: flex; color: var(--color-ink-faint); }
 .tt-link-item.is-url .tt-link-icon { color: var(--color-link); }

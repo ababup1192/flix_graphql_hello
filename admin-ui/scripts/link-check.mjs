@@ -21,6 +21,15 @@ const note = (step, detail = "") => steps.push(`  OK  ${step}${detail ? " — " 
 const fail = (step, detail) => problems.push(`  NG  ${step} — ${detail}`);
 const check = (ok, step, detail) => (ok ? note(step) : fail(step, detail));
 
+// **型の id は seed のたびに変わる。** 焼き付けず apiId から引く。
+const blogTypeId = await fetch(`${cms}/p/default/admin/graphql`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", "X-Dev-User": process.env.VITE_DEV_USER ?? "dev@localhost" },
+  body: JSON.stringify({ query: `query { contentTypes { id apiId } }` }),
+})
+  .then((response) => response.json())
+  .then((answer) => (answer.data?.contentTypes ?? []).find((type) => type.apiId === "blogs")?.id ?? "");
+
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
@@ -164,6 +173,58 @@ try {
     fail("乗せた候補が選択位置になる", `候補が ${await all.count()} 件しかありません`);
   }
 
+  // 5b. 今のリンク先が出る（面と吹き出し）
+  await page.keyboard.press("Escape");
+  await openNew(`link-now ${Date.now()}`);
+  await page.evaluate(() => {
+    document.querySelector("tiptap-editor").setAttribute(
+      "doc",
+      JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [
+        { type: "text", text: "そと", marks: [{ type: "link", attrs: { href: "https://example.com/a" } }] },
+        { type: "text", text: " と " },
+        { type: "text", text: "消えた先", marks: [{ type: "link", attrs: { entryId: "aaaaaaaaaaaa" } }] },
+      ] }] })
+    );
+  });
+  await page.waitForTimeout(1800);
+  const anchors = page.locator("tiptap-editor .tt-body a");
+  check((await anchors.count()) === 2, "リンクが 2 本描かれる", `${await anchors.count()} 本`);
+
+  await anchors.first().hover();
+  await page.waitForTimeout(400);
+  check(
+    (await page.locator(".tt-link-tip").textContent()) === "https://example.com/a",
+    "外部リンクに乗せると URL が出る",
+    (await page.locator(".tt-link-tip").textContent()) ?? "出ません"
+  );
+
+  await anchors.nth(1).hover();
+  await page.waitForTimeout(400);
+  check(
+    ((await page.locator(".tt-link-tip").textContent()) ?? "").includes("見つかりません"),
+    "消えた指し先は見つかりませんと出る",
+    (await page.locator(".tt-link-tip").textContent()) ?? "出ません"
+  );
+  check(
+    await page.locator(".tt-link-tip").evaluate((el) => el.classList.contains("is-bad")),
+    "消えた指し先は赤く出る"
+  );
+
+  await anchors.first().click();
+  await page.waitForTimeout(300);
+  await page.locator('.tt-tool[title="リンク"]').click();
+  await page.waitForSelector(".tt-link", { timeout: 4000 });
+  await page.waitForTimeout(600);
+  check(
+    ((await page.locator(".tt-link-now").textContent()) ?? "").includes("https://example.com/a"),
+    "面の頭に今のリンク先が出る",
+    (await page.locator(".tt-link-now").textContent()) ?? "出ません"
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  await openDialog();
+  await page.waitForTimeout(900);
+
   // 6. URL とコンテンツの見分けが付く（5 の面を開いたまま使う）
   await page.locator(".tt-link-input").fill("");
   await page.waitForTimeout(900);
@@ -176,7 +237,8 @@ try {
   check(shown <= 8, "候補は 8 件までしか出さない", `${shown} 件`);
   const more = page.locator(".tt-link-more");
   if ((await more.count()) === 1) {
-    await more.click();
+    // mousedown で開くので dispatchEvent。click だと押した瞬間に行が描き直されて待ち続ける。
+    await more.dispatchEvent("mousedown");
     await page.waitForTimeout(300);
     check((await page.locator(".tt-link-item").count()) > shown, "もっと見るで残りが出る", `${shown} 件のまま`);
   } else {
@@ -230,7 +292,7 @@ try {
   const found = await fetch(`${cms}/p/default/admin/graphql`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Dev-User": process.env.VITE_DEV_USER ?? "dev@localhost" },
-    body: JSON.stringify({ query: `query entries { entries(typeId: "5", first: 30) { nodes { id fields } } }` }),
+    body: JSON.stringify({ query: `query entries { entries(typeId: "${blogTypeId}", first: 30) { nodes { id fields } } }` }),
   }).then((response) => response.json());
   const saved = JSON.stringify(found.data?.entries?.nodes ?? found);
   check(saved.includes('"type":"link"'), "CMS に link の mark が入っている", saved.slice(0, 300));

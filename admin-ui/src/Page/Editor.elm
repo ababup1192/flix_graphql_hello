@@ -121,6 +121,7 @@ type alias Model =
 
     {- 本文からリンクを張る時の候補。型をまたいで探す。 -}
     , linkCandidates : List Model.LinkCandidate
+    , linkedEntries : List Model.LinkCandidate
     }
 
 
@@ -170,6 +171,8 @@ type Msg
     | GotReferrers (Result Api.Problem (List Model.Referrer))
     | LinkSearched String
     | GotLinkCandidates String (Result Api.Problem Model.EntryList)
+    | LinkResolveAsked (List String)
+    | GotLinkedEntries String (Result Api.Problem Model.EntryList)
     | GotSchedules (Result Api.Problem (List Model.ScheduleRow))
     | GotRefs String String (Result Api.Problem Model.EntryList)
     | GotRefLabels (Result Api.Problem Model.EntryList)
@@ -251,6 +254,7 @@ init project apiId entryId =
     , expanded = Nothing
     , schedulesOpen = False
     , linkCandidates = []
+    , linkedEntries = []
     , richPicking = Nothing
     , richPicked = []
     , insert = Nothing
@@ -713,6 +717,40 @@ update ctx msg model =
             )
 
         GotLinkCandidates _ (Err _) ->
+            ( model, [] )
+
+        LinkResolveAsked ids ->
+            -- **本文が指しているコンテンツを引き直す。** 面とツールチップで「今どこを
+            -- 指しているか」を出すのに要る。id が消えていれば返らないので、そのまま
+            -- 「見つかりません」になる。
+            if List.isEmpty ids then
+                ( { model | linkedEntries = [] }, [] )
+
+            else
+                ( { model | linkedEntries = [] }
+                , ctx.types
+                    |> List.map
+                        (\summary ->
+                            Api.call
+                                (\id ->
+                                    Queries.entries id
+                                        ctx.project
+                                        { typeId = summary.id, search = "", stage = "", conditions = [], ids = ids, order = "", first = List.length ids, skip = 0 }
+                                )
+                                (GotLinkedEntries summary.name)
+                        )
+                )
+
+        GotLinkedEntries typeName (Ok page) ->
+            ( { model
+                | linkedEntries =
+                    model.linkedEntries
+                        ++ List.map (\row -> { id = row.id, title = EntryLabel.forRow row, typeName = typeName, stage = row.stage }) page.nodes
+              }
+            , []
+            )
+
+        GotLinkedEntries _ (Err _) ->
             ( model, [] )
 
         GotSchedules result ->
@@ -2439,6 +2477,10 @@ richEditor big model apiId current =
         -- 候補を属性で返す。
         , Html.Attributes.attribute "entries" (E.encode 0 (E.list encodeCandidate model.linkCandidates))
 
+        -- **本文が指しているコンテンツ。** 候補（探した結果）とは別で、既にかかっている
+        -- リンクの指し先を出すのに使う。
+        , Html.Attributes.attribute "linked" (E.encode 0 (E.list encodeCandidate model.linkedEntries))
+
         -- **本文の画像は `assetId` しか持たない。** 描くのに要る URL はここで渡す。
         , Html.Attributes.attribute "assets" (E.encode 0 (E.list encodeAsset (allAssets model)))
         , Html.Attributes.attribute "uploadinput" richInputId
@@ -2447,6 +2489,7 @@ richEditor big model apiId current =
             (E.encode 0 (E.list encodeResolved (List.filter (\done -> done.apiId == apiId) model.resolved)))
         , Html.Events.on "docchange" (D.map (FieldValue.Rich >> FieldTyped apiId) (D.field "detail" D.string))
         , Html.Events.on "linksearch" (D.map LinkSearched (D.field "detail" D.string))
+        , Html.Events.on "linkresolve" (D.map LinkResolveAsked (D.field "detail" (D.list D.string)))
         , Html.Events.on "mediapick" (D.succeed (RichPickerOpened apiId))
         , Html.Events.on "mediaupload" (D.map (RichUploadStarted apiId) (D.field "detail" startedDecoder))
         ]

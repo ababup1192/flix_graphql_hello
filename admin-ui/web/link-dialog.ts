@@ -25,6 +25,8 @@ export type LinkChoice = { href: string; label: string } | { entryId: string; la
 type Args = {
   // 今かかっているリンク（無ければ null）
   current: { href?: string | null; entryId?: string | null } | null;
+  // entry の id から、その中身を引く。まだ引けていなければ null。
+  linkedOf: (entryId: string) => Candidate | null;
   onSearch: (query: string) => void;
   onDone: (choice: LinkChoice) => void;
 };
@@ -46,9 +48,14 @@ export class LinkDialog {
   // 変わり、触っていないマウスに選択を奪われる。
   private byKey = false;
   private onDone: Args["onDone"];
+  private current: Args["current"];
+  private linkedOf: Args["linkedOf"];
+  private now: HTMLDivElement | null = null;
 
   constructor(args: Args) {
     this.onDone = args.onDone;
+    this.current = args.current;
+    this.linkedOf = args.linkedOf;
 
     this.dom = document.createElement("div");
     this.dom.className = "tt-link";
@@ -61,6 +68,15 @@ export class LinkDialog {
 
     this.list = document.createElement("div");
     this.list.className = "tt-link-list";
+
+    // **今どこを指しているかを頭に出す。** 出さないと、既にかかっているリンクを押しても
+    // 入力欄が空のまま（コンテンツへのリンクは href を持たない）で、指し先が分からない。
+    if (args.current) {
+      this.now = document.createElement("div");
+      this.now.className = "tt-link-now";
+      this.dom.appendChild(this.now);
+      this.paintNow();
+    }
 
     this.dom.append(this.input, this.list);
 
@@ -114,6 +130,43 @@ export class LinkDialog {
   setCandidates(candidates: Candidate[]) {
     this.candidates = candidates;
     this.paint();
+  }
+
+  setLinked(linkedOf: Args["linkedOf"]) {
+    this.linkedOf = linkedOf;
+    this.paintNow();
+  }
+
+  // 「今のリンク先」。外部は URL、コンテンツは題と種類と公開の状態。
+  private paintNow() {
+    const now = this.now;
+    const current = this.current;
+    if (!now || !current) return;
+
+    const label = document.createElement("span");
+    label.className = "tt-link-now-label";
+    const body = document.createElement("span");
+    body.className = "tt-link-now-body";
+    const icon = document.createElement("span");
+    icon.className = "tt-link-icon";
+
+    if (current.entryId) {
+      const found = this.linkedOf(current.entryId);
+      label.textContent = "今のリンク先（コンテンツ）";
+      icon.innerHTML = ICON_ENTRY;
+      if (found) {
+        body.textContent = `${found.title}（${found.type} · ${stageLabel(found.stage)}）`;
+      } else {
+        // **消えた指し先は赤く出す。** 公開の時に断られる物を、書いている間に見せる。
+        now.classList.add("is-bad");
+        body.textContent = `見つかりません（${current.entryId}）`;
+      }
+    } else {
+      label.textContent = "今のリンク先（外部）";
+      icon.innerHTML = ICON_OUT;
+      body.textContent = current.href ?? "";
+    }
+    now.replaceChildren(label, icon, body);
   }
 
   focusInput() {
@@ -198,7 +251,8 @@ const ICON_OUT =
 const ICON_ENTRY =
   '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>';
 
-function stageLabel(stage: string | undefined): string {
+/** 公開の状態の呼び方。面と吹き出しで揃える。 */
+export function stageLabel(stage: string | undefined): string {
   if (stage === "PUBLISHED") return "公開中";
   if (stage === "CHANGED") return "公開中 · 下書きあり";
   return "下書き";

@@ -163,6 +163,9 @@ docker compose pull && docker compose up -d
 
 `backup` サービスが毎晩 `pg_dump` を `./backups/` に置き、7 日分残す。外へ逃がすなら rclone で R2 へ同期する。
 
+**取れた物を確かめてから古い物を消す**（`gzip -t` と最小の大きさ）。失敗した周は書いた物を消し、古い物を残して `backup failed: <path>` を stderr に出す。
+Loki なら `{service="backup"} |= "backup failed"` で拾う。**この行が出たまま 7 日放置すると、7 日分が全部その日の失敗で埋まる**ので、警報を 1 本置く。
+
 ```bash
 rclone sync ./backups r2:cms-backups   # cron で毎晩
 ```
@@ -172,6 +175,17 @@ rclone sync ./backups r2:cms-backups   # cron で毎晩
 ```bash
 gunzip -c backups/cms-20260907-0300.sql.gz | docker compose exec -T postgres psql -U cms cms
 ```
+
+**復元演習**（手順があるのと戻せるのは別なので、たまに通す）。本番に当てずに確かめるなら、空のデータベースへ入れて表と RLS の数を見る。
+
+```bash
+docker compose exec postgres psql -U cms -d postgres -c "CREATE DATABASE restore_drill;"
+gunzip -c backups/cms-20260907-0300.sql.gz | docker compose exec -T postgres psql -q -U cms restore_drill
+docker compose exec postgres psql -U cms -d restore_drill -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';" -c "SELECT count(*) FROM pg_policies WHERE schemaname='public';"
+docker compose exec postgres psql -U cms -d postgres -c "DROP DATABASE restore_drill;"
+```
+
+2026-09-10 に手元（中身が空の開発 DB、dump は 71KB）で通した結果は 0.5 秒 / 20 表 / RLS 11 本。**中身が入った本番の値は別に測る。**
 
 ## ログと監視
 

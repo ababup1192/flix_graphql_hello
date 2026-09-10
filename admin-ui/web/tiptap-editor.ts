@@ -22,7 +22,7 @@ import { codeBlockView, ensureUsed } from "./code-block";
 import { BlockEdges, hasPendingLine } from "./block-edges";
 import { CodeEditing } from "./code-editing";
 import { MarkdownRules } from "./markdown-rules";
-import { LinkDialog, type Candidate, type LinkChoice } from "./link-dialog";
+import { LinkDialog, stageLabel, type Candidate, type LinkChoice } from "./link-dialog";
 import { dismissOn } from "./dismiss";
 import { isDraggingTable, tableHandles } from "./table-drag";
 import { Highlight, RaisedCaret, Subscript, Superscript } from "./text-marks";
@@ -100,6 +100,8 @@ const ICONS = {
   highlight: '<path d="M4 20h16"/><path d="M6 16l8-8 3 3-8 8z"/><path d="M12 6l3-3 3 3-3 3z"/>',
   trash: '<path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="m4 17 4.5-4.5 3 3L15 12l5 5"/>',
+  entry: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+  external: '<path d="M7 17 17 7"/><path d="M9 7h8v8"/>',
   // WhyNot: 丸い矢印（rotate-ccw / rotate-cw）にしない。16px では左右の違いが読めず、
   // 2 つ並ぶと同じ印に見える。矢の頭が横を向く形にして、向きを一目で分かるようにする。
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5A5.5 5.5 0 0 1 20 14.5 5.5 5.5 0 0 1 14.5 20H11"/>',
@@ -254,6 +256,11 @@ class TiptapEditor extends HTMLElement {
   private unmenu: (() => void) | null = null;
   private unwatchScroll: (() => void) | null = null;
   private candidates: Candidate[] = [];
+  // 本文が指しているコンテンツ。**面とツールチップで「今どこを指しているか」を出す。**
+  // 候補（探した結果）とは別で、id から引く。
+  private linked = new Map<string, Candidate>();
+  private asked = "";
+  private tip: HTMLElement | null = null;
   private assets = new AssetStore();
   private insertedAt = -1;
   private handled = new Set<string>();
@@ -264,7 +271,7 @@ class TiptapEditor extends HTMLElement {
   private sending = false;
 
   static get observedAttributes() {
-    return ["doc", "entries", "assets", "insert", "resolved"];
+    return ["doc", "entries", "assets", "insert", "resolved", "linked"];
   }
 
   connectedCallback() {
@@ -356,6 +363,7 @@ class TiptapEditor extends HTMLElement {
       editorProps: { attributes: { class: "tt-body" } },
       onUpdate: () => {
         this.emit();
+        this.askLinked();
       },
 
       // **道具の押した状態は、どの変化でも塗り直す。**
@@ -369,9 +377,11 @@ class TiptapEditor extends HTMLElement {
 
     this.buildBar(bar);
     this.watchTableHover(mount);
+    this.watchLinkHover(mount);
     this.paint();
     this.syncAssets();
     this.applyInsert();
+    this.askLinked();
     this.applyResolved();
 
     // 開いた時点で入っているコードに色を付ける。読み終わってから塗り直す。
@@ -514,6 +524,7 @@ class TiptapEditor extends HTMLElement {
     const current = this.editor.isActive("link") ? this.editor.getAttributes("link") : null;
     const dialog = new LinkDialog({
       current,
+      linkedOf: (entryId) => this.linked.get(entryId) ?? null,
       onSearch: (query) => this.dispatchEvent(new CustomEvent("linksearch", { detail: query })),
       onDone: (choice) => this.applyLink(choice),
     });
@@ -647,6 +658,58 @@ class TiptapEditor extends HTMLElement {
       if (this.menu) return;
       this.paintTableTools();
     });
+  }
+
+  //
+  // リンクに乗せたら、指し先を吹き出しで出す。
+  //
+  // **押さないと分からない、では遅い。** 本文の見た目はどちらも下線なので、
+  // 外部かコンテンツか、どのコンテンツかが読んでいる間に分からなかった。
+  // Notion・WordPress・Payload も、乗せる／押すと指し先を出す。
+  //
+  private watchLinkHover(mount: HTMLElement) {
+    mount.addEventListener("mouseover", (event) => {
+      const anchor = (event.target as Element | null)?.closest?.("a") as HTMLAnchorElement | null;
+      if (!anchor) return;
+      this.showLinkTip(anchor);
+    });
+    mount.addEventListener("mouseout", (event) => {
+      const to = (event as MouseEvent).relatedTarget as Element | null;
+      if (to?.closest?.("a")) return;
+      this.tip?.remove();
+      this.tip = null;
+    });
+  }
+
+  private showLinkTip(anchor: HTMLAnchorElement) {
+    this.tip?.remove();
+    const entryId = anchor.getAttribute("data-entry-id");
+    const tip = document.createElement("div");
+    tip.className = "tt-link-tip";
+
+    const icon = document.createElement("span");
+    icon.className = "tt-link-icon";
+    const body = document.createElement("span");
+    if (entryId) {
+      const found = this.linked.get(entryId);
+      icon.innerHTML = svg(ICONS.entry);
+      if (found) body.textContent = `${found.title}（${found.type} · ${stageLabel(found.stage)}）`;
+      else {
+        tip.classList.add("is-bad");
+        body.textContent = `見つかりません（${entryId}）`;
+      }
+    } else {
+      icon.innerHTML = svg(ICONS.external);
+      body.textContent = anchor.getAttribute("href") ?? "";
+    }
+    tip.append(icon, body);
+    this.appendChild(tip);
+
+    const at = anchor.getBoundingClientRect();
+    const base = this.getBoundingClientRect();
+    tip.style.left = `${Math.max(at.left - base.left, 4)}px`;
+    tip.style.top = `${at.bottom - base.top + 6}px`;
+    this.tip = tip;
   }
 
   // カーソルが入っている表の DOM。
@@ -902,6 +965,10 @@ class TiptapEditor extends HTMLElement {
       this.syncAssets();
       return;
     }
+    if (name === "linked") {
+      this.syncLinked();
+      return;
+    }
     // **doc を変える物は 1 拍おく。** 属性が変わるのは Elm が DOM を書いている
     // 最中で、その場で doc を変えると `docchange` が Elm の描き直しの中に飛び込み、
     // 入れた物が Elm 側に残らない（実際に、画面には出るのに保存されなかった）。
@@ -924,6 +991,7 @@ class TiptapEditor extends HTMLElement {
     if (incoming === this.lastSent) return;
     if (incoming === JSON.stringify(unfold(this.editor.getJSON()))) return;
     this.editor.commands.setContent(this.docFromAttribute(this.editor.extensionManager.extensions), false);
+    this.askLinked();
   }
 
   private parsed(name: string): unknown {
@@ -938,6 +1006,36 @@ class TiptapEditor extends HTMLElement {
   private syncAssets() {
     const list = this.parsed("assets");
     this.assets.set(Array.isArray(list) ? list : []);
+  }
+
+  private syncLinked() {
+    const list = this.parsed("linked");
+    if (!Array.isArray(list)) return;
+    this.linked = new Map((list as Candidate[]).filter((found) => found?.id).map((found) => [found.id, found]));
+    this.dialog?.setLinked((entryId) => this.linked.get(entryId) ?? null);
+  }
+
+  //
+  // 本文が指しているコンテンツを引き直してもらう。
+  //
+  // **エディタは API を知らない**（`linksearch` と同じ決まり）。doc に居る entryId を
+  // `linkresolve` の event で外に出し、答えは `linked` の属性で受ける。
+  //
+  private askLinked() {
+    if (!this.editor) return;
+    const ids = new Set<string>();
+    this.editor.state.doc.descendants((node) => {
+      for (const mark of node.marks) {
+        const entryId = mark.attrs?.entryId;
+        if (mark.type.name === "link" && typeof entryId === "string" && entryId) ids.add(entryId);
+      }
+    });
+    // **同じ顔ぶれなら投げ直さない。** 打つ度に doc が変わるので、そのまま出すと
+    // 1 文字ごとに問い合わせが飛ぶ。
+    const key = [...ids].sort().join(",");
+    if (key === this.asked) return;
+    this.asked = key;
+    this.dispatchEvent(new CustomEvent("linkresolve", { detail: [...ids] }));
   }
 
   // Elm が選んだメディアを本文に入れる。`seq` で 1 回だけ入れる
