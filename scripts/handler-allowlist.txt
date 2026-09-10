@@ -1,0 +1,8 @@
+# Session / Tenant / CmsErr の handler を入れて良いファイルと、Granted を組み立てて良いファイル。
+# scripts/check-handlers.sh が突き合わせる
+# DbRunner: リクエストごとに CmsErr → Session → SQL の数え → Db.guard の順で入れる唯一の入口
+src/app/DbRunner.flix
+# Session: 主体を決めて走らせる runWith と、権限の証明を作る grant 系
+src/cms/Session.flix
+# Tenant: プロジェクトを固定して走らせる runWith
+src/cms/Tenant.flix

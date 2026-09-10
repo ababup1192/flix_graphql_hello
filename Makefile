@@ -31,6 +31,7 @@ check:
 	bin/flix check
 	cd schemagen && ../bin/flix check
 	scripts/check-tx.sh
+	scripts/check-handlers.sh
 	scripts/check-log-keys.sh
 
 # 既定は DB 無しのテスト

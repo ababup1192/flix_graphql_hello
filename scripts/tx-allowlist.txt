@@ -1,5 +1,13 @@
-# withLazyTx（Pool / TenantTx）を呼んで良いファイル（Tx を張る入口）。scripts/check-tx.sh が突き合わせる
+# 接続や Tx を自分で開いて良いファイル（Tx を張る入口と、業務の外で 1 本だけ繋ぐ物）。scripts/check-tx.sh が突き合わせる
 # DbRunner.transact / withTx / withRequestTx: 再試行と Db.guard と RLS の印を 1 か所で決める入口（withRequestTx は Pool.borrow / Tx.begin / Jdbc.* で Tx を手で組む）
 src/app/DbRunner.flix
 # TenantTx: Pool.withLazyTxAfterBegin を包んで印を置く
 src/app/TenantTx.flix
+# Main: 起動時に migrations の適用済みを確かめる 1 本（Tx を張らない）
+src/Main.flix
+# AppRole: 起動時にアプリ用のロールを作る。所有者で 1 本だけ繋ぐ
+src/app/AppRole.flix
+# Health: /health の接続の確認。プールから借りるだけで業務の Tx を張らない
+src/app/Health.flix
+# SelfHeal: 接続が生きているかの確認。プールを作り直す判断に使う
+src/app/SelfHeal.flix
