@@ -9,6 +9,7 @@
 import type { Editor } from "@tiptap/core";
 import { ensure, labelOf, search, type Language } from "./code-languages";
 import { dismissOn } from "./dismiss";
+import { placeUnder } from "./place";
 
 // 図は**コードブロックの言語を `mermaid` にする**（GitHub / Zenn / esa / Craft と同じ。
 // 専用の node を作った例は 1 つも無かった）。CMS も `diagramLanguage()` でこの形を受ける。
@@ -157,6 +158,7 @@ export function codeBlockView(lowlight: Lowlight) {
       searchBox.value = "";
       at = 0;
       paintList();
+      placeUnder(popover, button, 240);
       searchBox.focus();
       undismiss = dismissOn({ inside: [popover, button], onClose: () => close() });
     };

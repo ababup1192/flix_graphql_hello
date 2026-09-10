@@ -384,7 +384,7 @@ themeButton config ( value, label ) =
 
 menuBox : String -> List (Html msg) -> Html msg
 menuBox place children =
-    div [ class ("absolute z-40 flex w-60 flex-col rounded-lg border border-edge bg-panel py-1 shadow-lg " ++ place) ] children
+    div [ class ("absolute z-(--z-dropdown) flex w-60 flex-col rounded-lg border border-edge bg-panel py-1 shadow-lg " ++ place) ] children
 
 
 {-| メニューの行の見た目。リンクの行もボタンの行も同じ当たり判定にする。

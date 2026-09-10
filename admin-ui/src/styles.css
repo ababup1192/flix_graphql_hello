@@ -43,6 +43,29 @@
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
 
+/* 重なりの層。**数字はここだけに置き**、各所は `z-(--z-…)` / `var(--z-…)` で引く。
+   WhyNot: 各所に生の数字を書かない。1 か所を上げると別の所が沈むので、
+   直す度に全部の数字を読み直す事になる。
+   WhyNot: `@theme` に入れない。Tailwind v4 の theme は z-index の名前空間を持たず、
+   ここに置いても `z-dropdown` のようなクラスは作られない。 */
+:root {
+  /* 外を押したら閉じるための、見た目を持たない層。**貼り付く帯より下**に敷く
+     （帯のボタンは、面を開いたままでも押せる方が速い） */
+  --z-dismiss: 10;
+  /* 画面に貼り付く帯とレール */
+  --z-sticky: 20;
+  /* 入力やボタンに付く候補・メニュー・小さな面 */
+  --z-dropdown: 30;
+  /* 画面の端から出る引き出しと、画面いっぱいに広げた欄 */
+  --z-drawer: 40;
+  /* 覆いを敷くダイアログ */
+  --z-dialog: 50;
+  /* 一時的な知らせ。**ダイアログの上**（保存の結果は覆いの下に隠さない） */
+  --z-toast: 60;
+  /* 乗せた時だけ出る吹き出し。押せないので一番上でも邪魔しない */
+  --z-tooltip: 70;
+}
+
 /* ダークは同じトークンを塗り替えるだけ。状態の色の意味は変えない。 */
 :root[data-theme="dark"] {
   --color-app: #010409;
@@ -303,12 +326,12 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 .tt-code-lang:hover { border-color: var(--color-edge); background: var(--color-panel); color: var(--color-ink); }
 .tt-code-lang.is-unset { color: var(--color-ink-faint); }
 
-/* 打って絞る（70 以上あるのでセレクトボックスでは読めない） */
+/* 打って絞る（70 以上あるのでセレクトボックスでは読めない）。
+   場所は開く時に `placeUnder` が入れる（帯の中に絶対位置で置くと、広げて書く時に
+   本文の `overflow` に切られる）。 */
 .tt-code-pop {
-  position: absolute;
-  top: 30px;
-  left: 4px;
-  z-index: 40;
+  position: fixed;
+  z-index: var(--z-dropdown);
   display: flex;
   flex-direction: column;
   width: 240px;
@@ -381,7 +404,7 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 /* リンクの面。URL とコンテンツを 1 つの面で切り替える */
 .tt-link {
   position: fixed;
-  z-index: 30;
+  z-index: var(--z-dropdown);
   display: flex;
   flex-direction: column;
   width: 300px;
@@ -451,7 +474,7 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
    （ProseMirror は編集できる所の中の知らない DOM を戻す）。 */
 .tt-link-tip {
   position: absolute;
-  z-index: 25;
+  z-index: var(--z-tooltip);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -755,7 +778,7 @@ body.tt-dragging-row, body.tt-dragging-row * { cursor: ns-resize !important; }
 /* ツールバーから出る小さな献立（表の操作） */
 .tt-menu {
   position: fixed;
-  z-index: 30;
+  z-index: var(--z-dropdown);
   display: flex;
   flex-direction: column;
   width: 220px;

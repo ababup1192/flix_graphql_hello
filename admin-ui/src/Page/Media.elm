@@ -361,7 +361,7 @@ sizeText bytes =
 -}
 viewPanel : Model -> AssetRow -> Html Msg
 viewPanel model asset =
-    div [ class "sticky top-0 flex max-h-screen w-72 shrink-0 flex-col gap-4 overflow-auto border-l border-edge py-6 pl-5" ]
+    div [ class "sticky top-0 z-(--z-sticky) flex max-h-screen w-72 shrink-0 flex-col gap-4 overflow-auto border-l border-edge py-6 pl-5" ]
         [ Ui.railTitle "選んだメディア"
         , if String.startsWith "image/" asset.mime then
             Html.img [ src asset.url, class "w-full rounded-md border border-edge bg-well object-contain" ] []

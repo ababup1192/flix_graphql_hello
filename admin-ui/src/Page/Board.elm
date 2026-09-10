@@ -266,7 +266,7 @@ viewBoard model detail =
 -}
 viewConfirm : Model -> { row : EntryRow, title : String, from : String, to : String } -> Html Msg
 viewConfirm model ask =
-    div [ class "fixed inset-0 z-50 flex items-center justify-center bg-black/30" ]
+    div [ class "fixed inset-0 z-(--z-dialog) flex items-center justify-center bg-black/30" ]
         [ Ui.card [ class "flex w-[420px] flex-col gap-3 p-5" ]
             [ Ui.subheading
                 (if ask.to == "DRAFT" then

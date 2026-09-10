@@ -1506,7 +1506,7 @@ WhyNot: トグル 1 つで公開を切り替えない。CMS の公開は公開�
 -}
 viewActionBar : Model -> ContentTypeDetail -> Html Msg
 viewActionBar model detail =
-    div [ class "sticky top-0 z-30 -mx-6 flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-edge bg-panel px-6 py-3" ]
+    div [ class "sticky top-0 z-(--z-sticky) -mx-6 flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-edge bg-panel px-6 py-3" ]
         -- **題は 1 行に切る。** 幅を止めないと、長い題が折り返して帯が縦に伸びる
         -- （画面を送ると付いてくる帯なので、本文の見える高さがそのぶん減る）。
         [ div [ class "flex min-w-0 max-w-[36ch] flex-col" ]
@@ -2390,7 +2390,7 @@ viewRich model field current =
     div
         [ class
             (if big then
-                "fixed inset-0 z-40 flex flex-col gap-2 bg-app p-4"
+                "fixed inset-0 z-(--z-drawer) flex flex-col gap-2 bg-app p-4"
 
              else
                 "flex flex-col gap-1.5"
@@ -2571,16 +2571,24 @@ viewRefField args model field current =
             model.refOpen == Just field.apiId
     in
     div [ class "flex flex-col gap-2" ]
-        [ -- **外を押したら閉じる層は、このフィールドより下・上の帯より下に敷く。**
-          -- `Ui.dismissLayer` は z-30 で帯も z-30。素で置くと後から描かれる層が勝ち、
-          -- 開いている間は「下書き保存」も、選んである物のチップも押せなくなる
-          -- （実際にどちらも押せなかった）。
-          if open then
-            div [ class "relative z-20" ] [ Ui.dismissLayer RefClosed ]
+        [ if open then
+            Ui.dismissLayer RefClosed
 
           else
             text ""
-        , div [ class "relative z-30 flex flex-col gap-2" ]
+        , div
+            [ class
+                (if open then
+                    -- **持ち上げるのは開いている 1 本だけ。**
+                    -- WhyNot: 参照フィールドを常に持ち上げない。同じ値の入れ物が縦に並ぶと
+                    -- 後から描かれた方が勝ち、上のフィールドの候補が下のフィールドの
+                    -- チップ・入力欄の後ろに回る（実際に回った）。
+                    "relative z-(--z-dropdown) flex flex-col gap-2"
+
+                 else
+                    "relative flex flex-col gap-2"
+                )
+            ]
             -- **選んである物を探す欄の上に置く。** 下に置くと、開いた候補が
             -- そのまま覆いかぶさり、今足した物が見えず押せもしない（実際に押せなかった）。
             [ div [ class "flex flex-wrap gap-1.5" ] (List.map (viewChosenRef model field) chosen)
@@ -2638,7 +2646,7 @@ refLabelOf model entryId =
 -}
 viewRefCandidates : { types : List Model.ContentTypeSummary } -> Model -> FieldDef -> List String -> Html Msg
 viewRefCandidates args model field chosen =
-    div [ class "absolute top-9 left-0 z-40 flex max-h-56 w-full flex-col overflow-auto rounded-md border border-edge bg-panel shadow-lg" ]
+    div [ class "absolute top-9 left-0 z-(--z-dropdown) flex max-h-56 w-full flex-col overflow-auto rounded-md border border-edge bg-panel shadow-lg" ]
         (case Dict.get field.apiId model.refs of
             Nothing ->
                 [ span [ class "px-2 py-2 text-xs text-ink-faint" ] [ text "探しています…" ] ]

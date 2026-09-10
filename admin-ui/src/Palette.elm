@@ -222,7 +222,7 @@ view project types model =
                 pickedIndex project types model
         in
         div
-            [ class "fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-32"
+            [ class "fixed inset-0 z-(--z-dialog) flex items-start justify-center bg-black/30 pt-32"
             , onClick Closed
             ]
             [ div

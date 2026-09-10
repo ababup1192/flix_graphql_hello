@@ -24,6 +24,7 @@ import { CodeEditing } from "./code-editing";
 import { MarkdownRules } from "./markdown-rules";
 import { LinkDialog, stageLabel, type Candidate, type LinkChoice } from "./link-dialog";
 import { dismissOn } from "./dismiss";
+import { placeUnder } from "./place";
 import { isDraggingTable, tableHandles } from "./table-drag";
 import { Highlight, RaisedCaret, Subscript, Superscript } from "./text-marks";
 import { type Align, alignColumn, columnAlign, resizeTable, tableSize } from "./table-tools";
@@ -923,19 +924,7 @@ class TiptapEditor extends HTMLElement {
   private placeUnder(dom: HTMLElement, anchor: string | HTMLElement, width: number) {
     const button = typeof anchor === "string" ? this.querySelector<HTMLElement>(anchor) : anchor;
     if (!button) return;
-    const at = button.getBoundingClientRect();
-    const gap = 6;
-
-    // 下に入らなければ上へ返す。左右は画面の中に収める。
-    const below = at.bottom + gap;
-    const height = dom.offsetHeight || 260;
-    const top = below + height > window.innerHeight - 8 ? Math.max(8, at.top - gap - height) : below;
-    const left = Math.min(Math.max(8, at.left), window.innerWidth - width - 8);
-
-    dom.style.position = "fixed";
-    dom.style.top = `${Math.round(top)}px`;
-    dom.style.left = `${Math.round(left)}px`;
-    dom.style.right = "auto";
+    placeUnder(dom, button, width);
   }
 
   private closeDialog() {

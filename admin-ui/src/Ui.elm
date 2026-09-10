@@ -424,7 +424,7 @@ empty text =
 toast : msg -> String -> Html msg
 toast onClose text =
     Html.div
-        [ A.class "fixed bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-edge bg-panel px-4 py-2.5 text-[13px] text-ink shadow-lg" ]
+        [ A.class "fixed bottom-5 left-1/2 z-(--z-toast) flex -translate-x-1/2 items-center gap-3 rounded-lg border border-edge bg-panel px-4 py-2.5 text-[13px] text-ink shadow-lg" ]
         [ Html.text text
         , Html.button [ A.class "text-ink-faint", E.onClick onClose ] [ Html.text "✕" ]
         ]
@@ -648,7 +648,7 @@ drawer :
     -> Html msg
 drawer args children =
     Html.div
-        [ A.class "fixed inset-0 z-40 flex justify-end bg-black/30", E.onClick args.onClose ]
+        [ A.class "fixed inset-0 z-(--z-drawer) flex justify-end bg-black/30", E.onClick args.onClose ]
         [ Html.div
             [ A.class "flex h-full w-[720px] max-w-full flex-col gap-4 overflow-auto border-l border-edge bg-panel p-5"
             , E.stopPropagationOn "click" (Json.Decode.succeed ( args.onIgnore, True ))
@@ -669,22 +669,23 @@ drawer args children =
 -}
 overlay : msg -> List (Html.Attribute msg) -> List (Html msg) -> Html msg
 overlay onClose attrs =
-    Html.div (A.class "fixed inset-0 z-50 flex justify-center bg-black/40" :: E.onClick onClose :: attrs)
+    Html.div (A.class "fixed inset-0 z-(--z-dialog) flex justify-center bg-black/40" :: E.onClick onClose :: attrs)
 
 
 {-| 開いている面の外を押したら閉じるための、**見た目を持たない**層。
 
-メニューより 1 つ下（z-30）に敷く。上に乗るメニュー自体は押しても届かないので、
-中の項目はそのまま動く。
+`--z-dismiss` は開いている面（`--z-dropdown`）より下なので、面の中の項目はそのまま押せる。
 
 WhyNot: 背景を塗らない。塗ると「モーダルは 1 段まで」（仕様 6 章）の覆いと見分けが付かず、
 メニューが重い物に見える。
 WhyNot: 開いていない時も敷いたままにしない。透明でも下の画面の押下を全部奪う。
+WhyNot: 貼り付く帯（`--z-sticky`）より上に敷かない。面を開いている間、帯の「下書き保存」を
+押すのに 2 回かかる。
 
 -}
 dismissLayer : msg -> Html msg
 dismissLayer onDismiss =
-    Html.div [ A.class "fixed inset-0 z-30", E.onClick onDismiss ] []
+    Html.div [ A.class "fixed inset-0 z-(--z-dismiss)", E.onClick onDismiss ] []
 
 
 {-| メディアの 1 枚。押して選ぶ。
