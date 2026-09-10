@@ -7,7 +7,7 @@ mod EntriesQueries {
     ///
     /// 生成元 entries.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -369755578
+    pub def sourceHash(): Int32 = 865033631
 
     ///
     /// entryExists の 1 行。
@@ -78,11 +78,11 @@ mod EntriesQueries {
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
-    /// upsertContent: INSERT INTO entry_contents (entry_id, stage, data) VALUES ($1, $2, $3) ON CONFLICT (entry_id, stage) DO UPDATE SET data = EXCLUDED.data, updated_at = now()
+    /// upsertContent: INSERT INTO entry_contents (entry_id, stage, data, project_id) VALUES ($1, $2, $3, $4) ON CONFLICT (entry_id, stage) DO UPDATE SET data = EXCLUDED.data, updated_at = now()
     ///
-    pub def upsertContent(args: { entryId = String, stage = String, data = Util.Json.Json }): Int32 \ DbWrite =
-        let sql = "INSERT INTO entry_contents (entry_id, stage, data) VALUES ($1, $2, $3)\n    ON CONFLICT (entry_id, stage) DO UPDATE SET data = EXCLUDED.data, updated_at = now()";
-        let params = List#{SqlValue.Str(args#entryId), SqlValue.Str(args#stage), SqlValue.ofJson(args#data)};
+    pub def upsertContent(args: { entryId = String, stage = String, data = Util.Json.Json, projectId = Int64 }): Int32 \ DbWrite =
+        let sql = "INSERT INTO entry_contents (entry_id, stage, data, project_id) VALUES ($1, $2, $3, $4)\n    ON CONFLICT (entry_id, stage) DO UPDATE SET data = EXCLUDED.data, updated_at = now()";
+        let params = List#{SqlValue.Str(args#entryId), SqlValue.Str(args#stage), SqlValue.ofJson(args#data), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
@@ -177,11 +177,11 @@ mod EntriesQueries {
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
-    /// deleteContent: DELETE FROM entry_contents WHERE entry_id = $1 AND stage = $2
+    /// deleteContent: DELETE FROM entry_contents WHERE entry_id = $1 AND stage = $2 AND project_id = $3
     ///
-    pub def deleteContent(args: { entryId = String, stage = String }): Int32 \ DbWrite =
-        let sql = "DELETE FROM entry_contents WHERE entry_id = $1 AND stage = $2";
-        let params = List#{SqlValue.Str(args#entryId), SqlValue.Str(args#stage)};
+    pub def deleteContent(args: { entryId = String, stage = String, projectId = Int64 }): Int32 \ DbWrite =
+        let sql = "DELETE FROM entry_contents WHERE entry_id = $1 AND stage = $2 AND project_id = $3";
+        let params = List#{SqlValue.Str(args#entryId), SqlValue.Str(args#stage), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
@@ -345,11 +345,11 @@ mod EntriesQueries {
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
-    /// insertLink: INSERT INTO entry_links (project_id, from_entry_id, stage, field_id, to_entry_id, position) VALUES ($1, $2, $3, $4, $5, $6)
+    /// insertLink: INSERT INTO entry_links (project_id, from_entry_id, stage, field_api_id, to_entry_id, position) VALUES ($1, $2, $3, $4, $5, $6)
     ///
-    pub def insertLink(args: { projectId = Int64, fromEntryId = String, stage = String, fieldId = Int64, toEntryId = String, position = Int32 }): Int32 \ DbWrite =
-        let sql = "INSERT INTO entry_links (project_id, from_entry_id, stage, field_id, to_entry_id, position) VALUES ($1, $2, $3, $4, $5, $6)";
-        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Str(args#fromEntryId), SqlValue.Str(args#stage), SqlValue.Int64(args#fieldId), SqlValue.Str(args#toEntryId), SqlValue.Int32(args#position)};
+    pub def insertLink(args: { projectId = Int64, fromEntryId = String, stage = String, fieldApiId = String, toEntryId = String, position = Int32 }): Int32 \ DbWrite =
+        let sql = "INSERT INTO entry_links (project_id, from_entry_id, stage, field_api_id, to_entry_id, position) VALUES ($1, $2, $3, $4, $5, $6)";
+        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Str(args#fromEntryId), SqlValue.Str(args#stage), SqlValue.Str(args#fieldApiId), SqlValue.Str(args#toEntryId), SqlValue.Int32(args#position)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
@@ -363,10 +363,10 @@ mod EntriesQueries {
         ) yield { toEntryId = toEntryId }
 
     ///
-    /// unpublishedTargets: SELECT DISTINCT l.to_entry_id FROM entry_links AS l LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL AND e.stage = 'published' WHERE l.from_entry_id = $1 AND l.project_id = $2 AND l.stage = 'draft' AND e.id IS NULL
+    /// unpublishedTargets: SELECT DISTINCT l.to_entry_id FROM entry_links AS l JOIN entries AS src ON src.id = l.from_entry_id AND src.project_id = l.project_id JOIN content_fields AS f ON f.type_id = src.type_id AND f.api_id = l.field_api_id AND f.project_id = l.project_id LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL AND e.stage = 'published' WHERE l.from_entry_id = $1 AND l.project_id = $2 AND l.stage = 'draft' AND e.id IS NULL
     ///
     pub def unpublishedTargets(args: { fromEntryId = String, projectId = Int64 }): List[UnpublishedTargetsRow] \ DbRead =
-        let sql = "SELECT DISTINCT l.to_entry_id\n    FROM entry_links AS l\n    LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL AND e.stage = 'published'\n    WHERE l.from_entry_id = $1 AND l.project_id = $2 AND l.stage = 'draft' AND e.id IS NULL";
+        let sql = "SELECT DISTINCT l.to_entry_id\n    FROM entry_links AS l\n    JOIN entries AS src ON src.id = l.from_entry_id AND src.project_id = l.project_id\n    JOIN content_fields AS f ON f.type_id = src.type_id AND f.api_id = l.field_api_id AND f.project_id = l.project_id\n    LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL AND e.stage = 'published'\n    WHERE l.from_entry_id = $1 AND l.project_id = $2 AND l.stage = 'draft' AND e.id IS NULL";
         let params = List#{SqlValue.Str(args#fromEntryId), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(unpublishedTargetsDecoder(), sql, params))
 
@@ -381,29 +381,29 @@ mod EntriesQueries {
         ) yield { toEntryId = toEntryId }
 
     ///
-    /// missingTargets: SELECT DISTINCT l.to_entry_id FROM entry_links AS l LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL WHERE l.from_entry_id = $1 AND l.project_id = $2 AND l.stage = 'draft' AND e.id IS NULL
+    /// missingTargets: SELECT DISTINCT l.to_entry_id FROM entry_links AS l JOIN entries AS src ON src.id = l.from_entry_id AND src.project_id = l.project_id JOIN content_fields AS f ON f.type_id = src.type_id AND f.api_id = l.field_api_id AND f.project_id = l.project_id LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL WHERE l.from_entry_id = $1 AND l.project_id = $2 AND l.stage = 'draft' AND e.id IS NULL
     ///
     pub def missingTargets(args: { fromEntryId = String, projectId = Int64 }): List[MissingTargetsRow] \ DbRead =
-        let sql = "SELECT DISTINCT l.to_entry_id\n    FROM entry_links AS l\n    LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL\n    WHERE l.from_entry_id = $1 AND l.project_id = $2 AND l.stage = 'draft' AND e.id IS NULL";
+        let sql = "SELECT DISTINCT l.to_entry_id\n    FROM entry_links AS l\n    JOIN entries AS src ON src.id = l.from_entry_id AND src.project_id = l.project_id\n    JOIN content_fields AS f ON f.type_id = src.type_id AND f.api_id = l.field_api_id AND f.project_id = l.project_id\n    LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL\n    WHERE l.from_entry_id = $1 AND l.project_id = $2 AND l.stage = 'draft' AND e.id IS NULL";
         let params = List#{SqlValue.Str(args#fromEntryId), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(missingTargetsDecoder(), sql, params))
 
     ///
     /// referrerLinks の 1 行。
     ///
-    pub type alias ReferrerLinksRow = { fromEntryId = String, fieldId = Int64 }
+    pub type alias ReferrerLinksRow = { fromEntryId = String, fieldApiId = String }
 
     def referrerLinksDecoder(): Decoder[ReferrerLinksRow] =
         forA (
             fromEntryId <- Decoder.str("from_entry_id");
-            fieldId <- Decoder.int64("field_id")
-        ) yield { fromEntryId = fromEntryId, fieldId = fieldId }
+            fieldApiId <- Decoder.str("field_api_id")
+        ) yield { fromEntryId = fromEntryId, fieldApiId = fieldApiId }
 
     ///
-    /// referrerLinks: SELECT DISTINCT l.from_entry_id, l.field_id FROM entry_links AS l JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL WHERE l.to_entry_id = $1 AND l.project_id = $2 AND l.stage = $3 ORDER BY l.from_entry_id, l.field_id
+    /// referrerLinks: SELECT DISTINCT l.from_entry_id, l.field_api_id FROM entry_links AS l JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL AND e.project_id = l.project_id JOIN content_fields AS f ON f.type_id = e.type_id AND f.api_id = l.field_api_id AND f.project_id = l.project_id WHERE l.to_entry_id = $1 AND l.project_id = $2 AND l.stage = $3 ORDER BY l.from_entry_id, l.field_api_id
     ///
     pub def referrerLinks(args: { toEntryId = String, stage = String, projectId = Int64 }): List[ReferrerLinksRow] \ DbRead =
-        let sql = "SELECT DISTINCT l.from_entry_id, l.field_id\n    FROM entry_links AS l\n    JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL\n    WHERE l.to_entry_id = $1 AND l.project_id = $2 AND l.stage = $3\n    ORDER BY l.from_entry_id, l.field_id";
+        let sql = "SELECT DISTINCT l.from_entry_id, l.field_api_id\n    FROM entry_links AS l\n    JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL AND e.project_id = l.project_id\n    JOIN content_fields AS f ON f.type_id = e.type_id AND f.api_id = l.field_api_id AND f.project_id = l.project_id\n    WHERE l.to_entry_id = $1 AND l.project_id = $2 AND l.stage = $3\n    ORDER BY l.from_entry_id, l.field_api_id";
         let params = List#{SqlValue.Str(args#toEntryId), SqlValue.Int64(args#projectId), SqlValue.Str(args#stage)};
         RawSql.runWithAllow(() -> Sql.fetchAs(referrerLinksDecoder(), sql, params))
 
@@ -418,10 +418,10 @@ mod EntriesQueries {
         ) yield { fromEntryId = fromEntryId }
 
     ///
-    /// publishedReferrers: SELECT DISTINCT l.from_entry_id FROM entry_links AS l JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL WHERE l.to_entry_id = $1 AND l.project_id = $2 AND l.stage = 'published'
+    /// publishedReferrers: SELECT DISTINCT l.from_entry_id FROM entry_links AS l JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL AND e.project_id = l.project_id JOIN content_fields AS f ON f.type_id = e.type_id AND f.api_id = l.field_api_id AND f.project_id = l.project_id WHERE l.to_entry_id = $1 AND l.project_id = $2 AND l.stage = 'published'
     ///
     pub def publishedReferrers(args: { toEntryId = String, projectId = Int64 }): List[PublishedReferrersRow] \ DbRead =
-        let sql = "SELECT DISTINCT l.from_entry_id\n    FROM entry_links AS l\n    JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL\n    WHERE l.to_entry_id = $1 AND l.project_id = $2 AND l.stage = 'published'";
+        let sql = "SELECT DISTINCT l.from_entry_id\n    FROM entry_links AS l\n    JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL AND e.project_id = l.project_id\n    JOIN content_fields AS f ON f.type_id = e.type_id AND f.api_id = l.field_api_id AND f.project_id = l.project_id\n    WHERE l.to_entry_id = $1 AND l.project_id = $2 AND l.stage = 'published'";
         let params = List#{SqlValue.Str(args#toEntryId), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(publishedReferrersDecoder(), sql, params))
 

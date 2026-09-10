@@ -266,21 +266,28 @@ mod ContentEntries {
     ///
     /// 操作の影響。取り下げ・削除で壊れる参照元（公開の中身。削除なら下書きも）と、公開で一緒に動く未公開の参照先（再帰）。
     ///
-    pub def impact(proof: Granted[ReadDraft], id: EntryId, action: ImpactAction): Impact \ DbRead + CmsErr + Tenant =
+    pub def impact(_proof: Granted[ReadDraft], id: EntryId, action: ImpactAction): Impact \ DbRead + CmsErr + Tenant =
         // 無ければ notFound
         discard load(id);
         // 操作ごとに、壊れる参照元（breaks）と一緒に動く参照先（cascades）を集める
         match action {
             case ImpactAction.Publish   => { breaks = Nil, cascades = dependenciesOf(id :: Nil, id) |> List.filterMap(lookup) }
-            case ImpactAction.Unpublish => { breaks = referrers(proof, id, Stage.Published), cascades = Nil }
-            case ImpactAction.Delete    => { breaks = referrers(proof, id, Stage.Published) ::: referrers(proof, id, Stage.Draft), cascades = Nil }
+            case ImpactAction.Unpublish => { breaks = referrers(id, Stage.Published), cascades = Nil }
+            case ImpactAction.Delete    => { breaks = referrers(id, Stage.Published) ::: referrers(id, Stage.Draft), cascades = Nil }
         }
 
+    ///
     /// stage の中身でこの entry を参照している物。参照元は下書きの中身で返す。
-    def referrers(reader: Granted[ReadDraft], id: EntryId, stage: Stage): List[Referrer] \ DbRead + CmsErr + Tenant =
+    ///
+    /// WhyNot: via を FieldId から引き直さないのは、索引が apiId を持つようになったため
+    /// （参照元 1 件ごとにフィールドの SELECT が 1 本増えていた）。
+    ///
+    def referrers(id: EntryId, stage: Stage): List[Referrer] \ DbRead + Tenant =
         EntriesQueries.referrerLinks({ toEntryId = EntryId.text(id), stage = EntryRows.stageToDb(stage), projectId = Tenant.currentId() })
-            |> List.filterMap(row -> EntryId.parse(row#fromEntryId) |> Option.flatMap(lookup) |> Option.map(entry ->
-                { entry = entry, via = ContentTypes.getField(reader, FieldId.FieldId(row#fieldId))#apiId, stage = stage }))
+            |> List.filterMap(row -> forM (
+                    entry <- EntryId.parse(row#fromEntryId) |> Option.flatMap(lookup);
+                    via   <- ApiId.parse(row#fieldApiId)
+                ) yield { entry = entry, via = via, stage = stage })
 
     /// 未公開の参照先を深さ優先で集める（依存の順。直接の参照先は id 順。重複と循環は visited で止める）。
     def dependenciesOf(visited: List[EntryId], id: EntryId): List[EntryId] \ DbRead + Tenant =
@@ -328,7 +335,7 @@ mod ContentEntries {
         let key = EntryId.text(id);
         let published = EntryRows.stageToDb(Stage.Published);
         discard EntriesQueries.deleteLinks({ fromEntryId = key, stage = published, projectId = Tenant.currentId() });
-        discard EntriesQueries.deleteContent({ entryId = key, stage = published });
+        discard EntriesQueries.deleteContent({ entryId = key, stage = published, projectId = Tenant.currentId() });
         discard EntriesQueries.markUnpublished({ id = key, projectId = Tenant.currentId() })
 
     // ---- バージョン ----
@@ -431,10 +438,10 @@ mod ContentEntries {
     def writeContent(id: EntryId, stage: Stage, owner: ContentType, data: EntryData): Unit \ DbWrite + Tenant =
         let key = EntryId.text(id);
         let stageText = EntryRows.stageToDb(stage);
-        discard EntriesQueries.upsertContent({ entryId = key, stage = stageText, data = EntryRows.dataToJson(data) });
+        discard EntriesQueries.upsertContent({ entryId = key, stage = stageText, data = EntryRows.dataToJson(data), projectId = Tenant.currentId() });
         discard EntriesQueries.deleteLinks({ fromEntryId = key, stage = stageText, projectId = Tenant.currentId() });
         EntryLinks.extract(owner#fields, data) |> List.forEach(link ->
-            discard EntriesQueries.insertLink({ projectId = Tenant.currentId(), fromEntryId = key, stage = stageText, fieldId = FieldId.toInt64(link#field#id), toEntryId = EntryId.text(link#target), position = link#position }))
+            discard EntriesQueries.insertLink({ projectId = Tenant.currentId(), fromEntryId = key, stage = stageText, fieldApiId = ApiId.text(link#field#apiId), toEntryId = EntryId.text(link#target), position = link#position }))
 
     ///
     /// 参照先を同じ stage で 1 本の SELECT で先読みし、各 entry の linked に載せる。参照が無ければ SQL を出さない。

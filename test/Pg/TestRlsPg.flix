@@ -1,7 +1,7 @@
 ///
 /// RLS を実 PostgreSQL で見る。所有者（superuser）で種を置き、アプリ用のロール cms_app で繋ぎ直して、
 /// 条件を書かない生 SQL でも他のプロジェクトの行が読めず・書けず・消せず、印の無い Tx は 0 行で、
-/// 他のプロジェクトの project_id では INSERT できない事を、中身の 7 表すべてで確かめる。
+/// 他のプロジェクトの project_id では INSERT できない事を、中身の 8 表すべてで確かめる。
 ///
 mod TestRlsPg {
 
@@ -9,7 +9,7 @@ mod TestRlsPg {
 
     /// RLS を掛けた表。
     def guardedTables(): List[String] =
-        List#{"content_types", "content_fields", "entries", "entry_versions", "entry_links", "assets", "webhooks"}
+        List#{"content_types", "content_fields", "entries", "entry_contents", "entry_versions", "entry_links", "assets", "webhooks"}
 
     def countRows(table: String): Int64 \ DbRead + RawSql + DbErr =
         Sql.fetchOneAs(Decoder.int64("total"), "SELECT count(*)::bigint AS total FROM ${table}", Nil) |> Option.getWithDefault(-1i64)
@@ -22,7 +22,7 @@ mod TestRlsPg {
         discard Sql.fetch("SELECT set_config('app.project_id', $1, false)", SqlValue.Str(text) :: Nil)
 
     ///
-    /// default に 7 表とも 1 行以上置く（型・フィールド・entry・版・参照・asset・Webhook）。shop のプロジェクト id を返す。
+    /// default に 8 表とも 1 行以上置く（型・フィールド・entry・中身・版・参照・asset・Webhook）。shop のプロジェクト id を返す。
     ///
     def seedAllTables(): ProjectId \ Db + CmsErr + IdGen + Tenant + Session + ObjectStore =
         let shop = Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("shop"), "店");
@@ -39,7 +39,7 @@ mod TestRlsPg {
         shop
 
     ///
-    /// 7 表それぞれで:
+    /// 8 表それぞれで:
     ///   印 = default : count ≥ 1
     ///   印 = shop    : count 0、UPDATE 0 行、DELETE 0 行（条件を書いていないのに）
     ///   印 無し      : count 0

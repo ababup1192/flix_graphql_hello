@@ -49,12 +49,6 @@ mod ContentTypes {
     def load(id: TypeId): ContentType \ DbRead + CmsErr + Tenant =
         lookup(id) |> CmsErr.orNotFound(Entity.ContentType, "${id}")
 
-    ///
-    /// フィールド 1 つ（children 付き）。無ければ notFound。
-    ///
-    pub def getField(_proof: Granted[ReadDraft], id: FieldId): FieldDef \ DbRead + CmsErr + Tenant =
-        loadField(id)
-
     /// フィールド 1 つ。無ければ notFound。権限は見ない（ユースケースの内部で使う）。
     def loadField(id: FieldId): FieldDef \ DbRead + CmsErr + Tenant =
         let flat = ContentFieldsQueries.findField({ id = FieldId.toInt64(id), projectId = Tenant.currentId() }) |> Option.map(ContentTypeRows.toFieldDef) |> CmsErr.orNotFound(Entity.Field, "${id}");

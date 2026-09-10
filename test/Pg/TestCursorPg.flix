@@ -15,7 +15,7 @@ mod TestCursorPg {
         discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("views", FieldKind.Number, FieldConfig.empty()));
         List.range(1, 8) |> List.forEach(n ->
             discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b${n}")), CmsTestKit.entryData(List#{("title", Json.JString("t${n}")), ("views", CmsTestKit.intJson(n * 10))})));
-        discard EntriesQueries.upsertContent({ entryId = "b3", stage = "draft", data = Json.JObject(Map#{ "title" => Json.JString("t3"), "views" => Json.JString("many") }) })
+        discard EntriesQueries.upsertContent({ entryId = "b3", stage = "draft", data = Json.JObject(Map#{ "title" => Json.JString("t3"), "views" => Json.JString("many") }), projectId = Tenant.currentId() })
 
     /// 応答の nodes の id、pageInfo.hasNextPage、pageInfo.endCursor。
     def pageOf(response: (Value, Option[String])): (List[String], Value, Option[String]) =

@@ -28,8 +28,8 @@ query purgeDeletedEntries(typeId: Int64, projectId: Int64) -> exec {
     DELETE FROM entries WHERE type_id = :typeId AND project_id = :projectId AND deleted_at IS NOT NULL
 }
 
-query upsertContent(entryId: String, stage: String, data: Json) -> exec {
-    INSERT INTO entry_contents (entry_id, stage, data) VALUES (:entryId, :stage, :data)
+query upsertContent(entryId: String, stage: String, data: Json, projectId: Int64) -> exec {
+    INSERT INTO entry_contents (entry_id, stage, data, project_id) VALUES (:entryId, :stage, :data, :projectId)
     ON CONFLICT (entry_id, stage) DO UPDATE SET data = EXCLUDED.data, updated_at = now()
 }
 
@@ -74,8 +74,8 @@ query markUnpublished(id: String, projectId: Int64) -> exec {
     UPDATE entries SET stage = 'draft', published_at = NULL, updated_at = now() WHERE id = :id AND project_id = :projectId AND stage = 'published' AND deleted_at IS NULL
 }
 
-query deleteContent(entryId: String, stage: String) -> exec {
-    DELETE FROM entry_contents WHERE entry_id = :entryId AND stage = :stage
+query deleteContent(entryId: String, stage: String, projectId: Int64) -> exec {
+    DELETE FROM entry_contents WHERE entry_id = :entryId AND stage = :stage AND project_id = :projectId
 }
 
 // ---- 一意 ----
@@ -132,14 +132,16 @@ query deleteLinks(fromEntryId: String, stage: String, projectId: Int64) -> exec 
     DELETE FROM entry_links WHERE from_entry_id = :fromEntryId AND stage = :stage AND project_id = :projectId
 }
 
-query insertLink(projectId: Int64, fromEntryId: String, stage: String, fieldId: Int64, toEntryId: String, position: Int32) -> exec {
-    INSERT INTO entry_links (project_id, from_entry_id, stage, field_id, to_entry_id, position) VALUES (:projectId, :fromEntryId, :stage, :fieldId, :toEntryId, :position)
+query insertLink(projectId: Int64, fromEntryId: String, stage: String, fieldApiId: String, toEntryId: String, position: Int32) -> exec {
+    INSERT INTO entry_links (project_id, from_entry_id, stage, field_api_id, to_entry_id, position) VALUES (:projectId, :fromEntryId, :stage, :fieldApiId, :toEntryId, :position)
 }
 
 // 下書きが参照している entry のうち、公開されていない物（ゴミ箱の物と無い物を含む）
 query unpublishedTargets(fromEntryId: String, projectId: Int64) -> many {
     SELECT DISTINCT l.to_entry_id
     FROM entry_links AS l
+    JOIN entries AS src ON src.id = l.from_entry_id AND src.project_id = l.project_id
+    JOIN content_fields AS f ON f.type_id = src.type_id AND f.api_id = l.field_api_id AND f.project_id = l.project_id
     LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL AND e.stage = 'published'
     WHERE l.from_entry_id = :fromEntryId AND l.project_id = :projectId AND l.stage = 'draft' AND e.id IS NULL
 }
@@ -148,23 +150,27 @@ query unpublishedTargets(fromEntryId: String, projectId: Int64) -> many {
 query missingTargets(fromEntryId: String, projectId: Int64) -> many {
     SELECT DISTINCT l.to_entry_id
     FROM entry_links AS l
+    JOIN entries AS src ON src.id = l.from_entry_id AND src.project_id = l.project_id
+    JOIN content_fields AS f ON f.type_id = src.type_id AND f.api_id = l.field_api_id AND f.project_id = l.project_id
     LEFT JOIN entries AS e ON e.id = l.to_entry_id AND e.deleted_at IS NULL
     WHERE l.from_entry_id = :fromEntryId AND l.project_id = :projectId AND l.stage = 'draft' AND e.id IS NULL
 }
 
 // この entry を stage の中身で参照している entry と、どのフィールドで参照しているか（影響の見える化用）
 query referrerLinks(toEntryId: String, stage: String, projectId: Int64) -> many {
-    SELECT DISTINCT l.from_entry_id, l.field_id
+    SELECT DISTINCT l.from_entry_id, l.field_api_id
     FROM entry_links AS l
-    JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL
+    JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL AND e.project_id = l.project_id
+    JOIN content_fields AS f ON f.type_id = e.type_id AND f.api_id = l.field_api_id AND f.project_id = l.project_id
     WHERE l.to_entry_id = :toEntryId AND l.project_id = :projectId AND l.stage = :stage
-    ORDER BY l.from_entry_id, l.field_id
+    ORDER BY l.from_entry_id, l.field_api_id
 }
 
 // この entry を公開側で参照している entry（取り下げ・削除の防止用）
 query publishedReferrers(toEntryId: String, projectId: Int64) -> many {
     SELECT DISTINCT l.from_entry_id
     FROM entry_links AS l
-    JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL
+    JOIN entries AS e ON e.id = l.from_entry_id AND e.deleted_at IS NULL AND e.project_id = l.project_id
+    JOIN content_fields AS f ON f.type_id = e.type_id AND f.api_id = l.field_api_id AND f.project_id = l.project_id
     WHERE l.to_entry_id = :toEntryId AND l.project_id = :projectId AND l.stage = 'published'
 }

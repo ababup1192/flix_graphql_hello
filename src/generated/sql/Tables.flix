@@ -458,6 +458,7 @@ mod EntryContentsTable {
     pub def stage(): Fragment.Col[EntryContentsTable, String, Fragment.NotNull] = Fragment.Col.Col("stage", SqlValue.Str)
     pub def data(): Fragment.Col[EntryContentsTable, Util.Json.Json, Fragment.NotNull] = Fragment.Col.Col("data", SqlValue.ofJson)
     pub def updatedAt(): Fragment.Col[EntryContentsTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("updated_at", SqlValue.ofTimestamp)
+    pub def projectId(): Fragment.Col[EntryContentsTable, Int64, Fragment.NotNull] = Fragment.Col.Col("project_id", SqlValue.Int64)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
@@ -467,6 +468,8 @@ mod EntryContentsTable {
         case EntryIdFkey
         /// entry_contents_stage_check (check)
         case StageCheck
+        /// entry_contents_project_id_fkey (foreign key)
+        case ProjectIdFkey
     }
 
     ///
@@ -483,11 +486,13 @@ mod EntryContentsTable {
     pub def raiseConstraint(constraint: Constraint): a \ DbErr = match constraint {
         case Constraint.EntryIdFkey => DbErr.foreignKeyViolation("entry_contents_entry_id_fkey")
         case Constraint.StageCheck => DbErr.checkViolation("entry_contents_stage_check")
+        case Constraint.ProjectIdFkey => DbErr.foreignKeyViolation("entry_contents_project_id_fkey")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
         case "entry_contents_entry_id_fkey" => Some(Constraint.EntryIdFkey)
         case "entry_contents_stage_check" => Some(Constraint.StageCheck)
+        case "entry_contents_project_id_fkey" => Some(Constraint.ProjectIdFkey)
         case _ => None
     }
 
@@ -506,10 +511,10 @@ mod EntryLinksTable {
 
     pub def fromEntryId(): Fragment.Col[EntryLinksTable, String, Fragment.NotNull] = Fragment.Col.Col("from_entry_id", SqlValue.Str)
     pub def stage(): Fragment.Col[EntryLinksTable, String, Fragment.NotNull] = Fragment.Col.Col("stage", SqlValue.Str)
-    pub def fieldId(): Fragment.Col[EntryLinksTable, Int64, Fragment.NotNull] = Fragment.Col.Col("field_id", SqlValue.Int64)
     pub def toEntryId(): Fragment.Col[EntryLinksTable, String, Fragment.NotNull] = Fragment.Col.Col("to_entry_id", SqlValue.Str)
     pub def position(): Fragment.Col[EntryLinksTable, Int32, Fragment.NotNull] = Fragment.Col.Col("position", SqlValue.Int32)
     pub def projectId(): Fragment.Col[EntryLinksTable, Int64, Fragment.NotNull] = Fragment.Col.Col("project_id", SqlValue.Int64)
+    pub def fieldApiId(): Fragment.Col[EntryLinksTable, String, Fragment.NotNull] = Fragment.Col.Col("field_api_id", SqlValue.Str)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。

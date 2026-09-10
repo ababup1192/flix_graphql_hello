@@ -53,7 +53,7 @@ mod TestContentApiPg {
     def testPgContentApiTolerantOfStaleShapes(): Unit \ {IO, Assert} =
         let stale = () -> {
             seed();
-            discard EntriesQueries.upsertContent({ entryId = "b3", stage = "draft", data = Util.Json.Json.JObject(Map#{ "title" => Util.Json.Json.JString("stale"), "tags" => Util.Json.Json.JString("flix"), "views" => Util.Json.Json.JString("many") }) })
+            discard EntriesQueries.upsertContent({ entryId = "b3", stage = "draft", data = Util.Json.Json.JObject(Map#{ "title" => Util.Json.Json.JString("stale"), "tags" => Util.Json.Json.JString("flix"), "views" => Util.Json.Json.JString("many") }), projectId = Tenant.currentId() })
         };
         let (byTag, byViews, ordered) = PgTestSupport.withContentApi(stale, ask ->
             (ask("{ blogs(stage: DRAFT, where: { tags_contains: \"flix\" }) { nodes { id } } }"),
