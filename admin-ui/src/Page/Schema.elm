@@ -91,6 +91,18 @@ type alias EditForm =
     }
 
 
+{-| integer は NUMBER だけの設定。他の種類で送るとサーバが config を弾き、
+名前を直すだけの保存も通らなくなる。
+-}
+integerOf : EditForm -> Maybe Bool
+integerOf form =
+    if form.kind == "NUMBER" then
+        Just form.integer
+
+    else
+        Nothing
+
+
 formOf : FieldDef -> EditForm
 formOf field =
     { id = field.id
@@ -338,7 +350,7 @@ update ctx msg model =
                                     , sourceField = form.sourceField
                                     , min = String.toFloat form.min
                                     , max = String.toFloat form.max
-                                    , integer = form.integer
+                                    , integer = integerOf form
                                     , options = optionsOf form.options
                                     }
                             )

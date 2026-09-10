@@ -499,7 +499,7 @@ type alias FieldPatch =
     , sourceField : String
     , min : Maybe Float
     , max : Maybe Float
-    , integer : Bool
+    , integer : Maybe Bool
     , options : List String
     }
 
@@ -527,7 +527,7 @@ updateField id project args =
                         , sourceField = presentIf (not (String.isEmpty args.sourceField)) args.sourceField
                         , min = presentOr args.min
                         , max = presentOr args.max
-                        , integer = Opt.Present args.integer
+                        , integer = presentOr args.integer
                         , options = presentIf (not (List.isEmpty args.options)) args.options
                         }
                 }
