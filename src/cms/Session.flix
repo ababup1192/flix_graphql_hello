@@ -71,6 +71,12 @@ mod Session {
     pub def readDraftOfPublisher(_proof: Granted[PublishEntries]): Granted[ReadDraft] =
         seal()
 
+    ///
+    /// ManageTypes の証明から ReadDraft の証明。判定はし直さない（理由は readDraftOfWriter と同じ。editor 以上は readDraft を持つ）。
+    ///
+    pub def readDraftOfTypeManager(_proof: Granted[ManageTypes]): Granted[ReadDraft] =
+        seal()
+
     /// 証明の値。この mod の中だけ。
     def seal(): Granted[p] = Granted.Granted(Seal.Seal)
 
