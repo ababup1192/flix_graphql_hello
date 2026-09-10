@@ -24,6 +24,11 @@ pub enum SchemaEffectKind with Eq, Order, ToString {
 pub type alias SchemaEffect = { kind = SchemaEffectKind, typeId = TypeId, apiId = Option[ApiId], draft = Int64, published = Int64 }
 
 ///
+/// 押す前に見せる影響のまとまり。safe なら確認なしで押せる。
+///
+pub type alias SchemaImpact = { safe = Bool, effects = List[SchemaEffect] }
+
+///
 /// フィールド 1 本の数え上げ。SQL が埋める。
 ///
 /// - draft / published: その apiId に値を持つ entry

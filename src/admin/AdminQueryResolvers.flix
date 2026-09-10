@@ -82,6 +82,20 @@ mod AdminQueryResolvers {
     def impactOf(id: Id, action: GeneratedAdmin.ImpactAction): Impact \ DbRead + CmsErr + Tenant + Session =
         ContentEntries.impact(Session.grant(), AdminMapping.entryId("id", id), AdminMapping.impactActionOf(action))
 
+    ///
+    /// Query.fieldImpact（スキーマの dry-run）。書き込まない。
+    ///
+    pub def fieldImpact(): GeneratedAdmin.QueryFieldImpactResolver[AdminEff] =
+        (_context, input) -> Ok(impactFor(input))
+
+    /// 押した後の姿を組み立てて差を取り、当たる entry を数える。ラムダの中で effect を使わないための切り出し。
+    def impactFor(input: GeneratedAdmin.SchemaChangeInput): SchemaImpact \ DbRead + CmsErr + Tenant + Session =
+        let edit = AdminMapping.schemaEdit(input);
+        let changes = SchemaPreview.changesFor(edit, ContentTypes.list(Session.grant()));
+        let (fields, types) = SchemaCounts.forChanges(changes);
+        let effects = FieldImpact.of(changes, fields, types);
+        { safe = List.isEmpty(effects), effects = effects }
+
     /// Query.publishPlan（まとめて dry-run）。withDependencies の既定は true
     pub def publishPlan(): GeneratedAdmin.QueryPublishPlanResolver[AdminEff] =
         (_context, ids, withDependencies) -> Ok(planFor(ids, withDependencies))
@@ -152,6 +166,6 @@ mod AdminQueryResolvers {
     /// type Query のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.QueryResolvers[AdminEff] =
         { contentTypes = contentTypes(), contentType = contentType(), entries = entries(), entry = entry(), assets = assets(), asset = asset(),
-          publishCheck = publishCheck(), impact = impact(), publishPlan = publishPlan(), viewer = viewer(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries(), schedules = schedules(), auditEvents = auditEvents() }
+          publishCheck = publishCheck(), impact = impact(), fieldImpact = fieldImpact(), publishPlan = publishPlan(), viewer = viewer(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries(), schedules = schedules(), auditEvents = auditEvents() }
 
 }

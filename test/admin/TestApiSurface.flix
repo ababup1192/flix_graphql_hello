@@ -71,9 +71,11 @@ mod TestApiSurface {
                 "PublishPlan: ok steps violations" ::
                 "PublishPlanStep: entry reason report" ::
                 "PublishReport: ok violations unpublishedDependencies" ::
-                "Query: contentTypes contentType entries entry assets asset publishCheck impact publishPlan viewer me members invitations apiKeys webhooks webhookDeliveries schedules auditEvents" ::
+                "Query: contentTypes contentType entries entry assets asset publishCheck impact publishPlan viewer me members invitations apiKeys webhooks webhookDeliveries schedules auditEvents fieldImpact" ::
                 "Referrer: entry via stage" ::
                 "Schedule: id entryId action runAt withDependencies status requestedBy lastError overdue createdAt doneAt" ::
+                "SchemaEffect: kind field draft published" ::
+                "SchemaImpact: safe effects" ::
                 "Upload: asset uploadUrl expiresInSeconds" ::
                 "Viewer: kind name roles scope permissions" ::
                 "Violation: path message" ::

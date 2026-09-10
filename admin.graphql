@@ -42,6 +42,9 @@ type Query {
   schedules(entryId: ID, first: Int = 50, after: ID): [Schedule!]!
   """監査の記録。新しい順（owner だけ）。誰が・いつ・何を変えたか。after は前のページの最後の id"""
   auditEvents(first: Int = 50, after: ID): [AuditEvent!]!
+  """スキーマを変える前の影響。書き込まない。safe なら確認なしで押せる。
+  押す時は effects から組んだ expected を渡す（渡さずに押すと、影響がある操作は止まる）"""
+  fieldImpact(input: SchemaChangeInput!): SchemaImpact!
 }
 
 """入力の 1 つの誤り。path は GraphQL の入力に対応（"fields.title" など）"""
@@ -106,6 +109,68 @@ type PublishPlan {
   violations: [Violation!]!
 }
 
+"""スキーマを変える操作。action ごとに要る項目が違う"""
+input SchemaChangeInput {
+  action: SchemaAction!
+  """REMOVE_FIELD / UPDATE_FIELD のフィールド"""
+  fieldId: ID
+  """ADD_FIELD / DELETE_CONTENT_TYPE の型"""
+  typeId: ID
+  """UPDATE_FIELD の変更"""
+  patch: FieldPatch
+  """ADD_FIELD の定義"""
+  field: FieldInput
+}
+
+enum SchemaAction {
+  REMOVE_FIELD
+  UPDATE_FIELD
+  ADD_FIELD
+  DELETE_CONTENT_TYPE
+}
+
+"""スキーマを変えると既存のデータに何が起きるか"""
+enum SchemaEffectKind {
+  """値が配信から消える。DB には残る"""
+  VALUES_HIDDEN
+  """参照が配信から消える"""
+  REFERENCES_HIDDEN
+  """asset の参照が配信から消える"""
+  ASSETS_HIDDEN
+  """消したはずの値が配信に戻る"""
+  VALUES_RESURRECTED
+  """公開中の entry が再公開できなくなる"""
+  PUBLISH_BLOCKED
+  """下書きの保存が通らなくなる"""
+  DRAFT_BLOCKED
+  """型と一緒に entry が消える"""
+  ENTRIES_REMOVED
+}
+
+"""影響 1 つ"""
+type SchemaEffect {
+  kind: SchemaEffectKind!
+  """効くフィールドの apiId。型ごとの影響なら null"""
+  field: String
+  """下書きに当たる件数"""
+  draft: Int!
+  """公開中に当たる件数"""
+  published: Int!
+}
+
+"""スキーマを変える前の影響（dry-run）"""
+type SchemaImpact {
+  """既存のデータに何も起きない。確認なしで押せる"""
+  safe: Boolean!
+  effects: [SchemaEffect!]!
+}
+
+"""画面が見た影響。押す時に渡す。見た時より種類が増えるか公開中の件数が増えていれば止まる"""
+input SchemaImpactInput {
+  kinds: [SchemaEffectKind!]!
+  published: Int!
+}
+
 """操作の影響"""
 type Impact {
   """壊れる（参照先を失う）entry。取り下げ・削除の前に見せる"""
@@ -117,12 +182,14 @@ type Impact {
 type Mutation {
   createContentType(input: ContentTypeInput!): ContentType!
   updateContentType(id: ID!, input: ContentTypePatch!): ContentType!
-  """フィールドごと消す"""
-  deleteContentType(id: ID!): ID!
+  """フィールドごと消す。expected は fieldImpact で見た影響"""
+  deleteContentType(id: ID!, expected: SchemaImpactInput): ID!
   """末尾に足す"""
   addField(typeId: ID!, input: FieldInput!): FieldDef!
-  updateField(id: ID!, input: FieldPatch!): FieldDef!
-  removeField(id: ID!): ID!
+  """expected は fieldImpact で見た影響"""
+  updateField(id: ID!, input: FieldPatch!, expected: SchemaImpactInput): FieldDef!
+  """expected は fieldImpact で見た影響"""
+  removeField(id: ID!, expected: SchemaImpactInput): ID!
   """ids の順に並べ直す。型の全フィールドを過不足なく渡す"""
   reorderFields(typeId: ID!, ids: [ID!]!): ContentType!
 

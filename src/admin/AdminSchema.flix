@@ -37,6 +37,8 @@ mod AdminSchema {
             publishPlan   = PublishPlanResolvers.resolvers(),
             referrer      = ReferrerResolvers.resolvers(),
             impact        = ImpactResolvers.resolvers(),
+            schemaEffect  = SchemaEffectResolvers.resolvers(),
+            schemaImpact  = SchemaImpactResolvers.resolvers(),
             entry        = EntryResolvers.resolvers(),
             entryVersion = EntryVersionResolvers.resolvers(),
             fieldChange  = FieldChangeResolvers.resolvers(),

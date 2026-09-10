@@ -19,10 +19,10 @@ mod AdminMutationResolvers {
 
     /// Mutation.deleteContentType。消した id を返す
     pub def deleteContentType(): GeneratedAdmin.MutationDeleteContentTypeResolver[AdminEff] =
-        (_context, id) -> { deleteType(id); Ok(id) }
+        (_context, id, expected) -> { deleteType(id, expected); Ok(id) }
 
-    def deleteType(id: Id): Unit \ Db + CmsErr + IdGen + Tenant + Session =
-        ContentTypes.delete(Session.grant(), AdminMapping.typeId("id", id))
+    def deleteType(id: Id, expected: Option[GeneratedAdmin.SchemaImpactInput]): Unit \ Db + CmsErr + IdGen + Tenant + Session =
+        guarded(expected, () -> ContentTypes.delete(Session.grant(), AdminMapping.typeId("id", id)))
 
     /// Mutation.addField
     pub def addField(): GeneratedAdmin.MutationAddFieldResolver[AdminEff] =
@@ -33,17 +33,24 @@ mod AdminMutationResolvers {
 
     /// Mutation.updateField
     pub def updateField(): GeneratedAdmin.MutationUpdateFieldResolver[AdminEff] =
-        (_context, id, patch) -> Ok(updateFieldOf(id, patch))
+        (_context, id, patch, expected) -> Ok(updateFieldOf(id, patch, expected))
 
-    def updateFieldOf(id: Id, patch: GeneratedAdmin.FieldPatch): FieldDef \ Db + CmsErr + IdGen + Tenant + Session =
-        ContentTypes.updateField(Session.grant(), AdminMapping.fieldId("id", id), AdminMapping.fieldChanges(patch))
+    def updateFieldOf(id: Id, patch: GeneratedAdmin.FieldPatch, expected: Option[GeneratedAdmin.SchemaImpactInput]): FieldDef \ Db + CmsErr + IdGen + Tenant + Session =
+        guarded(expected, () -> ContentTypes.updateField(Session.grant(), AdminMapping.fieldId("id", id), AdminMapping.fieldChanges(patch)))
 
     /// Mutation.removeField。消した id を返す
     pub def removeField(): GeneratedAdmin.MutationRemoveFieldResolver[AdminEff] =
-        (_context, id) -> { removeFieldOf(id); Ok(id) }
+        (_context, id, expected) -> { removeFieldOf(id, expected); Ok(id) }
 
-    def removeFieldOf(id: Id): Unit \ Db + CmsErr + IdGen + Tenant + Session =
-        ContentTypes.removeField(Session.grant(), AdminMapping.fieldId("id", id))
+    def removeFieldOf(id: Id, expected: Option[GeneratedAdmin.SchemaImpactInput]): Unit \ Db + CmsErr + IdGen + Tenant + Session =
+        guarded(expected, () -> ContentTypes.removeField(Session.grant(), AdminMapping.fieldId("id", id)))
+
+    ///
+    /// スキーマを壊しうる操作を包む。影響が空なら expected 無しでも通り、空でなければ
+    /// 見た影響（expected）と突き合わせて、悪くなっていれば止める。
+    ///
+    def guarded(expected: Option[GeneratedAdmin.SchemaImpactInput], thunk: Unit -> a \ ef): a \ ef + DbRead + CmsErr + Tenant + Session =
+        SchemaGuard.withImpact(Session.grant(), expected |> Option.map(AdminMapping.fingerprint), thunk)
 
     /// Mutation.reorderFields
     pub def reorderFields(): GeneratedAdmin.MutationReorderFieldsResolver[AdminEff] =

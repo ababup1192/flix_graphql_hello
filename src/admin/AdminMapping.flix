@@ -569,6 +569,58 @@ mod AdminMapping {
         }
 
     ///
+    ///
+    /// SchemaChangeInput を、押す前の操作に写す。action ごとに要る項目が無ければ invalid。
+    ///
+    /// WhyNot: 4 つの省略可能な項目で「どれか 1 つ」にしない。GraphQL に oneOf の口が無く
+    /// （schemagen も扱わない）、0 個や 2 個を渡せる形になるため。action を必須にして、
+    /// 要る項目だけをここで確かめる。
+    ///
+    pub def schemaEdit(input: GeneratedAdmin.SchemaChangeInput): SchemaEdit \ CmsErr = match input#action {
+        case GeneratedAdmin.SchemaAction.RemoveField =>
+            SchemaEdit.RemoveField(fieldId("fieldId", required("fieldId", input#fieldId)))
+        case GeneratedAdmin.SchemaAction.DeleteContentType =>
+            SchemaEdit.DeleteContentType(typeId("typeId", required("typeId", input#typeId)))
+        case GeneratedAdmin.SchemaAction.UpdateField =>
+            SchemaEdit.UpdateField(fieldId("fieldId", required("fieldId", input#fieldId)),
+                fieldChanges(input#patch |> Option.map(patch -> patch) |> CmsErr.orInvalid("patch", "UPDATE_FIELD には patch が要ります")))
+        case GeneratedAdmin.SchemaAction.AddField =>
+            SchemaEdit.AddField(typeId("typeId", required("typeId", input#typeId)),
+                fieldDraft(input#field |> Option.map(field -> field) |> CmsErr.orInvalid("field", "ADD_FIELD には field が要ります")))
+    }
+
+    /// action に要る id。無ければ invalid。
+    def required(argument: String, id: Option[Id]): Id \ CmsErr =
+        id |> CmsErr.orInvalid(argument, "この action には ${argument} が要ります")
+
+    ///
+    /// 画面が見た影響。押す時に渡す。
+    ///
+    pub def fingerprint(input: GeneratedAdmin.SchemaImpactInput): SchemaGuard.Fingerprint =
+        { kinds = input#kinds |> List.map(effectKindOf), published = Int32.toInt64(input#published) }
+
+    /// 影響の種類を GraphQL の enum から写す。
+    pub def effectKindOf(kind: GeneratedAdmin.SchemaEffectKind): SchemaEffectKind = match kind {
+        case GeneratedAdmin.SchemaEffectKind.ValuesHidden      => SchemaEffectKind.ValuesHidden
+        case GeneratedAdmin.SchemaEffectKind.ReferencesHidden  => SchemaEffectKind.ReferencesHidden
+        case GeneratedAdmin.SchemaEffectKind.AssetsHidden      => SchemaEffectKind.AssetsHidden
+        case GeneratedAdmin.SchemaEffectKind.ValuesResurrected => SchemaEffectKind.ValuesResurrected
+        case GeneratedAdmin.SchemaEffectKind.PublishBlocked    => SchemaEffectKind.PublishBlocked
+        case GeneratedAdmin.SchemaEffectKind.DraftBlocked      => SchemaEffectKind.DraftBlocked
+        case GeneratedAdmin.SchemaEffectKind.EntriesRemoved    => SchemaEffectKind.EntriesRemoved
+    }
+
+    /// 影響の種類を GraphQL の enum へ写す。
+    pub def effectKindTo(kind: SchemaEffectKind): GeneratedAdmin.SchemaEffectKind = match kind {
+        case SchemaEffectKind.ValuesHidden      => GeneratedAdmin.SchemaEffectKind.ValuesHidden
+        case SchemaEffectKind.ReferencesHidden  => GeneratedAdmin.SchemaEffectKind.ReferencesHidden
+        case SchemaEffectKind.AssetsHidden      => GeneratedAdmin.SchemaEffectKind.AssetsHidden
+        case SchemaEffectKind.ValuesResurrected => GeneratedAdmin.SchemaEffectKind.ValuesResurrected
+        case SchemaEffectKind.PublishBlocked    => GeneratedAdmin.SchemaEffectKind.PublishBlocked
+        case SchemaEffectKind.DraftBlocked      => GeneratedAdmin.SchemaEffectKind.DraftBlocked
+        case SchemaEffectKind.EntriesRemoved    => GeneratedAdmin.SchemaEffectKind.EntriesRemoved
+    }
+
     /// FieldInput を Draft に。
     ///
     pub def fieldDraft(input: GeneratedAdmin.FieldInput): FieldDraft \ CmsErr =
