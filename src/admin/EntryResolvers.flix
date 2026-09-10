@@ -14,10 +14,21 @@ mod EntryResolvers {
             publishedAt = (_context, source) -> Ok(source#publishedAt |> Option.map(Timestamp.toIso8601)),
             createdAt   = (_context, source) -> Ok(Timestamp.toIso8601(source#createdAt)),
             updatedAt   = (_context, source) -> Ok(Timestamp.toIso8601(source#updatedAt)),
+            path        = (_context, source) -> Ok(pathOf(source)),
             +versions   = (_context, source) -> Ok(versionsOf(source#id)),
             +diff       = (_context, source, fromRef, toRef) -> Ok(diffOf(source, fromRef, toRef))
             | GeneratedAdmin.entryDefaults()
         }
+
+    ///
+    /// Entry.path。型の linkPath に id と slug を差し込む。型紙が無い型は None。
+    ///
+    /// **コンテンツ API と同じ物を出す。** 本文のリンクの href（`RichText.toHtml`）も
+    /// 同じ `LinkPath` で作るので、管理画面で見えたパスがそのまま配信で出る。
+    ///
+    def pathOf(source: Entry): Option[String] \ DbRead + CmsErr + Tenant + Session + Preloaded =
+        let owner = contentTypeOf(source#typeId);
+        LinkPath.of(owner#linkPath, EntryId.text(source#id), EntryValue.slugOf(owner, source#data))
 
     ///
     /// Entry.versions。写しにあればそれ。無ければ一覧のページの分を 1 本でまとめて引いて写しに入れる（ページの最初の行だけ SQL が出る）。

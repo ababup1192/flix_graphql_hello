@@ -346,6 +346,7 @@ contentTypeDetail =
         |> SS.with ContentType.name
         |> SS.with (ContentType.kind |> SS.map TypeKind.toString)
         |> SS.with (ContentType.previewUrl |> SS.map (Maybe.withDefault ""))
+        |> SS.with (ContentType.linkPath |> SS.map (Maybe.withDefault ""))
         |> SS.with ContentType.singular
         |> SS.with ContentType.icon
         |> SS.with (ContentType.fields fieldDef)
@@ -409,6 +410,7 @@ createContentType id project args =
                 , singular = Opt.Absent
                 , plural = Opt.Absent
                 , previewUrl = Opt.Absent
+                , linkPath = Opt.Absent
                 , icon = Opt.Absent
                 }
             }
@@ -749,12 +751,13 @@ orderOf order =
 
 entryRow : SelectionSet EntryRow Api.Admin.Object.Entry
 entryRow =
-    SS.map5 EntryRow
+    SS.map6 EntryRow
         Entry.id
         Entry.version
         (Entry.stage |> SS.map EntryStage.toString)
         Entry.fields
         Entry.updatedAt
+        Entry.path
 
 
 {-| コンテンツ 1 件。編集の画面が使う。
@@ -832,7 +835,7 @@ referrerRow =
 -}
 titleIn : D.Value -> String
 titleIn fields =
-    EntryLabel.forRow { id = "", version = 0, stage = "", fields = fields, updatedAt = "" }
+    EntryLabel.forRow { id = "", version = 0, stage = "", fields = fields, updatedAt = "", path = Nothing }
 
 
 publishEntry : String -> Slug -> { entryId : String, withDependencies : Bool } -> ( Api.Request, D.Decoder EntryRow )
@@ -1139,7 +1142,7 @@ updateProjectVisibility id slug isPublic =
 {-| 型の設定を直す。**エンドポイント（apiId）は変えられない。**
 省いた項目は触らない（CMS の決まり）ので、アイコンだけ送りたい時も `name` は今の値を渡す。
 -}
-updateContentType : String -> Slug -> { typeId : String, name : String, previewUrl : String, icon : String } -> ( Api.Request, D.Decoder ContentTypeSummary )
+updateContentType : String -> Slug -> { typeId : String, name : String, previewUrl : String, linkPath : String, icon : String } -> ( Api.Request, D.Decoder ContentTypeSummary )
 updateContentType id project args =
     Api.mutation { id = id, kind = "updateContentType", project = project }
         (AdminMutation.updateContentType
@@ -1149,6 +1152,7 @@ updateContentType id project args =
                 , singular = Opt.Absent
                 , plural = Opt.Absent
                 , previewUrl = presentIf (not (String.isEmpty args.previewUrl)) args.previewUrl
+                , linkPath = Opt.Present args.linkPath
                 , icon = presentIf (not (String.isEmpty args.icon)) args.icon
                 }
             }

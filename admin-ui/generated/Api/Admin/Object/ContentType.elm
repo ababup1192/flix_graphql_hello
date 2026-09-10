@@ -65,6 +65,15 @@ previewUrl =
     Object.selectionForField "(Maybe String)" "previewUrl" [] (Decode.string |> Decode.nullable)
 
 
+{-| 本文のコンテンツへのリンクが、サイト上でどの path になるかの型紙（`/blog/{slug}`）。
+使える印は {id} と {slug} の 2 つで、{slug} は値が無ければ id に落ちる。
+/ か http(s):// で始める。空なら本文の HTML は `#entry:{id}` を出す（サイトが data-entry-id を見て置き換える）
+-}
+linkPath : SelectionSet (Maybe String) Api.Admin.Object.ContentType
+linkPath =
+    Object.selectionForField "(Maybe String)" "linkPath" [] (Decode.string |> Decode.nullable)
+
+
 {-| 管理画面のサイドバーに出すアイコンの識別子（"book" / "tag"）。絵柄は管理画面が決める。
 英小文字・数字・- を 32 文字まで（先頭は英小文字）。省いて作れば kind ごとの既定（COLLECTION は list、SINGLETON は file）
 -}

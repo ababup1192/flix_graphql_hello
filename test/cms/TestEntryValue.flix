@@ -45,6 +45,26 @@ mod TestEntryValue {
         Assert.assertEq(expected = List#{("hero", List#{"headline"})},
             EntryValue.blocks(sections(), data) |> List.map(match (variant, inner) -> (ApiId.text(variant#apiId), Map.keysOf(inner) |> Set.toList |> List.map(ApiId.text))))
 
+    /// 型の SLUG のフィールドの値を読む。SLUG が無い型、値が空、値が無い時は None（LinkPath が id に落とす）。
+    /// SLUG が 2 つある型は並びの先の物を採る。
+    @Test
+    def testEntryValueSlugOf(): Unit \ Assert =
+        let slug = CmsTestKit.fieldDef("slug", FieldKind.Slug);
+        let title = CmsTestKit.fieldDef("title", FieldKind.Text);
+        let second = { position = 1 | CmsTestKit.fieldDef("second", FieldKind.Slug) };
+        let data = CmsTestKit.entryData(List#{("slug", Json.JString("hello")), ("second", Json.JString("hi")), ("title", Json.JString("Hi")), ("blank", Json.JString(""))});
+        let table = List#{
+            (List#{title, slug}, data, Some("hello")),
+            (List#{title, slug, second}, data, Some("hello")),
+            (List#{second, title}, data, Some("hi")),
+            (List#{title}, data, None),
+            (List#{title, CmsTestKit.fieldDef("blank", FieldKind.Slug)}, data, None),
+            (List#{title, slug}, CmsTestKit.entryData(Nil), None)
+        };
+        Assert.assertEq(expected = table |> List.map(match (_, _, want) -> want),
+            table |> List.map(match (fields, given, _) ->
+                EntryValue.slugOf(CmsTestKit.contentType(1i64, "blogs", TypeKind.Collection, "記事", fields), given)))
+
     /// 位置付きの読み取りは元の番号を保つ（読めない要素を飛ばしても詰めない）。配列でなければ空。
     @Test
     def testEntryValueItemsWithIndex(): Unit \ Assert =

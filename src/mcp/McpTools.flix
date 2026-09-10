@@ -504,7 +504,7 @@ mod McpTools {
 
     /// ContentType の selection。
     def typeSelection(): String =
-        "id apiId kind name singular plural previewUrl createdAt updatedAt fields { ${fieldDefSelection(2)} }"
+        "id apiId kind name singular plural previewUrl linkPath createdAt updatedAt fields { ${fieldDefSelection(2)} }"
 
     /// Entry の中身以外。
     def entrySummarySelection(): String = "id typeId version stage publishedAt createdAt updatedAt"
@@ -891,7 +891,7 @@ mod McpTools {
     pub def readConverter(format: Format): Value -> Value = match format {
         case Format.Markdown => docTo(doc -> Markdown.toMarkdown(doc))
         case Format.Text     => docTo(doc -> RichText.toText(doc))
-        case Format.Html     => docTo(doc -> RichText.toHtml(Map.empty(), doc))
+        case Format.Html     => docTo(doc -> RichText.toHtml(Map.empty(), Map.empty(), doc))
         case Format.Doc      => identity
     }
 

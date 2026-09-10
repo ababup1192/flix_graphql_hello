@@ -31,7 +31,7 @@ mod TestContentTypeRows {
         (field#id, field#typeId, field#apiId, field#name, field#kind, field#many, field#required, field#unique, field#localized, field#target, field#parent, field#position, flattenConfig(field#config))
 
     /// content_types の行。INSERT の引数に id と時刻を足す。
-    def typeRow(names: Naming.TypeNames, draft: ContentTypeDraft): { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, icon = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp } =
+    def typeRow(names: Naming.TypeNames, draft: ContentTypeDraft): { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, linkPath = String, icon = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp } =
         { +id = 5i64, +createdAt = at(1725000000123i64), +updatedAt = at(1725000000456i64) | ContentTypeRows.typeInsert(names, draft) }
 
     /// content_fields の行。INSERT の引数に id と、後追いの UPDATE で入る target / parent を足す。
@@ -116,13 +116,13 @@ mod TestContentTypeRows {
 
     // ---- UPDATE の Changes ----
 
-    /// 型の変更は Some の列だけが SET に出て、順番は name / singular / plural / preview_url / icon。全部 None なら空。
+    /// 型の変更は Some の列だけが SET に出て、順番は name / singular / plural / preview_url / link_path / icon。全部 None なら空。
     @Test
     def testTypeChangesSql(): Unit \ Assert =
-        let all = { name = Some("N"), singular = Some(CmsTestKit.typeName("Post")), plural = Some(CmsTestKit.apiId("posts")), previewUrl = Some(""), icon = Some("tag") };
-        let some = { name = None, singular = None, plural = Some(CmsTestKit.apiId("posts")), previewUrl = None, icon = None };
-        let none = { name = None, singular = None, plural = None, previewUrl = None, icon = None };
-        Assert.assertEq(expected = (("name = $1, singular = $2, plural = $3, preview_url = $4, icon = $5", List#{SqlValue.Str("N"), SqlValue.Str("Post"), SqlValue.Str("posts"), SqlValue.Str(""), SqlValue.Str("tag")}),
+        let all = { name = Some("N"), singular = Some(CmsTestKit.typeName("Post")), plural = Some(CmsTestKit.apiId("posts")), previewUrl = Some(""), linkPath = Some("/x/{slug}"), icon = Some("tag") };
+        let some = { name = None, singular = None, plural = Some(CmsTestKit.apiId("posts")), previewUrl = None, linkPath = None, icon = None };
+        let none = { name = None, singular = None, plural = None, previewUrl = None, linkPath = None, icon = None };
+        Assert.assertEq(expected = (("name = $1, singular = $2, plural = $3, preview_url = $4, link_path = $5, icon = $6", List#{SqlValue.Str("N"), SqlValue.Str("Post"), SqlValue.Str("posts"), SqlValue.Str(""), SqlValue.Str("/x/{slug}"), SqlValue.Str("tag")}),
                                     ("plural = $1", List#{SqlValue.Str("posts")}),
                                     true),
             (Fragment.appendChanges(ContentTypeRows.typeChanges(all), Nil),

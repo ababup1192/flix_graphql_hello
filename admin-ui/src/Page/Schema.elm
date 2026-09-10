@@ -219,7 +219,7 @@ update ctx msg model =
                             (\id ->
                                 Queries.updateContentType id
                                     ctx.project
-                                    { typeId = detail.id, name = detail.name, previewUrl = detail.previewUrl, icon = icon }
+                                    { typeId = detail.id, name = detail.name, previewUrl = detail.previewUrl, linkPath = detail.linkPath, icon = icon }
                             )
                             GotIcon
                       ]
@@ -734,7 +734,7 @@ viewType args model detail =
                 {- WhyNot: 面を上に置いたままにしない。フィールドが 40 個あると表が 2478px になり、
                    下の方の行を押しても設定の面が画面の外に出たままで編集できない（実際にできなかった）。
                 -}
-                div [ class "sticky top-6 max-h-[calc(100vh-6rem)] w-[380px] shrink-0 overflow-auto" ]
+                div [ class "sticky top-6 z-(--z-sticky) max-h-[calc(100vh-6rem)] w-[380px] shrink-0 overflow-auto" ]
                     [ viewPanel args model detail ]
 
               else

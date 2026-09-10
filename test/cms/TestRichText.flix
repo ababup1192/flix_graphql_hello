@@ -22,6 +22,7 @@ mod TestRichText {
 
     def link(href: String): Json = Json.JObject(Map#{ "type" => Json.JString("link"), "attrs" => Json.JObject(Map#{ "href" => Json.JString(href) }) })
 
+
     def image(assetId: String, alt: String): Json =
         Json.JObject(Map#{ "type" => Json.JString("image"), "attrs" => Json.JObject(Map#{ "assetId" => Json.JString(assetId), "alt" => Json.JString(alt) }) })
 
@@ -138,7 +139,7 @@ mod TestRichText {
                 ++ "<p><strong>a</strong><a href=\"https://example.com/?a=1&amp;b=2\" target=\"_blank\" rel=\"noopener noreferrer\">&lt;b&gt;</a></p>"
                 ++ "<img src=\"https://cdn.example/1/asset001/写真.png\" alt=\"写真\" width=\"640\" height=\"480\">"
                 ++ "<ul><li><p>x<br>y</p></li></ul>",
-            RichText.toHtml(images, sample()))
+            RichText.toHtml(images, Map.empty(), sample()))
 
     /// 見出しの一覧。attrs.id があればそれ、無ければ出現順の h-N（id 付きの物は番号を消費しない）。html の id と同じ。
     ///
@@ -156,7 +157,7 @@ mod TestRichText {
         Assert.assertEq(
             expected = (List#{ (2, "A", "h-1"), (3, "B", "intro"), (2, "C", "h-2") },
                         "<h2 id=\"h-1\">A</h2><h3 id=\"intro\">B</h3><blockquote><h2 id=\"h-2\">C</h2></blockquote>"),
-            (RichText.headings(doc) |> List.map(heading -> (heading#level, heading#text, heading#id)), RichText.toHtml(Map.empty(), doc)))
+            (RichText.headings(doc) |> List.map(heading -> (heading#level, heading#text, heading#id)), RichText.toHtml(Map.empty(), Map.empty(), doc)))
 
     /// codeBlock の language は class に出る。規則外の id と language は検査で止まる。
     @Test
@@ -168,7 +169,7 @@ mod TestRichText {
         });
         Assert.assertEq(
             expected = ("<pre><code class=\"language-ts\">let x = 1</code></pre>", List#{ "fields.body.content[0]", "fields.body.content[1]" }),
-            (RichText.toHtml(Map.empty(), code), RichText.validate("fields.body", bad) |> List.map(violation -> { let Violation.Violation(path, _) = violation; path })))
+            (RichText.toHtml(Map.empty(), Map.empty(), code), RichText.validate("fields.body", bad) |> List.map(violation -> { let Violation.Violation(path, _) = violation; path })))
 
     // ---- ブログ向けの表現 ----
 
@@ -196,7 +197,7 @@ mod TestRichText {
                 ++ "<figure data-embed=\"youtube\"><iframe src=\"https://www.youtube.com/embed/dQw4w9WgXcQ\" loading=\"lazy\" allowfullscreen allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture\"></iframe></figure>"
                 ++ "<figure data-embed=\"x\"><blockquote class=\"twitter-tweet\"><a href=\"https://x.com/flixlang/status/1234567890\">https://x.com/flixlang/status/1234567890</a></blockquote></figure>"
                 ++ "<p><a href=\"#entry:b2\" data-entry-id=\"b2\">関連</a></p>",
-            RichText.toHtml(images, doc))
+            RichText.toHtml(images, Map.empty(), doc))
 
     /// 上付き・下付き・蛍光ペン。中身であって飾りではないので HTML の要素で出す。
     @Test
@@ -207,7 +208,7 @@ mod TestRichText {
         }) });
         Assert.assertEq(
             expected = "<p>H<sub>2</sub>O は m<sup>2</sup> で <mark>大事</mark></p>",
-            RichText.toHtml(Map.empty(), doc))
+            RichText.toHtml(Map.empty(), Map.empty(), doc))
 
     /// 表の HTML。見出しだけの先頭行は thead、残りは tbody。colspan / rowspan は 2 以上の時だけ出す。
     @Test
@@ -252,7 +253,7 @@ mod TestRichText {
         };
         Assert.assertEq(
             expected = cases |> List.map(snd),
-            cases |> List.map(entry -> RichText.toHtml(Map.empty(), fst(entry))))
+            cases |> List.map(entry -> RichText.toHtml(Map.empty(), Map.empty(), fst(entry))))
 
     /// 埋め込みの URL の判定。知らない提供元と任意の iframe は通らない。
     @Test
@@ -288,7 +289,7 @@ mod TestRichText {
     def testToHtmlWithoutAssetAndNestedMarks(): Unit \ Assert =
         Assert.assertEq(
             expected = "<p><strong><em>x</em></strong></p>",
-            RichText.toHtml(Map.empty(), node("doc", List#{ image("asset001", ""), node("paragraph", List#{ marked("x", List#{ mark("bold"), mark("italic") }) }) })))
+            RichText.toHtml(Map.empty(), Map.empty(), node("doc", List#{ image("asset001", ""), node("paragraph", List#{ marked("x", List#{ mark("bold"), mark("italic") }) }) })))
 
     // ---- 本文の穴を塞ぐノード ----
 
@@ -306,6 +307,21 @@ mod TestRichText {
 
     /// 1 ブロックだけの doc が validate に通るか。
     def isValidDoc(block: Json): Bool = List.isEmpty(RichText.validate("fields.body", node("doc", List#{ block })))
+
+    ///
+    /// コンテンツへのリンクの href。型ごとの path が分かっていればそれを出し、
+    /// 無ければ `#entry:{id}`。data-entry-id はどちらでも付く（サイトが差し替えられる）。
+    ///
+    @Test
+    def testToHtmlEntryLink(): Unit \ Assert =
+        let doc = node("doc", List#{ node("paragraph", List#{ marked("ここ", List#{ entryLink("aaaaaaaaaaaa") }) }) });
+        let paths = Map#{ CmsTestKit.entryId("aaaaaaaaaaaa") => "/blog/hello" };
+        Assert.assertEq(
+            expected = List#{
+                "<p><a href=\"/blog/hello\" data-entry-id=\"aaaaaaaaaaaa\">ここ</a></p>",
+                "<p><a href=\"#entry:aaaaaaaaaaaa\" data-entry-id=\"aaaaaaaaaaaa\">ここ</a></p>"
+            },
+            List#{ RichText.toHtml(Map.empty(), paths, doc), RichText.toHtml(Map.empty(), Map.empty(), doc) })
 
     /// 表のセルの中は段落だけ。表・引用・コードブロック・箇条書き・見出し・画像は止まる。
     @Test
@@ -443,14 +459,14 @@ mod TestRichText {
         Assert.assertEq(
             expected = "<div data-gallery=\"3\"><figure><img src=\"u1\" alt=\"a\" width=\"640\" height=\"480\"></figure><figure><img src=\"u2\" alt=\"\"><figcaption>図 1</figcaption></figure></div>"
                 ++ "<div data-gallery=\"2\"><figure><img src=\"u1\" alt=\"\" width=\"640\" height=\"480\"></figure></div>",
-            RichText.toHtml(images, doc))
+            RichText.toHtml(images, Map.empty(), doc))
 
     /// linkCard は data-link-card 付きの a で、中身は url。文字はエスケープ。
     @Test
     def testToHtmlLinkCard(): Unit \ Assert =
         Assert.assertEq(
             expected = "<a data-link-card href=\"https://example.com/?a=1&amp;b=2\">https://example.com/?a=1&amp;b=2</a>",
-            RichText.toHtml(Map.empty(), node("doc", List#{ linkCard("https://example.com/?a=1&b=2") })))
+            RichText.toHtml(Map.empty(), Map.empty(), node("doc", List#{ linkCard("https://example.com/?a=1&b=2") })))
 
     /// codeBlock の fileName と highlightLines は pre の data 属性。language の class はそのまま。無い物は出ない。
     @Test
@@ -464,14 +480,14 @@ mod TestRichText {
             expected = "<pre data-file-name=\"src/a.ts\" data-highlight-lines=\"1,3-5\"><code class=\"language-ts\">let x = 1</code></pre>"
                 ++ "<pre data-file-name=\"Makefile\"><code>check:</code></pre>"
                 ++ "<pre data-highlight-lines=\"2\"><code>y</code></pre>",
-            RichText.toHtml(Map.empty(), doc))
+            RichText.toHtml(Map.empty(), Map.empty(), doc))
 
     /// details は summary をエスケープして summary に、中身はそのまま。
     @Test
     def testToHtmlDetails(): Unit \ Assert =
         Assert.assertEq(
             expected = "<details><summary>&lt;補足&gt;</summary><p>中身</p><ul><li><p>x</p></li></ul></details>",
-            RichText.toHtml(Map.empty(), node("doc", List#{ details(Some(Json.JString("<補足>")), List#{ node("paragraph", List#{ text("中身") }), node("bulletList", List#{ node("listItem", List#{ node("paragraph", List#{ text("x") }) }) }) }) })))
+            RichText.toHtml(Map.empty(), Map.empty(), node("doc", List#{ details(Some(Json.JString("<補足>")), List#{ node("paragraph", List#{ text("中身") }), node("bulletList", List#{ node("listItem", List#{ node("paragraph", List#{ text("x") }) }) }) }) })))
 
     /// 平文: gallery は中の caption を改行で（caption の無い image は出ない）、linkCard は url、details は summary と中身。
     @Test
@@ -499,7 +515,7 @@ mod TestRichText {
         });
         Assert.assertEq(
             expected = (List#{ (2, "A", "h-1"), (3, "B", "h-2") }, "<h2 id=\"h-1\">A</h2><details><summary>補足</summary><h3 id=\"h-2\">B</h3></details>"),
-            (RichText.headings(doc) |> List.map(heading -> (heading#level, heading#text, heading#id)), RichText.toHtml(Map.empty(), doc)))
+            (RichText.headings(doc) |> List.map(heading -> (heading#level, heading#text, heading#id)), RichText.toHtml(Map.empty(), Map.empty(), doc)))
 
     // ---- 数式 / Mermaid / タスクリスト / 動画 ----
 
@@ -543,7 +559,7 @@ mod TestRichText {
         let doc = node("doc", List#{ node("paragraph", List#{ text("和は "), mathText("a<b") }), mathBlock(List#{ ("tex", Json.JString("x<y")) }) });
         Assert.assertEq(
             expected = "<p>和は <span data-math=\"inline\">a&lt;b</span></p><div data-math=\"block\">x&lt;y</div>",
-            RichText.toHtml(Map.empty(), doc))
+            RichText.toHtml(Map.empty(), Map.empty(), doc))
 
     /// language が mermaid の codeBlock は pre に data-diagram が付く。他の言語には付かない。
     @Test
@@ -554,7 +570,7 @@ mod TestRichText {
         });
         Assert.assertEq(
             expected = "<pre data-diagram=\"mermaid\"><code class=\"language-mermaid\">graph TD;\nA--&gt;B</code></pre><pre><code class=\"language-ts\">x</code></pre>",
-            RichText.toHtml(Map.empty(), doc))
+            RichText.toHtml(Map.empty(), Map.empty(), doc))
 
     /// listItem の checked は li の data-checked。無ければ属性無し。
     @Test
@@ -566,7 +582,7 @@ mod TestRichText {
         }) });
         Assert.assertEq(
             expected = "<ul><li data-checked=\"true\"><p>a</p></li><li data-checked=\"false\"><p>b</p></li><li><p>c</p></li></ul>",
-            RichText.toHtml(Map.empty(), doc))
+            RichText.toHtml(Map.empty(), Map.empty(), doc))
 
     /// video は figure の中の video。src と poster は渡した asset の URL、caption は figcaption。asset が無ければ出ず、poster の asset が無ければ poster だけ出ない。
     @Test
@@ -582,7 +598,7 @@ mod TestRichText {
             expected = "<figure><video controls src=\"v.mp4\" poster=\"p.jpg\"></video><figcaption>&lt;動画&gt;</figcaption></figure>"
                 ++ "<figure><video controls src=\"v.mp4\"></video></figure>"
                 ++ "<figure><video controls src=\"v.mp4\"></video></figure>",
-            RichText.toHtml(images, doc))
+            RichText.toHtml(images, Map.empty(), doc))
 
     /// 平文では math と mathBlock の TeX がそのまま出る。
     @Test

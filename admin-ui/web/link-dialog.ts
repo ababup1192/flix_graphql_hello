@@ -13,7 +13,7 @@
 // TypeScript の api.ts と Elm が持つ）。打った文字を `linksearch` の event で外に出し、
 // 候補は `entries` の属性で返してもらう。
 
-export type Candidate = { id: string; title: string; type: string; stage?: string };
+export type Candidate = { id: string; title: string; type: string; stage?: string; path?: string | null };
 
 // 一度に出す候補の数。**型ごとに 5 件ずつ来る**ので、型が 8 つあると 40 件並ぶ。
 const SHOWN = 8;
@@ -150,23 +150,31 @@ export class LinkDialog {
     const icon = document.createElement("span");
     icon.className = "tt-link-icon";
 
+    // **配信で出る path も添える。** どのコンテンツを指しているかだけでは、
+    // サイトのどの URL になるかが分からず、型紙の付け忘れに気付けない。
+    const where = document.createElement("code");
+    where.className = "tt-link-now-path";
+
     if (current.entryId) {
       const found = this.linkedOf(current.entryId);
       label.textContent = "今のリンク先（コンテンツ）";
       icon.innerHTML = ICON_ENTRY;
       if (found) {
         body.textContent = `${found.title}（${found.type} · ${stageLabel(found.stage)}）`;
+        where.textContent = found.path ?? `#entry:${current.entryId}`;
+        if (!found.path) where.classList.add("is-weak");
       } else {
         // **消えた指し先は赤く出す。** 公開の時に断られる物を、書いている間に見せる。
         now.classList.add("is-bad");
         body.textContent = `見つかりません（${current.entryId}）`;
+        where.textContent = `#entry:${current.entryId}`;
       }
     } else {
       label.textContent = "今のリンク先（外部）";
       icon.innerHTML = ICON_OUT;
       body.textContent = current.href ?? "";
     }
-    now.replaceChildren(label, icon, body);
+    now.replaceChildren(label, icon, body, ...(where.textContent ? [where] : []));
   }
 
   focusInput() {

@@ -62,6 +62,14 @@ updatedAt =
     Object.selectionForField "String" "updatedAt" [] Decode.string
 
 
+{-| サイト上でのこの entry の path。型の linkPath（"/blog/{slug}"）から作る。linkPath が無い型は null。
+本文からこの entry を指した時に出る href と同じ物
+-}
+path : SelectionSet (Maybe String) Api.Admin.Object.Entry
+path =
+    Object.selectionForField "(Maybe String)" "path" [] (Decode.string |> Decode.nullable)
+
+
 {-| バージョン。新しい順。公開時と saveVersion で積む
 -}
 versions :

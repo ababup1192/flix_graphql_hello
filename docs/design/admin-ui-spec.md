@@ -274,6 +274,7 @@ CMS 側の並走は 10 章の優先順に従う。
 - `required` は**公開時だけ**効く（下書き保存は通る）。`unique` は**公開中の値とだけ**照合する
 - **フィールドの種類（kind）は後から変えられない**。`removeField` と選択肢の削除は影響を検査しない
 - `createPreviewToken` の `url` は型に `previewUrl` が無いと null
+- 型の `linkPath` は**サイト上の path の型紙**（`/blog/{slug}`）。使える印は `{id}` と `{slug}` の 2 つで、`{slug}` は値が無ければ id に落ちる。`/` か `http(s)://` で始める。設定すると本文のコンテンツへのリンクの `href` がその path になり、無ければ `#entry:{id}`（`data-entry-id` はどちらでも付く）。`RichText { links { id apiId path } }` でも同じ物が引ける
 - `EntryVersion.author` は表示名の文字列（email か `api-key:<名前>`）。userId は無いのでアバターは出せない
 - **管理 API の URL は `/p/{プロジェクト slug}/admin/graphql`**。`/p/{slug}/graphql` は**コンテンツ API** で別物。Account API は `/account/graphql` だけ（`/p/{slug}/account/graphql` は 404）
 - dev 認証は `X-Dev-User: <email>`（`Authorization` ではない）。dev の時サーバは 127.0.0.1 にしか bind しない

@@ -711,7 +711,7 @@ update ctx msg model =
             ( { model
                 | linkCandidates =
                     model.linkCandidates
-                        ++ List.map (\row -> { id = row.id, title = EntryLabel.forRow row, typeName = typeName, stage = row.stage }) page.nodes
+                        ++ List.map (\row -> { id = row.id, title = EntryLabel.forRow row, typeName = typeName, stage = row.stage, path = row.path }) page.nodes
               }
             , []
             )
@@ -745,7 +745,7 @@ update ctx msg model =
             ( { model
                 | linkedEntries =
                     model.linkedEntries
-                        ++ List.map (\row -> { id = row.id, title = EntryLabel.forRow row, typeName = typeName, stage = row.stage }) page.nodes
+                        ++ List.map (\row -> { id = row.id, title = EntryLabel.forRow row, typeName = typeName, stage = row.stage, path = row.path }) page.nodes
               }
             , []
             )
@@ -2546,6 +2546,7 @@ encodeCandidate candidate =
         , ( "title", E.string candidate.title )
         , ( "type", E.string candidate.typeName )
         , ( "stage", E.string candidate.stage )
+        , ( "path", candidate.path |> Maybe.map E.string |> Maybe.withDefault E.null )
         ]
 
 

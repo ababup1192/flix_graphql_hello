@@ -82,6 +82,7 @@ type alias ContentTypeDetail =
     , name : String
     , kind : String
     , previewUrl : String
+    , linkPath : String
     , singular : String
     , icon : String
     , fields : List FieldDef
@@ -122,6 +123,7 @@ type alias EntryRow =
     , stage : String
     , fields : Json.Decode.Value
     , updatedAt : String
+    , path : Maybe String
     }
 
 
@@ -138,6 +140,7 @@ type alias LinkCandidate =
     , title : String
     , typeName : String
     , stage : String
+    , path : Maybe String
     }
 
 

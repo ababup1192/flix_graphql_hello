@@ -11,10 +11,10 @@ mod TestContentTypes {
     use CmsErr.CmsFailure
 
     def typeRows(): List[Row] =
-        Row.makeRows(List#{"id", "api_id", "kind", "name", "singular", "plural", "preview_url", "icon", "created_at", "updated_at"},
+        Row.makeRows(List#{"id", "api_id", "kind", "name", "singular", "plural", "preview_url", "link_path", "icon", "created_at", "updated_at"},
             List#{
-                List#{SqlValue.Int64(1i64), SqlValue.Str("blogs"), SqlValue.Str("collection"), SqlValue.Str("記事"), SqlValue.Str("Blog"), SqlValue.Str("blogs"), SqlValue.Str(""), SqlValue.Str("list"), SqlValue.ofTimestamp(Timestamp.at("2026-09-01T00:00:00Z")), SqlValue.ofTimestamp(Timestamp.at("2026-09-01T00:00:00Z"))},
-                List#{SqlValue.Int64(2i64), SqlValue.Str("tags"), SqlValue.Str("collection"), SqlValue.Str("タグ"), SqlValue.Str("Tag"), SqlValue.Str("tags"), SqlValue.Str(""), SqlValue.Str("list"), SqlValue.ofTimestamp(Timestamp.at("2026-09-01T00:00:00Z")), SqlValue.ofTimestamp(Timestamp.at("2026-09-01T00:00:00Z"))}
+                List#{SqlValue.Int64(1i64), SqlValue.Str("blogs"), SqlValue.Str("collection"), SqlValue.Str("記事"), SqlValue.Str("Blog"), SqlValue.Str("blogs"), SqlValue.Str(""), SqlValue.Str(""), SqlValue.Str("list"), SqlValue.ofTimestamp(Timestamp.at("2026-09-01T00:00:00Z")), SqlValue.ofTimestamp(Timestamp.at("2026-09-01T00:00:00Z"))},
+                List#{SqlValue.Int64(2i64), SqlValue.Str("tags"), SqlValue.Str("collection"), SqlValue.Str("タグ"), SqlValue.Str("Tag"), SqlValue.Str("tags"), SqlValue.Str(""), SqlValue.Str(""), SqlValue.Str("list"), SqlValue.ofTimestamp(Timestamp.at("2026-09-01T00:00:00Z")), SqlValue.ofTimestamp(Timestamp.at("2026-09-01T00:00:00Z"))}
             })
 
     ///
@@ -80,7 +80,7 @@ mod TestContentTypes {
         let (_, statements) = DbTest.runRecordingWith(rowsFor, 1, () -> DbError.runWithFailure(() -> CmsTestKit.runWithResult(() -> Tenant.runWith(ProjectId.default(), () -> CmsTestKit.asSystem(() ->
             ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("profiles", "記事")))))));
         let insert = statements |> List.find(statement -> String.startsWith(prefix = "INSERT", statement#sql));
-        Assert.assertEq(expected = Some(List#{SqlValue.Int64(1i64), SqlValue.Str("profiles"), SqlValue.Str("collection"), SqlValue.Str("記事"), SqlValue.Str("Profile"), SqlValue.Str("profiles"), SqlValue.Str(""), SqlValue.Str("list")}),
+        Assert.assertEq(expected = Some(List#{SqlValue.Int64(1i64), SqlValue.Str("profiles"), SqlValue.Str("collection"), SqlValue.Str("記事"), SqlValue.Str("Profile"), SqlValue.Str("profiles"), SqlValue.Str(""), SqlValue.Str(""), SqlValue.Str("list")}),
             insert |> Option.map(statement -> statement#params))
 
     /// 渡した icon はそのまま INSERT の最後の引数になる。
@@ -105,7 +105,7 @@ mod TestContentTypes {
     /// 規則の外の icon は invalid で、UPDATE は発行されない。
     @Test
     def testContentTypesUpdateRejectsIcon(): Unit \ {Assert, IO} =
-        let changes = { name = None, singular = None, plural = None, previewUrl = None, icon = Some("") };
+        let changes = { name = None, singular = None, plural = None, previewUrl = None, linkPath = None, icon = Some("") };
         let (result, sqls) = record(() -> ContentTypes.update(Session.grant(), TypeId.TypeId(1i64), changes));
         Assert.assertEq(expected = (List#{"icon"}, false), (CmsTestKit.failurePaths(result), List.memberOf("UPDATE", sqls)))
 
@@ -127,6 +127,21 @@ mod TestContentTypes {
         Assert.assertEq(expected = (Some(SqlValue.Int32(2)), true),
             (insert |> Option.flatMap(statement -> List.last(statement#params)),
              List.exists(statement -> String.contains(substr = "updated_at = now()", statement#sql), statements)))
+
+    ///
+    /// フィールドを 1 つ直すのに出す SQL の本数（SELECT / UPDATE / INSERT）。
+    ///
+    /// 読み直し 3 本 → フィールドの UPDATE 2 本 → 型の読み直し 2 本 → 型の updated_at → 型の読み直し 2 本
+    /// → 監査の INSERT 1 本 → 戻り値の読み直し 2 本。
+    ///
+    /// 本数を数えるのは、通知や監査のために型を読み直す実装を足すと、**フィールドを触るたびに SELECT が静かに増える**ため。
+    /// 実 PG のテストは結果しか見ないので、この形の劣化は本数でしか捕まらない（2026-09-10 に監査を足した時に実際に 2 本増えた）。
+    @Test
+    def testContentTypesUpdateFieldStatementCounts(): Unit \ {Assert, IO} =
+        let changes = { name = Some("題"), required = None, unique = None, localized = None, config = None };
+        let (_, sqls) = record(() -> ContentTypes.updateField(Session.grant(), FieldId.FieldId(10i64), changes));
+        let countOf = verb -> sqls |> List.count(sql -> sql == verb);
+        Assert.assertEq(expected = (9, 3, 1), (countOf("SELECT"), countOf("UPDATE"), countOf("INSERT")))
 
     /// 無い型に足そうとすると notFound。
     @Test

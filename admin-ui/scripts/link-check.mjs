@@ -30,6 +30,16 @@ const blogTypeId = await fetch(`${cms}/p/default/admin/graphql`, {
   .then((response) => response.json())
   .then((answer) => (answer.data?.contentTypes ?? []).find((type) => type.apiId === "blogs")?.id ?? "");
 
+// **配信で出るパスは CMS が持つ。** 画面に出る文字が API の path と同じ物かを見るので、
+// 期待値はここで引いておく（型紙は API 設定で変えられるので焼き付けない）。
+const linkedBlog = await fetch(`${cms}/p/default/admin/graphql`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", "X-Dev-User": process.env.VITE_DEV_USER ?? "dev@localhost" },
+  body: JSON.stringify({ query: `query { entries(typeId: "${blogTypeId}", first: 1) { nodes { id path } } }` }),
+})
+  .then((response) => response.json())
+  .then((answer) => answer.data?.entries?.nodes?.[0] ?? null);
+
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
@@ -176,24 +186,26 @@ try {
   // 5b. 今のリンク先が出る（面と吹き出し）
   await page.keyboard.press("Escape");
   await openNew(`link-now ${Date.now()}`);
-  await page.evaluate(() => {
+  await page.evaluate((alive) => {
     document.querySelector("tiptap-editor").setAttribute(
       "doc",
       JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [
         { type: "text", text: "そと", marks: [{ type: "link", attrs: { href: "https://example.com/a" } }] },
         { type: "text", text: " と " },
         { type: "text", text: "消えた先", marks: [{ type: "link", attrs: { entryId: "aaaaaaaaaaaa" } }] },
+        { type: "text", text: " と " },
+        { type: "text", text: "生きた先", marks: [{ type: "link", attrs: { entryId: alive } }] },
       ] }] })
     );
-  });
+  }, linkedBlog?.id ?? "aaaaaaaaaaaa");
   await page.waitForTimeout(1800);
   const anchors = page.locator("tiptap-editor .tt-body a");
-  check((await anchors.count()) === 2, "リンクが 2 本描かれる", `${await anchors.count()} 本`);
+  check((await anchors.count()) === 3, "リンクが 3 本描かれる", `${await anchors.count()} 本`);
 
   await anchors.first().hover();
   await page.waitForTimeout(400);
   check(
-    (await page.locator(".tt-link-tip").textContent()) === "https://example.com/a",
+    ((await page.locator(".tt-link-tip-path").textContent()) ?? "") === "https://example.com/a",
     "外部リンクに乗せると URL が出る",
     (await page.locator(".tt-link-tip").textContent()) ?? "出ません"
   );
@@ -210,6 +222,16 @@ try {
     "消えた指し先は赤く出る"
   );
 
+  // **エディタ上で「どんなパスになるか」が読める。** 出る文字が API の Entry.path と一致する事まで見る。
+  if (linkedBlog?.path) {
+    await anchors.nth(2).hover();
+    await page.waitForTimeout(400);
+    const shown = (await page.locator(".tt-link-tip-path").textContent()) ?? "";
+    check(shown === linkedBlog.path, "コンテンツのリンクに乗せると配信のパスが出る", `${shown} ≠ ${linkedBlog.path}`);
+  } else {
+    fail("コンテンツのリンクに乗せると配信のパスが出る", "blogs に linkPath が付いた entry がありません");
+  }
+
   await anchors.first().click();
   await page.waitForTimeout(300);
   await page.locator('.tt-tool[title="リンク"]').click();
@@ -221,6 +243,18 @@ try {
     (await page.locator(".tt-link-now").textContent()) ?? "出ません"
   );
   await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+
+  // 面の側でも、コンテンツのリンクなら配信のパスが読める
+  if (linkedBlog?.path) {
+    await anchors.nth(2).click();
+    await page.waitForTimeout(300);
+    await openDialog();
+    await page.waitForTimeout(900);
+    const shown = (await page.locator(".tt-link-now-path").textContent()) ?? "";
+    check(shown === linkedBlog.path, "面の今のリンク先に配信のパスが出る", `${shown} ≠ ${linkedBlog.path}`);
+    await page.keyboard.press("Escape");
+  }
   await page.waitForTimeout(300);
   await openDialog();
   await page.waitForTimeout(900);

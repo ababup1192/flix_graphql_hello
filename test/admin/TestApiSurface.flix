@@ -45,9 +45,10 @@ mod TestApiSurface {
                 "Asset: id url fileName mime size width height alt status createdAt usedBy" ::
                 "AssetEdge: cursor node" ::
                 "AssetPage: nodes edges pageInfo totalCount" ::
-                "ContentType: id apiId kind name singular plural previewUrl icon fields createdAt updatedAt" ::
+                "AuditEvent: id actor action targetKind targetId detail createdAt" ::
+                "ContentType: id apiId kind name singular plural previewUrl linkPath icon fields createdAt updatedAt" ::
                 "DiffLine: kind text" ::
-                "Entry: id typeId version stage fields publishedAt createdAt updatedAt versions diff" ::
+                "Entry: id typeId version stage fields publishedAt createdAt updatedAt path versions diff" ::
                 "EntryEdge: cursor node" ::
                 "EntryPage: nodes edges pageInfo totalCount" ::
                 "EntryVersion: id version reason author fields createdAt" ::
@@ -70,7 +71,7 @@ mod TestApiSurface {
                 "PublishPlan: ok steps violations" ::
                 "PublishPlanStep: entry reason report" ::
                 "PublishReport: ok violations unpublishedDependencies" ::
-                "Query: contentTypes contentType entries entry assets asset publishCheck impact publishPlan viewer me members invitations apiKeys webhooks webhookDeliveries schedules" ::
+                "Query: contentTypes contentType entries entry assets asset publishCheck impact publishPlan viewer me members invitations apiKeys webhooks webhookDeliveries schedules auditEvents" ::
                 "Referrer: entry via stage" ::
                 "Schedule: id entryId action runAt withDependencies status requestedBy lastError overdue createdAt doneAt" ::
                 "Upload: asset uploadUrl expiresInSeconds" ::

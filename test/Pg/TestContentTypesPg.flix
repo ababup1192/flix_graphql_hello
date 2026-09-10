@@ -47,8 +47,8 @@ mod TestContentTypesPg {
         let result = PgTestSupport.withDb(() -> {
             let blogs = ContentTypes.create(Session.grant(), blogsDraft());
             discard ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("tags", "タグ"));
-            let renamed = ContentTypes.update(Session.grant(), blogs#id, { name = Some("ブログ記事"), singular = None, plural = None, previewUrl = None, icon = None });
-            let collision = CmsTestKit.runWithResult(() -> ContentTypes.update(Session.grant(), blogs#id, { name = None, singular = Some(CmsTestKit.typeName("Tag")), plural = None, previewUrl = None, icon = None }));
+            let renamed = ContentTypes.update(Session.grant(), blogs#id, { name = Some("ブログ記事"), singular = None, plural = None, previewUrl = None, linkPath = None, icon = None });
+            let collision = CmsTestKit.runWithResult(() -> ContentTypes.update(Session.grant(), blogs#id, { name = None, singular = Some(CmsTestKit.typeName("Tag")), plural = None, previewUrl = None, linkPath = None, icon = None }));
             (renamed#name, TypeName.text(renamed#singular), collision |> Result.map(found -> TypeName.text(found#singular)))
         });
         Assert.assertEq(expected = Ok(Ok(("ブログ記事", "Blog", Err(CmsFailure.Invalid(List#{Violation.Violation("singular", "'Tag' は既に他の型が使っています")}))))), result)
@@ -58,7 +58,7 @@ mod TestContentTypesPg {
     def testPgApiIdUniqueInDb(): Unit \ {IO, Assert} =
         let kind = PgTestSupport.withDb(() -> {
             discard ContentTypes.create(Session.grant(), blogsDraft());
-            DbError.runWithKind(() -> ContentTypesQueries.insertContentType({ projectId = 1i64, apiId = "blogs", kind = "collection", name = "x", singular = "X", plural = "xs", previewUrl = "", icon = "list" }))
+            DbError.runWithKind(() -> ContentTypesQueries.insertContentType({ projectId = 1i64, apiId = "blogs", kind = "collection", name = "x", singular = "X", plural = "xs", previewUrl = "", linkPath = "", icon = "list" }))
                 |> Result.map(Option.map(row -> row#id))
         });
         Assert.assertEq(expected = Ok(Ok(Err(DbError.DbErrorKind.UniqueViolation("content_types_project_api_id_key")))), kind)

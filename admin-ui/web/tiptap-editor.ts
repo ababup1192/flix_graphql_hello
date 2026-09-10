@@ -691,18 +691,31 @@ class TiptapEditor extends HTMLElement {
     const icon = document.createElement("span");
     icon.className = "tt-link-icon";
     const body = document.createElement("span");
+    body.className = "tt-link-tip-body";
+    const name = document.createElement("span");
+    name.className = "tt-link-tip-name";
+    const where = document.createElement("code");
+    where.className = "tt-link-tip-path";
     if (entryId) {
       const found = this.linked.get(entryId);
       icon.innerHTML = svg(ICONS.entry);
-      if (found) body.textContent = `${found.title}（${found.type} · ${stageLabel(found.stage)}）`;
-      else {
+      if (found) {
+        name.textContent = `${found.title}（${found.type} · ${stageLabel(found.stage)}）`;
+        where.textContent = found.path ?? `#entry:${entryId}`;
+        // **型紙が無ければ、出るのは `#entry:{id}` だとそのまま見せる。** 配信で
+        // 何が出るかを隠すと、サイト側が置き換えを書いていない事に気付けない。
+        if (!found.path) where.classList.add("is-weak");
+      } else {
         tip.classList.add("is-bad");
-        body.textContent = `見つかりません（${entryId}）`;
+        name.textContent = "見つかりません";
+        where.textContent = `#entry:${entryId}`;
       }
     } else {
       icon.innerHTML = svg(ICONS.external);
-      body.textContent = anchor.getAttribute("href") ?? "";
+      name.textContent = "外部リンク";
+      where.textContent = anchor.getAttribute("href") ?? "";
     }
+    body.append(name, where);
     tip.append(icon, body);
     this.appendChild(tip);
 

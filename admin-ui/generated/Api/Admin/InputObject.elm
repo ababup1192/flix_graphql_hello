@@ -92,9 +92,9 @@ buildContentTypeInput required____ fillOptionals____ =
     let
         optionals____ =
             fillOptionals____
-                { kind = Absent, singular = Absent, plural = Absent, previewUrl = Absent, icon = Absent }
+                { kind = Absent, singular = Absent, plural = Absent, previewUrl = Absent, linkPath = Absent, icon = Absent }
     in
-    { apiId = required____.apiId, kind = optionals____.kind, name = required____.name, singular = optionals____.singular, plural = optionals____.plural, previewUrl = optionals____.previewUrl, icon = optionals____.icon }
+    { apiId = required____.apiId, kind = optionals____.kind, name = required____.name, singular = optionals____.singular, plural = optionals____.plural, previewUrl = optionals____.previewUrl, linkPath = optionals____.linkPath, icon = optionals____.icon }
 
 
 type alias ContentTypeInputRequiredFields =
@@ -108,6 +108,7 @@ type alias ContentTypeInputOptionalFields =
     , singular : OptionalArgument String
     , plural : OptionalArgument String
     , previewUrl : OptionalArgument String
+    , linkPath : OptionalArgument String
     , icon : OptionalArgument String
     }
 
@@ -121,6 +122,7 @@ type alias ContentTypeInput =
     , singular : OptionalArgument String
     , plural : OptionalArgument String
     , previewUrl : OptionalArgument String
+    , linkPath : OptionalArgument String
     , icon : OptionalArgument String
     }
 
@@ -130,7 +132,7 @@ type alias ContentTypeInput =
 encodeContentTypeInput : ContentTypeInput -> Value
 encodeContentTypeInput input____ =
     Encode.maybeObject
-        [ ( "apiId", Encode.string input____.apiId |> Just ), ( "kind", Encode.enum Api.Admin.Enum.TypeKind.toString |> Encode.optional input____.kind ), ( "name", Encode.string input____.name |> Just ), ( "singular", Encode.string |> Encode.optional input____.singular ), ( "plural", Encode.string |> Encode.optional input____.plural ), ( "previewUrl", Encode.string |> Encode.optional input____.previewUrl ), ( "icon", Encode.string |> Encode.optional input____.icon ) ]
+        [ ( "apiId", Encode.string input____.apiId |> Just ), ( "kind", Encode.enum Api.Admin.Enum.TypeKind.toString |> Encode.optional input____.kind ), ( "name", Encode.string input____.name |> Just ), ( "singular", Encode.string |> Encode.optional input____.singular ), ( "plural", Encode.string |> Encode.optional input____.plural ), ( "previewUrl", Encode.string |> Encode.optional input____.previewUrl ), ( "linkPath", Encode.string |> Encode.optional input____.linkPath ), ( "icon", Encode.string |> Encode.optional input____.icon ) ]
 
 
 buildContentTypePatch :
@@ -140,9 +142,9 @@ buildContentTypePatch fillOptionals____ =
     let
         optionals____ =
             fillOptionals____
-                { name = Absent, singular = Absent, plural = Absent, previewUrl = Absent, icon = Absent }
+                { name = Absent, singular = Absent, plural = Absent, previewUrl = Absent, linkPath = Absent, icon = Absent }
     in
-    { name = optionals____.name, singular = optionals____.singular, plural = optionals____.plural, previewUrl = optionals____.previewUrl, icon = optionals____.icon }
+    { name = optionals____.name, singular = optionals____.singular, plural = optionals____.plural, previewUrl = optionals____.previewUrl, linkPath = optionals____.linkPath, icon = optionals____.icon }
 
 
 type alias ContentTypePatchOptionalFields =
@@ -150,6 +152,7 @@ type alias ContentTypePatchOptionalFields =
     , singular : OptionalArgument String
     , plural : OptionalArgument String
     , previewUrl : OptionalArgument String
+    , linkPath : OptionalArgument String
     , icon : OptionalArgument String
     }
 
@@ -161,6 +164,7 @@ type alias ContentTypePatch =
     , singular : OptionalArgument String
     , plural : OptionalArgument String
     , previewUrl : OptionalArgument String
+    , linkPath : OptionalArgument String
     , icon : OptionalArgument String
     }
 
@@ -170,7 +174,7 @@ type alias ContentTypePatch =
 encodeContentTypePatch : ContentTypePatch -> Value
 encodeContentTypePatch input____ =
     Encode.maybeObject
-        [ ( "name", Encode.string |> Encode.optional input____.name ), ( "singular", Encode.string |> Encode.optional input____.singular ), ( "plural", Encode.string |> Encode.optional input____.plural ), ( "previewUrl", Encode.string |> Encode.optional input____.previewUrl ), ( "icon", Encode.string |> Encode.optional input____.icon ) ]
+        [ ( "name", Encode.string |> Encode.optional input____.name ), ( "singular", Encode.string |> Encode.optional input____.singular ), ( "plural", Encode.string |> Encode.optional input____.plural ), ( "previewUrl", Encode.string |> Encode.optional input____.previewUrl ), ( "linkPath", Encode.string |> Encode.optional input____.linkPath ), ( "icon", Encode.string |> Encode.optional input____.icon ) ]
 
 
 buildDateTimeFilter :

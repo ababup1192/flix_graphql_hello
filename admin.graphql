@@ -524,6 +524,9 @@ type Entry {
   publishedAt: String
   createdAt: String!
   updatedAt: String!
+  """サイト上でのこの entry の path。型の linkPath（"/blog/{slug}"）から作る。linkPath が無い型は null。
+  本文からこの entry を指した時に出る href と同じ物"""
+  path: String
   """バージョン。新しい順。公開時と saveVersion で積む"""
   versions: [EntryVersion!]!
   """2 つのバージョンの中身の差分。from → to の向き。同じなら空。定義の position 順で、定義に無いキーは最後"""
@@ -718,6 +721,10 @@ type ContentType {
   plural: String!
   """管理画面のプレビューが開く URL。{id} を entry の id に置き換える"""
   previewUrl: String
+  """本文のコンテンツへのリンクが、サイト上でどの path になるかの型紙（`/blog/{slug}`）。
+  使える印は {id} と {slug} の 2 つで、{slug} は値が無ければ id に落ちる。
+  / か http(s):// で始める。空なら本文の HTML は `#entry:{id}` を出す（サイトが data-entry-id を見て置き換える）"""
+  linkPath: String
   """管理画面のサイドバーに出すアイコンの識別子（"book" / "tag"）。絵柄は管理画面が決める。
   英小文字・数字・- を 32 文字まで（先頭は英小文字）。省いて作れば kind ごとの既定（COLLECTION は list、SINGLETON は file）"""
   icon: String!
@@ -777,6 +784,8 @@ input ContentTypeInput {
   """省くと apiId から導く"""
   plural: String
   previewUrl: String
+  """サイト上の path の型紙（`/blog/{slug}`）。{id} と {slug} が使える"""
+  linkPath: String
   """省くと kind ごとの既定（COLLECTION は list、SINGLETON は file）"""
   icon: String
 }
@@ -787,6 +796,8 @@ input ContentTypePatch {
   singular: String
   plural: String
   previewUrl: String
+  """サイト上の path の型紙（`/blog/{slug}`）。空にすると型紙なしに戻る"""
+  linkPath: String
   """サイドバーのアイコンの識別子。何度でも選び直せる"""
   icon: String
 }

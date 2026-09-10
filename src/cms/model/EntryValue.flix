@@ -15,6 +15,17 @@ mod EntryValue {
 
     pub def text(apiId: ApiId, data: EntryData): Option[String] = one(asString, apiId, data)
 
+    ///
+    /// 型の SLUG のフィールドの値。無ければ None（`LinkPath` が id に落とす）。
+    ///
+    /// WhyNot: 空文字を Some で返さない。SLUG が未入力の下書きで `/blog/` のような
+    /// 尻切れの path を出してしまう。
+    ///
+    pub def slugOf(owner: ContentType, data: EntryData): Option[String] =
+        owner#fields |> List.find(field -> field#kind == FieldKind.Slug)
+            |> Option.flatMap(field -> text(field#apiId, data))
+            |> Option.filter(String.nonEmpty)
+
     pub def texts(apiId: ApiId, data: EntryData): List[String] = many(asString, apiId, data)
 
     pub def number(apiId: ApiId, data: EntryData): Option[Float64] = one(asFloat64, apiId, data)

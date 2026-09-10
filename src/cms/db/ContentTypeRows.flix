@@ -68,7 +68,7 @@ mod ContentTypeRows {
     /// content_types の行とそのフィールド（木）から ContentType を組む。
     /// kind や apiId が規則に合わない行（DDL と管理 API が守るので起きない）は DbErr にする。
     ///
-    pub def toContentType(row: { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, icon = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp | r }, fields: List[FieldDef]): ContentType \ DbErr =
+    pub def toContentType(row: { id = Int64, apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, linkPath = String, icon = String, createdAt = Timestamp.Timestamp, updatedAt = Timestamp.Timestamp | r }, fields: List[FieldDef]): ContentType \ DbErr =
         {
             id         = TypeId.TypeId(row#id),
             apiId      = apiIdOrRaise("content_types.api_id", row#apiId),
@@ -76,7 +76,8 @@ mod ContentTypeRows {
             name       = row#name,
             singular   = TypeName.parse(row#singular) |> Rows.orRaise("content_types.singular", row#singular),
             plural     = apiIdOrRaise("content_types.plural", row#plural),
-            previewUrl = previewUrlFromDb(row#previewUrl),
+            previewUrl = blankFromDb(row#previewUrl),
+            linkPath   = blankFromDb(row#linkPath),
             icon       = row#icon,
             fields     = fields,
             createdAt  = row#createdAt,
@@ -114,14 +115,15 @@ mod ContentTypeRows {
     ///
     /// insertContentType の引数。
     ///
-    pub def typeInsert(names: Naming.TypeNames, draft: ContentTypeDraft): { apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, icon = String } =
+    pub def typeInsert(names: Naming.TypeNames, draft: ContentTypeDraft): { apiId = String, kind = String, name = String, singular = String, plural = String, previewUrl = String, linkPath = String, icon = String } =
         {
             apiId      = ApiId.text(names#apiId),
             kind       = typeKindToDb(draft#kind),
             name       = draft#name,
             singular   = TypeName.text(names#singular),
             plural     = ApiId.text(names#plural),
-            previewUrl = previewUrlToDb(draft#previewUrl),
+            previewUrl = blankToDb(draft#previewUrl),
+            linkPath   = blankToDb(draft#linkPath),
             icon       = draft#icon |> Option.getWithDefault(Naming.deriveIcon(draft#kind))
         }
 
@@ -134,6 +136,7 @@ mod ContentTypeRows {
             |> Fragment.setIfSome(ContentTypesTable.singular(), changes#singular |> Option.map(TypeName.text))
             |> Fragment.setIfSome(ContentTypesTable.plural(), changes#plural |> Option.map(ApiId.text))
             |> Fragment.setIfSome(ContentTypesTable.previewUrl(), changes#previewUrl)
+            |> Fragment.setIfSome(ContentTypesTable.linkPath(), changes#linkPath)
             |> Fragment.setIfSome(ContentTypesTable.icon(), changes#icon)
 
     ///
@@ -171,9 +174,10 @@ mod ContentTypeRows {
     /// WhyNot: api_keys のように列を NULL 可にして `Option` の引数で渡さないのは、空文字が URL として意味を持たず、
     /// 値と「無し」を取り違えようが無いため。api_keys の期限を直したのは、epoch 0 が正しい日時でもあり得たから。
     ///
-    def previewUrlToDb(url: Option[String]): String = url |> Option.getWithDefault("")
+    /// 空の TEXT は「設定なし」。previewUrl と linkPath で同じ扱い。
+    def blankToDb(text: Option[String]): String = text |> Option.getWithDefault("")
 
-    def previewUrlFromDb(text: String): Option[String] = if (text == "") None else Some(text)
+    def blankFromDb(text: String): Option[String] = if (text == "") None else Some(text)
 
     def apiIdOrRaise(column: String, text: String): ApiId \ DbErr =
         ApiId.parse(text) |> Rows.orRaise(column, text)

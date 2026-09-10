@@ -67,7 +67,10 @@ export const MarkdownRules = Extension.create({
       // WhyNot: 入れた後にリンクを外すのを省かない。省くと、続けて打った文字まで
       // 同じリンクの中に入る。
       new InputRule({
-        find: /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/,
+        // CMS が受ける href は http(s) と mailto だけ（`RichText.isSafeHref`）。
+        // WhyNot: `/blog/hello` のような相対の path を拾わない。CMS が断るので、
+        // 打った通りに見えて保存で落ちる。
+        find: /\[([^\]\n]+)\]\(((?:https?:\/\/|mailto:)[^\s)]+)\)$/,
         handler: ({ range, match, chain }) => {
           chain()
             .deleteRange(range)

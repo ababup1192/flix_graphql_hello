@@ -156,9 +156,11 @@ mod ContentSchemaBuilder {
             case FieldKind.Asset => valueField(name, field#many, Out.obj(assetType()),
                 entry -> EntryValue.text(apiId, entry#data) |> Option.flatMap(AssetId.parse) |> Option.flatMap(readyAsset),
                 entry -> EntryValue.texts(apiId, entry#data) |> List.filterMap(AssetId.parse) |> List.filterMap(readyAsset)) |> described
-            case FieldKind.RichText => valueField(name, field#many, Out.obj(richTextType()),
-                entry -> Map.get(apiId, entry#data) |> Option.filter(RichText.isDoc),
-                entry -> Map.get(apiId, entry#data) |> Option.map(EntryValue.items(json -> if (RichText.isDoc(json)) Some(json) else None)) |> Option.getWithDefault(Nil)) |> described
+            // 本文は doc だけでなく、それを持つ entry も source に持つ。**本文が指しているコンテンツの
+            // path を出すのに、先読みした linked が要る。**
+            case FieldKind.RichText => valueField(name, field#many, Out.obj(richTextType(all)),
+                entry -> Map.get(apiId, entry#data) |> Option.filter(RichText.isDoc) |> Option.map(doc -> (doc, entry)),
+                entry -> Map.get(apiId, entry#data) |> Option.map(EntryValue.items(json -> if (RichText.isDoc(json)) Some(json) else None)) |> Option.getWithDefault(Nil) |> List.map(doc -> (doc, entry))) |> described
             case _ => valueField(name, field#many, Out.string(), entry -> EntryValue.text(apiId, entry#data), entry -> EntryValue.texts(apiId, entry#data)) |> described
         }
 
@@ -187,18 +189,47 @@ mod ContentSchemaBuilder {
             |> ObjectType.withDescription("画像やファイル。url で配信する")
 
     ///
-    /// `RichText { json html text }`。source は doc の JSON。html の image は ready な asset の配信 URL を埋め、無い物は出さない。
+    /// `RichText { json html text links }`。source は (doc, その doc を持つ entry)。
+    /// html の image は ready な asset の配信 URL を埋め、無い物は出さない。
     ///
-    def richTextType(): ObjectType[Util.Json.Json, ContentEff] =
+    def richTextType(all: List[ContentType]): ObjectType[(Util.Json.Json, Entry), ContentEff] =
         Schema.objectType("RichText", () ->
-            Schema.field0("json", Out.json(), (_context, doc) -> Ok(JsonValue.fromJson(doc))) ::
-            Schema.field0("html", Out.string(), (_context, doc) -> Ok(RichText.toHtml(imageRefs(doc), doc))) ::
-            Schema.field0("text", Out.string(), (_context, doc) -> Ok(RichText.toText(doc))) ::
-            Schema.field0("headings", Out.list(Out.obj(headingType())), (_context, doc) -> Ok(RichText.headings(doc))) ::
-            Schema.field1("excerpt", excerptLengthArg(), Out.string(), (_context, doc, length) -> Ok(RichText.excerpt(length |> Option.getWithDefault(120), doc))) ::
-            Schema.field0("wordCount", Out.int32(), (_context, doc) -> Ok(RichText.wordCount(doc))) ::
-            Schema.field0("readingTimeMinutes", Out.int32(), (_context, doc) -> Ok(RichText.readingTimeMinutes(doc))) :: Nil)
-            |> ObjectType.withDescription("構造化した本文。json は ProseMirror の doc、html はその描画（見出しに id 付き）、text は平文、headings は目次用、excerpt / wordCount / readingTimeMinutes は一覧向けの派生値")
+            Schema.field0("json", Out.json(), (_context, src) -> Ok(JsonValue.fromJson(fst(src)))) ::
+            Schema.field0("html", Out.string(), (_context, src) -> Ok(RichText.toHtml(imageRefs(fst(src)), linkPaths(all, src), fst(src)))) ::
+            Schema.field0("text", Out.string(), (_context, src) -> Ok(RichText.toText(fst(src)))) ::
+            Schema.field0("headings", Out.list(Out.obj(headingType())), (_context, src) -> Ok(RichText.headings(fst(src)))) ::
+            Schema.field0("links", Out.list(Out.obj(richTextLinkType())), (_context, src) -> Ok(richTextLinks(all, src))) ::
+            Schema.field1("excerpt", excerptLengthArg(), Out.string(), (_context, src, length) -> Ok(RichText.excerpt(length |> Option.getWithDefault(120), fst(src)))) ::
+            Schema.field0("wordCount", Out.int32(), (_context, src) -> Ok(RichText.wordCount(fst(src)))) ::
+            Schema.field0("readingTimeMinutes", Out.int32(), (_context, src) -> Ok(RichText.readingTimeMinutes(fst(src)))) :: Nil)
+            |> ObjectType.withDescription("構造化した本文。json は ProseMirror の doc、html はその描画（見出しに id 付き）、text は平文、headings は目次用、links は本文が指しているコンテンツ、excerpt / wordCount / readingTimeMinutes は一覧向けの派生値")
+
+    ///
+    /// 本文が指しているコンテンツ 1 つ。`json` を自分で描くサイトが、entryId から href を作るのに使う。
+    ///
+    def richTextLinkType(): ObjectType[(EntryId, ApiId, Option[String]), ContentEff] =
+        Schema.objectType("RichTextLink", () ->
+            Schema.field0("id", Out.id(), (_context, src) -> { let (id, _, _) = src; Ok(Id.Id(EntryId.text(id))) }) ::
+            Schema.field0("apiId", Out.string(), (_context, src) -> { let (_, apiId, _) = src; Ok(ApiId.text(apiId)) }) ::
+            Schema.field0("path", Out.option(Out.string()), (_context, src) -> { let (_, _, path) = src; Ok(path) }) :: Nil)
+            |> ObjectType.withDescription("本文が指しているコンテンツ。path は型の linkPath から作った物で、linkPath が無ければ null")
+
+    ///
+    /// 本文が指しているコンテンツ（id, 型の apiId, path）。
+    ///
+    /// **引き直さない。** 参照先は `attachLinked` が 1 本の SELECT で先読みしていて、本文の
+    /// リンクも `EntryLinks.extract` に入っている。消えた指し先は落ちる。
+    ///
+    def richTextLinks(all: List[ContentType], src: (Util.Json.Json, Entry)): List[(EntryId, ApiId, Option[String])] =
+        let (doc, entry) = src;
+        RichText.linkedEntryIds(doc) |> List.filterMap(id ->
+            Linked.get(id, entry#linked) |> Option.flatMap(target ->
+                all |> List.find(owner -> owner#id == target#typeId) |> Option.map(owner ->
+                    (id, owner#apiId, LinkPath.of(owner#linkPath, EntryId.text(id), EntryValue.slugOf(owner, target#data))))))
+
+    /// 本文のリンクに出す href。型に linkPath が無い物は入れない（`#entry:{id}` のままになる）。
+    def linkPaths(all: List[ContentType], src: (Util.Json.Json, Entry)): Map[EntryId, String] =
+        richTextLinks(all, src) |> List.filterMap(match (id, _, path) -> path |> Option.map(found -> (id, found))) |> List.toMap
 
     /// `excerpt(length: Int = 120)`
     def excerptLengthArg(): Arg[Option[Int32]] =

@@ -131,6 +131,7 @@ detailOf fields =
     , name = "ブログ"
     , kind = "COLLECTION"
     , previewUrl = ""
+    , linkPath = ""
     , singular = "Blog"
     , icon = "list"
     , fields = fields

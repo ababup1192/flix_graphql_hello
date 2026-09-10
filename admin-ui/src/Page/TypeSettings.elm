@@ -1,6 +1,6 @@
 module Page.TypeSettings exposing (Model, Msg, init, load, update, view)
 
-{-| API 設定（型の名前・プレビューの URL・削除）。
+{-| API 設定（型の名前・プレビューの URL・パスの形・削除）。
 
 **エンドポイント（apiId）は変えられない。** URL と API の名前になっていて、変えると
 公開サイトが壊れるため、CMS 側に更新の口が無い。
@@ -24,6 +24,7 @@ type alias Model =
     , detail : Loaded ContentTypeDetail
     , name : String
     , previewUrl : String
+    , linkPath : String
     , confirmDelete : Bool
     , deleted : Bool
     , errors : List String
@@ -35,6 +36,7 @@ type Msg
     = GotType (Result Api.Problem (Maybe ContentTypeDetail))
     | NameTyped String
     | PreviewTyped String
+    | LinkPathTyped String
     | Saved
     | GotSaved (Result Api.Problem Model.ContentTypeSummary)
     | DeleteAsked
@@ -50,6 +52,7 @@ init project apiId =
     , detail = Loaded.Loading
     , name = ""
     , previewUrl = ""
+    , linkPath = ""
     , confirmDelete = False
     , deleted = False
     , errors = []
@@ -73,7 +76,7 @@ update ctx msg model =
             in
             ( case Loaded.toMaybe loaded of
                 Just detail ->
-                    { model | detail = loaded, name = detail.name, previewUrl = detail.previewUrl }
+                    { model | detail = loaded, name = detail.name, previewUrl = detail.previewUrl, linkPath = detail.linkPath }
 
                 Nothing ->
                     { model | detail = loaded }
@@ -86,12 +89,15 @@ update ctx msg model =
         PreviewTyped url ->
             ( { model | previewUrl = url }, [] )
 
+        LinkPathTyped path ->
+            ( { model | linkPath = path }, [] )
+
         Saved ->
             case Loaded.toMaybe model.detail of
                 Just detail ->
                     ( { model | busy = True, errors = [] }
                     , [ Api.call
-                            (\id -> Queries.updateContentType id ctx.project { typeId = detail.id, name = model.name, previewUrl = model.previewUrl, icon = "" })
+                            (\id -> Queries.updateContentType id ctx.project { typeId = detail.id, name = model.name, previewUrl = model.previewUrl, linkPath = model.linkPath, icon = "" })
                             GotSaved
                       ]
                     )
@@ -167,6 +173,12 @@ viewSettings args model detail =
                 , errors = []
                 }
                 [ Ui.input [ value model.previewUrl, onInput PreviewTyped, class "font-mono", placeholder "https://example.com/blog/{id}" ] ]
+            , Ui.field
+                { label = "パスの形"
+                , hint = Just "本文からこの API のコンテンツへリンクした時に出る path。{slug} と {id} が使えます（{slug} は空なら id になります）。空にすると #entry:{id} のままになります"
+                , errors = []
+                }
+                [ Ui.input [ value model.linkPath, onInput LinkPathTyped, class "font-mono", placeholder "/blog/{slug}" ] ]
             , if args.canManage then
                 div [] [ Ui.button [ onClick Saved ] [ text (busyText model "保存") ] ]
 

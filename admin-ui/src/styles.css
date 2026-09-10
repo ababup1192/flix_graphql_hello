@@ -466,8 +466,20 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
   font-weight: 600;
 }
 .tt-link-now-body { color: var(--color-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 配信で出る path。**等幅で本文と見た目を分ける**（ここだけは打った通りの文字列）。 */
+.tt-link-now-path {
+  grid-column: 2;
+  overflow: hidden;
+  color: var(--color-ink-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tt-link-now-path.is-weak { font-style: italic; }
 .tt-link-now.is-bad { background: var(--color-bad-bg); }
 .tt-link-now.is-bad .tt-link-now-body,
+.tt-link-now.is-bad .tt-link-now-path,
 .tt-link-now.is-bad .tt-link-icon { color: var(--color-bad); }
 
 /* リンクに乗せた時の吹き出し。**本文の DOM の外に出す**
@@ -494,6 +506,19 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 .tt-link-tip .tt-link-icon svg { width: 13px; height: 13px; }
 .tt-link-tip.is-bad { border-color: var(--color-bad); color: var(--color-bad); }
 .tt-link-tip.is-bad .tt-link-icon { color: var(--color-bad); }
+/* 吹き出しは 2 行。上が指し先の名前、下が配信で出る path。 */
+.tt-link-tip-body { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
+.tt-link-tip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-link-tip-path {
+  overflow: hidden;
+  color: var(--color-ink-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tt-link-tip-path.is-weak { font-style: italic; }
+.tt-link-tip.is-bad .tt-link-tip-path { color: var(--color-bad); }
 
 /* 行の頭の印。外部か、この CMS のコンテンツか。 */
 .tt-link-icon { flex: 0 0 auto; display: flex; color: var(--color-ink-faint); }

@@ -471,13 +471,13 @@ mod RichText {
     /// 外部リンクは `target="_blank" rel="noopener noreferrer"`、entry へのリンクは `href="#entry:{id}" data-entry-id`
     /// （サイトが slug に置き換える。json 側の entryId と同じ値）。
     ///
-    pub def toHtml(images: Map[AssetId, ImageRef], doc: Json): String = htmlOf(images, withHeadingIds(doc))
+    pub def toHtml(images: Map[AssetId, ImageRef], paths: Map[EntryId, String], doc: Json): String = htmlOf(images, paths, withHeadingIds(doc))
 
-    def htmlOf(images: Map[AssetId, ImageRef], node: Json): String = match node {
+    def htmlOf(images: Map[AssetId, ImageRef], paths: Map[EntryId, String], node: Json): String = match node {
         case Json.JObject(fields) =>
-            let inner = () -> children(fields) |> List.map(htmlOf(images)) |> List.join("");
+            let inner = () -> children(fields) |> List.map(htmlOf(images, paths)) |> List.join("");
             match typeOf(fields) {
-                case Some("text")           => applyMarks(marksOf(fields), escape(Map.get("text", fields) |> Option.flatMap(EntryValue.asString) |> Option.getWithDefault("")))
+                case Some("text")           => applyMarks(paths, marksOf(fields), escape(Map.get("text", fields) |> Option.flatMap(EntryValue.asString) |> Option.getWithDefault("")))
                 case Some("paragraph")      => { let body = inner(); if (String.isEmpty(String.trim(body))) "" else "<p>${body}</p>" }
                 case Some("heading")        =>
                     let level = attrInt("level", fields) |> Option.getWithDefault(1);
@@ -495,7 +495,7 @@ mod RichText {
                     let fileName = attrString("fileName", fields) |> Option.filter(isFileName) |> Option.map(found -> " data-file-name=\"${escape(found)}\"") |> Option.getWithDefault("");
                     let highlightLines = attrString("highlightLines", fields) |> Option.filter(isHighlightLines) |> Option.map(found -> " data-highlight-lines=\"${found}\"") |> Option.getWithDefault("");
                     "<pre${diagram}${fileName}${highlightLines}><code${language}>${inner()}</code></pre>"
-                case Some("table")          => tableHtml(images, fields)
+                case Some("table")          => tableHtml(images, paths, fields)
                 case Some("tableRow")       => "<tr>${inner()}</tr>"
                 case Some("tableCell")      => "<td${spanAttrs(fields)}${alignAttr(fields)}>${inner()}</td>"
                 case Some("tableHeader")    => "<th${spanAttrs(fields)}${alignAttr(fields)}>${inner()}</th>"
@@ -572,7 +572,7 @@ mod RichText {
         }
 
     /// マークを外側から順に巻く（先頭のマークが一番外）。
-    def applyMarks(marks: List[Map[String, Json]], text: String): String =
+    def applyMarks(paths: Map[EntryId, String], marks: List[Map[String, Json]], text: String): String =
         List.foldRight((mark, acc) -> match typeOf(mark) {
             case Some("bold")      => "<strong>${acc}</strong>"
             case Some("italic")    => "<em>${acc}</em>"
@@ -586,7 +586,11 @@ mod RichText {
             case Some("math")      => "<span data-math=\"inline\">${acc}</span>"
             case Some("link")      => match (attrString("href", mark), attrString("entryId", mark) |> Option.flatMap(EntryId.parse)) {
                 case (Some(href), _) if isSafeHref(href) => "<a href=\"${escape(href)}\" target=\"_blank\" rel=\"noopener noreferrer\">${acc}</a>"
-                case (_, Some(entryId)) => "<a href=\"#entry:${EntryId.text(entryId)}\" data-entry-id=\"${EntryId.text(entryId)}\">${acc}</a>"
+                // **型に linkPath があれば踏める href を出す。** 無ければ `#entry:{id}` のままで、
+                // サイトが data-entry-id を見て差し替える。data-entry-id はどちらでも付ける。
+                case (_, Some(entryId)) =>
+                    let href = Map.get(entryId, paths) |> Option.getWithDefault("#entry:${EntryId.text(entryId)}");
+                    "<a href=\"${escape(href)}\" data-entry-id=\"${EntryId.text(entryId)}\">${acc}</a>"
                 case _ => acc
             }
             case _ => acc
@@ -642,15 +646,15 @@ mod RichText {
     /// tr を table の直下に置くと HTML として不正で、読む側が thead / tbody で見分けられない
     /// （サイト側の CSS が `thead th` で書けない）。
     ///
-    def tableHtml(images: Map[AssetId, ImageRef], fields: Map[String, Json]): String =
+    def tableHtml(images: Map[AssetId, ImageRef], paths: Map[EntryId, String], fields: Map[String, Json]): String =
         let rows = children(fields);
-        let render = list -> list |> List.map(htmlOf(images)) |> List.join("");
+        let render = list -> list |> List.map(htmlOf(images, paths)) |> List.join("");
         match rows {
             case Nil          => "<table></table>"
             case head :: rest =>
                 if (isHeaderRow(head)) {
                     let body = if (List.isEmpty(rest)) "" else "<tbody>${render(rest)}</tbody>";
-                    "<table><thead>${htmlOf(images, head)}</thead>${body}</table>"
+                    "<table><thead>${htmlOf(images, paths, head)}</thead>${body}</table>"
                 } else {
                     "<table><tbody>${render(rows)}</tbody></table>"
                 }
