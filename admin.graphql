@@ -40,6 +40,8 @@ type Query {
   webhookDeliveries(webhookId: ID!, first: Int = 20, after: ID): [WebhookDelivery!]!
   """予約公開の一覧。新しい順。entryId を渡せばその entry の物だけ。after は前のページの最後の id"""
   schedules(entryId: ID, first: Int = 50, after: ID): [Schedule!]!
+  """監査の記録。新しい順（owner だけ）。誰が・いつ・何を変えたか。after は前のページの最後の id"""
+  auditEvents(first: Int = 50, after: ID): [AuditEvent!]!
 }
 
 """入力の 1 つの誤り。path は GraphQL の入力に対応（"fields.title" など）"""
@@ -401,6 +403,23 @@ type Invitation {
   id: ID!
   email: String!
   role: Role!
+  createdAt: String!
+}
+
+"""監査の 1 件。版の残らない変更（メンバー・役割・鍵・型）を積んだ物。
+entry の変更は entry_versions に版として残るので、ここには出ない"""
+type AuditEvent {
+  id: ID!
+  """した人。人は email、鍵は "api-key:<鍵の名前>"（版の author と同じ形）"""
+  actor: String!
+  """した事。"member.role_changed" / "type.deleted" / "field.removed" など"""
+  action: String!
+  """対象の種類。"member" / "invitation" / "api_key" / "type" / "field" の 5 つ"""
+  targetKind: String!
+  """対象。型は apiId、フィールドは "<型の apiId>.<フィールドの apiId>"、メンバーは id か email"""
+  targetId: String!
+  """付随する値。役割の変更なら {"role": "editor"}、鍵の発行なら {"name": "CI"}"""
+  detail: JSON!
   createdAt: String!
 }
 

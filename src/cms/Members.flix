@@ -25,10 +25,12 @@ mod Members {
         let normalized = Email.normalize(email);
         CmsErr.raiseIfAny(if (String.isMatch(regex = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", normalized)) Nil else Violation.Violation("email", "'${email}' は email の形ではありません") :: Nil);
         let inviter = Session.currentUser();
-        match Accounts.findByEmail(normalized) {
+        let invitation = match Accounts.findByEmail(normalized) {
             case Some(user) => addNow(normalized, role, user)
             case None       => placeInvitation(proof, normalized, role, inviter)
-        }
+        };
+        Audit.record(AuditChange.MemberInvited(normalized, role));
+        invitation
 
     ///
     /// 既にログインした事のある人はその場でメンバーにする。招待の行は作らない。
@@ -51,26 +53,29 @@ mod Members {
     ///
     /// 役割を変える。最後の owner を降格させる事はできない。
     ///
-    pub def changeRole(proof: Granted[ManageMembers], userId: UserId, role: Role): Member \ Db + CmsErr + Tenant =
+    pub def changeRole(proof: Granted[ManageMembers], userId: UserId, role: Role): Member \ Db + CmsErr + IdGen + Tenant + Session =
         let current = roleOf(userId) |> CmsErr.orNotFound(Entity.Member, "${userId}");
         if (current == Role.Owner and role != Role.Owner) guardLastOwner() else ();
         discard AuthQueries.upsertMembership({ userId = UserId.toInt64(userId), projectId = Tenant.currentId(), role = Role.text(role) });
+        Audit.record(AuditChange.MemberRoleChanged(userId, role));
         list(proof) |> List.find(member -> member#userId == userId) |> CmsErr.orNotFound(Entity.Member, "${userId}")
 
     ///
     /// 外す。最後の owner は外せない。
     ///
-    pub def remove(_proof: Granted[ManageMembers], userId: UserId): Unit \ Db + CmsErr + Tenant =
+    pub def remove(_proof: Granted[ManageMembers], userId: UserId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let current = roleOf(userId) |> CmsErr.orNotFound(Entity.Member, "${userId}");
         if (current == Role.Owner) guardLastOwner() else ();
-        discard AuthQueries.deleteMembership({ userId = UserId.toInt64(userId), projectId = Tenant.currentId() })
+        discard AuthQueries.deleteMembership({ userId = UserId.toInt64(userId), projectId = Tenant.currentId() });
+        Audit.record(AuditChange.MemberRemoved(userId))
 
     ///
     /// 招待を取り消す。
     ///
-    pub def cancelInvitation(_proof: Granted[ManageMembers], publicId: String): Unit \ DbWrite + CmsErr + Tenant =
+    pub def cancelInvitation(_proof: Granted[ManageMembers], publicId: String): Unit \ DbWrite + CmsErr + IdGen + Tenant + Session =
         let deleted = AuthQueries.deleteInvitationByPublicId({ publicId = publicId, projectId = Tenant.currentId() });
-        if (deleted == 0) CmsErr.notFound(Entity.Invitation, publicId) else ()
+        if (deleted == 0) CmsErr.notFound(Entity.Invitation, publicId) else ();
+        Audit.record(AuditChange.InvitationCancelled(publicId))
 
     /// 今のプロジェクトでの直接の役割。membership が無ければ None。
     def roleOf(userId: UserId): Option[Role] \ DbRead + Tenant =

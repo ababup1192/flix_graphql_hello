@@ -112,7 +112,7 @@ api_keys       (id, project_id, name, key_hash, scope: read | readDraft, created
 | 既存の PG テスト 46 件 | `withDb` が既定で owner を入れるので変更ゼロ |
 | ブラウザの Cookie と CORS | 管理画面を Access の同じアプリの下に置く。`Allow-Credentials` を足す |
 | 公開 API をキー無しにする判断 | `visibility` で切り替え。既定は公開 |
-| 監査ログ | この段では入れない。Runner で Actor と操作名が揃うので後で 1 か所 |
+| 監査ログ | 入った（2026-09-10）。Runner ではなくユースケースが `Audit.record` を業務と同じ Tx で呼ぶ。[audit-log.md](audit-log.md) |
 
 ### セキュリティの決め（規模で緩めない）
 

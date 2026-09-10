@@ -68,6 +68,11 @@ curl -s -X POST localhost:8080/admin/graphql \
 `Entry.path` は、その entry がサイト上で持つ path（型の `linkPath` から作る。型紙が無い型は null）。本文からこの entry を指した時に出る href と同じ物で、
 管理画面が「今どこを指しているか」を出すのに使う。
 
+**版の残らない変更は監査ログに残る。** 型・フィールド・メンバー・招待・API キーを変える mutation は、業務の書き込みと同じ Tx で
+`audit_events` に 1 行積む（誰が・いつ・何を・どの対象に）。失敗した操作は一緒に ROLLBACK されるので記録も残らない。表は RLS で append-only
+（SELECT と INSERT の policy しか無く、アプリも表の所有者も書き換えられない）。entry の変更を入れないのは `entry_versions` が版として全部持っているため。
+読むのは管理 API の `auditEvents(first, after)`（owner だけ。新しい順）。画面はまだ（#18）。
+
 ### コンテンツ API で読む
 
 ```bash

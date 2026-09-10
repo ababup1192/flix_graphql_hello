@@ -65,7 +65,7 @@ mod ContentTypes {
     ///
     /// content type を作る。singular / plural を省けば apiId から導く。名前の規則に合わなければ invalid。
     ///
-    pub def create(_proof: Granted[ManageTypes], draft: ContentTypeDraft): ContentType \ Db + CmsErr + IdGen + Tenant =
+    pub def create(_proof: Granted[ManageTypes], draft: ContentTypeDraft): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
         // 名前を揃える。singular / plural が無ければ apiId から導く
         let names = buildTypeNames(draft);
         let derived = Option.isEmpty(draft#singular) and Option.isEmpty(draft#plural);
@@ -75,6 +75,7 @@ mod ContentTypes {
         // 行を作り、型の変更を知らせる
         let inserted = ContentTypesQueries.insertContentType({ +projectId = Tenant.currentId() | ContentTypeRows.typeInsert(names, draft) }) |> Rows.expectId;
         Publishing.notify(PublishingEvent.SchemaChanged(names#apiId));
+        Audit.record(AuditChange.TypeCreated(names#apiId));
         load(TypeId.TypeId(inserted))
 
     ///
@@ -98,7 +99,7 @@ mod ContentTypes {
     ///
     /// content type を直す。触った項目だけ UPDATE に出る。名前を変えるなら規則を検査する。
     ///
-    pub def update(_proof: Granted[ManageTypes], id: TypeId, changes: ContentTypeChanges): ContentType \ Db + CmsErr + IdGen + Tenant =
+    pub def update(_proof: Granted[ManageTypes], id: TypeId, changes: ContentTypeChanges): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
         let existing = load(id);
         // 変えた後の名前（触っていない項目は今の物）
         let names = {
@@ -112,13 +113,14 @@ mod ContentTypes {
         // 触った項目だけ UPDATE し、型の変更を知らせる
         discard ContentTypesQueries.updateContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() }, ContentTypeRows.typeChanges(changes));
         Publishing.notify(PublishingEvent.SchemaChanged(existing#apiId));
+        Audit.record(AuditChange.TypeUpdated(existing#apiId));
         load(id)
 
     ///
     /// content type をフィールドごと消す。無ければ notFound。entry が残っていれば、他の型から参照されていれば invalid。
     /// ゴミ箱の entry は型と一緒に消す（残すと型が消せない）。
     ///
-    pub def delete(_proof: Granted[ManageTypes], id: TypeId): Unit \ Db + CmsErr + IdGen + Tenant =
+    pub def delete(_proof: Granted[ManageTypes], id: TypeId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let existing = load(id);
         let remaining = EntriesQueries.countEntriesOfType({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() }) |> Rows.total;
         let referrers = ContentFieldsQueries.countFieldsTargeting({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() }) |> Rows.total;
@@ -127,14 +129,15 @@ mod ContentTypes {
             ::: (if (referrers == 0i64) Nil else Violation.Violation("id", "他の型の REFERENCE のフィールド ${referrers} 本が参照先にしています。先にそのフィールドを消してください") :: Nil));
         discard EntriesQueries.purgeDeletedEntries({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() });
         discard ContentTypesQueries.deleteContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() });
-        Publishing.notify(PublishingEvent.SchemaChanged(existing#apiId))
+        Publishing.notify(PublishingEvent.SchemaChanged(existing#apiId));
+        Audit.record(AuditChange.TypeDeleted(existing#apiId))
 
     // ---- フィールド ----
 
     ///
     /// フィールドを末尾に足す。apiId の規則と config の組み合わせを検査する。parent があればその子（object の子か blocks の variant）になる。
     ///
-    pub def addField(_proof: Granted[ManageTypes], typeId: TypeId, draft: FieldDraft): FieldDef \ Db + CmsErr + IdGen + Tenant =
+    pub def addField(_proof: Granted[ManageTypes], typeId: TypeId, draft: FieldDraft): FieldDef \ Db + CmsErr + IdGen + Tenant + Session =
         let owner = load(typeId);
         let parent = draft#parent |> Option.map(parentId -> FieldTree.find(parentId, owner#fields) |> CmsErr.orNotFound(Entity.Field, "${parentId}"));
         CmsErr.raiseIfAny(validateDraft(takenApiIds(owner#fields, None), parent, draft) ::: targetTypeExists(draft#target) ::: fieldTypeNameViolations(owner, draft));
@@ -145,13 +148,14 @@ mod ContentTypes {
         let inserted = ContentFieldsQueries.insertField(ContentTypeRows.fieldInsert(typeId, position, draft)) |> Rows.expectId;
         Option.forEach(target -> discard ContentFieldsQueries.setFieldTarget({ id = inserted, targetTypeId = TypeId.toInt64(target), projectId = Tenant.currentId() }), draft#target);
         Option.forEach(parentId -> discard ContentFieldsQueries.setFieldParent({ id = inserted, parentFieldId = FieldId.toInt64(parentId), projectId = Tenant.currentId() }), draft#parent);
-        touch(typeId);
+        discard touch(typeId);
+        Audit.record(AuditChange.FieldAdded(owner#apiId, "${draft#apiId}"));
         loadField(FieldId.FieldId(inserted))
 
     ///
     /// フィールドを直す。触った項目だけ UPDATE に出る。config は丸ごと置き換える。
     ///
-    pub def updateField(_proof: Granted[ManageTypes], id: FieldId, changes: FieldChanges): FieldDef \ Db + CmsErr + IdGen + Tenant =
+    pub def updateField(_proof: Granted[ManageTypes], id: FieldId, changes: FieldChanges): FieldDef \ Db + CmsErr + IdGen + Tenant + Session =
         let existing = loadField(id);
         let taken = takenApiIds(fieldsOf(existing#typeId), Some(id));
         let config = changes#config |> Option.getWithDefault(existing#config);
@@ -159,27 +163,28 @@ mod ContentTypes {
         let required = changes#required |> Option.getWithDefault(existing#required);
         CmsErr.raiseIfAny(Naming.validateFlags({ unique = unique | existing }) ::: Naming.validateChildFlags({ hasParent = Option.nonEmpty(existing#parent), required = required, unique = unique }) ::: Naming.validateConfig(taken, existing#kind, config));
         discard ContentFieldsQueries.updateField({ id = FieldId.toInt64(id), projectId = Tenant.currentId() }, ContentTypeRows.fieldChanges(changes));
-        touch(existing#typeId);
+        Audit.record(AuditChange.FieldUpdated(touch(existing#typeId), "${existing#apiId}"));
         loadField(id)
 
     ///
     /// フィールドを消す。無ければ notFound。
     ///
-    pub def removeField(_proof: Granted[ManageTypes], id: FieldId): Unit \ Db + CmsErr + IdGen + Tenant =
+    pub def removeField(_proof: Granted[ManageTypes], id: FieldId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let existing = loadField(id);
         discard ContentFieldsQueries.deleteField({ id = FieldId.toInt64(id), projectId = Tenant.currentId() });
-        touch(existing#typeId)
+        Audit.record(AuditChange.FieldRemoved(touch(existing#typeId), "${existing#apiId}"))
 
     ///
     /// ids の順に並べ直す。最上位のフィールドを過不足なく渡さなければ invalid。object / blocks の子は対象外。
     ///
-    pub def reorderFields(_proof: Granted[ManageTypes], typeId: TypeId, ids: List[FieldId]): ContentType \ Db + CmsErr + IdGen + Tenant =
+    pub def reorderFields(_proof: Granted[ManageTypes], typeId: TypeId, ids: List[FieldId]): ContentType \ Db + CmsErr + IdGen + Tenant + Session =
         let owner = load(typeId);
         let current = owner#fields |> List.map(field -> field#id) |> List.toSet;
         let sameSet = List.length(ids) == Set.size(current) and List.toSet(ids) == current;
         CmsErr.raiseIfAny(if (sameSet) Nil else Violation.Violation("ids", "最上位のフィールドの id を過不足なく、重複なく渡してください") :: Nil);
         List.forEachWithIndex((index, id) -> discard ContentFieldsQueries.setFieldPosition({ id = FieldId.toInt64(id), position = index, projectId = Tenant.currentId() }), ids);
-        touch(typeId);
+        discard touch(typeId);
+        Audit.record(AuditChange.FieldsReordered(owner#apiId));
         load(typeId)
 
     // ---- 部品 ----
@@ -249,10 +254,15 @@ mod ContentTypes {
         ContentFieldsQueries.listFieldsOfType({ typeId = TypeId.toInt64(typeId), projectId = Tenant.currentId() }) |> List.map(ContentTypeRows.toFieldDef) |> FieldTree.build
 
     ///
-    /// 型の updated_at を今にする。フィールドを触った時も型が変わった事にする。
+    /// 型の updated_at を今にする。フィールドを触った時も型が変わった事にする。型の apiId を返す。
     ///
-    def touch(typeId: TypeId): Unit \ Db + CmsErr + IdGen + Tenant =
+    /// WhyNot: apiId を捨てないのは、ここで既に型を読んでいるため。呼ぶ側が監査のために読み直すと、
+    /// フィールドを触るたびに型とフィールドの SELECT が 2 本増える。
+    ///
+    def touch(typeId: TypeId): ApiId \ Db + CmsErr + IdGen + Tenant =
         discard ContentTypesQueries.touchContentType({ id = TypeId.toInt64(typeId), projectId = Tenant.currentId() });
-        Publishing.notify(PublishingEvent.SchemaChanged(load(typeId)#apiId))
+        let apiId = load(typeId)#apiId;
+        Publishing.notify(PublishingEvent.SchemaChanged(apiId));
+        apiId
 
 }

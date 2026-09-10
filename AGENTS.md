@@ -97,4 +97,5 @@ MCP サーバ（`POST /mcp`）の繋ぎ方、本番とセルフホスト（docke
 - **ルート表に行を足したら `TestServer` の describe にも 1 行**
 - **`Net.Http.runWithIO` を src/ で使わない**（handler ごとに HttpClient を作りスレッドが残る）。`OutboundHttp.runWith`
 - **外向きの id に連番を出さない**（乱数の public_id、時刻順に読む物は ULID）
+- **監査（`Audit.record`）は業務の書き込みと同じ Tx で呼ぶ。** `audit_events` は SELECT と INSERT の policy しか無く、後から書き換えられない
 - **ドメイン（src/cms）は GeneratedAdmin を知らない。** 写しは `AdminMapping` / `AccountMapping`

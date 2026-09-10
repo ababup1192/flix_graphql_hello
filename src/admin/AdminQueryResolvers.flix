@@ -127,6 +127,14 @@ mod AdminQueryResolvers {
     def listDeliveries(webhookId: Id, first: Option[Int32], after: Option[Id]): List[WebhookDelivery] \ DbRead + CmsErr + Tenant + Session =
         Webhooks.deliveries(Session.grant(), AdminMapping.publicIdOf(webhookId), EntryPage.clamp(20, first, None) |> fst, after |> Option.map(AdminMapping.publicIdOf))
 
+    /// Query.auditEvents
+    pub def auditEvents(): GeneratedAdmin.QueryAuditEventsResolver[AdminEff] =
+        (_context, first, after) -> Ok(listAuditEvents(first, after))
+
+    /// 監査の記録。新しい順。after は前のページの最後の id。
+    def listAuditEvents(first: Option[Int32], after: Option[Id]): List[AuditEvent] \ DbRead + CmsErr + Tenant + Session =
+        Audit.recent(Session.grant(), EntryPage.clamp(50, first, None) |> fst |> Int32.toInt64, after |> Option.map(AdminMapping.publicIdOf))
+
     /// Query.schedules
     pub def schedules(): GeneratedAdmin.QuerySchedulesResolver[AdminEff] =
         (_context, entryId, first, after) -> Ok(listSchedules(entryId, first, after))
@@ -144,6 +152,6 @@ mod AdminQueryResolvers {
     /// type Query のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.QueryResolvers[AdminEff] =
         { contentTypes = contentTypes(), contentType = contentType(), entries = entries(), entry = entry(), assets = assets(), asset = asset(),
-          publishCheck = publishCheck(), impact = impact(), publishPlan = publishPlan(), viewer = viewer(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries(), schedules = schedules() }
+          publishCheck = publishCheck(), impact = impact(), publishPlan = publishPlan(), viewer = viewer(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries(), schedules = schedules(), auditEvents = auditEvents() }
 
 }

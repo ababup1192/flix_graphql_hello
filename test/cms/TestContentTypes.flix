@@ -128,6 +128,21 @@ mod TestContentTypes {
             (insert |> Option.flatMap(statement -> List.last(statement#params)),
              List.exists(statement -> String.contains(substr = "updated_at = now()", statement#sql), statements)))
 
+    ///
+    /// フィールドを 1 つ直すのに出す SQL の本数（SELECT / UPDATE / INSERT）。
+    ///
+    /// 読み直し 3 本 → フィールドの UPDATE 2 本 → 型の読み直し 2 本 → 型の updated_at → 型の読み直し 2 本
+    /// → 監査の INSERT 1 本 → 戻り値の読み直し 2 本。
+    ///
+    /// 本数を数えるのは、通知や監査のために型を読み直す実装を足すと、**フィールドを触るたびに SELECT が静かに増える**ため。
+    /// 実 PG のテストは結果しか見ないので、この形の劣化は本数でしか捕まらない（2026-09-10 に監査を足した時に実際に 2 本増えた）。
+    @Test
+    def testContentTypesUpdateFieldStatementCounts(): Unit \ {Assert, IO} =
+        let changes = { name = Some("題"), required = None, unique = None, localized = None, config = None };
+        let (_, sqls) = record(() -> ContentTypes.updateField(Session.grant(), FieldId.FieldId(10i64), changes));
+        let countOf = verb -> sqls |> List.count(sql -> sql == verb);
+        Assert.assertEq(expected = (9, 3, 1), (countOf("SELECT"), countOf("UPDATE"), countOf("INSERT")))
+
     /// 無い型に足そうとすると notFound。
     @Test
     def testContentTypesAddFieldToMissingType(): Unit \ {Assert, IO} =

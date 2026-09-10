@@ -161,21 +161,21 @@ mod AdminMutationResolvers {
     pub def cancelInvitation(): GeneratedAdmin.MutationCancelInvitationResolver[AdminEff] =
         (_context, id) -> { cancelInvitationOf(id); Ok(id) }
 
-    def cancelInvitationOf(id: Id): Unit \ DbWrite + CmsErr + Tenant + Session =
+    def cancelInvitationOf(id: Id): Unit \ DbWrite + CmsErr + IdGen + Tenant + Session =
         Members.cancelInvitation(Session.grant(), AdminMapping.publicIdOf(id))
 
     /// Mutation.changeMemberRole
     pub def changeMemberRole(): GeneratedAdmin.MutationChangeMemberRoleResolver[AdminEff] =
         (_context, userId, role) -> Ok(changeRoleOf(userId, role))
 
-    def changeRoleOf(userId: Id, role: GeneratedAdmin.Role): Member \ Db + CmsErr + Tenant + Session =
+    def changeRoleOf(userId: Id, role: GeneratedAdmin.Role): Member \ Db + CmsErr + IdGen + Tenant + Session =
         Members.changeRole(Session.grant(), AdminMapping.userId("userId", userId), AdminMapping.roleOf(role))
 
     /// Mutation.removeMember。外した id を返す
     pub def removeMember(): GeneratedAdmin.MutationRemoveMemberResolver[AdminEff] =
         (_context, userId) -> { removeMemberOf(userId); Ok(userId) }
 
-    def removeMemberOf(userId: Id): Unit \ Db + CmsErr + Tenant + Session =
+    def removeMemberOf(userId: Id): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         Members.remove(Session.grant(), AdminMapping.userId("userId", userId))
 
     /// Mutation.createApiKey。pepper が無ければ発行できない
@@ -195,7 +195,7 @@ mod AdminMutationResolvers {
     pub def revokeApiKey(): GeneratedAdmin.MutationRevokeApiKeyResolver[AdminEff] =
         (_context, id) -> { revokeApiKeyOf(id); Ok(id) }
 
-    def revokeApiKeyOf(id: Id): Unit \ DbWrite + CmsErr + Tenant + Session =
+    def revokeApiKeyOf(id: Id): Unit \ DbWrite + CmsErr + IdGen + Tenant + Session =
         ApiKeys.revoke(Session.grant(), AdminMapping.publicIdOf(id))
 
     /// Mutation.createPreviewToken。pepper が無ければ発行できない

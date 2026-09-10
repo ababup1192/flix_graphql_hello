@@ -1,0 +1,111 @@
+///
+/// 監査に残す出来事。版の残らない変更（メンバー・役割・鍵・型）だけを持つ。ユースケースが 1 つ作って `Audit.record` に渡す。
+///
+/// WhyNot: entry の変更をここに入れないのは、`entry_versions` が誰が・いつ・どんな中身にしたかを版として全部持っていて、
+/// 監査としてはそちらの方が強いため。二重に持つと、片方だけ残る形が作れてしまう。
+///
+pub enum AuditChange with Eq, Order {
+    /// 招待した（既にログイン済みの人はその場でメンバーになる）
+    case MemberInvited(String, Role)
+    /// メンバーの役割を変えた
+    case MemberRoleChanged(UserId, Role)
+    /// メンバーを外した
+    case MemberRemoved(UserId)
+    /// 招待を取り消した
+    case InvitationCancelled(String)
+    /// プロジェクトの API キーを発行した（公開 id, 名前）
+    case ApiKeyCreated(String, String)
+    /// API キーを失効させた
+    case ApiKeyRevoked(String)
+    /// content type を作った / 直した / 消した
+    case TypeCreated(ApiId)
+    case TypeUpdated(ApiId)
+    case TypeDeleted(ApiId)
+    /// フィールドを足した / 直した / 消した（型の apiId, フィールドの apiId）
+    case FieldAdded(ApiId, String)
+    case FieldUpdated(ApiId, String)
+    case FieldRemoved(ApiId, String)
+    /// 最上位のフィールドを並べ替えた
+    case FieldsReordered(ApiId)
+}
+
+///
+/// 監査の記録。業務の書き込みと同じ Tx で 1 行積む。
+///
+/// WhyNot: `DbRunner.transact` で全 mutation をまとめて 1 か所で積まないのは、そこに揃っているのが主体と
+/// プロジェクトだけで、何をどの対象にしたかが無いため。操作名だけの記録は監査に使えない。
+///
+/// WhyNot: 出来事の表（events）+ consumer にしないのは、この記録の消費者が監査の 1 つだけで、業務の Tx の中で終わるため
+/// （`Publishing` と同じ判断。[docs/design/cdn.md]）。
+///
+/// WhyNot: 証明（`Granted[p]`）を取らないのは、記録を積むのは操作の結果で、誰ができるかは各ユースケースの入口が
+/// 既に決めているため（`Webhooks.emit` と同じ）。ここで別の証明を要求すると同じ操作に 2 つの権限が要る事になる。
+///
+mod Audit {
+
+    use Util.Json.Json
+
+    ///
+    /// 積む行。`rowOf` が出来事から作る純粋な値。
+    ///
+    pub type alias AuditRow = { actor = String, action = String, targetKind = String, targetId = String, detail = Json }
+
+    ///
+    /// 出来事を今の主体で積む。ユースケースが業務の書き込みと同じ Tx で 1 回呼ぶ。
+    ///
+    pub def record(change: AuditChange): Unit \ DbWrite + IdGen + Tenant + Session =
+        let row = rowOf(Session.displayName(), change);
+        discard AuditQueries.insertAuditEvent({
+            id = IdGen.freshUlid(), projectId = Tenant.currentId(),
+            actor = row#actor, action = row#action, targetKind = row#targetKind, targetId = row#targetId, detail = row#detail })
+
+    ///
+    /// 出来事 → 積む行。action は `<対象>.<した事>`、targetId は後から人が引ける値。
+    ///
+    /// WhyNot: 変更前の値を detail に入れないのは、それを持つには各ユースケースが変更前を読み直す必要があり、
+    /// 型の変更では読み直しが 1 回増えるため。誰が何を触ったかは追えるので、中身の差分が要るなら版のある entry と同じ形を別に足す。
+    ///
+    pub def rowOf(actor: String, change: AuditChange): AuditRow = match change {
+        case AuditChange.MemberInvited(email, role)      => row(actor, "member.invited", "member", email, roleDetail(role))
+        case AuditChange.MemberRoleChanged(userId, role) => row(actor, "member.role_changed", "member", "${userId}", roleDetail(role))
+        case AuditChange.MemberRemoved(userId)           => row(actor, "member.removed", "member", "${userId}", empty())
+        case AuditChange.InvitationCancelled(publicId)   => row(actor, "invitation.cancelled", "invitation", publicId, empty())
+        case AuditChange.ApiKeyCreated(publicId, name)   => row(actor, "api_key.created", "api_key", publicId, Json.JObject(Map#{ "name" => Json.JString(name) }))
+        case AuditChange.ApiKeyRevoked(publicId)         => row(actor, "api_key.revoked", "api_key", publicId, empty())
+        case AuditChange.TypeCreated(apiId)              => row(actor, "type.created", "type", "${apiId}", empty())
+        case AuditChange.TypeUpdated(apiId)              => row(actor, "type.updated", "type", "${apiId}", empty())
+        case AuditChange.TypeDeleted(apiId)              => row(actor, "type.deleted", "type", "${apiId}", empty())
+        case AuditChange.FieldAdded(apiId, field)        => row(actor, "field.added", "field", "${apiId}.${field}", empty())
+        case AuditChange.FieldUpdated(apiId, field)      => row(actor, "field.updated", "field", "${apiId}.${field}", empty())
+        case AuditChange.FieldRemoved(apiId, field)      => row(actor, "field.removed", "field", "${apiId}.${field}", empty())
+        case AuditChange.FieldsReordered(apiId)          => row(actor, "fields.reordered", "type", "${apiId}", empty())
+    }
+
+    /// 行を組む。
+    def row(actor: String, action: String, targetKind: String, targetId: String, detail: Json): AuditRow =
+        { actor = actor, action = action, targetKind = targetKind, targetId = targetId, detail = detail }
+
+    /// 役割の付く出来事の詳細。
+    def roleDetail(role: Role): Json = Json.JObject(Map#{ "role" => Json.JString(Role.text(role)) })
+
+    /// 詳細の無い出来事。
+    def empty(): Json = Json.JObject(Map.empty())
+
+    ///
+    /// 新しい順に読む。今のプロジェクトの分だけ（RLS の印が効く）。after を渡せばその id より古い物から。
+    ///
+    pub def recent(_proof: Granted[ManageMembers], max: Int64, after: Option[String]): List[AuditEvent] \ DbRead + Tenant =
+        match after {
+            case None          => AuditQueries.listAuditEvents({ projectId = Tenant.currentId(), max = max }) |> List.map(toEvent)
+            case Some(afterId) => AuditQueries.listAuditEventsAfter({ projectId = Tenant.currentId(), afterId = afterId, max = max }) |> List.map(toEventAfter)
+        }
+
+    /// 行を読む値に。
+    def toEvent(found: AuditQueries.ListAuditEventsRow): AuditEvent =
+        { id = found#id, actor = found#actor, action = found#action, targetKind = found#targetKind, targetId = found#targetId, detail = found#detail, createdAt = found#createdAt }
+
+    /// after 付きの行を読む値に。
+    def toEventAfter(found: AuditQueries.ListAuditEventsAfterRow): AuditEvent =
+        { id = found#id, actor = found#actor, action = found#action, targetKind = found#targetKind, targetId = found#targetId, detail = found#detail, createdAt = found#createdAt }
+
+}

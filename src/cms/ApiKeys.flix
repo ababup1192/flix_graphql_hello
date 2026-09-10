@@ -25,6 +25,7 @@ mod ApiKeys {
         let id = AuthQueries.insertApiKey(AuthRows.toApiKeyInsert({
             publicId = publicId, projectId = Tenant.currentId(), name = draft#name, keyHash = SecretHash.hash(pepper, key),
             pepperId = pepper#pepperId, scope = draft#scope, expiresAt = draft#expiresAt })) |> Rows.expectId;
+        Audit.record(AuditChange.ApiKeyCreated(publicId, draft#name));
         { id = id, publicId = publicId, name = draft#name, scope = draft#scope, expiresAt = draft#expiresAt, key = key }
 
     ///
@@ -58,9 +59,10 @@ mod ApiKeys {
     ///
     /// 失効する。行は残す。
     ///
-    pub def revoke(_proof: Granted[ManageApiKeys], publicId: String): Unit \ DbWrite + CmsErr + Tenant =
+    pub def revoke(_proof: Granted[ManageApiKeys], publicId: String): Unit \ DbWrite + CmsErr + IdGen + Tenant + Session =
         let changed = AuthQueries.revokeApiKey({ publicId = publicId, projectId = Tenant.currentId() });
-        if (changed == 0) CmsErr.notFound(Entity.ApiKey, publicId) else ()
+        if (changed == 0) CmsErr.notFound(Entity.ApiKey, publicId) else ();
+        Audit.record(AuditChange.ApiKeyRevoked(publicId))
 
     ///
     /// 今のプロジェクトの鍵の一覧。
