@@ -48,9 +48,12 @@ mod SchemaCounts {
             published = Map.getWithDefault("published", 0i64, byStage),
             missingPublished =
                 if (tightens(changes, field, isRequired)) SchemaImpactQueries.countMissingPublished({ typeId = owner, path = path, projectId = tenant }) |> Rows.total else 0i64,
-            outsideConfig =
-                narrowedOptions(changes, field) |> Option.map(options ->
-                    SchemaImpactQueries.countOutsideOptions({ typeId = owner, apiId = key, options = options, projectId = tenant }) |> Rows.total) |> Option.getWithDefault(0i64),
+            outsideConfig = match narrowed(changes, field) {
+                case Some(Narrowing.Options(kept))             => SchemaImpactQueries.countOutsideOptions({ typeId = owner, apiId = key, options = kept, projectId = tenant }) |> Rows.total
+                case Some(Narrowing.MaxLength(limit))          => SchemaImpactQueries.countOverLength({ typeId = owner, path = valuePath(field#apiId), limit = limit, projectId = tenant }) |> Rows.total
+                case Some(Narrowing.Range(low, high, integer)) => SchemaImpactQueries.countOutsideRange({ typeId = owner, path = valuePath(field#apiId), low = low, high = high, integer = integer, projectId = tenant }) |> Rows.total
+                case None                                      => 0i64
+            },
             duplicatePublished =
                 if (tightens(changes, field, isUnique)) SchemaImpactQueries.countDuplicatePublished({ typeId = owner, apiId = key, projectId = tenant }) |> Rows.total else 0i64
         }
@@ -82,16 +85,17 @@ mod SchemaCounts {
     }
 
     ///
-    /// SELECT の選択肢を減らした変更なら、新しい選択肢を返す。
+    /// config を締めた変更なら、どこをどこまで締めたか。締め方の判定は SchemaDiff が持つ。
     ///
-    /// WhyNot: maxLength や min / max を締めた分はまだ数えない。SELECT だけ先にするのは、
-    /// spec が「消すと公開中のコンテンツが壊れる」と名指ししている唯一の config のため。
-    ///
-    def narrowedOptions(changes: List[SchemaChange], field: FieldDef): Option[List[String]] =
+    def narrowed(changes: List[SchemaChange], field: FieldDef): Option[Narrowing] =
         changes |> List.findMap(change -> match change {
-            case SchemaChange.FieldConfigNarrowed(now, was) =>
-                if (now#id == field#id and List.length(now#config#options) < List.length(was#options)) Some(now#config#options) else None
-            case _ => None
+            case SchemaChange.FieldConfigNarrowed(now, was) => if (now#id == field#id) SchemaDiff.narrowing(was, now#config) else None
+            case _                                          => None
         })
+
+    ///
+    /// フィールドの値そのものを指す jsonpath（型は問わない）。長さや範囲は SQL 側で見る。
+    ///
+    def valuePath(apiId: ApiId): String = "$.**.\"${ApiId.text(apiId)}\""
 
 }

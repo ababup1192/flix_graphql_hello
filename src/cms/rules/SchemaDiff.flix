@@ -15,6 +15,22 @@ pub enum SchemaChange {
 }
 
 ///
+/// config のどこを、どこまで締めたか。種類ごとに 1 つ（SELECT は選択肢、文字列は上限、NUMBER は範囲）。
+/// 数え上げがそのまま SQL に渡す。
+///
+/// Range が持つのは**締めた側だけ**。触っていない側の範囲から外れていた値は前から保存できなかったので、
+/// 今回の影響には入れない。
+///
+pub enum Narrowing with Eq {
+    /// 残る選択肢
+    case Options(List[String])
+    /// 新しい上限（文字数）
+    case MaxLength(Int32)
+    /// 上げた下限、下げた上限、整数に限ったか
+    case Range(Option[Float64], Option[Float64], Bool)
+}
+
+///
 /// スキーマ全体の前後から変更の列を出す。純粋。
 ///
 /// 出すのは「既存のデータに影響しうる変更」だけ。緩める側（required を外す、選択肢を足す、
@@ -63,21 +79,27 @@ mod SchemaDiff {
         (if (now#unique and not was#unique) SchemaChange.FieldUnique(now) :: Nil else Nil) :::
         (if (configNarrowed(was#config, now#config)) SchemaChange.FieldConfigNarrowed(now, was#config) :: Nil else Nil)
 
+    /// config を締めたか。
+    def configNarrowed(was: FieldConfig, now: FieldConfig): Bool = Option.nonEmpty(narrowing(was, now))
+
     ///
-    /// config を締めたか。選択肢を減らす・上限を縮める・下限を上げる・整数に限る、が締める側。
+    /// config を締めたなら、どこをどこまで締めたか。選択肢を外す・上限を縮める・下限を上げる・整数に限る、が締める側。
+    ///
+    /// WhyNot: 選択肢は「数が減ったか」で見ない。B を消して C を足すと数は同じだが、B の値は取り残される。
+    /// 前にあった選択肢が 1 つでも無くなっていれば締めた事にする。
     ///
     /// WhyNot: sourceField（slug の元）の変更は締めた事にしない。既にある値はそのまま残り、
     /// 次に作る entry の初期値が変わるだけ。
     ///
-    def configNarrowed(was: FieldConfig, now: FieldConfig): Bool =
-        let optionsShrunk = List.length(now#options) < List.length(was#options)
-            and List.forAll(option -> List.memberOf(option, was#options), now#options);
-        let integerAdded = now#integer == Some(true) and was#integer != Some(true);
-        optionsShrunk
-            or tightenedUpper(was#maxLength, now#maxLength)
-            or tightenedLower(was#min, now#min)
-            or tightenedUpperFloat(was#max, now#max)
-            or integerAdded
+    pub def narrowing(was: FieldConfig, now: FieldConfig): Option[Narrowing] =
+        let optionDropped = List.exists(option -> not List.memberOf(option, now#options), was#options);
+        let low = if (tightenedLower(was#min, now#min)) now#min else None;
+        let high = if (tightenedUpperFloat(was#max, now#max)) now#max else None;
+        let integer = now#integer == Some(true) and was#integer != Some(true);
+        if (optionDropped) Some(Narrowing.Options(now#options))
+        else if (tightenedUpper(was#maxLength, now#maxLength)) now#maxLength |> Option.map(Narrowing.MaxLength)
+        else if (Option.nonEmpty(low) or Option.nonEmpty(high) or integer) Some(Narrowing.Range(low, high, integer))
+        else None
 
     /// 上限: 無かった所に付く、または小さくなる。
     def tightenedUpper(was: Option[Int32], now: Option[Int32]): Bool = match (was, now) {

@@ -7,7 +7,7 @@ mod SchemaImpactQueries {
     ///
     /// 生成元 schema_impact.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -1434273253
+    pub def sourceHash(): Int32 = 501080777
 
     ///
     /// countFieldValues の 1 行。
@@ -81,5 +81,41 @@ mod SchemaImpactQueries {
         let sql = "SELECT count(*)::bigint AS total\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft'\n    WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n      AND c.data ->> $3 IS NOT NULL AND NOT (c.data ->> $3 = ANY($4))";
         let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#apiId), SqlValue.StrArray(args#options)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(countOutsideOptionsDecoder(), sql, params))
+
+    ///
+    /// countOverLength の 1 行。
+    ///
+    pub type alias CountOverLengthRow = { total = Option[Int64] }
+
+    def countOverLengthDecoder(): Decoder[CountOverLengthRow] =
+        forA (
+            total <- Decoder.opt(Decoder.int64("total"))
+        ) yield { total = total }
+
+    ///
+    /// countOverLength: SELECT count(*)::bigint AS total FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft' WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND EXISTS ( SELECT 1 FROM jsonb_path_query(c.data, $3::jsonpath) AS v WHERE jsonb_typeof(v) = 'string' AND length(v #>> '{}') > $4 )
+    ///
+    pub def countOverLength(args: { typeId = Int64, path = String, limit = Int32, projectId = Int64 }): Option[CountOverLengthRow] \ DbRead =
+        let sql = "SELECT count(*)::bigint AS total\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft'\n    WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n      AND EXISTS (\n          SELECT 1 FROM jsonb_path_query(c.data, $3::jsonpath) AS v\n          WHERE jsonb_typeof(v) = 'string' AND length(v #>> '{}') > $4\n      )";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#path), SqlValue.Int32(args#limit)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(countOverLengthDecoder(), sql, params))
+
+    ///
+    /// countOutsideRange の 1 行。
+    ///
+    pub type alias CountOutsideRangeRow = { total = Option[Int64] }
+
+    def countOutsideRangeDecoder(): Decoder[CountOutsideRangeRow] =
+        forA (
+            total <- Decoder.opt(Decoder.int64("total"))
+        ) yield { total = total }
+
+    ///
+    /// countOutsideRange: SELECT count(*)::bigint AS total FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft' WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND EXISTS ( SELECT 1 FROM jsonb_path_query(c.data, $3::jsonpath) AS v WHERE jsonb_typeof(v) = 'number' AND ( ($4::float8 IS NOT NULL AND (v #>> '{}')::float8 < $4::float8) OR ($5::float8 IS NOT NULL AND (v #>> '{}')::float8 > $5::float8) OR ($6 AND (v #>> '{}')::numeric <> trunc((v #>> '{}')::numeric)) ) )
+    ///
+    pub def countOutsideRange(args: { typeId = Int64, path = String, low = Option[Float64], high = Option[Float64], integer = Bool, projectId = Int64 }): Option[CountOutsideRangeRow] \ DbRead =
+        let sql = "SELECT count(*)::bigint AS total\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft'\n    WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n      AND EXISTS (\n          SELECT 1 FROM jsonb_path_query(c.data, $3::jsonpath) AS v\n          WHERE jsonb_typeof(v) = 'number' AND (\n                 ($4::float8 IS NOT NULL AND (v #>> '{}')::float8 < $4::float8)\n              OR ($5::float8 IS NOT NULL AND (v #>> '{}')::float8 > $5::float8)\n              OR ($6 AND (v #>> '{}')::numeric <> trunc((v #>> '{}')::numeric))\n          )\n      )";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#path), SqlValue.ofOption(SqlValue.NullType.Float64, SqlValue.Float64, args#low), SqlValue.ofOption(SqlValue.NullType.Float64, SqlValue.Float64, args#high), SqlValue.Bool(args#integer)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(countOutsideRangeDecoder(), sql, params))
 
 }

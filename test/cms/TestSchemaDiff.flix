@@ -125,10 +125,13 @@ mod TestSchemaDiff {
         let n120 = capped(10i64, "title", Some(120));
         let n80  = capped(10i64, "title", Some(80));
         let none = capped(10i64, "title", None);
+        let ac  = withOptions(12i64, "category", List#{"A", "C"});
         let table = List#{
             (ab,   a,     List#{"config:category"}),
             (ab,   abc,   Nil),
             (ab,   ab,    Nil),
+            // B を消して C を足した。数は同じでも B の値は取り残される
+            (ab,   ac,    List#{"config:category"}),
             (n120, n80,   List#{"config:title"}),
             (n80,  n120,  Nil),
             (none, n120,  List#{"config:title"}),
@@ -150,5 +153,37 @@ mod TestSchemaDiff {
                     case SchemaChange.FieldConfigNarrowed(_, was) => Some(was#options)
                     case _                                        => None
                 }))
+
+
+    /// 数値の範囲。
+    def ranged(id: Int64, api: String, min: Option[Float64], max: Option[Float64], integer: Option[Bool]): FieldDef =
+        { config = { min = min, max = max, integer = integer | FieldConfig.empty() } | at(id, 0, CmsTestKit.fieldDef(api, FieldKind.Number)) }
+
+    /// 締め方を短い文字にする。
+    def narrowing(before: FieldDef, after: FieldDef): String =
+        match SchemaDiff.narrowing(before#config, after#config) {
+            case None                                       => "-"
+            case Some(Narrowing.Options(kept))              => "options:${List.join(",", kept)}"
+            case Some(Narrowing.MaxLength(n))               => "maxLength:${n}"
+            case Some(Narrowing.Range(low, high, integer))  => "range:${low}/${high}/${integer}"
+        }
+
+    ///
+    /// 締めた config は「どこを、どこまで」を持って返す。数え上げがそのまま SQL に渡す。
+    /// 触っていない側の範囲は持たない（前から外れていた値は今回の影響ではない）。
+    ///
+    @Test
+    def testSchemaDiffNarrowingSaysWhere(): Unit \ Assert =
+        let table = List#{
+            (withOptions(12i64, "c", List#{"A", "B"}),  withOptions(12i64, "c", List#{"A"}),         "options:A"),
+            (capped(10i64, "t", None),                   capped(10i64, "t", Some(5)),                  "maxLength:5"),
+            (capped(10i64, "t", Some(200)),              capped(10i64, "t", Some(5)),                  "maxLength:5"),
+            (ranged(11i64, "n", None, None, None),       ranged(11i64, "n", Some(5.0), None, None),   "range:Some(5.0)/None/false"),
+            (ranged(11i64, "n", Some(1.0), Some(100.0), None), ranged(11i64, "n", Some(1.0), Some(10.0), None), "range:None/Some(10.0)/false"),
+            (ranged(11i64, "n", None, None, None),       ranged(11i64, "n", None, None, Some(true)),   "range:None/None/true"),
+            (ranged(11i64, "n", Some(5.0), None, None),  ranged(11i64, "n", Some(1.0), None, None),   "-")
+        };
+        Assert.assertEq(expected = table |> List.map(match (_, _, want) -> want),
+            table |> List.map(match (before, after, _) -> narrowing(before, after)))
 
 }
