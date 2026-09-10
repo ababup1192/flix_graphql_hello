@@ -12,8 +12,10 @@ microCMS の移行先として作っている（動的に content type を定義
 | `/graphql` | **コンテンツ API**（読むだけ）。型の定義から graphql-java のスキーマを実行時に組む。`blogs` 型を作れば `blog(id)` / `blogs(where, orderBy, first, skip, after, stage)` と `Blog` / `BlogWhere` / `BlogOrderBy` / `BlogConnection` が生え、定義を変えると次のリクエストで組み直す |
 | `/admin/graphql` | **管理 API**。型とフィールドの定義、entry の読み書き、公開、asset、Webhook、予約公開、鍵。SDL は `admin.graphql`（正） |
 | `/account/graphql` | **Account API**。プロジェクトを選ぶ前の操作（me / 組織 / プロジェクト作成 / PAT）。SDL は `account.graphql` |
-| `/mcp` | **MCP サーバ**。AI エージェントから読み書きする 12 のツール。管理 API への GraphQL クライアント |
-| `/health` | DB に届けば `{"status":"ok","version":"<git の sha>"}`、届かなければ 503 |
+| `/mcp` | **MCP サーバ**。AI エージェントから読み書きする 15 のツール。管理 API への GraphQL クライアント |
+| `/health` | DB に届けば `{"status":"ok","version":"<git の sha>"}`。接続プールが張り付いていれば 200 のまま `"status":"degraded"`、DB に届かないかワーカーが止まっていれば 503（[deploy/README.md](deploy/README.md)） |
+
+管理画面は Elm で `admin-ui/`（別のビルド。`make ui-dev`）。CMS 本体は API だけを出す。
 
 管理 API と Account API は SDL が正で、そこから型付きの Flix コードを生成する。人が書くのは SDL と、生成されたレコード型に合わせたリゾルバだけで、**スキーマとリゾルバのズレはコンパイルで落ちる**。
 
@@ -63,6 +65,9 @@ curl -s -X POST localhost:8080/admin/graphql \
 - `impact(id)` — 取り下げ・削除で壊れる entry（フィールドの参照・本文内のリンク・asset の使用先）
 - `publishPlan(ids, withDependencies)` / `publishMany` — 参照先が先の順に並べ、1 つでも通らなければ何も公開しない
 
+`Entry.path` は、その entry がサイト上で持つ path（型の `linkPath` から作る。型紙が無い型は null）。本文からこの entry を指した時に出る href と同じ物で、
+管理画面が「今どこを指しているか」を出すのに使う。
+
 ### コンテンツ API で読む
 
 ```bash
@@ -76,7 +81,21 @@ curl -s -X POST localhost:8080/graphql -d '{"query": "{ blog(id: \"b1\", stage: 
 値は全部プレースホルダで SQL に渡す。一覧は `first` / `skip` に加えて `after`（cursor）で辿れる（[docs/design/pagination.md](docs/design/pagination.md)）。
 
 `REFERENCE` は参照先の型として展開され、同じ stage の物を返す（一覧は 1 本の SELECT で先読み）。`SELECT` は型ごとの enum（`BlogCategory`）で、
-`many: true` なら複数選択。`RICH_TEXT` は doc / html / text / 目次 / 抜粋 と Markdown で返せる。`DATE` は ISO 8601 の文字列。
+`many: true` なら複数選択。`DATE` は ISO 8601 の文字列。
+
+`RICH_TEXT` は `RichText { json html text headings links excerpt(length) wordCount readingTimeMinutes }` で返る。
+`json` は ProseMirror の doc、`html` はその描画（見出しに id、表・callout・gallery・数式・Mermaid は class ではなく `data-*`）、`headings` は目次用。
+
+```bash
+curl -s -X POST localhost:8080/graphql \
+  -d '{"query": "{ blogs { body { html links { id apiId path } headings { level text id } } } }"}'
+```
+
+**本文のコンテンツへのリンクは、CMS が path まで作る。** 型に**パスの形**（`ContentType.linkPath`。`/blog/{slug}` のような型紙で、
+使える印は `{id}` と `{slug}` の 2 つ。`{slug}` は値が無ければ id に落ちる）を入れておくと、`html` の `<a href>` がそのまま踏める path になり、
+`links[].path` にも同じ物が出る。型紙が無い型は href が `#entry:{id}` のままで、サイトが置き換える。
+**`data-entry-id` は型紙のあるなしに関わらず必ず付く**ので、`json` を自分で描くサイトも `links` から id → path を引ける。
+型紙は `/` か `http(s)://` で始まる物だけを受ける（`//evil.example.com/` は scheme 相対なので弾く）。
 
 匿名の GET はプロジェクトの版から weak な ETag を組み、`If-None-Match` が合えば GraphQL を実行せず 304 を返す。
 
@@ -138,11 +157,16 @@ make test-pg   # 実 PostgreSQL と MinIO 込み（コンテナの起動と停�
 make generate  # admin.graphql / account.graphql → src/generated/graphql/
 make gen       # migrations/ + queries/*.q → src/generated/sql/（sqlfx の生成器）
 make fatjar    # 実行可能な jar（artifact/）
+
+make ui-gen    # admin.graphql / account.graphql → admin-ui/generated/（elm-graphql）
+make ui-dev    # 管理画面の dev サーバ（CMS は別のターミナルで make run）
+make ui-check  # elm-format の検査・elm-review・elm-test・tsc
 ```
 
 `bin/flix` は `--Xsubeffecting=lambdas` を付けて呼ぶ（純粋なリゾルバのラムダをそのまま effect 付きの関数型に置くため）。
 VS Code の Flix 拡張にも同じフラグが要り、`.vscode/settings.json` の `flix.extraFlixArgs` で渡している。
-CI は push ごとに `make check` と `make test-pg`。
+CI は push ごとに `make check` と `make test-pg`（`test.yml`）。`admin-ui/` と SDL を触ると `admin-ui.yml` が動き、
+SDL と生成物のずれ・`ui-check`・build・本番のビルドに dev のヘッダが混ざっていない事を見る。
 
 テストの方針は**純粋な物はテストファースト**。`src/cms/rules`、`src/cms/db` の SQL 化、`src/crypto`、`src/http/Router` のような入出力が決まる物は、
 実装の前に表（入力 → 期待）を書いて通す。実 PG と GraphQL は後付けで、機能ごとに 1 回「繋ぎ目を伸ばす」観点を入れる。
@@ -166,7 +190,7 @@ src/graphql/                      graphql-java の境界と Schema の DSL
 src/app/                          AppEnv・認証・ルート表・DbRunner・仕事・ログ・/health・停止
 src/mcp/ src/import/              MCP サーバ、microCMS からの取り込み
 src/http/ src/log/ src/crypto/ src/auth/ src/storage/
-admin-ui/                         管理画面（Elm）
+admin-ui/                         管理画面（Elm + Vite。src/ が画面、web/ が TipTap の Web Component）
 deploy/                           本番とセルフホスト（compose + Caddy / Alloy）
 test/                             src と同じ構成。test/Pg/ だけ実 PG
 ```
@@ -180,6 +204,7 @@ test/                             src と同じ構成。test/Pg/ だけ実 PG
 | API 層・リゾルバ・MCP | [docs/architecture/api.md](docs/architecture/api.md) |
 | Tx・仕事・ログ・停止 | [docs/architecture/runtime.md](docs/architecture/runtime.md) |
 | 認証と権限 | [docs/architecture/auth.md](docs/architecture/auth.md) |
+| 管理画面の仕様 | [docs/design/admin-ui-spec.md](docs/design/admin-ui-spec.md) |
 | これから作る物 | [docs/design/roadmap.md](docs/design/roadmap.md) |
 | Flix の書き方 | [docs/flix-conventions.md](docs/flix-conventions.md) |
 | コードの流儀 | [AGENTS.md](AGENTS.md) |

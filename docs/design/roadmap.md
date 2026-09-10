@@ -1,4 +1,4 @@
-# ロードマップ（2026-09-09 更新）
+# ロードマップ（2026-09-10 更新）
 
 目標は 2 段。**(A) 今月中に自社の 2 サイト（Consumer / Business）が microCMS 無しで回る。(B) その後、他社に出せる。**
 見積もりは「この進め方（Claude が書き、人が仕様と優先順位を決める）での作業時間」。暦の上では実データの検証や外部設定の待ちが加わる。
@@ -9,7 +9,7 @@
 
 | # | 機能 | 誰に | 時間 | 中身 |
 |---|---|---|---|---|
-| 9 | 管理画面（Elm、`admin-ui/`） | 編集者 | 目で見る往復が律速 | ログイン、プロジェクト切り替え、型の編集、entry の一覧・編集、TipTap、画像、公開、プレビュー、dry-run と impact の表示。API の試し打ち（GraphiQL の埋め込み。ログイン済みの JWT で叩く。エンドポイントには同梱しない。introspection と CORS は既にある）。仕様は [admin-ui-spec.md](admin-ui-spec.md)、段取りは [admin-ui-phases.md](admin-ui-phases.md) |
+| 9 | 管理画面（Elm、`admin-ui/`） | 編集者 | 目で見る往復が律速 | プロジェクト切り替え・型の編集・entry の一覧とボード・エディタ（TipTap）・メディア・メンバー・API キーと Webhook・API プレビュー・dry-run と impact の表示は入った（ログイン画面は Cloudflare Access が持つので作らない）。残りは **richText の編集部品の穴**（linkCard / 動画 / callout / details / embed は素通しで保持するだけ）、**まとめて公開の導線**（`publishPlan` / `publishMany` / `deleteEntry` / `createPreviewToken` を画面から呼んでいない）、GraphiQL の埋め込み。ワークフローの画面は #22a 待ち。仕様は [admin-ui-spec.md](admin-ui-spec.md)、段取りは [admin-ui-phases.md](admin-ui-phases.md) |
 | 10 | 公開サイトの載せ替え | 自社 | 半日 | elm-pages を GraphQL に。`headings` で目次、`html` で本文。Cloudflare Pages の再ビルドは Webhook |
 
 ここまでで **(A) 達成**。microCMS を解約できる。
@@ -20,9 +20,8 @@
 |---|---|---|---|---|
 | 12 | 公開の巻き戻し（`revertPublish`）と時点指定の読み出し（`at`） | 編集者・監査 | 1.5 日 | 版から 1 Tx で戻す。コンテンツ API に `at` を足す。**microCMS には無い** |
 | 13 | 型の export / apply | 開発者 | 半日 | SDL に寄せた書式で往復。差分の計画、削除の保護、`@renamedFrom` |
-| 14 | codegen の手順と CI の雛形 | 開発者 | 1 日 | elm-graphql / graphql-codegen に委ねる。Webhook で PR を開く |
-| 15a | richText の doc に本文の穴を塞ぐ node（gallery / image の alt / linkCard / codeBlock の fileName と highlightLines） | 編集者 | 半日 | microCMS でカスタムフィールドに追い出されている物を本文の中に持てるようにする。バックエンドは doc の形・validate・HTML・Markdown の方言まで。エディタは管理画面で。脚注は後 |
-| 15b | richText の doc の第 2 弾（数式 / Mermaid / タスクリスト / 動画） | 編集者 | 半日 | 15a と同じ型。動画は AssetRules に mime ごとの上限。entryEmbed（本文に別の entry）は参照展開が絡むので単独で |
+| 14 | codegen の手順と CI の雛形 | 開発者 | 1 日 | elm-graphql / graphql-codegen に委ねる。Webhook で PR を開く。自社の admin-ui は `admin-ui.yml` が `ui-gen-check` で SDL とのずれを落としているので、要るのは**利用者向けの手順書と雛形** |
+| 15c | richText の entryEmbed（本文に別の entry）と脚注 | 編集者 | 半日 | entryEmbed は参照展開と impact に通す必要があるので単独で。脚注は footnote mark（Markdown は `[^1]`） |
 | 16 | pending の asset の掃除 cron、asset の先読み | 編集者・運用 | 半日 | 既存の query を出すだけ + 孤児の削除。`usedBy` は済み |
 | 16d | 集計（`<plural>Aggregate`: count と SELECT / REFERENCE / BOOLEAN / DATE（年月）の groupBy。where は EntryFilterSql を再利用） | 編集者 | 1 日 | #9 の管理画面で内訳が要る時に入れる。**microCMS には無い** |
 | 17 | 課金（Stripe）と組織の上限 | サービス | 1〜2 日 | [hosting-and-externalized-risk.md](hosting-and-externalized-risk.md) |
@@ -80,7 +79,7 @@ MCP の asset・予約公開・主体ごとの tools/list は #24（MCP v2）、
 
 ## 差別化の言い方（表と一緒に使う）
 
-- 上: 動的スキーマの GraphQL、richText の返し方（json / html / text / 目次 / 抜粋）、参照と asset の整合が構造的に壊れない、セルフホストと価格
+- 上: 動的スキーマの GraphQL、richText の返し方（json / html / text / 目次 / 抜粋 / links）、本文のリンクが最初から踏める href になる（型ごとの `linkPath`。Contentful と Sanity はサイト側に id → path の対応を書かせる）、参照と asset の整合が構造的に壊れない、セルフホストと価格
 - 編集者向けに新しく作る: 影響の見える化（`impact`）、公開計画（`publishPlan` / `publishMany`）、巻き戻しと時点指定（#12）。「壊れない・戻せる・押す前に分かる」
 - 並ぶ: プレビュー、予約公開、差分、Webhook、権限、多言語
 - 追いつかない: 管理画面の完成度、画像変換、日本語ドキュメント、ISMS
@@ -89,7 +88,9 @@ MCP の asset・予約公開・主体ごとの tools/list は #24（MCP v2）、
 
 機能の中身は SDL（`admin.graphql` / `account.graphql`）と [../architecture/](../architecture/) にあるので、ここには一覧だけ置く。
 
-**API と機能** — 管理 API / コンテンツ API（動的スキーマ、where / orderBy / after、参照、OBJECT / BLOCKS）、公開・版・一意（advisory lock）、dry-run（`publishCheck`）、影響の見える化（`impact`）、公開計画（`publishPlan` / `publishMany`）、バージョン間の差分（`Entry.diff`）、テナント、asset（S3 互換、署名付き URL、`usedBy`）、richText（doc / html / text / 目次 / 抜粋 / 埋め込み / 表 / callout）と Markdown、DATE と複数選択の SELECT、GraphQL の GET 対応、MCP v1（12 ツール）、microCMS の API スキーマの取り込み。
+**API と機能** — 管理 API / コンテンツ API（動的スキーマ、where / orderBy / after、参照、OBJECT / BLOCKS）、公開・版・一意（advisory lock）、dry-run（`publishCheck`）、影響の見える化（`impact`）、公開計画（`publishPlan` / `publishMany`）、バージョン間の差分（`Entry.diff`）、テナント、asset（S3 互換、署名付き URL、`usedBy`、動画は mp4 / webm で上限 200 MB）、richText（doc / html / text / 目次 / 抜粋 / links / wordCount と readingTimeMinutes）と Markdown の双方向変換、DATE と複数選択の SELECT、GraphQL の GET 対応、MCP v1（15 ツール）、microCMS の API スキーマの取り込み、型のアイコン。
+
+**richText の node** — 段落 / 見出し / リスト / タスク（listItem の checked）/ 引用 / codeBlock（language・fileName・highlightLines。language が mermaid なら `data-diagram`）/ 表（セルの寄せ。HTML は結合を落とさない）/ callout / details / gallery（columns 2〜4）/ image（alt・caption）/ video（poster）/ embed（YouTube・Vimeo・X）/ linkCard / 数式（`math` mark と `mathBlock`。TeX のまま持ち描画はサイト側）。mark は bold / italic / strike / underline / code / link / math / sub / sup / highlight。**型ごとのパスの形**（`ContentType.linkPath` の型紙 `/blog/{slug}`。`{id}` と `{slug}`）から `Entry.path` と本文の href を作る。
 
 **認証と権限** — 組織・メンバー・招待、JWT / JWKS、Authz の Datalog、権限の証明 `Granted[p]`、API キー（scope: WRITE + role、期限、last_used_at）、PAT、プレビュートークン、visibility、Host でプロジェクト slug、Account API。テナント分離の三重（Tenant effect / `make gen --scope project_id` / RLS）。
 
