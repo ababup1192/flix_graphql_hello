@@ -1,4 +1,4 @@
-module Page.Audit exposing (Model, Msg(..), init, update, urlOf, view)
+module Page.Audit exposing (Model, Msg(..), init, scrollTarget, update, urlOf, view)
 
 {-| プロジェクト設定 › 監査ログ。誰が・いつ・何を変えたか。読むだけ。
 
@@ -581,36 +581,38 @@ viewRow surround model row =
         zone =
             Maybe.withDefault Time.utc model.zone
     in
-    Ui.rowOf columns
-        [ span [ class "font-mono text-[12px] whitespace-nowrap", title row.createdAt ]
-            [ text (DateTime.formatLocalShort zone row.createdAt ++ " " ++ DateTime.zoneAbbr zone row.createdAt) ]
-        , div [ class "flex min-w-0 items-center gap-2" ]
-            [ Ui.chip (kindTone row.actorKind) row.actorKind
-            , span [ class "truncate", title row.actor ] [ text row.actor ]
-            ]
-        , viewWhat surround.existing model zone row
-        , Html.button
-            [ class "flex h-7 w-7 cursor-pointer items-center justify-center rounded text-ink-soft hover:bg-well hover:text-ink"
-            , type_ "button"
-            , title
-                (if open then
-                    "閉じる"
-
-                 else
-                    "詳しく"
-                )
-            , onClick (Toggled row.id)
-            ]
-            [ span
-                [ class
+    div [ Html.Attributes.id (rowDomId row.id) ]
+        [ Ui.rowOf columns
+            [ span [ class "font-mono text-[12px] whitespace-nowrap", title row.createdAt ]
+                [ text (DateTime.formatLocalShort zone row.createdAt ++ " " ++ DateTime.zoneAbbr zone row.createdAt) ]
+            , div [ class "flex min-w-0 items-center gap-2" ]
+                [ Ui.chip (kindTone row.actorKind) row.actorKind
+                , span [ class "truncate", title row.actor ] [ text row.actor ]
+                ]
+            , viewWhat surround.existing model zone row
+            , Html.button
+                [ class "flex h-7 w-7 cursor-pointer items-center justify-center rounded text-ink-soft hover:bg-well hover:text-ink"
+                , type_ "button"
+                , title
                     (if open then
-                        "transition-transform"
+                        "閉じる"
 
                      else
-                        "-rotate-90 transition-transform"
+                        "詳しく"
                     )
+                , onClick (Toggled row.id)
                 ]
-                [ Icon.view Icon.caret ]
+                [ span
+                    [ class
+                        (if open then
+                            "transition-transform"
+
+                         else
+                            "-rotate-90 transition-transform"
+                        )
+                    ]
+                    [ Icon.view Icon.caret ]
+                ]
             ]
         ]
         :: (if open then
@@ -964,3 +966,26 @@ viewMore model =
 
     else
         text ""
+
+
+{-| 行の DOM の id。固定 URL（?id=）で開いた時にその行まで送るのに使う。
+-}
+rowDomId : String -> String
+rowDomId id =
+    "audit-" ++ id
+
+
+{-| 固定 URL で指された行が一覧に入っていれば、その DOM の id。Main が読み込みの後に Effect.ScrollTo にする。
+-}
+scrollTarget : Model -> Maybe String
+scrollTarget model =
+    case ( model.wanted, Loaded.toMaybe model.rows ) of
+        ( Just id, Just rows ) ->
+            if List.any (\row -> row.id == id) rows then
+                Just (rowDomId id)
+
+            else
+                Nothing
+
+        _ ->
+            Nothing

@@ -30,7 +30,8 @@ type Effect msg
     | SetUnsaved Bool
     | Copy String {- ブラウザに URL を開かせる（ダウンロードの口）。 -}
     | OpenUrl String
-    | Focus String {- 少し待ってから Msg を出す。**打つ度に問い合わせない**ために使う。 -}
+    | Focus String {- その id の要素が画面の上の方に来るまで縦に送る（固定 URL で開いた行など）。 -}
+    | ScrollTo String {- 少し待ってから Msg を出す。**打つ度に問い合わせない**ために使う。 -}
     | After Float msg {- 今日は何日か。日付を選ぶ画面の初めの月を決めるのに要る。 -}
     | Today (Time.Zone -> Int -> Int -> Int -> msg)
     | PushRoute String
@@ -157,6 +158,12 @@ perform caps effect =
         Focus elementId ->
             -- 当てられなくても画面は動くので、結果は捨てる。
             Task.attempt (\_ -> caps.ignore) (Browser.Dom.focus elementId)
+
+        ScrollTo elementId ->
+            -- 要素の位置を測ってから、その少し上（ヘッダの分）まで送る。無ければ何もしない。
+            Browser.Dom.getElement elementId
+                |> Task.andThen (\found -> Browser.Dom.setViewport 0 (found.element.y - 96))
+                |> Task.attempt (\_ -> caps.ignore)
 
         PushRoute url ->
             Nav.pushUrl caps.key url

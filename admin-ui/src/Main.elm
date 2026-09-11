@@ -683,6 +683,10 @@ update msg model =
                                     Audit.ExportRequested export ->
                                         Effect.batch [ Effect.OpenUrl export.url, Effect.After copiedMillis (AuditMsg Audit.ExportShown) ]
 
+                                    -- 固定 URL（?id=）で開いた行まで送る。最初のページが来た時だけ
+                                    Audit.GotRows (Ok _) ->
+                                        Audit.scrollTarget next |> Maybe.map Effect.ScrollTo |> Maybe.withDefault Effect.none
+
                                     _ ->
                                         Effect.none
                                 ]
