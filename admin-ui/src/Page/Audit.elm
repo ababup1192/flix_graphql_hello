@@ -26,6 +26,7 @@ import Set exposing (Set)
 import Time
 import Ui
 import Ui.DateTime as DateTime
+import Ui.Icon as Icon
 
 
 type alias Model =
@@ -366,7 +367,7 @@ viewRow existing model row =
         , span [ class "min-w-0 truncate font-mono text-[12px]", title row.action ] [ text row.action ]
         , viewTarget existing model row
         , Html.button
-            [ class "flex h-6 w-6 cursor-pointer items-center justify-center rounded text-ink-soft hover:bg-well hover:text-ink"
+            [ class "flex h-7 w-7 cursor-pointer items-center justify-center rounded text-ink-soft hover:bg-well hover:text-ink"
             , type_ "button"
             , title
                 (if open then
@@ -377,13 +378,16 @@ viewRow existing model row =
                 )
             , onClick (Toggled row.id)
             ]
-            [ text
-                (if open then
-                    "▾"
+            [ span
+                [ class
+                    (if open then
+                        "transition-transform"
 
-                 else
-                    "▸"
-                )
+                     else
+                        "-rotate-90 transition-transform"
+                    )
+                ]
+                [ Icon.view Icon.caret ]
             ]
         ]
         :: (if open then
