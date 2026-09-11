@@ -10,6 +10,7 @@ module Queries exposing
     , cancelInvitation
     , cancelSchedule
     , changeMemberRole
+    , chunkIds
     , confirmAsset
     , contentType
     , contentTypes
@@ -710,6 +711,31 @@ type alias EntryQuery =
     , first : Int
     , skip : Int
     }
+
+
+{-| id で名指しして引く時に、1 回で頼める id の数。CMS は first を 200 で丸める。
+-}
+idsPerCall : Int
+idsPerCall =
+    200
+
+
+{-| 名指しの id を、1 回で頼める数ずつに分ける。
+
+WhyNot: 何件あっても 1 回で頼む、にしない。丸められた分は黙って落ち、見出しを
+引けなかった参照が 12 桁の id のまま画面に出る。
+
+-}
+chunkIds : List String -> List (List String)
+chunkIds ids =
+    if List.isEmpty ids then
+        []
+
+    else if List.length ids <= idsPerCall then
+        [ ids ]
+
+    else
+        List.take idsPerCall ids :: chunkIds (List.drop idsPerCall ids)
 
 
 entries : String -> Slug -> EntryQuery -> ( Api.Request, D.Decoder EntryList )

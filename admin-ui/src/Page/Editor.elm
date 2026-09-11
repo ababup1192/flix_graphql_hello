@@ -1211,27 +1211,39 @@ refLabelCalls ctx model =
             wanted
                 |> List.map Tuple.first
                 |> unique
-                |> List.map
+                |> List.concatMap
                     (\typeId ->
-                        Api.call
-                            (\id ->
-                                Queries.entries id
-                                    ctx.project
-                                    { typeId = typeId
-                                    , search = ""
-                                    , stage = ""
-                                    , conditions = []
-                                    , ids = wanted |> List.filter (\( t, _ ) -> t == typeId) |> List.map Tuple.second
-                                    , order = ""
-                                    , first = 100
-                                    , skip = 0
-                                    }
-                            )
-                            GotRefLabels
+                        wanted
+                            |> List.filter (\( t, _ ) -> t == typeId)
+                            |> List.map Tuple.second
+                            |> Queries.chunkIds
+                            |> List.map (refLabelCall ctx typeId)
                     )
 
         _ ->
             []
+
+
+{-| 名指しした id の分だけ引く。**頼んだ数をそのまま first にする**ので、
+引けなかった物は出ない。
+-}
+refLabelCall : { project : Slug } -> String -> List String -> Api.Call Msg
+refLabelCall ctx typeId ids =
+    Api.call
+        (\id ->
+            Queries.entries id
+                ctx.project
+                { typeId = typeId
+                , search = ""
+                , stage = ""
+                , conditions = []
+                , ids = ids
+                , order = ""
+                , first = List.length ids
+                , skip = 0
+                }
+        )
+        GotRefLabels
 
 
 {-| 参照のフィールドの `( apiId, 参照先の型 id )`。
