@@ -18,31 +18,36 @@ mod Webhooks {
     ///
     /// 作る。secret はこの戻りでしか見えない。
     ///
-    pub def create(_proof: Granted[ManageProject], draft: WebhookDraft): IssuedWebhook \ Db + CmsErr + IdGen + Tenant =
+    pub def create(_proof: Granted[ManageProject], draft: WebhookDraft): IssuedWebhook \ Db + CmsErr + IdGen + Tenant + Session =
         CmsErr.raiseIfAny(validate(draft));
         let publicId = IdGen.freshPublicId();
         let secret = secretPrefix() ++ IdGen.freshSecret();
         discard WebhooksQueries.insertWebhook({
             publicId = publicId, projectId = Tenant.currentId(), name = draft#name, url = draft#url,
             secret = secret, events = draft#events |> List.map(WebhookEvent.text), active = draft#active });
-        { webhook = find(publicId), secret = secret }
+        let webhook = find(publicId);
+        Audit.record(AuditChange.WebhookCreated(publicId, AuditSnapshot.ofWebhook(webhook)));
+        { webhook = webhook, secret = secret }
 
     ///
     /// 直す。secret は変えない（変えたければ作り直す）。
     ///
-    pub def update(_proof: Granted[ManageProject], publicId: String, draft: WebhookDraft): Webhook \ Db + CmsErr + Tenant =
+    pub def update(_proof: Granted[ManageProject], publicId: String, draft: WebhookDraft): Webhook \ Db + CmsErr + IdGen + Tenant + Session =
         CmsErr.raiseIfAny(validate(draft));
-        let changed = WebhooksQueries.updateWebhook({
+        let existing = find(publicId);
+        discard WebhooksQueries.updateWebhook({
             publicId = publicId, projectId = Tenant.currentId(), name = draft#name, url = draft#url,
             events = draft#events |> List.map(WebhookEvent.text), active = draft#active });
-        if (changed == 0) CmsErr.notFound(Entity.Webhook, publicId) else find(publicId)
+        Audit.record(AuditChange.WebhookUpdated(publicId, AuditSnapshot.ofWebhook(existing)));
+        find(publicId)
 
     ///
     /// 消す。配信の記録も消える。
     ///
-    pub def delete(_proof: Granted[ManageProject], publicId: String): Unit \ DbWrite + CmsErr + Tenant =
-        let deleted = WebhooksQueries.deleteWebhook({ publicId = publicId, projectId = Tenant.currentId() });
-        if (deleted == 0) CmsErr.notFound(Entity.Webhook, publicId) else ()
+    pub def delete(_proof: Granted[ManageProject], publicId: String): Unit \ Db + CmsErr + IdGen + Tenant + Session =
+        let existing = find(publicId);
+        discard WebhooksQueries.deleteWebhook({ publicId = publicId, projectId = Tenant.currentId() });
+        Audit.record(AuditChange.WebhookDeleted(publicId, AuditSnapshot.ofWebhook(existing)))
 
     ///
     /// 配信の記録。新しい順。
@@ -57,9 +62,10 @@ mod Webhooks {
     ///
     /// 配信をもう 1 度送る番にする。送っている最中の物は触れない。
     ///
-    pub def redeliver(_proof: Granted[ManageProject], deliveryId: String): WebhookDelivery \ Db + CmsErr + Tenant =
+    pub def redeliver(_proof: Granted[ManageProject], deliveryId: String): WebhookDelivery \ Db + CmsErr + IdGen + Tenant + Session =
         let changed = WebhooksQueries.resetDelivery({ id = deliveryId, projectId = Tenant.currentId() });
         if (changed == 0) CmsErr.notFound(Entity.WebhookDelivery, deliveryId) else ();
+        Audit.record(AuditChange.WebhookRedelivered(deliveryId));
         WebhooksQueries.findDelivery({ id = deliveryId, projectId = Tenant.currentId() }) |> Option.map(WebhookRows.toDelivery) |> CmsErr.orNotFound(Entity.WebhookDelivery, deliveryId)
 
     ///

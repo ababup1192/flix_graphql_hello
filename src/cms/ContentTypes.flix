@@ -132,10 +132,10 @@ mod ContentTypes {
         CmsErr.raiseIfAny(
             (if (remaining == 0i64) Nil else Violation.Violation("id", "entry が ${remaining} 件あります。先に消してください") :: Nil)
             ::: (if (referrers == 0i64) Nil else Violation.Violation("id", "他の型の REFERENCE のフィールド ${referrers} 本が参照先にしています。先にそのフィールドを消してください") :: Nil));
-        discard EntriesQueries.purgeDeletedEntries({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() });
+        let purged = EntriesQueries.purgeDeletedEntries({ typeId = TypeId.toInt64(id), projectId = Tenant.currentId() });
         discard ContentTypesQueries.deleteContentType({ id = TypeId.toInt64(id), projectId = Tenant.currentId() });
         Publishing.notify(PublishingEvent.SchemaChanged(existing#apiId));
-        Audit.record(AuditChange.TypeDeleted(existing#apiId, SchemaSnapshot.ofTypeWithFields(targetNames(existing#fields), existing)))
+        Audit.record(AuditChange.TypeDeleted(existing#apiId, SchemaSnapshot.ofTypeWithFields(targetNames(existing#fields), existing), purged))
 
     // ---- フィールド ----
 

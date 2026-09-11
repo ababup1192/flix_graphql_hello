@@ -99,12 +99,12 @@ mod Scheduler {
     ///
     /// 1 件実行して結果を書く。
     ///
-    def runOne(pool: Pool, claimed: { id = String, projectId = Int64, projectSlug = String, entryId = String, action = String, withDependencies = Bool }): Result[String, Unit] \ {IO, Log} =
+    def runOne(pool: Pool, claimed: { id = String, projectId = Int64, projectSlug = String, entryId = String, action = String, withDependencies = Bool, runAt = Timestamp.Timestamp }): Result[String, Unit] \ {IO, Log} =
         let projectId = ProjectId.ProjectId(claimed#projectId);
         let labels = Log.Fields.empty() |> Log.Fields.str("project", claimed#projectSlug) |> Log.Fields.str("id", claimed#entryId);
         // 行の文字列を entry id と操作に読み、読めた物だけ実行する
         let outcome = match (EntryId.parse(claimed#entryId), ScheduleAction.parse(claimed#action)) {
-            case (Some(entryId), Some(action)) => runAction(pool, projectId, entryId, action, claimed#withDependencies)
+            case (Some(entryId), Some(action)) => runAction(pool, projectId, entryId, action, claimed#withDependencies, claimed#runAt)
             // 知らない操作や壊れた id は failed にして先へ進む（新しい版が積んだ物を古い版が拾った時など）
             case _ => Ok(Err(("知らない予約です: ${claimed#action} ${claimed#entryId}", Log.Fields.empty())))
         };
@@ -119,10 +119,10 @@ mod Scheduler {
     /// そのプロジェクトの RLS の印を置き、System の認証済みユーザーで開いた Tx で publish / unpublish を実行する。
     /// 業務エラーは failed に書く理由にし、DB の失敗はそのまま返す。
     ///
-    def runAction(pool: Pool, projectId: ProjectId, entryId: EntryId, action: ScheduleAction, withDependencies: Bool): ActionOutcome \ {IO, Log} =
+    def runAction(pool: Pool, projectId: ProjectId, entryId: EntryId, action: ScheduleAction, withDependencies: Bool, runAt: Timestamp.Timestamp): ActionOutcome \ {IO, Log} =
         match Tenant.runWith(projectId, () -> IdGen.runWithRandom(() ->
             DbRunner.transact(pool, Some(projectId), Actor.System, () -> match action {
-                case ScheduleAction.Publish   => discard ContentEntries.publish(Session.grant(), entryId, "scheduler", withDependencies)
+                case ScheduleAction.Publish   => discard ContentEntries.publishScheduled(Session.grant(), entryId, runAt, withDependencies)
                 case ScheduleAction.Unpublish => discard ContentEntries.unpublish(Session.grant(), entryId)
             }))) {
             case Ok(())                                          => Ok(Ok(()))

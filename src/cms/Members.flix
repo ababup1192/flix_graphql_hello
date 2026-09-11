@@ -72,7 +72,7 @@ mod Members {
     ///
     /// 招待を取り消す。
     ///
-    pub def cancelInvitation(_proof: Granted[ManageMembers], publicId: String): Unit \ DbWrite + CmsErr + IdGen + Tenant + Session =
+    pub def cancelInvitation(_proof: Granted[ManageMembers], publicId: String): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let deleted = AuthQueries.deleteInvitationByPublicId({ publicId = publicId, projectId = Tenant.currentId() });
         if (deleted == 0) CmsErr.notFound(Entity.Invitation, publicId) else ();
         Audit.record(AuditChange.InvitationCancelled(publicId))

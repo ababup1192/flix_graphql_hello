@@ -20,7 +20,7 @@ mod Assets {
     /// ブラウザが置いた後。ストレージに実在するかを HEAD で確かめ、その size と渡された寸法・alt で ready にする。
     /// 既に ready なら寸法と alt だけ上書きする（再送しても壊れない）。
     ///
-    pub def confirm(_proof: Granted[ManageAssets], id: AssetId, details: AssetConfirm): Asset \ Db + CmsErr + Tenant + ObjectStore =
+    pub def confirm(_proof: Granted[ManageAssets], id: AssetId, details: AssetConfirm): Asset \ Db + CmsErr + IdGen + Tenant + Session + ObjectStore =
         let asset = get(id);
         let size = ObjectStore.head(asset#key) |> orStorageErr;
         match size {
@@ -31,7 +31,10 @@ mod Assets {
                     width = AssetRows.dimensionToDb(details#width), height = AssetRows.dimensionToDb(details#height),
                     alt = details#alt |> Option.getWithDefault(asset#alt)
                 });
-                get(id)
+                let ready = get(id);
+                // WhyNot: 既に ready の物の confirm を積まない。confirm は冪等で同じ asset に何度も来るため
+                if (asset#status == AssetStatus.Pending) Audit.record(AuditChange.AssetConfirmed(id, AuditSnapshot.ofAsset(ready))) else ();
+                ready
         }
 
     ///
@@ -46,11 +49,12 @@ mod Assets {
     /// 消す。entry（下書き・公開・richText の image を含む）が使っていれば invalid。
     /// ストレージの削除は DB の後で、失敗しても DB は消えたまま（孤児は掃除で拾う）。
     ///
-    pub def delete(_proof: Granted[ManageAssets], id: AssetId): Unit \ Db + CmsErr + Tenant + ObjectStore =
+    pub def delete(_proof: Granted[ManageAssets], id: AssetId): Unit \ Db + CmsErr + IdGen + Tenant + Session + ObjectStore =
         let asset = get(id);
         let holders = AssetsQueries.assetHolders({ projectId = Tenant.currentId(), assetId = AssetId.text(id) }) |> List.map(row -> row#id);
         CmsErr.raiseIfAny(if (List.isEmpty(holders)) Nil else Violation.Violation("id", "entry '${List.join("', '", holders)}' が使っています。先に外してください") :: Nil);
         discard AssetsQueries.deleteAsset({ id = AssetId.text(id), projectId = Tenant.currentId() });
+        Audit.record(AuditChange.AssetDeleted(id, AuditSnapshot.ofAsset(asset)));
         discard ObjectStore.delete(asset#key)
 
     ///

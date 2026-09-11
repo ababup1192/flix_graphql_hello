@@ -25,7 +25,7 @@
 | 16 | pending の asset の掃除 cron、asset の先読み | 編集者・運用 | 半日 | 既存の query を出すだけ + 孤児の削除。`usedBy` は済み |
 | 16d | 集計（`<plural>Aggregate`: count と SELECT / REFERENCE / BOOLEAN / DATE（年月）の groupBy。where は EntryFilterSql を再利用） | 編集者 | 1 日 | #9 の管理画面で内訳が要る時に入れる。**microCMS には無い** |
 | 17 | 課金（Stripe）と組織の上限 | サービス | 1〜2 日 | [hosting-and-externalized-risk.md](hosting-and-externalized-risk.md) |
-| 18 | 監査ログの残り | 企業 | 半日 | 表（`audit_events`。RLS で append-only）と `Audit.record` は入り、型・フィールド・メンバー・招待・API キーの 13 の出来事を業務の Tx で積んでいる。events の 1 表 + consumer にはしないと決めた（消費者が監査 1 つで Tx の中で終わる。`Audit.flix` の WhyNot）。残りは 2 つ: ~~読み出す口~~（管理 API の `auditEvents(first, after)` が入った。画面はまだ）、**記録漏れ**（`createPreviewToken` / `updateProjectVisibility` / Webhook 4 つ / asset 4 つ。出来事の enum を足す所から）、**組織レベル**（Account API の組織メンバー・プロジェクト作成・PAT。`Audit.record` が `Tenant` を要求するので project_id の持ち方を先に決める）。entry は `entry_versions` が持つので入れない |
+| 18 | 監査ログの残り | 企業 | 半日 | 表（`audit_events`。RLS で append-only）と `Audit.record` は入り、型・フィールド・メンバー・招待・API キーの 13 の出来事を業務の Tx で積んでいる。events の 1 表 + consumer にはしないと決めた（消費者が監査 1 つで Tx の中で終わる。`Audit.flix` の WhyNot）。~~読み出す口~~（管理 API の `auditEvents(first, after, actorKind, action, since, until)`。画面はまだ）、~~記録漏れ~~（主体の列 `actor_kind` / `actor_id`、公開範囲 / Webhook 4 / asset 2 / entry の取り下げ・削除・予約公開が入った。preview token は積まない。[audit-log.md](audit-log.md)）。残りは **組織レベル**（Account API の組織メンバー・プロジェクト作成・PAT。`Audit.record` が `Tenant` を要求するので project_id の持ち方を先に決める）、CSV、MCP の actor 種別。entry の編集と手での公開は `entry_versions` が持つので入れない |
 | 19 | 編集中の表示（在席） | 編集者 | 半日 | 楽観ロックは済み。誰が開いているかを出す |
 | 20 | AI 補助（alt / 抜粋 / 見出し） | 編集者 | 半日 | `Assistant` effect。セルフホストでは無効化できる |
 

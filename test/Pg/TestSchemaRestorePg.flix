@@ -16,7 +16,7 @@ mod TestSchemaRestorePg {
 
     /// action で監査を 1 行引き、変更前の姿を返す。
     def recorded(action: String): Option[Json] \ DbRead + CmsErr + Tenant + Session =
-        Audit.recent(Session.grant(), 50i64, None)
+        Audit.latest(Session.grant(), 50i64)
             |> List.filter(found -> found#action == action)
             |> List.head
             |> Option.flatMap(found -> beforeOf(found#detail))

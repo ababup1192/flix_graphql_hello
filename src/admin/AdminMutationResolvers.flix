@@ -140,7 +140,7 @@ mod AdminMutationResolvers {
     pub def confirmAsset(): GeneratedAdmin.MutationConfirmAssetResolver[AdminEff] =
         (_context, id, input) -> Ok(confirmUpload(id, input))
 
-    def confirmUpload(id: Id, input: Option[GeneratedAdmin.AssetConfirmInput]): Asset \ Db + CmsErr + Tenant + ObjectStore + Session =
+    def confirmUpload(id: Id, input: Option[GeneratedAdmin.AssetConfirmInput]): Asset \ Db + CmsErr + IdGen + Tenant + ObjectStore + Session =
         Assets.confirm(Session.grant(), AdminMapping.assetId("id", id), AdminMapping.assetConfirm(input))
 
     /// Mutation.updateAsset
@@ -154,14 +154,14 @@ mod AdminMutationResolvers {
     pub def deleteAsset(): GeneratedAdmin.MutationDeleteAssetResolver[AdminEff] =
         (_context, id) -> { deleteAssetOf(id); Ok(id) }
 
-    def deleteAssetOf(id: Id): Unit \ Db + CmsErr + Tenant + ObjectStore + Session =
+    def deleteAssetOf(id: Id): Unit \ Db + CmsErr + IdGen + Tenant + ObjectStore + Session =
         Assets.delete(Session.grant(), AdminMapping.assetId("id", id))
 
     /// Mutation.updateProjectVisibility
     pub def updateProjectVisibility(): GeneratedAdmin.MutationUpdateProjectVisibilityResolver[AdminEff] =
         (_context, visibility) -> Ok(updateVisibility(visibility))
 
-    def updateVisibility(visibility: GeneratedAdmin.Visibility): Project \ Db + CmsErr + Tenant + Session =
+    def updateVisibility(visibility: GeneratedAdmin.Visibility): Project \ Db + CmsErr + IdGen + Tenant + Session =
         Projects.updateVisibility(Session.grant(), AdminMapping.visibilityOf(visibility))
 
     /// Mutation.inviteMember
@@ -175,7 +175,7 @@ mod AdminMutationResolvers {
     pub def cancelInvitation(): GeneratedAdmin.MutationCancelInvitationResolver[AdminEff] =
         (_context, id) -> { cancelInvitationOf(id); Ok(id) }
 
-    def cancelInvitationOf(id: Id): Unit \ DbWrite + CmsErr + IdGen + Tenant + Session =
+    def cancelInvitationOf(id: Id): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         Members.cancelInvitation(Session.grant(), AdminMapping.publicIdOf(id))
 
     /// Mutation.changeMemberRole
@@ -200,7 +200,7 @@ mod AdminMutationResolvers {
         }
 
     /// 鍵を発行する。manageApiKeys の証明と、ログインの JWT で来た本人の証明の 2 つを作って渡す。
-    def createApiKeyWith(pepper: SecretHash.Pepper, name: String, scope: GeneratedAdmin.ApiKeyScope, role: Option[GeneratedAdmin.Role], expiresAt: Option[String]): IssuedApiKey \ DbWrite + CmsErr + IdGen + Tenant + Session + Time.Clock.Clock =
+    def createApiKeyWith(pepper: SecretHash.Pepper, name: String, scope: GeneratedAdmin.ApiKeyScope, role: Option[GeneratedAdmin.Role], expiresAt: Option[String]): IssuedApiKey \ Db + CmsErr + IdGen + Tenant + Session + Time.Clock.Clock =
         ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, {
             name = name, scope = AdminMapping.apiKeyScopeOf(scope, role),
             expiresAt = expiresAt |> Option.map(text -> AdminMapping.timestampOf("expiresAt", text)) }, Time.Clock.now())
@@ -209,7 +209,7 @@ mod AdminMutationResolvers {
     pub def revokeApiKey(): GeneratedAdmin.MutationRevokeApiKeyResolver[AdminEff] =
         (_context, id) -> { revokeApiKeyOf(id); Ok(id) }
 
-    def revokeApiKeyOf(id: Id): Unit \ DbWrite + CmsErr + IdGen + Tenant + Session =
+    def revokeApiKeyOf(id: Id): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         ApiKeys.revoke(Session.grant(), AdminMapping.publicIdOf(id))
 
     /// Mutation.createPreviewToken。pepper が無ければ発行できない
@@ -251,21 +251,21 @@ mod AdminMutationResolvers {
     pub def updateWebhook(): GeneratedAdmin.MutationUpdateWebhookResolver[AdminEff] =
         (_context, id, input) -> Ok(updateWebhookOf(id, input))
 
-    def updateWebhookOf(id: Id, input: GeneratedAdmin.WebhookInput): Webhook \ Db + CmsErr + Tenant + Session =
+    def updateWebhookOf(id: Id, input: GeneratedAdmin.WebhookInput): Webhook \ Db + CmsErr + IdGen + Tenant + Session =
         Webhooks.update(Session.grant(), AdminMapping.publicIdOf(id), AdminMapping.webhookDraftOf(input))
 
     /// Mutation.deleteWebhook。消した id を返す
     pub def deleteWebhook(): GeneratedAdmin.MutationDeleteWebhookResolver[AdminEff] =
         (_context, id) -> { deleteWebhookOf(id); Ok(id) }
 
-    def deleteWebhookOf(id: Id): Unit \ DbWrite + CmsErr + Tenant + Session =
+    def deleteWebhookOf(id: Id): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         Webhooks.delete(Session.grant(), AdminMapping.publicIdOf(id))
 
     /// Mutation.redeliverWebhook
     pub def redeliverWebhook(): GeneratedAdmin.MutationRedeliverWebhookResolver[AdminEff] =
         (_context, deliveryId) -> Ok(redeliverOf(deliveryId))
 
-    def redeliverOf(deliveryId: Id): WebhookDelivery \ Db + CmsErr + Tenant + Session =
+    def redeliverOf(deliveryId: Id): WebhookDelivery \ Db + CmsErr + IdGen + Tenant + Session =
         Webhooks.redeliver(Session.grant(), AdminMapping.publicIdOf(deliveryId))
 
     /// type Mutation のリゾルバ一式

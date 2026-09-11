@@ -16,7 +16,7 @@ mod ApiKeys {
     /// 発行する。今のプロジェクトに付く。manageApiKeys の証明と、ログインの JWT で来た本人の証明（`Granted[Interactive]`。PAT や鍵からは作れない）の 2 つを受ける。
     /// write の鍵は発行者が持つ役割より高い役割にはできず、期限は未来だけ。
     ///
-    pub def create(_proof: Granted[ManageApiKeys], _login: Granted[Interactive], pepper: SecretHash.Pepper, draft: ApiKeyDraft, nowMillis: Int64): IssuedApiKey \ DbWrite + CmsErr + IdGen + Tenant + Session =
+    pub def create(_proof: Granted[ManageApiKeys], _login: Granted[Interactive], pepper: SecretHash.Pepper, draft: ApiKeyDraft, nowMillis: Int64): IssuedApiKey \ Db + CmsErr + IdGen + Tenant + Session =
         CmsErr.raiseIfAny(Naming.validateName("name", draft#name));
         requireRoleWithinIssuer(draft#scope);
         CmsErr.raiseIfAny(validateExpiry(draft#expiresAt, nowMillis));
@@ -59,7 +59,7 @@ mod ApiKeys {
     ///
     /// 失効する。行は残す。
     ///
-    pub def revoke(_proof: Granted[ManageApiKeys], publicId: String): Unit \ DbWrite + CmsErr + IdGen + Tenant + Session =
+    pub def revoke(_proof: Granted[ManageApiKeys], publicId: String): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let changed = AuthQueries.revokeApiKey({ publicId = publicId, projectId = Tenant.currentId() });
         if (changed == 0) CmsErr.notFound(Entity.ApiKey, publicId) else ();
         Audit.record(AuditChange.ApiKeyRevoked(publicId))

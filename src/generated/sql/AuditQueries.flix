@@ -7,62 +7,40 @@ mod AuditQueries {
     ///
     /// 生成元 audit.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 1454407488
+    pub def sourceHash(): Int32 = 1742786068
 
     ///
-    /// insertAuditEvent: INSERT INTO audit_events (id, project_id, actor, action, target_kind, target_id, detail) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    /// insertAuditEvent: INSERT INTO audit_events (id, project_id, actor_kind, actor_id, actor, action, target_kind, target_id, detail) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     ///
-    pub def insertAuditEvent(args: { id = String, projectId = Int64, actor = String, action = String, targetKind = String, targetId = String, detail = Util.Json.Json }): Int32 \ DbWrite =
-        let sql = "INSERT INTO audit_events (id, project_id, actor, action, target_kind, target_id, detail)\n    VALUES ($1, $2, $3, $4, $5, $6, $7)";
-        let params = List#{SqlValue.Str(args#id), SqlValue.Int64(args#projectId), SqlValue.Str(args#actor), SqlValue.Str(args#action), SqlValue.Str(args#targetKind), SqlValue.Str(args#targetId), SqlValue.ofJson(args#detail)};
+    pub def insertAuditEvent(args: { id = String, projectId = Int64, actorKind = String, actorId = String, actor = String, action = String, targetKind = String, targetId = String, detail = Util.Json.Json }): Int32 \ DbWrite =
+        let sql = "INSERT INTO audit_events (id, project_id, actor_kind, actor_id, actor, action, target_kind, target_id, detail)\n    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)";
+        let params = List#{SqlValue.Str(args#id), SqlValue.Int64(args#projectId), SqlValue.Str(args#actorKind), SqlValue.Str(args#actorId), SqlValue.Str(args#actor), SqlValue.Str(args#action), SqlValue.Str(args#targetKind), SqlValue.Str(args#targetId), SqlValue.ofJson(args#detail)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
     /// listAuditEvents の 1 行。
     ///
-    pub type alias ListAuditEventsRow = { id = String, actor = String, action = String, targetKind = String, targetId = String, detail = Util.Json.Json, createdAt = Timestamp.Timestamp }
+    pub type alias ListAuditEventsRow = { id = String, actorKind = String, actorId = String, actor = String, action = String, targetKind = String, targetId = String, detail = Util.Json.Json, createdAt = Timestamp.Timestamp }
 
     def listAuditEventsDecoder(): Decoder[ListAuditEventsRow] =
         forA (
             id <- Decoder.str("id");
+            actorKind <- Decoder.str("actor_kind");
+            actorId <- Decoder.str("actor_id");
             actor <- Decoder.str("actor");
             action <- Decoder.str("action");
             targetKind <- Decoder.str("target_kind");
             targetId <- Decoder.str("target_id");
             detail <- Decoder.json("detail");
             createdAt <- Decoder.timestamp("created_at")
-        ) yield { id = id, actor = actor, action = action, targetKind = targetKind, targetId = targetId, detail = detail, createdAt = createdAt }
+        ) yield { id = id, actorKind = actorKind, actorId = actorId, actor = actor, action = action, targetKind = targetKind, targetId = targetId, detail = detail, createdAt = createdAt }
 
     ///
-    /// listAuditEvents: SELECT id, actor, action, target_kind, target_id, detail, created_at FROM audit_events WHERE project_id = $1 ORDER BY id DESC LIMIT $2
+    /// listAuditEvents: SELECT id, actor_kind, actor_id, actor, action, target_kind, target_id, detail, created_at FROM audit_events WHERE project_id = $1 AND ($2 IS NULL OR id < $2) AND ($3 IS NULL OR actor_kind = $3) AND ($4 IS NULL OR action LIKE $4 || '%') AND ($5 IS NULL OR id >= $5) AND ($6 IS NULL OR id < $6) ORDER BY id DESC LIMIT $7
     ///
-    pub def listAuditEvents(args: { projectId = Int64, max = Int64 }): List[ListAuditEventsRow] \ DbRead =
-        let sql = "SELECT id, actor, action, target_kind, target_id, detail, created_at\n    FROM audit_events WHERE project_id = $1 ORDER BY id DESC LIMIT $2";
-        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Int64(args#max)};
+    pub def listAuditEvents(args: { projectId = Int64, afterId = Option[String], actorKind = Option[String], actionPrefix = Option[String], sinceId = Option[String], untilId = Option[String], max = Int64 }): List[ListAuditEventsRow] \ DbRead =
+        let sql = "SELECT id, actor_kind, actor_id, actor, action, target_kind, target_id, detail, created_at\n    FROM audit_events\n    WHERE project_id = $1\n      AND ($2 IS NULL OR id < $2)\n      AND ($3 IS NULL OR actor_kind = $3)\n      AND ($4 IS NULL OR action LIKE $4 || '%')\n      AND ($5 IS NULL OR id >= $5)\n      AND ($6 IS NULL OR id < $6)\n    ORDER BY id DESC LIMIT $7";
+        let params = List#{SqlValue.Int64(args#projectId), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#afterId), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#actorKind), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#actionPrefix), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#sinceId), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#untilId), SqlValue.Int64(args#max)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listAuditEventsDecoder(), sql, params))
-
-    ///
-    /// listAuditEventsAfter の 1 行。
-    ///
-    pub type alias ListAuditEventsAfterRow = { id = String, actor = String, action = String, targetKind = String, targetId = String, detail = Util.Json.Json, createdAt = Timestamp.Timestamp }
-
-    def listAuditEventsAfterDecoder(): Decoder[ListAuditEventsAfterRow] =
-        forA (
-            id <- Decoder.str("id");
-            actor <- Decoder.str("actor");
-            action <- Decoder.str("action");
-            targetKind <- Decoder.str("target_kind");
-            targetId <- Decoder.str("target_id");
-            detail <- Decoder.json("detail");
-            createdAt <- Decoder.timestamp("created_at")
-        ) yield { id = id, actor = actor, action = action, targetKind = targetKind, targetId = targetId, detail = detail, createdAt = createdAt }
-
-    ///
-    /// listAuditEventsAfter: SELECT id, actor, action, target_kind, target_id, detail, created_at FROM audit_events WHERE project_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3
-    ///
-    pub def listAuditEventsAfter(args: { projectId = Int64, afterId = String, max = Int64 }): List[ListAuditEventsAfterRow] \ DbRead =
-        let sql = "SELECT id, actor, action, target_kind, target_id, detail, created_at\n    FROM audit_events WHERE project_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3";
-        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Str(args#afterId), SqlValue.Int64(args#max)};
-        RawSql.runWithAllow(() -> Sql.fetchAs(listAuditEventsAfterDecoder(), sql, params))
 
 }

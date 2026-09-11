@@ -143,11 +143,17 @@ mod AdminQueryResolvers {
 
     /// Query.auditEvents
     pub def auditEvents(): GeneratedAdmin.QueryAuditEventsResolver[AdminEff] =
-        (_context, first, after) -> Ok(listAuditEvents(first, after))
+        (_context, first, after, actorKind, action, since, until) -> Ok(listAuditEvents(first, after, actorKind, action, since, until))
 
-    /// 監査の記録。新しい順。after は前のページの最後の id。
-    def listAuditEvents(first: Option[Int32], after: Option[Id]): List[AuditEvent] \ DbRead + CmsErr + Tenant + Session =
-        Audit.recent(Session.grant(), EntryPage.clamp(50, first, None) |> fst |> Int32.toInt64, after |> Option.map(AdminMapping.publicIdOf))
+    /// 監査の記録。新しい順。after は前のページの最後の id。since / until は ISO 8601（形が違えば invalid）。
+    def listAuditEvents(first: Option[Int32], after: Option[Id], actorKind: Option[GeneratedAdmin.ActorKind], action: Option[String], since: Option[String], until: Option[String]): List[AuditEvent] \ DbRead + CmsErr + Tenant + Session =
+        Audit.recent(Session.grant(), {
+            max = EntryPage.clamp(50, first, None) |> fst |> Int32.toInt64,
+            after = after |> Option.map(AdminMapping.publicIdOf),
+            actorKind = actorKind |> Option.map(AdminMapping.actorKindOf),
+            actionPrefix = action,
+            since = since |> Option.map(text -> AdminMapping.timestampOf("since", text)),
+            until = until |> Option.map(text -> AdminMapping.timestampOf("until", text)) })
 
     /// Query.schedules
     pub def schedules(): GeneratedAdmin.QuerySchedulesResolver[AdminEff] =

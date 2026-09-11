@@ -49,7 +49,7 @@ query claimDueSchedules(limit: Int64) -> many {
         SELECT id FROM scheduled_actions WHERE status = 'pending' AND run_at <= now()
         ORDER BY run_at LIMIT :limit FOR UPDATE SKIP LOCKED
     )
-    RETURNING s.id, s.project_id, p.slug AS project_slug, s.entry_id, s.action, s.with_dependencies
+    RETURNING s.id, s.project_id, p.slug AS project_slug, s.entry_id, s.action, s.with_dependencies, s.run_at
 }
 
 // unscoped: 実行中に落ちた行の回復。拾ってから staleMinutes 分たっても終わっていなければ pending に戻す（公開は冪等なので再実行してよい）

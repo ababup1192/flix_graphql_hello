@@ -121,4 +121,33 @@ mod Session {
         case Actor.System               => "system"
     }
 
+    ///
+    /// 監査に載せる主体（種類・id・表示名）。name は `displayName()` と同じ。人の id は users.public_id（管理 API に出るので内部の連番を出さない）。
+    ///
+    /// WhyNot: 鍵の id を public id にしない。`Actor.ApiKey` は名前と scope しか持たず、public id を足すと Actor を組む
+    /// 全ての場所（テストを含めて 27 か所）が変わるため。同名で再発行した鍵は `api_key.created` の行の時刻で見分ける
+    /// （public id に替える時は Actor に足して、ここを 1 行変える）。
+    ///
+    /// WhyNot: `Actor.User` に public id を足さない（Actor.User を組む・分ける場所が 31 か所）。監査の書き込みは稀なので、
+    /// その時に users を 1 回引く方が小さい。
+    ///
+    pub def actorRef(): ActorRef \ Session + DbRead =
+        actorRefOf(Session.current(), publicIdOf)
+
+    ///
+    /// 主体 → 監査に載せる主体。人の id は publicId で引く（純粋な部分。テストは引く関数を差し替える）。
+    ///
+    pub def actorRefOf(actor: Actor, publicId: UserId -> String \ ef): ActorRef \ ef = match actor {
+        case Actor.User(id, email, _, Login.Interactive)      => { kind = ActorKind.User, id = publicId(id), name = email }
+        case Actor.User(id, email, _, Login.PersonalToken(_)) => { kind = ActorKind.Pat, id = publicId(id), name = email }
+        case Actor.ApiKey(name, _)                            => { kind = ActorKind.ApiKey, id = name, name = "api-key:${name}" }
+        case Actor.Anonymous                                  => { kind = ActorKind.Anonymous, id = "", name = "anonymous" }
+        case Actor.Preview(entryId)                           => { kind = ActorKind.Preview, id = EntryId.text(entryId), name = "preview" }
+        case Actor.System                                     => { kind = ActorKind.System, id = "", name = "system" }
+    }
+
+    /// 人の users.public_id。認証済みの人の行が無い事は無いが、無ければ空（監査の書き込みを止めない）。
+    def publicIdOf(id: UserId): String \ DbRead =
+        AuthQueries.findUserById(UserId.toInt64(id)) |> Option.map(row -> row#publicId) |> Option.getWithDefault("")
+
 }
