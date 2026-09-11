@@ -145,6 +145,7 @@ results project types model =
                 ++ [ { label = "メディア", hint = "画面", route = Route.Media project }
                    , { label = "メンバー", hint = "設定", route = Route.Settings project Route.Members }
                    , { label = "API キーと Webhook", hint = "設定", route = Route.Settings project Route.ApiKeys }
+                   , { label = "監査ログ", hint = "設定", route = Route.Settings project (Route.Audit []) }
                    , { label = "プロジェクトと MCP", hint = "設定", route = Route.Settings project Route.ProjectSettings }
                    , { label = "自分", hint = "画面", route = Route.Account }
                    ]

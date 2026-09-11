@@ -4,6 +4,7 @@
 
 module Api.Admin.Object.AuditEvent exposing (..)
 
+import Api.Admin.Enum.ActorKind
 import Api.Admin.InputObject
 import Api.Admin.Interface
 import Api.Admin.Object
@@ -24,41 +25,58 @@ id =
     Object.selectionForField "ScalarCodecs.Id" "id" [] (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapCodecs |> .codecId |> .decoder)
 
 
-{-| した人。人は email、鍵は "api-key:<鍵の名前>"（版の author と同じ形）
+{-| 主体の種類
+-}
+actorKind : SelectionSet Api.Admin.Enum.ActorKind.ActorKind Api.Admin.Object.AuditEvent
+actorKind =
+    Object.selectionForField "Enum.ActorKind.ActorKind" "actorKind" [] Api.Admin.Enum.ActorKind.decoder
+
+
+{-| 主体の id。人は users.id、鍵は鍵の名前、SYSTEM は空。actorKind の列を足す前の行も空
+-}
+actorId : SelectionSet String Api.Admin.Object.AuditEvent
+actorId =
+    Object.selectionForField "String" "actorId" [] Decode.string
+
+
+{-| した人の表示名。人は email、鍵は "api-key:<鍵の名前>"（版の author と同じ形）
 -}
 actor : SelectionSet String Api.Admin.Object.AuditEvent
 actor =
     Object.selectionForField "String" "actor" [] Decode.string
 
 
-{-| した事。"member.role\_changed" / "type.deleted" / "field.removed" など
+{-| した事。"member.role\_changed" / "type.deleted" / "webhook.deleted" / "entry.unpublished" など
 -}
 action : SelectionSet String Api.Admin.Object.AuditEvent
 action =
     Object.selectionForField "String" "action" [] Decode.string
 
 
-{-| 対象の種類。"member" / "invitation" / "api\_key" / "type" / "field" の 5 つ
+{-| 対象の種類。"member" / "invitation" / "api\_key" / "type" / "field" / "project" / "webhook" / "webhook\_delivery" / "asset" / "entry"
 -}
 targetKind : SelectionSet String Api.Admin.Object.AuditEvent
 targetKind =
     Object.selectionForField "String" "targetKind" [] Decode.string
 
 
-{-| 対象。型は apiId、フィールドは "<型の apiId>.<フィールドの apiId>"、メンバーは id か email
+{-| 対象。型は apiId、フィールドは "<型の apiId>.<フィールドの apiId>"、メンバーは id か email、Webhook・asset・entry は id、プロジェクトは slug
 -}
 targetId : SelectionSet String Api.Admin.Object.AuditEvent
 targetId =
     Object.selectionForField "String" "targetId" [] Decode.string
 
 
-{-| 付随する値。役割の変更なら {"role": "editor"}、鍵の発行なら {"name": "CI"}
+{-| 付随する値。役割の変更なら {"role": "editor"}、消した物は {"before": 変更前の姿}（Webhook の url は host / pathHint / urlHash に落とした物）、
+entry なら {"typeApiId", "version"}
 -}
 detail : SelectionSet ScalarCodecs.Json Api.Admin.Object.AuditEvent
 detail =
     Object.selectionForField "ScalarCodecs.Json" "detail" [] (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapCodecs |> .codecJson |> .decoder)
 
 
+{-| UTC の ISO 8601
+-}
 createdAt : SelectionSet String Api.Admin.Object.AuditEvent
 createdAt =
     Object.selectionForField "String" "createdAt" [] Decode.string

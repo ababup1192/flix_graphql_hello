@@ -1,13 +1,17 @@
 module Ui.DateTime exposing
     ( Model
     , Msg
+    , dayAfterToIso
+    , dayToIso
     , formatLocal
+    , formatLocalShort
     , init
     , toIso
     , toIsoDate
     , update
     , view
     , viewDate
+    , zoneAbbr
     )
 
 {-| 日時を選ぶ。**年月日の順、曜日は日月火水木金土。**
@@ -160,6 +164,86 @@ formatLocal zone iso =
 
         _ ->
             String.left 16 iso
+
+
+{-| 一覧の狭い列に出す形（`MM-DD HH:MM`）。年は展開した所の ISO 8601 で分かる。
+-}
+formatLocalShort : Time.Zone -> String -> String
+formatLocalShort zone iso =
+    String.dropLeft 5 (formatLocal zone iso)
+
+
+{-| 手元のタイムゾーンの略号。+09:00 は JST、0 は UTC、他は `UTC+hh:mm` の形。
+
+WhyNot: 地名（Asia/Tokyo）を出さない。Elm の `Time.Zone` は名前を持たず、
+port を足してまで出す物でもない（この CMS の利用者はほぼ日本）。
+
+-}
+zoneAbbr : Time.Zone -> String -> String
+zoneAbbr zone iso =
+    let
+        minutes : Int
+        minutes =
+            case ( parseInt 0 4 iso, ( parseInt 5 7 iso, parseInt 8 10 iso ) ) of
+                ( Just year, ( Just month, Just day ) ) ->
+                    offsetMillis zone (wallMillis year month day 0 0) // 60000
+
+                _ ->
+                    offsetMillis zone 0 // 60000
+
+        sign : String
+        sign =
+            if minutes < 0 then
+                "-"
+
+            else
+                "+"
+    in
+    if minutes == 9 * 60 then
+        "JST"
+
+    else if minutes == 0 then
+        "UTC"
+
+    else
+        "UTC" ++ sign ++ pad 2 (abs minutes // 60) ++ ":" ++ pad 2 (modBy 60 (abs minutes))
+
+
+{-| `YYYY-MM-DD` の**手元の 0 時**を UTC の ISO 8601 に。期間の始まりに使う。
+-}
+dayToIso : Time.Zone -> String -> Maybe String
+dayToIso zone date =
+    Maybe.map (\( year, month, day ) -> toIso zone { year = year, month = month, day = day, hour = 0, minute = 0, shownYear = year, shownMonth = month })
+        (parseDate date)
+
+
+{-| `YYYY-MM-DD` の**次の日の手元の 0 時**を UTC の ISO 8601 に。「その日まで」を未満で送る時に使う。
+-}
+dayAfterToIso : Time.Zone -> String -> Maybe String
+dayAfterToIso zone date =
+    Maybe.map
+        (\( year, month, day ) ->
+            let
+                ( nextYear, nextMonth, nextDate ) =
+                    nextDay year month day
+            in
+            toIso zone { year = nextYear, month = nextMonth, day = nextDate, hour = 0, minute = 0, shownYear = nextYear, shownMonth = nextMonth }
+        )
+        (parseDate date)
+
+
+parseDate : String -> Maybe ( Int, Int, Int )
+parseDate date =
+    case ( parseInt 0 4 date, parseInt 5 7 date, parseInt 8 10 date ) of
+        ( Just year, Just month, Just day ) ->
+            if month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth year month then
+                Just ( year, month, day )
+
+            else
+                Nothing
+
+        _ ->
+            Nothing
 
 
 parseInt : Int -> Int -> String -> Maybe Int

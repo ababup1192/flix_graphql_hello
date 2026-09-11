@@ -42,6 +42,7 @@ type SettingsTab
     | Webhooks
     | Workflow
     | ProjectSettings
+    | Audit (List ( String, String ))
 
 
 {-| 一覧で URL に残す物。値をここでだけ決め、ページと Route が同じ名前を使う。
@@ -49,6 +50,13 @@ type SettingsTab
 listParams : List String
 listParams =
     [ "q", "where", "f", "order", "page", "cols", "after", "view" ]
+
+
+{-| 監査ログで URL に残す物。絞り込み（誰が / 何を / 期間）と、開いている行の id。
+-}
+auditParams : List String
+auditParams =
+    [ "kind", "action", "since", "until", "id" ]
 
 
 {-| 自分で組んだ絶対パスをルートに戻す。URL を書き換えた後に route を合わせるのに使う。
@@ -73,7 +81,7 @@ parser url =
         , P.map Organization (P.s "account" </> P.s "orgs" </> P.string)
         , P.map ProjectHome (P.s "p" </> P.string)
         , P.map ProjectHome (P.s "p" </> P.string </> P.s "c")
-        , P.map (\p t -> Entries p t (queryOf url)) (P.s "p" </> P.string </> P.s "c" </> P.string)
+        , P.map (\p t -> Entries p t (queryOf listParams url)) (P.s "p" </> P.string </> P.s "c" </> P.string)
         , P.map Board (P.s "p" </> P.string </> P.s "c" </> P.string </> P.s "board")
         , P.map TypeSchema (P.s "p" </> P.string </> P.s "c" </> P.string </> P.s "schema")
         , P.map TypeSettings (P.s "p" </> P.string </> P.s "c" </> P.string </> P.s "settings")
@@ -81,15 +89,15 @@ parser url =
         , P.map Entry (P.s "p" </> P.string </> P.s "c" </> P.string </> P.string)
         , P.map Media (P.s "p" </> P.string </> P.s "assets")
         , P.map (\p -> Settings p Members) (P.s "p" </> P.string </> P.s "settings")
-        , P.map (\p tab -> Settings p (settingsTabOf tab)) (P.s "p" </> P.string </> P.s "settings" </> P.string)
+        , P.map (\p tab -> Settings p (settingsTabOf (queryOf auditParams url) tab)) (P.s "p" </> P.string </> P.s "settings" </> P.string)
         ]
 
 
 {-| 一覧の絞り込みなどを、決めたキーの分だけ拾う。知らないキーは捨てる。
 -}
-queryOf : Url -> List ( String, String )
-queryOf url =
-    listParams
+queryOf : List String -> Url -> List ( String, String )
+queryOf keys url =
+    keys
         |> List.filterMap
             (\key ->
                 P.parse (P.query (Q.string key)) { url | path = "" }
@@ -98,9 +106,14 @@ queryOf url =
             )
 
 
-settingsTabOf : String -> SettingsTab
-settingsTabOf text =
+{-| タブの名前から。query は監査ログだけが使う（他のタブは絞り込みを持たない）。
+-}
+settingsTabOf : List ( String, String ) -> String -> SettingsTab
+settingsTabOf query text =
     case text of
+        "audit" ->
+            Audit query
+
         "api-keys" ->
             ApiKeys
 
@@ -134,6 +147,9 @@ settingsTabText tab =
 
         ProjectSettings ->
             "project"
+
+        Audit _ ->
+            "audit"
 
 
 toString : Route -> String
@@ -179,10 +195,20 @@ toString route =
             B.absolute [ "p", project, "assets" ] []
 
         Settings project tab ->
-            B.absolute [ "p", project, "settings", settingsTabText tab ] []
+            B.absolute [ "p", project, "settings", settingsTabText tab ] (List.map (\( k, v ) -> B.string k v) (settingsQuery tab))
 
         NotFound ->
             B.absolute [ "not-found" ] []
+
+
+settingsQuery : SettingsTab -> List ( String, String )
+settingsQuery tab =
+    case tab of
+        Audit query ->
+            query
+
+        _ ->
+            []
 
 
 {-| その URL がどのプロジェクトの物か。管理 API の URL を組むのに要る。
