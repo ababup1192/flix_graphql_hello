@@ -420,8 +420,8 @@ viewProjectRow config project =
 viewSelfMenu : Config msg -> Html msg
 viewSelfMenu config =
     menuBox "right-2.5 top-10"
+        -- Personal Access Token はアカウントの画面の中にある。同じ所に着く行を 2 つ並べない
         [ menuLink (Route.toString Route.Account) "アカウント"
-        , menuLink (Route.toString Route.AccountTokens) "Personal Access Token"
         , menuDivider
         , div [ class "px-3 pb-1 pt-1.5 text-[11px] font-semibold text-ink-soft" ] [ text "テーマ" ]
         , div [ class "flex gap-1 px-2 pb-1.5" ]
