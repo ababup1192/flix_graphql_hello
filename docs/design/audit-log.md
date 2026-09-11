@@ -8,7 +8,7 @@
 
 | 対象 | 積む操作 | detail |
 |---|---|---|
-| メンバー | `member.invited` / `member.role_changed` / `member.removed` / `invitation.cancelled` | 役割 |
+| メンバー | `member.invited` / `member.role_changed` / `member.removed` / `invitation.cancelled` | 役割。役割の変更は `{role, before}` |
 | 鍵 | `api_key.created` / `api_key.revoked` | 名前 |
 | 型 | `type.created` / `type.updated` / `type.deleted` | 変更前の姿（`SchemaSnapshot`）。消した物は物理削除した entry の件数 `purgedEntries` も |
 | フィールド | `field.added` / `field.updated` / `field.removed` / `fields.reordered` | 変更前の姿 |
@@ -16,6 +16,7 @@
 | Webhook | `webhook.created` / `webhook.updated` / `webhook.deleted` / `webhook.redelivered` | 姿（`AuditSnapshot.ofWebhook`。url はマスク）。直した・消した物は `before` |
 | asset | `asset.confirmed` / `asset.deleted` | `{mime, size, width, height}`。消した物は `before` |
 | entry | `entry.unpublished` / `entry.deleted` / `entry.published`（予約の実行だけ） | `{typeApiId, version}`。予約は `scheduledFor` も |
+| 監査 | `audit.exported`（CSV / JSON Lines の書き出し。targetId は形式） | `{format, actorKind, action, since, until, count}`（絞り込みは渡した物だけ） |
 
 **WhyNot: entry の編集と手での公開を積まない。** `entry_versions` が誰が・いつ・どんな中身にしたかを**版として全部**持っていて、
 監査としてはそちらの方が強い。二重に持つと片方だけ残る形が作れてしまう。
@@ -105,7 +106,7 @@ FORCE RLS の下ではアプリも表の所有者も書き換えられない（�
 Webhook と asset も同じ形で `before` を持つ（`AuditSnapshot`）。Webhook の url はマスク済みなので、そのままでは戻せない（host と pathHint で当たりを付け、urlHash で照合する）。
 
 作った・足した記録は `before` を持たない（元に戻すのは消す事なので、要る物が無い）。
-メンバーと鍵も持たない。役割は 3 通りしか無く action と targetId から読めて、鍵は値を二度と出せない。
+鍵も持たない（値を二度と出せない）。役割の変更（`member.role_changed`）は `{role, before}` で、`role` が変更後、`before` が変更前。
 
 **まだ戻せないのは entry の中身**。フィールドを消すと `entry_contents` の値は残るが、監査に残るのは定義だけで、
 値そのものは版（`entry_versions`）から辿る。取り下げ・削除の行も `{typeApiId, version}` だけで、中身は版から辿る。
@@ -120,12 +121,22 @@ Webhook と asset も同じ形で `before` を持つ（`AuditSnapshot`）。Webh
 - `action`: 前方一致（`"webhook."` で Webhook の全部）。`audit_events_action_idx`（`text_pattern_ops`）が効く
 - `since` / `until`: ISO 8601。**id が ULID なので、その時刻の最小の ULID（`Ulid.lowerBoundAt`）に変えて id の範囲で引く**（`created_at` の index は要らない）
 
-query は `listAuditEvents` の 1 本で、無い引数は NULL（`(:x IS NULL OR col = :x)`）。
+query は `listAuditEvents` の 1 本で、無い引数は NULL（`(:x IS NULL OR col = :x)`）。件数は同じ WHERE の `countAuditEvents`（管理 API の `auditEventsCount`）。
+
+## 書き出す
+
+`GET /p/{slug}/admin/audit.csv` と `audit.jsonl`（引数は `auditEvents` と同じ）。owner だけ、上限 100,000 件（超えたら 413 で期間を分けてもらう）。
+中身と裏側は [../architecture/runtime.md](../architecture/runtime.md) の AuditExport。
+
+**書き出し自体が監査に残る**（Strapi と同じ）: `audit.exported`、targetKind `audit`、targetId は形式（`csv` / `json`）、detail は `{format, actorKind, action, since, until, count}`（渡した絞り込みだけ）。
+管理 API の `recordAuditExport(input)` が積み、書き出しのルートが読みの後に 1 回呼ぶ。
+
+**WhyNot: 読みと同じ Tx で積まない。** 読みは 1 リクエスト 1 Tx の READ ONLY で、ページごとに管理 API を叩く形（MCP と同じ道）なので、書きの Tx は別に 1 つ。
+記録が無く書き出しだけ通る形は、記録の mutation が失敗した時に応答も断る事で塞ぐ。
 
 ## 残っている物
 
 - **戻す操作が API に無い**。変更前の姿は残るが、押して戻す口はまだ無く、`detail` を読んで手で足し直す
 - 組織（`organizations` / `org_members`）の変更と PAT は、プロジェクトを跨ぐので入っていない（組織の監査で）
-- CSV の書き出し（同じ引数で）
 - MCP 経由の操作を人と分ける（`actor_kind` に `mcp`）
 - 予約公開の `scheduledBy`（誰の予約か）。`scheduled_actions.requested_by` にはあるが、行には載せていない

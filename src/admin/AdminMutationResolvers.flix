@@ -268,6 +268,15 @@ mod AdminMutationResolvers {
     def redeliverOf(deliveryId: Id): WebhookDelivery \ Db + CmsErr + IdGen + Tenant + Session =
         Webhooks.redeliver(Session.grant(), AdminMapping.publicIdOf(deliveryId))
 
+    /// Mutation.recordAuditExport。積めたら true
+    pub def recordAuditExport(): GeneratedAdmin.MutationRecordAuditExportResolver[AdminEff] =
+        (_context, input) -> { recordAuditExportOf(input); Ok(true) }
+
+    def recordAuditExportOf(input: GeneratedAdmin.AuditExportInput): Unit \ Db + CmsErr + IdGen + Tenant + Session =
+        CmsErr.raiseIfAny(if (input#count < 0) Violation.Violation("count", "count は 0 以上にしてください") :: Nil else Nil);
+        Audit.recordExport(Session.grant(), AdminMapping.auditExportFormatOf(input#format),
+            AdminMapping.auditFilterOf(input#actorKind, input#action, input#since, input#until), input#count)
+
     /// type Mutation のリゾルバ一式
     pub def resolvers(deps: Deps): GeneratedAdmin.MutationResolvers[AdminEff] =
         {
@@ -304,7 +313,8 @@ mod AdminMutationResolvers {
             createWebhook           = createWebhook(),
             updateWebhook           = updateWebhook(),
             deleteWebhook           = deleteWebhook(),
-            redeliverWebhook        = redeliverWebhook()
+            redeliverWebhook        = redeliverWebhook(),
+            recordAuditExport       = recordAuditExport()
         }
 
 }

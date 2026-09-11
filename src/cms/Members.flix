@@ -69,7 +69,7 @@ mod Members {
         let current = roleOf(userId) |> CmsErr.orNotFound(Entity.Member, "${userId}");
         if (current == Role.Owner and role != Role.Owner) guardLastOwner() else ();
         discard AuthQueries.upsertMembership({ userId = UserId.toInt64(userId), projectId = Tenant.currentId(), role = Role.text(role) });
-        Audit.record(AuditChange.MemberRoleChanged(userId, role));
+        Audit.record(AuditChange.MemberRoleChanged(userId, current, role));
         list(proof) |> List.find(member -> member#userId == userId) |> CmsErr.orNotFound(Entity.Member, "${userId}")
 
     ///

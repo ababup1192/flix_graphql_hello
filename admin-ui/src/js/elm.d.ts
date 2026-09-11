@@ -10,6 +10,7 @@ declare module "*.elm" {
           setTheme_Shell_JS: { subscribe(handler: (value: string) => void): void };
           setUnsaved_Editor_JS: { subscribe(handler: (value: boolean) => void): void };
           copyText_Clipboard_JS: { subscribe(handler: (value: string) => void): void };
+          openUrl_Download_JS: { subscribe(handler: (value: string) => void): void };
         };
       };
     };

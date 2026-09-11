@@ -28,6 +28,8 @@ mod Server {
     /// - GET /health: DB に届けば 200、届かなければ 503。プールが張り付いていれば 200 のまま status が degraded。jobs にワーカーの最終実行時刻と待ち・失敗・期限を過ぎた件数（数えられなければ -1）、components に行ごとの段
     /// - POST /jobs/tick: 外部トリガー。X-Jobs-Token が設定と一致すればワーカーを 1 tick回す（無ければ 404）
     /// - POST /mcp: MCP サーバ（JSON-RPC。tools だけ）。管理 API のエンジンへの GraphQL クライアントとして動く
+    /// - GET /admin/audit.csv, /admin/audit.jsonl ?actorKind=&action=&since=&until=: 監査の記録の書き出し（owner だけ）。引数は auditEvents と同じ。
+    ///   MCP と同じく管理 API のエンジンへの GraphQL クライアントとして動き、上限 100,000 件（超えたら 413）、最後に audit.exported を積む
     ///
     pub def routes(config: ServerConfig, health: Health[ef]): List[Route[{Graphql, Log, Observe, ef}]] =
         Router.route(Method.Post, "/graphql",         Some(Engine.Content), widen(executeBody)) ::
@@ -37,7 +39,9 @@ mod Server {
         Router.route(Method.Post, "/account/graphql", Some(Engine.Account), widen(executeBody)) ::
         Router.route(Method.Get,  "/health",          None,                 widen(healthRoute(config#version, health))) ::
         Router.route(Method.Post, "/jobs/tick",       None,                 widen(jobsTick(config#jobsToken, health))) ::
-        Router.route(Method.Post, "/mcp",             Some(Engine.Admin),   widen(mcpRoute(config))) :: Nil
+        Router.route(Method.Post, "/mcp",             Some(Engine.Admin),   widen(mcpRoute(config))) ::
+        Router.route(Method.Get,  "/admin/audit.csv",   Some(Engine.Admin), widen(auditExportRoute(AuditExportFormat.Csv, health))) ::
+        Router.route(Method.Get,  "/admin/audit.jsonl", Some(Engine.Admin), widen(auditExportRoute(AuditExportFormat.Json, health))) :: Nil
 
     ///
     /// 行の handler を表全体の effect に広げる。行ごとの handler は自分の effect（Graphql だけ、Health の ef だけ）を宣言したままにする。
@@ -312,6 +316,45 @@ mod Server {
         case McpServer.Reply.Accepted              => { status = 202, headers = Nil, body = "" }
         case McpServer.Reply.Unauthenticated(body) => jsonResponse(401, ("WWW-Authenticate", "Bearer error=\"invalid_token\"") :: Nil, body)
     }
+
+    ///
+    /// GET /admin/audit.csv / audit.jsonl。認証に落ちていれば 401、引数の綴りが違えば 400、管理 API が断れば（forbidden・引数の形）その code を写した
+    /// ステータス、上限を超えれば 413。通れば添付ファイル（Content-Disposition）で no-store。断りの本文は {"error": {"code", "message"}}。
+    ///
+    /// WhyNot: GraphQL でなく GET で出すのは、ブラウザのダウンロード（window.open / form の GET）に乗せるため。
+    /// 中身は mcpRoute と同じく管理 API のエンジンへの GraphQL クライアントで、権限も絞り込みの検査も管理 API の物をそのまま使う。
+    ///
+    def auditExportRoute(format: AuditExportFormat, health: Health[ef], routeRequest: RouteRequest): HttpResponse \ {Graphql, Observe, ef} =
+        match (routeRequest#auth, AuditExport.filterOf(Http.parseQueryString(routeRequest#request#path))) {
+            case (Err(rejection), _)     => rejectExport({ status = 401, code = ErrorCode.text(Rejection.code(rejection)), message = Rejection.message(rejection) })
+            case (Ok(_), Err(message))   => rejectExport({ status = 400, code = "INVALID", message = message })
+            case (Ok(found), Ok(filter)) => exportAs(format, health, routeRequest, filter, found#actor)
+        }
+
+    ///
+    /// 認証済みユーザーで全件を集め、書き出した事を積んでから応答にする（読みと記録は別の Tx。記録は読みの後に 1 回）。
+    ///
+    def exportAs(format: AuditExportFormat, health: Health[ef], routeRequest: RouteRequest, filter: AuditExport.Filter, actor: Actor): HttpResponse \ {Graphql, Observe, ef} =
+        match AuditExport.collect(executeAs(actor), filter) {
+            case Err(failure) => rejectExport(failure)
+            case Ok(events)   => match AuditExport.record(executeAs(actor), format, filter, List.length(events)) {
+                case Err(failure) => rejectExport(failure)
+                case Ok(())       =>
+                    // ファイル名の日付と URL の元（プロジェクト slug は /p/ か Host から。無ければ既定プロジェクトの slug）
+                    let slug = Map.get(Router.projectSlugParam(), routeRequest#params) |> Option.getWithDefault("default");
+                    let host = Http.findHeader("Host", routeRequest#request#headers);
+                    let fileName = AuditExport.fileName(slug, format, filter, (health#now)());
+                    Observe.note(Log.Fields.empty() |> Log.Fields.int("audit.export.rows", Int32.toInt64(List.length(events))));
+                    { status = 200,
+                      headers = ("Content-Type", AuditExport.contentType(format)) :: ("Content-Disposition", AuditExport.contentDisposition(fileName)) :: ("Cache-Control", CacheHeaders.noStore()) :: Nil,
+                      body = AuditExport.render(format, host, slug, events) }
+            }
+        }
+
+    /// 書き出しの断り。理由（error.code / error.message）をリクエストの行に積む。
+    def rejectExport(failure: AuditExport.Failure): HttpResponse \ Observe =
+        Observe.note(Log.Fields.empty() |> LogFields.rejection(String.toLowerCase(failure#code), failure#message));
+        { status = failure#status, headers = ("Cache-Control", CacheHeaders.noStore()) :: Nil, body = AuditExport.failureBody(failure) }
 
     ///
     /// JSON の応答。

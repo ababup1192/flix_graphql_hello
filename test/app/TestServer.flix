@@ -385,8 +385,10 @@ mod TestServer {
         Assert.assertEq(
             expected = List#{
                 "POST /graphql", "GET /graphql", "POST /admin/graphql", "GET /admin/graphql", "POST /account/graphql", "GET /health", "POST /jobs/tick", "POST /mcp",
+                "GET /admin/audit.csv", "GET /admin/audit.jsonl",
                 "POST /p/{projectSlug}/graphql", "GET /p/{projectSlug}/graphql", "POST /p/{projectSlug}/admin/graphql", "GET /p/{projectSlug}/admin/graphql",
-                "GET /p/{projectSlug}/health", "POST /p/{projectSlug}/jobs/tick", "POST /p/{projectSlug}/mcp" },
+                "GET /p/{projectSlug}/health", "POST /p/{projectSlug}/jobs/tick", "POST /p/{projectSlug}/mcp",
+                "GET /p/{projectSlug}/admin/audit.csv", "GET /p/{projectSlug}/admin/audit.jsonl" },
             Server.routes(Server.defaultConfig(), HealthFake.ok()) |> Router.withProjectPrefix |> Router.describeAll)
 
     /// /p/{プロジェクト slug} 付きのパスも同じ handler に届く。空のプロジェクト slug（/p//graphql）や /p/ だけは 404。

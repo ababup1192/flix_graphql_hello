@@ -61,7 +61,7 @@ mod TestApiSurface {
                 "IssuedWebhook: webhook secret" ::
                 "Me: id email name roles permissions organizations projects" ::
                 "Member: userId email name role" ::
-                "Mutation: createContentType updateContentType deleteContentType addField updateField removeField reorderFields createEntry updateEntry deleteEntry publishEntry publishMany unpublishEntry saveVersion restoreVersion createUploadUrl confirmAsset updateAsset deleteAsset createPreviewToken schedulePublish scheduleUnpublish cancelSchedule updateProjectVisibility inviteMember cancelInvitation changeMemberRole removeMember createApiKey revokeApiKey createWebhook updateWebhook deleteWebhook redeliverWebhook" ::
+                "Mutation: createContentType updateContentType deleteContentType addField updateField removeField reorderFields createEntry updateEntry deleteEntry publishEntry publishMany unpublishEntry saveVersion restoreVersion createUploadUrl confirmAsset updateAsset deleteAsset createPreviewToken schedulePublish scheduleUnpublish cancelSchedule updateProjectVisibility inviteMember cancelInvitation changeMemberRole removeMember createApiKey revokeApiKey createWebhook updateWebhook deleteWebhook redeliverWebhook recordAuditExport" ::
                 "Organization: id name" ::
                 "OrganizationMembership: organization role" ::
                 "PageInfo: hasNextPage endCursor" ::
@@ -71,7 +71,7 @@ mod TestApiSurface {
                 "PublishPlan: ok steps violations" ::
                 "PublishPlanStep: entry reason report" ::
                 "PublishReport: ok violations unpublishedDependencies" ::
-                "Query: contentTypes contentType entries entry assets asset publishCheck impact publishPlan viewer me members invitations apiKeys webhooks webhookDeliveries schedules auditEvents fieldImpact" ::
+                "Query: contentTypes contentType entries entry assets asset publishCheck impact publishPlan viewer me members invitations apiKeys webhooks webhookDeliveries schedules auditEvents auditEventsCount fieldImpact" ::
                 "Referrer: entry via stage" ::
                 "Schedule: id entryId action runAt withDependencies status requestedBy lastError overdue createdAt doneAt" ::
                 "SchemaEffect: kind field draft published entries" ::

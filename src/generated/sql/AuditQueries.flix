@@ -7,7 +7,7 @@ mod AuditQueries {
     ///
     /// 生成元 audit.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 1742786068
+    pub def sourceHash(): Int32 = 746645363
 
     ///
     /// insertAuditEvent: INSERT INTO audit_events (id, project_id, actor_kind, actor_id, actor, action, target_kind, target_id, detail) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -42,5 +42,23 @@ mod AuditQueries {
         let sql = "SELECT id, actor_kind, actor_id, actor, action, target_kind, target_id, detail, created_at\n    FROM audit_events\n    WHERE project_id = $1\n      AND ($2 IS NULL OR id < $2)\n      AND ($3 IS NULL OR actor_kind = $3)\n      AND ($4 IS NULL OR action LIKE $4 || '%')\n      AND ($5 IS NULL OR id >= $5)\n      AND ($6 IS NULL OR id < $6)\n    ORDER BY id DESC LIMIT $7";
         let params = List#{SqlValue.Int64(args#projectId), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#afterId), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#actorKind), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#actionPrefix), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#sinceId), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#untilId), SqlValue.Int64(args#max)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listAuditEventsDecoder(), sql, params))
+
+    ///
+    /// countAuditEvents の 1 行。
+    ///
+    pub type alias CountAuditEventsRow = { total = Option[Int64] }
+
+    def countAuditEventsDecoder(): Decoder[CountAuditEventsRow] =
+        forA (
+            total <- Decoder.opt(Decoder.int64("total"))
+        ) yield { total = total }
+
+    ///
+    /// countAuditEvents: SELECT count(*)::bigint AS total FROM audit_events WHERE project_id = $1 AND ($2 IS NULL OR actor_kind = $2) AND ($3 IS NULL OR action LIKE $3 || '%') AND ($4 IS NULL OR id >= $4) AND ($5 IS NULL OR id < $5)
+    ///
+    pub def countAuditEvents(args: { projectId = Int64, actorKind = Option[String], actionPrefix = Option[String], sinceId = Option[String], untilId = Option[String] }): Option[CountAuditEventsRow] \ DbRead =
+        let sql = "SELECT count(*)::bigint AS total\n    FROM audit_events\n    WHERE project_id = $1\n      AND ($2 IS NULL OR actor_kind = $2)\n      AND ($3 IS NULL OR action LIKE $3 || '%')\n      AND ($4 IS NULL OR id >= $4)\n      AND ($5 IS NULL OR id < $5)";
+        let params = List#{SqlValue.Int64(args#projectId), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#actorKind), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#actionPrefix), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#sinceId), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#untilId)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(countAuditEventsDecoder(), sql, params))
 
 }

@@ -147,13 +147,18 @@ mod AdminQueryResolvers {
 
     /// 監査の記録。新しい順。after は前のページの最後の id。since / until は ISO 8601（形が違えば invalid）。
     def listAuditEvents(first: Option[Int32], after: Option[Id], actorKind: Option[GeneratedAdmin.ActorKind], action: Option[String], since: Option[String], until: Option[String]): List[AuditEvent] \ DbRead + CmsErr + Tenant + Session =
-        Audit.recent(Session.grant(), {
-            max = EntryPage.clamp(50, first, None) |> fst |> Int32.toInt64,
-            after = after |> Option.map(AdminMapping.publicIdOf),
-            actorKind = actorKind |> Option.map(AdminMapping.actorKindOf),
-            actionPrefix = action,
-            since = since |> Option.map(text -> AdminMapping.timestampOf("since", text)),
-            until = until |> Option.map(text -> AdminMapping.timestampOf("until", text)) })
+        Audit.recent(Session.grant(), AuditFilter.toQuery(
+            EntryPage.clamp(50, first, None) |> fst |> Int32.toInt64,
+            after |> Option.map(AdminMapping.publicIdOf),
+            AdminMapping.auditFilterOf(actorKind, action, since, until)))
+
+    /// Query.auditEventsCount
+    pub def auditEventsCount(): GeneratedAdmin.QueryAuditEventsCountResolver[AdminEff] =
+        (_context, actorKind, action, since, until) -> Ok(countAuditEvents(actorKind, action, since, until))
+
+    /// auditEvents と同じ絞り込みに当たる件数。GraphQL の Int に載せるので Int32 に丸める。
+    def countAuditEvents(actorKind: Option[GeneratedAdmin.ActorKind], action: Option[String], since: Option[String], until: Option[String]): Int32 \ DbRead + CmsErr + Tenant + Session =
+        Audit.count(Session.grant(), AdminMapping.auditFilterOf(actorKind, action, since, until)) |> Int64.clampToInt32(min = 0, max = 2147483647)
 
     /// Query.schedules
     pub def schedules(): GeneratedAdmin.QuerySchedulesResolver[AdminEff] =
@@ -172,6 +177,6 @@ mod AdminQueryResolvers {
     /// type Query のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.QueryResolvers[AdminEff] =
         { contentTypes = contentTypes(), contentType = contentType(), entries = entries(), entry = entry(), assets = assets(), asset = asset(),
-          publishCheck = publishCheck(), impact = impact(), fieldImpact = fieldImpact(), publishPlan = publishPlan(), viewer = viewer(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries(), schedules = schedules(), auditEvents = auditEvents() }
+          publishCheck = publishCheck(), impact = impact(), fieldImpact = fieldImpact(), publishPlan = publishPlan(), viewer = viewer(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries(), schedules = schedules(), auditEvents = auditEvents(), auditEventsCount = auditEventsCount() }
 
 }

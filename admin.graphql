@@ -44,6 +44,8 @@ type Query {
   絞り込みは全部任意: actorKind は主体の種類、action は前方一致（"webhook." で Webhook の全部）、
   since / until は ISO 8601 の時刻（since 以上 until 未満。id が時刻順なので id の範囲で引く）"""
   auditEvents(first: Int = 50, after: ID, actorKind: ActorKind, action: String, since: String, until: String): [AuditEvent!]!
+  """auditEvents と同じ絞り込みでの件数（owner だけ）。一覧の下に出す件数と、書き出しの前の上限（100,000 件）の確認に"""
+  auditEventsCount(actorKind: ActorKind, action: String, since: String, until: String): Int!
   """スキーマを変える前の影響。書き込まない。safe なら確認なしで押せる。
   押す時は effects から組んだ expected を渡す（渡さずに押すと、影響がある操作は止まる）"""
   fieldImpact(input: SchemaChangeInput!): SchemaImpact!
@@ -262,6 +264,10 @@ type Mutation {
   deleteWebhook(id: ID!): ID!
   """配信をもう 1 度送る（owner だけ）。failed や delivered の物にも使える"""
   redeliverWebhook(deliveryId: ID!): WebhookDelivery!
+
+  """監査の記録を書き出した事を監査に積む（owner だけ）。GET /admin/audit.csv / audit.jsonl が書き出しの最後に呼ぶ。
+  action は audit.exported、detail に format と絞り込み（auditEvents と同じ引数）と件数"""
+  recordAuditExport(input: AuditExportInput!): Boolean!
 }
 
 enum ScheduleAction {
@@ -489,6 +495,24 @@ enum ActorKind {
   SYSTEM
 }
 
+"""監査の書き出しの形式"""
+enum AuditExportFormat {
+  """UTF-8 with BOM、1 行 1 件、detail は JSON の文字列を 1 セルに"""
+  CSV
+  """JSON Lines。1 行 1 件、detail は入れ子のまま"""
+  JSON
+}
+
+"""書き出した事の記録。絞り込みは auditEvents と同じ引数（渡した物だけ detail に残る）、count は書き出した件数"""
+input AuditExportInput {
+  format: AuditExportFormat!
+  actorKind: ActorKind
+  action: String
+  since: String
+  until: String
+  count: Int!
+}
+
 """監査の 1 件。版の残らない変更（メンバー・役割・鍵・型・Webhook・asset・公開範囲と、entry の取り下げ・削除・予約公開の実行）を積んだ物。
 entry の編集と手での公開は entry_versions に版として残るので、ここには出ない"""
 type AuditEvent {
@@ -501,7 +525,7 @@ type AuditEvent {
   actor: String!
   """した事。"member.role_changed" / "type.deleted" / "webhook.deleted" / "entry.unpublished" など"""
   action: String!
-  """対象の種類。"member" / "invitation" / "api_key" / "type" / "field" / "project" / "webhook" / "webhook_delivery" / "asset" / "entry" """
+  """対象の種類。"member" / "invitation" / "api_key" / "type" / "field" / "project" / "webhook" / "webhook_delivery" / "asset" / "entry" / "audit"（書き出し） """
   targetKind: String!
   """対象。型は apiId、フィールドは "<型の apiId>.<フィールドの apiId>"、メンバーは id か email、Webhook・asset・entry は id、プロジェクトは slug"""
   targetId: String!

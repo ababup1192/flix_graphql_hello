@@ -53,7 +53,7 @@ action =
     Object.selectionForField "String" "action" [] Decode.string
 
 
-{-| 対象の種類。"member" / "invitation" / "api\_key" / "type" / "field" / "project" / "webhook" / "webhook\_delivery" / "asset" / "entry"
+{-| 対象の種類。"member" / "invitation" / "api\_key" / "type" / "field" / "project" / "webhook" / "webhook\_delivery" / "asset" / "entry" / "audit"（書き出し）
 -}
 targetKind : SelectionSet String Api.Admin.Object.AuditEvent
 targetKind =

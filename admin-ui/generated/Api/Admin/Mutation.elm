@@ -664,3 +664,17 @@ redeliverWebhook :
     -> SelectionSet decodesTo RootMutation
 redeliverWebhook requiredArgs____ object____ =
     Object.selectionForCompositeField "redeliverWebhook" [ Argument.required "deliveryId" requiredArgs____.deliveryId (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId) ] object____ Basics.identity
+
+
+type alias RecordAuditExportRequiredArguments =
+    { input : Api.Admin.InputObject.AuditExportInput }
+
+
+{-| 監査の記録を書き出した事を監査に積む（owner だけ）。GET /admin/audit.csv / audit.jsonl が書き出しの最後に呼ぶ。
+action は audit.exported、detail に format と絞り込み（auditEvents と同じ引数）と件数
+-}
+recordAuditExport :
+    RecordAuditExportRequiredArguments
+    -> SelectionSet Bool RootMutation
+recordAuditExport requiredArgs____ =
+    Object.selectionForField "Bool" "recordAuditExport" [ Argument.required "input" requiredArgs____.input Api.Admin.InputObject.encodeAuditExportInput ] Decode.bool

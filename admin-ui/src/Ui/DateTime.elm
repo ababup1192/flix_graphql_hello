@@ -7,6 +7,7 @@ module Ui.DateTime exposing
     , dayToIso
     , daysFromToday
     , formatLocal
+    , formatLocalSeconds
     , formatLocalShort
     , init
     , isDayChosen
@@ -15,6 +16,7 @@ module Ui.DateTime exposing
     , toIso
     , toIsoDate
     , update
+    , utcSeconds
     , view
     , viewDate
     , zoneAbbr
@@ -291,6 +293,31 @@ formatLocal zone iso =
 
         _ ->
             String.left 16 iso
+
+
+{-| 秒まで出す形（`YYYY-MM-DD HH:MM:SS`）。監査ログのように、同じ分に並ぶ行の前後を読む所に使う。
+秒が読めなければ `formatLocal` と同じ。
+-}
+formatLocalSeconds : Time.Zone -> String -> String
+formatLocalSeconds zone iso =
+    case parseInt 17 19 iso of
+        Just second ->
+            formatLocal zone iso ++ ":" ++ pad 2 second
+
+        Nothing ->
+            formatLocal zone iso
+
+
+{-| UTC の ISO 8601 を秒で切る（`2026-09-11T05:12:08.935938Z` → `2026-09-11T05:12:08Z`）。
+人に見せる UTC の表記で、マイクロ秒は要らない。
+-}
+utcSeconds : String -> String
+utcSeconds iso =
+    if String.length iso > 19 && String.endsWith "Z" iso then
+        String.left 19 iso ++ "Z"
+
+    else
+        iso
 
 
 {-| 今日（手元の年月日）から、その ISO 8601 の日時の日までの日数。過去なら負。

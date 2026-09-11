@@ -337,6 +337,31 @@ auditEvents fillInOptionals____ object____ =
     Object.selectionForCompositeField "auditEvents" optionalArgs____ object____ (Basics.identity >> Decode.list)
 
 
+type alias AuditEventsCountOptionalArguments =
+    { actorKind : OptionalArgument Api.Admin.Enum.ActorKind.ActorKind
+    , action : OptionalArgument String
+    , since : OptionalArgument String
+    , until : OptionalArgument String
+    }
+
+
+{-| auditEvents と同じ絞り込みでの件数（owner だけ）。一覧の下に出す件数と、書き出しの前の上限（100,000 件）の確認に
+-}
+auditEventsCount :
+    (AuditEventsCountOptionalArguments -> AuditEventsCountOptionalArguments)
+    -> SelectionSet Int RootQuery
+auditEventsCount fillInOptionals____ =
+    let
+        filledInOptionals____ =
+            fillInOptionals____ { actorKind = Absent, action = Absent, since = Absent, until = Absent }
+
+        optionalArgs____ =
+            [ Argument.optional "actorKind" filledInOptionals____.actorKind (Encode.enum Api.Admin.Enum.ActorKind.toString), Argument.optional "action" filledInOptionals____.action Encode.string, Argument.optional "since" filledInOptionals____.since Encode.string, Argument.optional "until" filledInOptionals____.until Encode.string ]
+                |> List.filterMap Basics.identity
+    in
+    Object.selectionForField "Int" "auditEventsCount" optionalArgs____ Decode.int
+
+
 type alias FieldImpactRequiredArguments =
     { input : Api.Admin.InputObject.SchemaChangeInput }
 

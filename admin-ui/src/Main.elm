@@ -79,6 +79,11 @@ port setUnsaved_Editor_JS : Bool -> Cmd msg
 port copyText_Clipboard_JS : String -> Cmd msg
 
 
+{-| URL をブラウザに開かせる。監査ログのエクスポートのように、返りがファイルで Elm に持ち込まない物。
+-}
+port openUrl_Download_JS : String -> Cmd msg
+
+
 
 -- MODEL
 
@@ -204,6 +209,7 @@ caps key =
     , toast = ToastShown
     , unsaved = setUnsaved_Editor_JS
     , copy = copyText_Clipboard_JS
+    , open = openUrl_Download_JS
     }
 
 
@@ -662,6 +668,17 @@ update msg model =
 
                                   else
                                     Effect.ReplaceRoute url
+                                , case pageMsg of
+                                    -- 行の固定 URL のコピー。クリップボードは port の先。返事は 2 秒で下ろす
+                                    Audit.CopyRequested copy ->
+                                        Effect.batch [ Effect.Copy copy.url, Effect.After copiedMillis (AuditMsg Audit.CopyShown) ]
+
+                                    -- エクスポート。ダウンロードはブラウザ任せなので、返事は開始の旨だけ
+                                    Audit.ExportRequested export ->
+                                        Effect.batch [ Effect.OpenUrl export.url, Effect.After copiedMillis (AuditMsg Audit.ExportShown) ]
+
+                                    _ ->
+                                        Effect.none
                                 ]
                             )
 
@@ -1512,7 +1529,7 @@ pageView workspace =
                 |> Html.map MembersMsg
 
         AuditPage page ->
-            Audit.view { canManage = Permission.has Permission.ManageMembers workspace.permissions, types = workspace.types } page
+            Audit.view { canManage = Permission.has Permission.ManageMembers workspace.permissions, types = workspace.types, origin = workspace.origin } page
                 |> Html.map AuditMsg
 
         EntriesPage page ->
