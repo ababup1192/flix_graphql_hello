@@ -222,7 +222,7 @@ viewOrg model ( org, projects ) =
             , case org of
                 Just chosen ->
                     if chosen.role == "OWNER" then
-                        Ui.ghostButton [ class "ml-auto h-7", onClick (OpenProjectForm chosen.id) ] [ text "+ プロジェクトを作る" ]
+                        Ui.ghostButton [ class "ml-auto h-7", onClick (OpenProjectForm chosen.id) ] [ text "+ プロジェクトを作成" ]
 
                     else
                         text ""
@@ -281,14 +281,14 @@ roleText role =
 viewProjectForm : Model -> { orgId : String, name : String, slug : String } -> Html Msg
 viewProjectForm model form =
     Ui.card [ class "flex flex-col gap-4 p-4" ]
-        [ Ui.subheading "プロジェクトを作る"
+        [ Ui.subheading "プロジェクトを作成"
         , Ui.field { label = "名前", hint = Nothing, errors = [] }
             [ Ui.input [ value form.name, onInput ProjectNameTyped, placeholder "ブログ" ] ]
         , Ui.field { label = "プロジェクト slug", hint = Just "URL に出る名前。英小文字・数字・ハイフン", errors = [] }
             [ Ui.input [ value form.slug, onInput ProjectSlugTyped, class "font-mono", placeholder "blog" ] ]
         , div [ class "flex gap-2" ]
-            [ Ui.button [ onClick ProjectSubmitted ] [ text (busyText model "作る") ]
-            , Ui.ghostButton [ onClick CloseForms ] [ text "やめる" ]
+            [ Ui.button [ onClick ProjectSubmitted ] [ text (busyText model "作成") ]
+            , Ui.ghostButton [ onClick CloseForms ] [ text "キャンセル" ]
             ]
         ]
 
@@ -298,23 +298,23 @@ viewOrgForm model =
     case model.newOrg of
         Just name ->
             Ui.card [ class "flex flex-col gap-4 p-4" ]
-                [ Ui.subheading "組織を作る"
+                [ Ui.subheading "組織を作成"
                 , Ui.field { label = "名前", hint = Nothing, errors = [] }
                     [ Ui.input [ value name, onInput OrgNameTyped, placeholder "自分の組織" ] ]
                 , div [ class "flex gap-2" ]
-                    [ Ui.button [ onClick OrgSubmitted ] [ text (busyText model "作る") ]
-                    , Ui.ghostButton [ onClick CloseForms ] [ text "やめる" ]
+                    [ Ui.button [ onClick OrgSubmitted ] [ text (busyText model "作成") ]
+                    , Ui.ghostButton [ onClick CloseForms ] [ text "キャンセル" ]
                     ]
                 ]
 
         Nothing ->
-            Ui.ghostButton [ onClick OpenOrgForm ] [ text "+ 組織を作る" ]
+            Ui.ghostButton [ onClick OpenOrgForm ] [ text "+ 組織を作成" ]
 
 
 busyText : Model -> String -> String
 busyText model label =
     if model.busy then
-        "送っています…"
+        "送信中…"
 
     else
         label

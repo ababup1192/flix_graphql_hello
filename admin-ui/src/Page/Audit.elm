@@ -956,7 +956,7 @@ viewMore model =
             [ Ui.ghostButton [ onClick MoreRequested, Html.Attributes.disabled model.busy ]
                 [ text
                     (if model.busy then
-                        "読んでいます…"
+                        "読み込み中…"
 
                      else
                         "もっと見る"

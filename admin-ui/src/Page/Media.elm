@@ -394,7 +394,7 @@ viewMore model page =
                     [ onClick MoreWanted, Html.Attributes.disabled model.loadingMore ]
                     [ text
                         (if model.loadingMore then
-                            "読んでいます…"
+                            "読み込み中…"
 
                          else
                             "もっと読む"

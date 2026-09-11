@@ -1635,7 +1635,7 @@ viewPublishDialog model =
                     viewReport model report
 
                 Nothing ->
-                    Ui.note [ text "公開前の確認をしています…" ]
+                    Ui.note [ text "確認中…" ]
             , case model.report of
                 Just report ->
                     if report.ok then
@@ -1659,7 +1659,7 @@ viewPublishDialog model =
             , viewActionError model
             , div [ class "flex gap-2" ]
                 [ viewPublishConfirm model
-                , Ui.ghostButton [ onClick PublishClosed ] [ text "やめる" ]
+                , Ui.ghostButton [ onClick PublishClosed ] [ text "キャンセル" ]
                 ]
             ]
         ]
@@ -1704,7 +1704,7 @@ viewRestoreDialog model version =
             , div [ class "flex gap-2" ]
                 [ Ui.button [ onClick RestoreWanted, Html.Attributes.disabled model.publishing ]
                     [ text (publishText model "戻す") ]
-                , Ui.ghostButton [ onClick PublishClosed ] [ text "やめる" ]
+                , Ui.ghostButton [ onClick PublishClosed ] [ text "キャンセル" ]
                 ]
             ]
         ]
@@ -1725,7 +1725,7 @@ viewUnpublishDialog model =
             , div [ class "flex gap-2" ]
                 [ Ui.button [ onClick UnpublishWanted, Html.Attributes.disabled model.publishing ]
                     [ text (publishText model "公開を終える") ]
-                , Ui.ghostButton [ onClick PublishClosed ] [ text "やめる" ]
+                , Ui.ghostButton [ onClick PublishClosed ] [ text "キャンセル" ]
                 ]
             ]
         ]
@@ -2015,16 +2015,16 @@ scheduleOpenLabel model =
         "閉じる"
 
     else if hasPendingSchedule model then
-        "予約を変える"
+        "予約を変更"
 
     else
-        "予約する"
+        "予約"
 
 
 scheduleSubmitLabel : Model -> String
 scheduleSubmitLabel model =
     if hasPendingSchedule model then
-        "この時刻に変える"
+        "この時刻に変更"
 
     else
         "この時刻に公開"
@@ -2042,7 +2042,7 @@ viewSchedule zone schedule =
         , if schedule.status == "PENDING" then
             Html.button
                 [ class "ml-auto cursor-pointer text-[color:var(--color-bad)]", onClick (ScheduleCancelled schedule.id) ]
-                [ text "取り消す" ]
+                [ text "取り消し" ]
 
           else
             text ""
@@ -2184,10 +2184,10 @@ publishLabel model =
         "公開中"
 
     else if model.stage == "DRAFT" then
-        "公開する"
+        "公開"
 
     else
-        "変更を公開する"
+        "変更を公開"
 
 
 {-| 確認の結果。違反はフォームの項目にも赤で出る。
@@ -2212,7 +2212,7 @@ viewReport model report =
     else
         Ui.callout Ui.toneWarn
             [ class "gap-1 p-3 text-xs" ]
-            (span [ class "font-semibold" ] [ text ("直す所が " ++ String.fromInt (List.length report.violations) ++ " 件あります") ]
+            (span [ class "font-semibold" ] [ text ("修正が必要な項目が " ++ String.fromInt (List.length report.violations) ++ " 件あります") ]
                 :: List.map (viewViolation model) report.violations
             )
 
@@ -2268,7 +2268,7 @@ stageChip stage =
 publishText : Model -> String -> String
 publishText model label =
     if model.publishing then
-        "送っています…"
+        "送信中…"
 
     else
         label
@@ -2280,10 +2280,10 @@ viewConflict : EntryRow -> Html Msg
 viewConflict theirs =
     Ui.card [ class "flex flex-col gap-3 border-[color:var(--color-warn)] bg-[color:var(--color-warn-bg)] p-4" ]
         [ Ui.subheading "他の人が先に保存しました"
-        , Ui.note [ text ("相手のバージョンは v" ++ String.fromInt theirs.version ++ " です。自分の入力を上に乗せるか、相手の内容に切り替えるかを選んでください。") ]
+        , Ui.note [ text ("相手のバージョンは v" ++ String.fromInt theirs.version ++ " です。自分の入力と相手の内容のどちらを採用するか選択してください。") ]
         , div [ class "flex gap-2" ]
-            [ Ui.button [ onClick KeepMine ] [ text "自分の入力を上に乗せる" ]
-            , Ui.ghostButton [ onClick TakeTheirs ] [ text "相手の内容にする" ]
+            [ Ui.button [ onClick KeepMine ] [ text "自分の入力を優先" ]
+            , Ui.ghostButton [ onClick TakeTheirs ] [ text "相手の内容を採用" ]
             ]
         ]
 
@@ -2298,7 +2298,7 @@ saveText state =
             "未保存"
 
         Saving _ ->
-            "保存しています…"
+            "保存中…"
 
         Conflicted ->
             "競合しました"
@@ -2780,7 +2780,7 @@ viewRefCandidates args model field chosen =
     div [ class "absolute top-9 left-0 z-(--z-dropdown) flex max-h-56 w-full flex-col overflow-auto rounded-md border border-edge bg-panel shadow-lg" ]
         (case Dict.get field.apiId model.refs of
             Nothing ->
-                [ span [ class "px-2 py-2 text-xs text-ink-faint" ] [ text "探しています…" ] ]
+                [ span [ class "px-2 py-2 text-xs text-ink-faint" ] [ text "検索中…" ] ]
 
             Just [] ->
                 [ viewNoCandidates args model field ]
@@ -2827,7 +2827,7 @@ viewNoCandidates args model field =
                         , Html.Attributes.target "_blank"
                         , class "text-xs"
                         ]
-                        [ text ("「" ++ summary.name ++ "」を作る") ]
+                        [ text ("「" ++ summary.name ++ "」を作成") ]
 
                 Nothing ->
                     text ""
@@ -2907,7 +2907,7 @@ viewDateField model field iso =
                         what ++ "を選ぶ"
 
                      else
-                        "選び直す"
+                        "選択し直す"
                     )
                 ]
 
@@ -2916,7 +2916,7 @@ viewDateField model field iso =
                 text ""
 
               else
-                Ui.quietActionLink [ onClick (DateCleared field.apiId) ] [ text "消す" ]
+                Ui.quietActionLink [ onClick (DateCleared field.apiId) ] [ text "削除" ]
             ]
         , case ( model.dateOpen == Just field.apiId, Dict.get field.apiId model.dates ) of
             ( True, Just picked ) ->
@@ -2929,8 +2929,8 @@ viewDateField model field iso =
                             Ui.DateTime.view model.zone picked
                         )
                     , div [ class "flex items-center gap-2" ]
-                        [ Ui.button [ onClick (DateApplied field.apiId) ] [ text ("この" ++ what ++ "にする") ]
-                        , Ui.ghostButton [ onClick DateClosed ] [ text "やめる" ]
+                        [ Ui.button [ onClick (DateApplied field.apiId) ] [ text ("この" ++ what ++ "を選択") ]
+                        , Ui.ghostButton [ onClick DateClosed ] [ text "キャンセル" ]
                         ]
                     ]
 
@@ -3024,7 +3024,7 @@ pickLabel empty many =
         "メディアを選ぶ"
 
     else
-        "選び直す"
+        "選択し直す"
 
 
 {-| メディア 1 件の見え姿。**画像を出す。** ファイル名と大きさを添え、操作をその中に置く。
@@ -3046,7 +3046,7 @@ viewAssetCard model assetId actions =
 
             Nothing ->
                 [ div [ class "flex h-20 items-center justify-center rounded bg-well" ]
-                    [ span [ class "text-[10px] text-ink-faint" ] [ text "読み込んでいます…" ] ]
+                    [ span [ class "text-[10px] text-ink-faint" ] [ text "読み込み中…" ] ]
                 , span [ class "truncate font-mono text-[10px] text-ink-faint" ] [ text assetId ]
                 ]
                     ++ actions
@@ -3117,8 +3117,8 @@ viewPicker model =
                                 [ onClick RichInsertWanted
                                 , Html.Attributes.disabled (List.isEmpty model.richPicked)
                                 ]
-                                [ text ("本文に入れる（" ++ String.fromInt (List.length model.richPicked) ++ "）") ]
-                            , Ui.ghostButton [ onClick PickerClosed ] [ text "やめる" ]
+                                [ text ("本文に挿入（" ++ String.fromInt (List.length model.richPicked) ++ "）") ]
+                            , Ui.ghostButton [ onClick PickerClosed ] [ text "キャンセル" ]
                             ]
 
                       else

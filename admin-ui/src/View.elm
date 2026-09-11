@@ -38,7 +38,7 @@ notMember args =
             , text " で通っています。管理者に招待してもらってください。招待されたらこのページを開き直すだけで入れます。"
             ]
         , div [ class "flex gap-2" ]
-            [ button "開き直す" args.onReload
+            [ button "再読み込み" args.onReload
             , linkButton "別のアカウントでログイン" "/cdn-cgi/access/logout"
             ]
         ]
@@ -52,7 +52,7 @@ signedOut args =
         [ logo
         , heading "ログインの有効期限が切れました"
         , paragraph [ text "入力中の内容は保存されていません。ログインし直してから、もう一度保存してください。" ]
-        , button "ログインし直す" args.onReload
+        , button "再ログイン" args.onReload
         ]
 
 

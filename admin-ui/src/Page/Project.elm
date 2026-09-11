@@ -71,13 +71,13 @@ view args model =
                 , Ui.ghostButton [ onClick VisibilityToggled ]
                     [ text
                         (if model.busy then
-                            "変えています…"
+                            "変更中…"
 
                          else if model.visibility == "PUBLIC" then
-                            "非公開にする"
+                            "非公開に変更"
 
                          else
-                            "公開にする"
+                            "公開に変更"
                         )
                     ]
                 ]
@@ -90,14 +90,14 @@ view args model =
                 [ Ui.codeBlock [] (mcpUrl args) ]
             , Ui.field { label = "つなぐコマンド", hint = Just "API キーは「API キーと Webhook」で発行します", errors = [] }
                 [ Ui.codeBlock [ class "text-[11px]" ]
-                    ("claude mcp add --transport http cms " ++ mcpUrl args ++ " --header \"X-Api-Key: <発行した鍵>\"")
+                    ("claude mcp add --transport http cms " ++ mcpUrl args ++ " --header \"X-Api-Key: <発行した API キー>\"")
                 ]
             , div [ class "flex flex-wrap gap-1.5" ]
                 (List.map (\label -> Ui.chip Ui.toneNeutral label)
-                    [ "API の一覧と定義を読む"
-                    , "コンテンツを検索する"
-                    , "コンテンツを 1 件読む（本文は Markdown）"
-                    , "コンテンツを作る・直す・消す"
+                    [ "API の一覧と定義の取得"
+                    , "コンテンツの検索"
+                    , "コンテンツ 1 件の取得（本文は Markdown）"
+                    , "コンテンツの作成・修正・削除"
                     , "公開前の確認と公開"
                     ]
                 )

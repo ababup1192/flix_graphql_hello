@@ -510,14 +510,14 @@ viewRequest model detail =
             [ Ui.subheading "実行する query"
             , div [ class "ml-auto flex items-center gap-2" ]
                 [ if model.edited then
-                    Ui.ghostButton [ onClick ResetWanted ] [ text "型から作り直す" ]
+                    Ui.ghostButton [ onClick ResetWanted ] [ text "API スキーマから再作成" ]
 
                   else
                     text ""
                 , Ui.button [ onClick SendWanted, Html.Attributes.disabled model.sending ]
                     [ text
                         (if model.sending then
-                            "送っています…"
+                            "送信中…"
 
                          else
                             "送る"
@@ -598,5 +598,5 @@ viewCurl model =
                 ++ E.encode 0 (E.object [ ( "query", E.string model.document ) ])
                 ++ "'"
             )
-        , Ui.note [ text "非公開のプロジェクトと下書きを読むには X-Api-Key が要ります。鍵は「API キー」の画面で発行します。" ]
+        , Ui.note [ text "非公開のプロジェクトと下書きを読むには X-Api-Key が要ります。API キーは「API キー」の画面で発行します。" ]
         ]

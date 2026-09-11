@@ -800,7 +800,7 @@ viewNewType model =
 
         Nothing ->
             Ui.page [ class "max-w-xl" ]
-                [ Ui.pageHeader { title = "API を作る", icon = Nothing, meta = [], actions = [] }
+                [ Ui.pageHeader { title = "API を作成", icon = Nothing, meta = [], actions = [] }
                 , Ui.note [ text "API はコンテンツの型です。作成した後にフィールドを追加します。エンドポイントは後から変更できません。" ]
                 , Ui.card [ class "flex flex-col gap-4 p-4" ]
                     [ Ui.field { label = "表示名", hint = Nothing, errors = Reply.errorsFor "name" model.reply }
@@ -817,7 +817,7 @@ viewNewType model =
                         , onToggle = TypeKindToggled
                         }
                     , Reply.addButton
-                        { label = "作る"
+                        { label = "作成"
                         , ready = apiIdError model.newType.apiId == Nothing
                         , reply = model.reply
                         , onAdd = TypeSubmitted
@@ -943,7 +943,7 @@ viewKindPicker =
     Ui.card [ class "flex flex-col gap-4 p-4" ]
         (div [ class "flex items-center gap-2" ]
             [ Ui.sectionTitle "種類を選ぶ"
-            , div [ class "ml-auto" ] [ Ui.ghostButton [ onClick PanelClosed ] [ text "やめる" ] ]
+            , div [ class "ml-auto" ] [ Ui.ghostButton [ onClick PanelClosed ] [ text "キャンセル" ] ]
             ]
             :: List.map viewKindGroup kindGroups
             ++ [ Ui.note [ text "種類は後から変えられません。" ] ]
@@ -992,7 +992,7 @@ viewAddPanel args model form =
         [ div [ class "flex items-center gap-2" ]
             [ span [ class "text-ink-soft" ] [ Icon.view (Icon.ofKind kind) ]
             , Ui.sectionTitle (kindText kind ++ " を追加")
-            , div [ class "ml-auto" ] [ Ui.ghostButton [ onClick PickerOpened ] [ text "種類を選び直す" ] ]
+            , div [ class "ml-auto" ] [ Ui.ghostButton [ onClick PickerOpened ] [ text "種類を選択し直す" ] ]
             ]
         , Ui.field { label = "表示名", hint = Just "画面に出る名前", errors = Reply.errorsFor "name" model.reply }
             [ Ui.input [ value form.name, onInput NameTyped, placeholder "タイトル" ] ]
@@ -1010,12 +1010,12 @@ viewAddPanel args model form =
         , Ui.errors (Reply.unmatched panelFields model.reply)
         , div [ class "flex items-center gap-2" ]
             [ Reply.addButton
-                { label = "追加する"
+                { label = "追加"
                 , ready = apiIdError form.apiId == Nothing
                 , reply = model.reply
                 , onAdd = AddSubmitted
                 }
-            , Ui.ghostButton [ onClick PanelClosed ] [ text "やめる" ]
+            , Ui.ghostButton [ onClick PanelClosed ] [ text "キャンセル" ]
             ]
         ]
 
@@ -1080,7 +1080,7 @@ viewEditPanel model detail form =
             ]
         , Ui.field { label = "表示名", hint = Just "画面に出る名前", errors = [] }
             [ Ui.input [ value form.name, onInput (\typed -> EditChanged (\f -> { f | name = typed })) ] ]
-        , Ui.field { label = "フィールド ID", hint = Just "API に出る名前。変えられません（変えると今の API が壊れます）", errors = [] }
+        , Ui.field { label = "フィールド ID", hint = Just "API に出る名前。変更できません（変更すると今の API が壊れます）", errors = [] }
             [ Ui.input [ value form.apiId, Html.Attributes.disabled True, class "font-mono" ] ]
         , Ui.field { label = "種類", hint = Just "変更できません。変更したいときは新しく作成して値を移します", errors = [] }
             [ div [ class "flex items-center gap-2 text-[13px] text-ink" ]
@@ -1115,7 +1115,7 @@ viewEditPanel model detail form =
                 , reply = model.reply
                 , onSave = EditSubmitted
                 }
-            , Ui.ghostButton [ onClick PanelClosed ] [ text "やめる" ]
+            , Ui.ghostButton [ onClick PanelClosed ] [ text "キャンセル" ]
             ]
         , viewRemove model form
         ]
@@ -1132,8 +1132,8 @@ viewSaveConfirm model form =
                 (Ui.subheading ("「" ++ form.name ++ "」をこの設定にすると")
                     :: viewEffects model impact.effects
                     ++ [ div [ class "flex gap-2" ]
-                            [ Ui.button [ onClick SaveConfirmed ] [ text (busyText model "承知して保存する") ]
-                            , Ui.ghostButton [ onClick SaveCancelled ] [ text "やめる" ]
+                            [ Ui.button [ onClick SaveConfirmed ] [ text (busyText model "保存") ]
+                            , Ui.ghostButton [ onClick SaveCancelled ] [ text "キャンセル" ]
                             ]
                        ]
                 )
@@ -1178,7 +1178,7 @@ viewEditConfig detail form =
 
         "SELECT" ->
             section
-                [ Ui.field { label = "選択肢", hint = Just "「,」で区切ります。**消すと、その値の公開中のコンテンツが壊れます**", errors = [] }
+                [ Ui.field { label = "選択肢", hint = Just "「,」で区切ります。**削除すると、その値の公開中のコンテンツが壊れます**", errors = [] }
                     [ Ui.input [ value form.options, onInput (\typed -> EditChanged (\f -> { f | options = typed })) ] ]
                 ]
 
@@ -1198,7 +1198,7 @@ viewEditConfig detail form =
 
 viewMaxLength : EditForm -> Html Msg
 viewMaxLength form =
-    Ui.field { label = "文字数の上限", hint = Just "入れると、入力欄に残り文字数の丸が出ます", errors = [] }
+    Ui.field { label = "文字数の上限", hint = Just "入力すると、入力欄に残り文字数が表示されます", errors = [] }
         [ Ui.input
             [ value form.maxLength
             , onInput (\typed -> EditChanged (\f -> { f | maxLength = typed }))
@@ -1232,8 +1232,8 @@ viewRemove model form =
                         ++ [ div [ class "flex gap-2" ]
                                 [ Ui.button
                                     [ onClick RemoveConfirmed, disabled (Loaded.toMaybe model.removeImpact == Nothing) ]
-                                    [ text (busyText model "削除する") ]
-                                , Ui.ghostButton [ onClick RemoveCancelled ] [ text "やめる" ]
+                                    [ text (busyText model "削除") ]
+                                , Ui.ghostButton [ onClick RemoveCancelled ] [ text "キャンセル" ]
                                 ]
                            ]
                     )
@@ -1255,7 +1255,7 @@ viewImpact : Model -> Loaded Model.SchemaImpact -> List (Html Msg)
 viewImpact model loaded =
     case loaded of
         Loaded.Loading ->
-            [ Ui.note [ text "影響を調べています…" ] ]
+            [ Ui.note [ text "影響を確認中…" ] ]
 
         Loaded.Failed problem ->
             [ Ui.note [ text ("影響を調べられませんでした（" ++ problem ++ "）。もう一度お試しください") ] ]
@@ -1508,7 +1508,7 @@ viewField args model field =
 busyText : Model -> String -> String
 busyText model label =
     if Reply.isSending model.reply then
-        "送っています…"
+        "送信中…"
 
     else
         label

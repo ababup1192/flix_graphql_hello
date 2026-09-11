@@ -350,7 +350,7 @@ viewProjectMenu config query =
                )
             ++ [ menuDivider
                , menuLink (Route.toString Route.Projects) "すべてのプロジェクト"
-               , menuLink (Route.toString Route.Projects) "＋ プロジェクトを作る"
+               , menuLink (Route.toString Route.Projects) "+ プロジェクトを作成"
                ]
         )
 
@@ -485,7 +485,7 @@ sidebar config =
                             [ href (Route.toString (Route.TypeSchema (slugOf config) "new"))
                             , class "px-2 py-2 pl-6 text-[13px] text-ink-soft hover:text-ink"
                             ]
-                            [ text "+ API を作る" ]
+                            [ text "+ API を作成" ]
 
                      else
                         text ""

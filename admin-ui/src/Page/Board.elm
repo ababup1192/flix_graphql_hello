@@ -431,20 +431,20 @@ viewConfirm model ask =
                 [ Ui.button [ onClick Confirmed ]
                     [ text
                         (if model.busy then
-                            "送っています…"
+                            "送信中…"
 
                          else if ask.to == "DRAFT" then
                             "公開を終える"
 
                          else if ask.from == "CHANGED" then
                             -- エディタの公開の確認と同じ語にする。
-                            "変更を公開する"
+                            "変更を公開"
 
                          else
-                            "公開する"
+                            "公開"
                         )
                     ]
-                , Ui.ghostButton [ onClick Cancelled ] [ text "やめる" ]
+                , Ui.ghostButton [ onClick Cancelled ] [ text "キャンセル" ]
                 ]
             ]
         ]

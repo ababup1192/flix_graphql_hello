@@ -293,7 +293,7 @@ view args model =
                 Ui.Confirm.view
                     { title = "「" ++ invite.email ++ "」への招待を取り消しますか"
                     , body = "この人はログインしてもメンバーになりません。もう一度招待し直せます。"
-                    , confirm = "取り消す"
+                    , confirm = "取り消し"
                     , reply = model.cancelling
                     , onConfirm = CancelConfirmed
                     , onCancel = CancelDismissed
@@ -420,7 +420,7 @@ viewInvitation args model invite =
         , span [ class "text-ink-soft" ] [ text (roleText invite.role) ]
         , viewInvitedAt model invite
         , if args.canManage then
-            div [ class "text-right" ] [ Ui.dangerLink (CancelAsked invite) "取り消す" ]
+            div [ class "text-right" ] [ Ui.dangerLink (CancelAsked invite) "取り消し" ]
 
           else
             text ""

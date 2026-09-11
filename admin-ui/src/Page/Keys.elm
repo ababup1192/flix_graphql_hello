@@ -368,7 +368,7 @@ view model =
         , case model.issuedHook of
             Just issued ->
                 Ui.Secret.view
-                    { title = "「" ++ issued.webhook.name ++ "」を追加しました。署名の鍵です"
+                    { title = "「" ++ issued.webhook.name ++ "」を追加しました。署名用のシークレットです"
                     , value = issued.secret
                     , copied = model.hookCopied
                     , onCopy = HookCopyRequested issued.secret
