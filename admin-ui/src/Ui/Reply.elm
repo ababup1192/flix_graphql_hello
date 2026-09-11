@@ -1,5 +1,7 @@
 module Ui.Reply exposing
     ( Reply
+    , addButton
+    , banner
     , done
     , errorsFor
     , failed
@@ -16,9 +18,17 @@ module Ui.Reply exposing
 {-| フォームの「返事」。**押したら必ず何かが返る**を 1 つの部品で揃える。
 
   - 送信中は「送信中…」を出し、ボタンを押せなくする
-  - 終わったら「保存しました」を出す。次に入力を触るまで残す（時間で消す仕組みを持たない。
-    消えた瞬間を見逃すと、保存できたのか分からなくなる）
   - 失敗したら理由を出す。**欄に対応する違反はその欄の下に**、それ以外はボタンの横に
+
+成功をどこに出すかは、フォームの種類で分ける。
+
+  - **直すフォーム**（API 設定のように入力が残る）は `saveButton`。「保存しました」を
+    ボタンの横に出し、次に入力を触るまで残す（時間で消すと、消えた瞬間を見逃した時に
+    保存できたか分からなくなる）
+  - **足すフォーム**（招待・API キー・Webhook のように入力が空に戻る）は `addButton` と
+    `banner`。成功は**一覧の上の帯**に「x@example.com を招待しました」と誰に対してかを添えて
+    出す。GitHub / Slack と同じ形。フォームの横に残すと、次の入力を始めているのに前回の結果が
+    居座る
 
 エディタの保存状態（`Editor.SaveState`）と同じ考え方を、設定・キー・メンバーのような
 小さいフォームで使える形にした物。
@@ -170,6 +180,7 @@ view reply =
 
 
 {-| 保存のボタンと返事を 1 行に。**変更が無ければ押せない**（押しても何も起きないボタンを置かない）。
+直すフォーム用。足すフォームは `addButton` と `banner`。
 -}
 saveButton : { label : String, dirty : Bool, reply : Reply, onSave : msg } -> Html msg
 saveButton args =
@@ -179,6 +190,51 @@ saveButton args =
             [ Html.text args.label ]
         , view args.reply
         ]
+
+
+{-| 足すフォームのボタン。**成功は横に出さない**（`banner` が一覧の上に出す）。
+送信中と、欄に付かなかった失敗だけ横に出る。
+-}
+addButton : { label : String, ready : Bool, reply : Reply, onAdd : msg } -> Html msg
+addButton args =
+    Html.div [ A.class "flex items-center gap-3" ]
+        [ Ui.button
+            [ E.onClick args.onAdd, A.disabled (not args.ready || isSending args.reply) ]
+            [ Html.text args.label ]
+        , case args.reply of
+            Done _ ->
+                Html.text ""
+
+            other ->
+                view other
+        ]
+
+
+{-| 足した結果の帯。一覧の上に出し、押して閉じられる。何に対してかを文に入れる
+（「招待しました」だけでは誰に送ったか分からない）。
+
+**フォームの返事（`Reply`）とは別に持つ。** 帯は一覧に起きた事で、フォームの状態ではない。
+同じ物にすると、次の入力を打ち始めた瞬間に（エラーを下ろすのと一緒に）消える。
+
+-}
+banner : { message : Maybe String, onClose : msg } -> Html msg
+banner args =
+    case args.message of
+        Just message ->
+            Ui.callout Ui.toneOk
+                [ A.class "flex-row items-center justify-between gap-3 px-4 py-2.5" ]
+                [ Html.span [ A.class "text-[13px]" ] [ Html.text message ]
+                , Html.button
+                    [ A.type_ "button"
+                    , A.class "shrink-0 text-xs text-ink-soft hover:text-ink"
+                    , A.attribute "aria-label" "閉じる"
+                    , E.onClick args.onClose
+                    ]
+                    [ Html.text "✕" ]
+                ]
+
+        Nothing ->
+            Html.text ""
 
 
 {-| 未保存の印。見出しの横に置く。

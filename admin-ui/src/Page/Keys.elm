@@ -357,7 +357,7 @@ viewKeyForm model =
                 [ Ui.field { label = "権限", hint = Nothing, errors = Reply.errorsFor "scope" model.keyReply ++ Reply.errorsFor "role" model.keyReply }
                     [ Ui.select [ onInput KeyScopeChosen ] scopeOptions (ApiKeyScope.toString model.newKeyScope) ]
                 ]
-            , Reply.saveButton { label = "発行", dirty = not (String.isEmpty (String.trim model.newKeyName)), reply = model.keyReply, onSave = KeySubmitted }
+            , Reply.addButton { label = "発行", ready = not (String.isEmpty (String.trim model.newKeyName)), reply = model.keyReply, onAdd = KeySubmitted }
             ]
         ]
 
@@ -577,11 +577,11 @@ viewHookForm model =
             [ Ui.field { label = "URL", hint = Nothing, errors = Reply.errorsFor "url" model.hookReply }
                 [ Ui.input [ value model.newHookUrl, onInput HookUrlTyped, placeholder "https://example.com/hook" ] ]
             ]
-        , Reply.saveButton
+        , Reply.addButton
             { label = "追加"
-            , dirty = not (String.isEmpty (String.trim model.newHookName)) && not (String.isEmpty (String.trim model.newHookUrl))
+            , ready = not (String.isEmpty (String.trim model.newHookName)) && not (String.isEmpty (String.trim model.newHookUrl))
             , reply = model.hookReply
-            , onSave = HookSubmitted
+            , onAdd = HookSubmitted
             }
         ]
 

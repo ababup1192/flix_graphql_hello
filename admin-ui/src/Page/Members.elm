@@ -34,6 +34,9 @@ type alias Model =
     , inviteRole : Role
     , inviteReply : Reply
 
+    {- 招待できた事の帯。一覧側の出来事なので、フォームの返事とは別に持つ。 -}
+    , invited : Maybe String
+
     {- 権限を変えた行と、その返事。1 度に 1 行しか変えられない。 -}
     , roleReply : Maybe ( String, Reply )
     , confirmRemove : Maybe MemberRow
@@ -52,6 +55,7 @@ type Msg
     | InviteRoleChosen String
     | InviteSubmitted
     | GotInvite (Result Api.Problem Invite)
+    | InviteBannerClosed
     | RoleChanged String String
     | GotRoleChange (Result Api.Problem MemberRow)
     | RoleReplyShown
@@ -75,6 +79,7 @@ init =
     , inviteEmail = ""
     , inviteRole = Role.Writer
     , inviteReply = Reply.idle
+    , invited = Nothing
     , roleReply = Nothing
     , confirmRemove = Nothing
     , removing = Reply.idle
@@ -121,10 +126,13 @@ update ctx msg model =
             -- **応答をそのまま一覧に足さない。** 既にログインした事のある人を招待すると、
             -- CMS はその場でメンバーにし、行の無い Invitation を返す（その id では取り消せない）。
             -- どちらになったか分からないので、両方を引き直す。
-            ( { model | inviteReply = Reply.done "招待しました", inviteEmail = "" }, load ctx.project )
+            ( { model | inviteReply = Reply.idle, invited = Just ("「" ++ model.inviteEmail ++ "」を招待しました"), inviteEmail = "" }, load ctx.project )
 
         GotInvite (Err problem) ->
             ( { model | inviteReply = Reply.failed problem }, [] )
+
+        InviteBannerClosed ->
+            ( { model | invited = Nothing }, [] )
 
         RoleChanged userId chosen ->
             ( { model | roleReply = Just ( userId, Reply.sending ) }
@@ -263,6 +271,7 @@ view args model =
 
           else
             text ""
+        , Reply.banner { message = model.invited, onClose = InviteBannerClosed }
         , viewMembers args model
         , viewInvitations args model
         , case model.confirmRemove of
@@ -307,11 +316,11 @@ viewInviteForm model =
             [ Ui.field { label = "権限", hint = Nothing, errors = Reply.errorsFor "role" model.inviteReply }
                 [ Ui.select [ onInput InviteRoleChosen ] roleOptions (Role.toString model.inviteRole) ]
             ]
-        , Reply.saveButton
+        , Reply.addButton
             { label = "招待"
-            , dirty = String.contains "@" model.inviteEmail
+            , ready = String.contains "@" model.inviteEmail
             , reply = model.inviteReply
-            , onSave = InviteSubmitted
+            , onAdd = InviteSubmitted
             }
         ]
 
