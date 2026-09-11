@@ -529,9 +529,14 @@ viewCard model detail row =
         , on "dragstart" (D.succeed (Grabbed row))
         , on "dragend" (D.succeed Released)
         ]
-        [ div [ class "flex items-center gap-1.5 text-[11px] text-ink-soft" ]
+        [ div
+            [ class "flex items-center gap-1.5 text-[11px] text-ink-soft"
+
+            -- 出ていない方（id か、公開サイトのパス）は乗せれば読める。
+            , Html.Attributes.title (detail.apiId ++ " #" ++ row.id)
+            ]
             [ span [ class "text-ink-faint" ] [ Icon.view Icon.entry ]
-            , span [ class "font-mono truncate" ] [ text (detail.apiId ++ " #" ++ String.right 6 row.id) ]
+            , span [ class "font-mono truncate" ] [ text (mark detail row) ]
             ]
 
         {- WhyNot: 題を伸ばし放題にしない。空白の無い英語の題は枠を突き抜けて隣の列に被り、
@@ -554,6 +559,44 @@ viewCard model detail row =
                    )
             )
         ]
+
+
+{-| カードの頭に出す短い名前。
+
+**スラッグがあれば公開サイトのパス**（`/blog/post-19`）。人はこれで記事を見分け、
+そのままブラウザに貼れる。**無ければ id の後ろ 6 桁**。
+
+WhyNot: 型の apiId を頭に付けない。盤は 1 つの型しか出さないので、上の見出しと
+同じ物が全カードに並ぶだけになる。
+
+WhyNot: スラッグが空の時に path を出さない。CMS は空のスラッグを id で埋めるので
+（`/blog/807ed5e435e8`）、長い id が並ぶだけで読めない。
+
+-}
+mark : ContentTypeDetail -> EntryRow -> String
+mark detail row =
+    case slugOf detail row of
+        Just _ ->
+            row.path |> Maybe.withDefault ("#" ++ String.right 6 row.id)
+
+        Nothing ->
+            "#" ++ String.right 6 row.id
+
+
+slugOf : ContentTypeDetail -> EntryRow -> Maybe String
+slugOf detail row =
+    detail.fields
+        |> List.filter (\field -> field.kind == "SLUG")
+        |> List.head
+        |> Maybe.andThen (\field -> D.decodeValue (D.field field.apiId D.string) row.fields |> Result.toMaybe)
+        |> Maybe.andThen
+            (\value ->
+                if String.isEmpty value then
+                    Nothing
+
+                else
+                    Just value
+            )
 
 
 {-| カードに出すタグの数。
