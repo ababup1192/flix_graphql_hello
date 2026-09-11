@@ -36,6 +36,11 @@ type alias Model =
     , apiId : String
     , contentType : Loaded ContentTypeDetail
     , entries : Loaded EntryList
+
+    {- 開いた時に名指しされたコンテンツ。**最近の 20 件に居なくても選択欄に出す**ため、
+       id で名指しして別に引く。
+    -}
+    , current : Maybe EntryRow
     , shape : Shape
     , entryId : String
     , draft : Bool
@@ -65,6 +70,7 @@ type alias Answer =
 type Msg
     = GotType (Result Api.Problem (Maybe ContentTypeDetail))
     | GotEntries (Result Api.Problem EntryList)
+    | GotCurrent (Result Api.Problem EntryList)
     | ShapeChosen Shape
     | EntryChosen String
     | DraftToggled
@@ -85,6 +91,7 @@ init project apiId one =
     , apiId = apiId
     , contentType = Loaded.Loading
     , entries = Loaded.Loading
+    , current = Nothing
     , shape =
         case one of
             Just _ ->
@@ -119,7 +126,7 @@ update ctx msg model =
             ( rebuild next
             , case result of
                 Ok (Just detail) ->
-                    [ entriesCall ctx.project detail.id ]
+                    entriesCall ctx.project detail.id :: currentCall ctx.project detail.id model.entryId
 
                 _ ->
                     []
@@ -147,6 +154,9 @@ update ctx msg model =
                 }
             , []
             )
+
+        GotCurrent result ->
+            ( { model | current = result |> Result.toMaybe |> Maybe.map .nodes |> Maybe.withDefault [] |> List.head }, [] )
 
         ShapeChosen shape ->
             ( rebuild { model | shape = shape, answer = Nothing }, [] )
@@ -206,13 +216,42 @@ rebuild model =
                 model
 
 
+{-| 選択欄に出す「最近の」の数。
+-}
+entryPageSize : Int
+entryPageSize =
+    20
+
+
+{-| 開いた時に名指しされた 1 件。**選択欄に必ず出す**ために id で引く。
+
+WhyNot: 最近の 20 件に混ざるのを当てにしない。混ざらないと選択欄は先頭の物を
+指したまま、query は名指しされた物、という食い違いになる。
+
+-}
+currentCall : Slug -> String -> String -> List (Api.Call Msg)
+currentCall project typeId entryId =
+    if String.isEmpty entryId then
+        []
+
+    else
+        [ Api.call
+            (\id ->
+                Queries.entries id
+                    project
+                    { typeId = typeId, search = "", stage = "", conditions = [], ids = [ entryId ], order = "", first = 1, skip = 0 }
+            )
+            GotCurrent
+        ]
+
+
 entriesCall : Slug -> String -> Api.Call Msg
 entriesCall project typeId =
     Api.call
         (\id ->
             Queries.entries id
                 project
-                { typeId = typeId, search = "", stage = "", conditions = [], ids = [], order = "", first = 20, skip = 0 }
+                { typeId = typeId, search = "", stage = "", conditions = [], ids = [], order = "", first = entryPageSize, skip = 0 }
         )
         GotEntries
 
@@ -383,8 +422,35 @@ viewControls model detail =
 
             OneShape ->
                 Ui.select [ onInput EntryChosen ] (entryOptions model detail) model.entryId
+        , case model.shape of
+            OneShape ->
+                viewEntryNote model
+
+            ListShape ->
+                text ""
         , Ui.checkbox { label = "下書きも読む（stage: DRAFT）", checked = model.draft, onToggle = DraftToggled }
         ]
+
+
+{-| 選択欄に何が入っているかを言う。**全件ではない**ので、出していない数を出す。
+-}
+viewEntryNote : Model -> Html Msg
+viewEntryNote model =
+    let
+        held : Int
+        held =
+            List.length (heldEntries model)
+
+        rest : Int
+        rest =
+            (Loaded.toMaybe model.entries |> Maybe.map .totalCount |> Maybe.withDefault 0) - held
+    in
+    if rest > 0 then
+        span [ class "text-xs text-ink-faint" ]
+            [ text ("最近の " ++ String.fromInt entryPageSize ++ " 件から選べます。ほかに " ++ String.fromInt rest ++ " 件あり、コンテンツ一覧から開くとここに出ます。") ]
+
+    else
+        text ""
 
 
 {-| 一覧か 1 件か。**押している方が塗られる**（GitHub の切り替えと同じ）。
@@ -400,10 +466,24 @@ shapeButton model shape label =
 
 entryOptions : Model -> ContentTypeDetail -> List ( String, String )
 entryOptions model detail =
-    Loaded.toMaybe model.entries
-        |> Maybe.map .nodes
-        |> Maybe.withDefault []
-        |> List.map (\row -> ( row.id, titleOf detail row ))
+    List.map (\row -> ( row.id, titleOf detail row )) (heldEntries model)
+
+
+{-| 選択欄に出す行。**開いた 1 件を先頭に**、その後ろに最近の分。
+-}
+heldEntries : Model -> List EntryRow
+heldEntries model =
+    let
+        recent : List EntryRow
+        recent =
+            Loaded.toMaybe model.entries |> Maybe.map .nodes |> Maybe.withDefault []
+    in
+    case model.current of
+        Just row ->
+            row :: List.filter (\other -> other.id /= row.id) recent
+
+        Nothing ->
+            recent
 
 
 titleOf : ContentTypeDetail -> EntryRow -> String
