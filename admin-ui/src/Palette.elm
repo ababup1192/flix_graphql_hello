@@ -23,6 +23,11 @@ type alias Model =
     { open : Bool
     , query : String
     , hits : Dict String (List Item)
+
+    {- 型ごとに、打った文字に当たるコンテンツの件数。**出した数より多ければ**
+       「一覧で探す」の行を出すのに使う。
+    -}
+    , counts : Dict String Int
     , picked : Int
     }
 
@@ -43,12 +48,18 @@ type Msg
     | Moved Int
     | Chosen Item
     | Confirmed
-    | GotHits String (Result Api.Problem EntryList)
+    | GotHits TypeMark (Result Api.Problem EntryList)
+
+
+{-| 型の目印。行の右に出す名前と、飛び先に使う apiId。
+-}
+type alias TypeMark =
+    { apiId : String, name : String }
 
 
 init : Model
 init =
-    { open = False, query = "", hits = Dict.empty, picked = 0 }
+    { open = False, query = "", hits = Dict.empty, counts = Dict.empty, picked = 0 }
 
 
 {-| 開いているか。画面でキーを拾うかの判定に使う。
@@ -65,34 +76,44 @@ update msg model =
             { model | open = True, picked = 0 }
 
         Closed ->
-            { model | open = False, query = "", hits = Dict.empty, picked = 0 }
+            { model | open = False, query = "", hits = Dict.empty, counts = Dict.empty, picked = 0 }
 
         Typed query ->
-            { model | query = query, picked = 0, hits = Dict.empty }
+            { model | query = query, picked = 0, hits = Dict.empty, counts = Dict.empty }
 
         Moved step ->
             { model | picked = model.picked + step }
 
         Chosen _ ->
-            { model | open = False, query = "", hits = Dict.empty, picked = 0 }
+            { model | open = False, query = "", hits = Dict.empty, counts = Dict.empty, picked = 0 }
 
         Confirmed ->
             -- 飛び先は親が決める（親が pickedItem を見て PushRoute する）。
             model
 
-        GotHits apiId (Ok page) ->
-            { model | hits = Dict.insert apiId (List.map (entryItem apiId) page.nodes) model.hits }
+        GotHits mark (Ok page) ->
+            { model
+                | hits = Dict.insert mark.apiId (List.map (entryItem mark) page.nodes) model.hits
+                , counts = Dict.insert mark.apiId page.totalCount model.counts
+            }
 
         GotHits _ (Err _) ->
             model
 
 
-entryItem : String -> EntryRow -> Item
-entryItem apiId row =
+entryItem : TypeMark -> EntryRow -> Item
+entryItem mark row =
     { label = EntryLabel.forRow row
-    , hint = apiId
-    , route = Route.Entry "" apiId row.id
+    , hint = mark.name
+    , route = Route.Entry "" mark.apiId row.id
     }
+
+
+{-| 型ごとに出す件数。**全部は出さない**ので、残りは「一覧で探す」で渡す。
+-}
+hitsPerType : Int
+hitsPerType =
+    5
 
 
 {-| 入力ごとに投げる検索。**型の数だけ**投げる。
@@ -112,9 +133,9 @@ searchCalls project types query =
                         (\id ->
                             Queries.entries id
                                 project
-                                { typeId = summary.id, search = query, stage = "", conditions = [], ids = [], order = "", first = 5, skip = 0 }
+                                { typeId = summary.id, search = query, stage = "", conditions = [], ids = [], order = "", first = hitsPerType, skip = 0 }
                         )
-                        (GotHits summary.apiId)
+                        (GotHits { apiId = summary.apiId, name = summary.name })
                 )
 
 
@@ -157,19 +178,52 @@ results project types model =
 
         entries : List Item
         entries =
-            model.hits
-                |> Dict.values
-                |> List.concat
-                |> List.map (\item -> { item | route = withProject project item.route })
+            types |> List.concatMap (group project model)
     in
     (places |> List.filter matches |> List.map (\place -> { label = place.label, hint = place.hint, route = place.route })) ++ entries
 
 
-{-| 今出ている候補（上限つき）。
+{-| 1 つの型の候補。上位の何件かと、その後ろに「一覧で探す」。
+
+WhyNot: 出した分だけで終わらせない。型ごとに 5 件しか引いていないので、
+6 件目以降はここからでは出ない。**その型の一覧へ、打った文字を持って渡す。**
+
+-}
+group : Slug -> Model -> ContentTypeSummary -> List Item
+group project model summary =
+    let
+        rows : List Item
+        rows =
+            Dict.get summary.apiId model.hits
+                |> Maybe.withDefault []
+                |> List.map (\item -> { item | route = withProject project item.route })
+
+        total : Int
+        total =
+            Dict.get summary.apiId model.counts |> Maybe.withDefault 0
+
+        needle : String
+        needle =
+            String.trim model.query
+    in
+    if total > List.length rows then
+        rows
+            ++ [ { label = summary.name ++ "の一覧で「" ++ needle ++ "」を探す"
+                 , hint = String.fromInt total ++ " 件"
+                 , route = Route.Entries project summary.apiId [ ( "q", needle ) ]
+                 }
+               ]
+
+    else
+        rows
+
+
+{-| 今出ている候補。**切らない**（切ると、その先へ行く手段が無くなる）。
+面は 320px までで、それを超えるとスクロールする。
 -}
 shown : Slug -> List ContentTypeSummary -> Model -> List Item
 shown project types model =
-    results project types model |> List.take 12
+    results project types model
 
 
 {-| 選んでいる位置。候補の数に丸める（下に行き過ぎたら最後、上は先頭）。
