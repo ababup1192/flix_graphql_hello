@@ -99,6 +99,7 @@ type Msg
     | DatePickOpened
     | DatePickMsg Ui.DateTime.Msg
     | DatePickClosed
+    | EscapePressed
     | TodayKnown Int Int Int
     | FilterAdded
     | FilterRemoved Int
@@ -312,6 +313,18 @@ update ctx msg model =
 
         DatePickClosed ->
             ( { model | datePick = Nothing }, [] )
+
+        EscapePressed ->
+            -- 開いている物を 1 段閉じる。暦が出ていれば暦だけ、でなければ絞り込みの面。
+            case ( model.datePick, model.adding ) of
+                ( Just _, _ ) ->
+                    ( { model | datePick = Nothing }, [] )
+
+                ( Nothing, Just _ ) ->
+                    ( { model | adding = Nothing, candidates = [], candidateTotal = 0, candidateQuery = "" }, [] )
+
+                ( Nothing, Nothing ) ->
+                    ( model, [] )
 
         TodayKnown year month day ->
             ( { model | today = Just { year = year, month = month, day = day } }, [] )

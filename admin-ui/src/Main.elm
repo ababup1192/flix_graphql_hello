@@ -446,9 +446,15 @@ update msg model =
                 paletteUpdate Palette.Opened model
 
             else if key == "Escape" then
-                -- 開いている物を 1 段閉じる。パレットとメニューの後、画面にも配る
-                paletteUpdate Palette.Closed { model | menu = Shell.NoMenu }
-                    |> andThenUpdate escapeToPage
+                -- 開いている物を 1 段閉じる。**API プレビューは画面の上に重なる**ので先に。
+                case model.preview of
+                    Just _ ->
+                        ( { model | preview = Nothing }, Effect.none )
+
+                    Nothing ->
+                        -- パレットとメニューの後、画面にも配る
+                        paletteUpdate Palette.Closed { model | menu = Shell.NoMenu }
+                            |> andThenUpdate escapeToPage
 
             else
                 ( model, Effect.none )
@@ -882,7 +888,16 @@ escapeToPage model =
                     update (AuditMsg Audit.EscapePressed) model
 
                 EntriesPage _ ->
-                    update (EntriesMsg Entries.DatePickClosed) model
+                    update (EntriesMsg Entries.EscapePressed) model
+
+                EditorPage _ ->
+                    update (EditorMsg Editor.EscapePressed) model
+
+                BoardPage _ ->
+                    update (BoardMsg Board.EscapePressed) model
+
+                SchemaPage _ ->
+                    update (SchemaMsg Schema.EscapePressed) model
 
                 AccountPage _ ->
                     update (AccountMsg Account.EscapePressed) model

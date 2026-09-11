@@ -1,4 +1,4 @@
-module Page.Board exposing (Model, Msg, init, load, update, view)
+module Page.Board exposing (Model, Msg(..), init, load, update, view)
 
 {-| ボード。コンテンツを列に分けて並べる。
 
@@ -51,6 +51,7 @@ type Msg
     | Hovered
     | Confirmed
     | Cancelled
+    | EscapePressed
     | GotMoved (Result Api.Problem EntryRow)
     | GotTagLabels (Result Api.Problem EntryList)
 
@@ -200,6 +201,10 @@ update ctx msg model =
                     ( model, [] )
 
         Cancelled ->
+            ( { model | asking = Nothing }, [] )
+
+        EscapePressed ->
+            -- 開いている物を 1 段閉じる。ここで開くのは移動の確認だけ。
             ( { model | asking = Nothing }, [] )
 
         Confirmed ->

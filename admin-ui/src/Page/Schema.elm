@@ -1,4 +1,4 @@
-module Page.Schema exposing (Model, Msg, init, load, update, view)
+module Page.Schema exposing (Model, Msg(..), init, load, update, view)
 
 {-| API スキーマ（型の定義）。フィールドの追加・編集・並び替え・削除。
 
@@ -187,6 +187,7 @@ type Msg
     | IconChosen String
     | GotIcon (Result Api.Problem Model.ContentTypeSummary)
     | PanelClosed
+    | EscapePressed
     | NameTyped String
     | ApiIdTyped String
     | KindChosen String
@@ -296,6 +297,18 @@ update ctx msg model =
 
         PanelClosed ->
             ( { model | panel = Closed, confirmRemove = Nothing, errors = [] }, [] )
+
+        EscapePressed ->
+            -- 開いている物を 1 段閉じる。確認が出ていれば確認だけ、でなければ右の面。
+            case ( model.confirmSave, model.confirmRemove ) of
+                ( Just _, _ ) ->
+                    ( { model | confirmSave = Nothing }, [] )
+
+                ( Nothing, Just _ ) ->
+                    ( { model | confirmRemove = Nothing }, [] )
+
+                ( Nothing, Nothing ) ->
+                    ( { model | panel = Closed, errors = [] }, [] )
 
         NameTyped name ->
             ( { model | panel = mapAdding (\form -> { form | name = name, apiId = camelize name }) model }, [] )

@@ -174,6 +174,7 @@ type Msg
     | PublishOpened
     | UnpublishOpened
     | PublishClosed
+    | EscapePressed
     | CheckWanted
     | GotReport (Result Api.Problem Model.PublishReport)
     | PublishWanted
@@ -668,6 +669,9 @@ update ctx msg model =
 
         PublishClosed ->
             ( { model | asking = NotAsking, pendingPublish = False, report = Nothing, actionError = Nothing }, [] )
+
+        EscapePressed ->
+            escapeOne model
 
         CheckWanted ->
             publish { project = ctx.project } msg model
@@ -1573,6 +1577,36 @@ viewActionBar model detail =
                 [ text (publishText model (publishLabel model)) ]
             ]
         ]
+
+
+{-| Escape で**開いている物を 1 段だけ閉じる**。上に重なっている物から順に見る。
+
+WhyNot: 競合（相手が先に保存した）はここで閉じない。閉じると、どちらを残すかを
+選ばないまま書き続ける事になる。
+
+-}
+escapeOne : Model -> ( Model, List (Api.Call Msg) )
+escapeOne model =
+    if model.asking /= NotAsking then
+        ( { model | asking = NotAsking, pendingPublish = False, report = Nothing, actionError = Nothing }, [] )
+
+    else if model.picking /= Nothing || model.richPicking /= Nothing then
+        ( { model | picking = Nothing, richPicking = Nothing }, [] )
+
+    else if model.dateOpen /= Nothing then
+        ( { model | dateOpen = Nothing }, [] )
+
+    else if model.refOpen /= Nothing then
+        ( { model | refOpen = Nothing }, [] )
+
+    else if model.referrersOpen then
+        ( { model | referrersOpen = False }, [] )
+
+    else if model.schedulingOpen then
+        ( { model | schedulingOpen = False }, [] )
+
+    else
+        ( model, [] )
 
 
 {-| 公開する物が無い状態。公開中で、下書きに変更が無い（押しても何も変わらない）。
