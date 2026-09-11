@@ -29,6 +29,7 @@ import Route
 import Ui
 import Ui.DateTime
 import Ui.Icon as Icon
+import Ui.Stage
 
 
 type alias Model =
@@ -1032,7 +1033,7 @@ normalizeOrder order =
 -}
 stageOptions : List ( String, String )
 stageOptions =
-    [ ( "", "すべての状態" ), ( "DRAFT", "下書き" ), ( "PUBLISHED", "公開中" ), ( "CHANGED", "公開中 · 下書きあり" ) ]
+    ( "", "すべての状態" ) :: Ui.Stage.options
 
 
 {-| 並び替え。**見出しを押せない列**（狭い画面で畳まれる更新日時、列に出ていない
@@ -1124,20 +1125,7 @@ viewRow model detail row =
             [ span [ class "text-ink-faint" ] [ Icon.view Icon.entry ]
             , span [ class "truncate" ] [ text (EntryLabel.byField detail.fields row) ]
             ]
-        , stageChip row.stage
+        , Ui.Stage.chip row.stage
         , span [ class "font-mono text-[11px] text-ink-soft" ] [ text (String.replace "T" " " (String.left 16 row.updatedAt)) ]
         , text ""
         ]
-
-
-stageChip : String -> Html msg
-stageChip stage =
-    case stage of
-        "PUBLISHED" ->
-            Ui.chip Ui.toneOk "公開中"
-
-        "CHANGED" ->
-            Ui.chip Ui.toneWarn "公開中 · 下書きあり"
-
-        _ ->
-            Ui.chip Ui.toneNeutral "下書き"

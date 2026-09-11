@@ -180,19 +180,19 @@ try {
   await page.locator(".tt-tool[title='リンク']").click();
   await page.waitForTimeout(600);
   await page.waitForTimeout(1500);
-  if ((await page.locator(".tt-link-item").count()) > 0) {
+  if ((await page.locator("[data-link-row]").count()) > 0) {
     note("リンクの面にコンテンツの候補が出る");
     // **URL を打つと一番上に「URL」の見出しとその行が出る**（タブで切り替えない）
-    await page.locator(".tt-link-input").fill("https://example.com");
+    await page.locator("#link-pick-input").fill("https://example.com");
     await page.waitForTimeout(600);
-    const head = await page.locator(".tt-link-head").first().textContent();
-    const first = await page.locator(".tt-link-item").first().textContent();
+    const head = await page.locator("[role='dialog'] .text-\\[10px\\].font-semibold").first().textContent();
+    const first = await page.locator("[data-link-row]").first().textContent();
     if (head === "URL" && (first ?? "").includes("https://example.com")) note("URL を打つとその行が出る");
     else fail("URL を打つとその行が出る", `${head} / ${first ?? ""}`);
 
-    await page.locator(".tt-link-input").fill("");
+    await page.locator("#link-pick-input").fill("");
     await page.waitForTimeout(1200);
-    await page.locator(".tt-link-item").first().click();
+    await page.locator("[data-link-row]").first().click();
     await page.waitForTimeout(600);
     const linked = await page.locator("tiptap-editor .tt-body").innerHTML();
     if (linked.includes("data-entry-id")) note("コンテンツへのリンクが張れる");

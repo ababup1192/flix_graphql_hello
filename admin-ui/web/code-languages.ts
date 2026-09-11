@@ -9,6 +9,7 @@
 //   - バージョン違いは持たない（`python3` のような名前は作らない）
 //   - REPL の変種（`python-repl` など）と、極端に使われない物は入れない
 //   - Flix と Elm は入れる（この CMS 自身がそれで書かれている）
+//   - 古くても名前を聞く物（COBOL 世代の現役言語）までは入れる。歴史上の言語（Simula・Algol）は入れない
 
 import type { LanguageFn } from "highlight.js";
 
@@ -43,6 +44,14 @@ export const LANGUAGES: Language[] = [
   { id: "less", label: "Less", aliases: [], load: () => import("highlight.js/lib/languages/less") },
   { id: "graphql", label: "GraphQL", aliases: ["gql"], load: () => import("highlight.js/lib/languages/graphql") },
 
+  // テンプレート
+  // 別名は検索で当てるためだけに持つ（doc に入るのは id の 1 つ）。
+  // 「Jinja」「ERB」のように、人が別の名前で覚えている物ほど別名が要る。
+  { id: "django", label: "Django / Jinja", aliases: ["jinja", "jinja2", "j2"], load: () => import("highlight.js/lib/languages/django") },
+  { id: "twig", label: "Twig", aliases: [], load: () => import("highlight.js/lib/languages/twig") },
+  { id: "handlebars", label: "Handlebars", aliases: ["hbs", "mustache"], load: () => import("highlight.js/lib/languages/handlebars") },
+  { id: "erb", label: "ERB", aliases: ["eruby", "rhtml"], load: () => import("highlight.js/lib/languages/erb") },
+
   // データと設定
   { id: "json", label: "JSON", aliases: [], load: () => import("highlight.js/lib/languages/json") },
   { id: "yaml", label: "YAML", aliases: ["yml"], load: () => import("highlight.js/lib/languages/yaml") },
@@ -61,6 +70,8 @@ export const LANGUAGES: Language[] = [
   { id: "apache", label: "Apache", aliases: [], load: () => import("highlight.js/lib/languages/apache") },
   { id: "cmake", label: "CMake", aliases: [], load: () => import("highlight.js/lib/languages/cmake") },
   { id: "nix", label: "Nix", aliases: [], load: () => import("highlight.js/lib/languages/nix") },
+  { id: "puppet", label: "Puppet", aliases: ["pp"], load: () => import("highlight.js/lib/languages/puppet") },
+  // Terraform（HCL）は highlight.js が文法を持たない。third-party を足してまでは入れない。
 
   // データベース
   { id: "sql", label: "SQL", aliases: [], load: () => import("highlight.js/lib/languages/sql") },
@@ -91,6 +102,15 @@ export const LANGUAGES: Language[] = [
   { id: "haxe", label: "Haxe", aliases: [], load: () => import("highlight.js/lib/languages/haxe") },
   { id: "crystal", label: "Crystal", aliases: [], load: () => import("highlight.js/lib/languages/crystal") },
   { id: "vala", label: "Vala", aliases: [], load: () => import("highlight.js/lib/languages/vala") },
+  { id: "tcl", label: "Tcl", aliases: ["tk"], load: () => import("highlight.js/lib/languages/tcl") },
+  { id: "arduino", label: "Arduino", aliases: ["ino"], load: () => import("highlight.js/lib/languages/arduino") },
+
+  // 古いが現役で名前を聞く物
+  { id: "fortran", label: "Fortran", aliases: ["f90", "f95"], load: () => import("highlight.js/lib/languages/fortran") },
+  { id: "delphi", label: "Delphi / Pascal", aliases: ["pascal", "objectpascal", "objfpc"], load: () => import("highlight.js/lib/languages/delphi") },
+  { id: "vbnet", label: "Visual Basic", aliases: ["vb", "vb.net", "visual basic"], load: () => import("highlight.js/lib/languages/vbnet") },
+  { id: "ada", label: "Ada", aliases: [], load: () => import("highlight.js/lib/languages/ada") },
+  // COBOL は highlight.js が文法を持たない（`cos` は Caché ObjectScript で別物）。
 
   // 関数型
   { id: "haskell", label: "Haskell", aliases: ["hs"], load: () => import("highlight.js/lib/languages/haskell") },
@@ -116,6 +136,8 @@ export const LANGUAGES: Language[] = [
   { id: "vhdl", label: "VHDL", aliases: [], load: () => import("highlight.js/lib/languages/vhdl") },
   { id: "wasm", label: "WebAssembly", aliases: ["wat"], load: () => import("highlight.js/lib/languages/wasm") },
   { id: "x86asm", label: "アセンブリ（x86）", aliases: ["asm"], load: () => import("highlight.js/lib/languages/x86asm") },
+  { id: "armasm", label: "アセンブリ（ARM）", aliases: ["arm", "asm"], load: () => import("highlight.js/lib/languages/armasm") },
+  { id: "dos", label: "バッチファイル", aliases: ["bat", "batch", "cmd"], load: () => import("highlight.js/lib/languages/dos") },
   { id: "vim", label: "Vim script", aliases: [], load: () => import("highlight.js/lib/languages/vim") },
   { id: "awk", label: "AWK", aliases: [], load: () => import("highlight.js/lib/languages/awk") },
 ];

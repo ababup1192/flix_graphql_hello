@@ -375,3 +375,17 @@ fieldImpact :
     -> SelectionSet decodesTo RootQuery
 fieldImpact requiredArgs____ object____ =
     Object.selectionForCompositeField "fieldImpact" [ Argument.required "input" requiredArgs____.input Api.Admin.InputObject.encodeSchemaChangeInput ] object____ Basics.identity
+
+
+type alias LinkCardsRequiredArguments =
+    { urls : List String }
+
+
+{-| richText の linkCard の OGP を表から引く（取りに行かない）。編集画面が開き直した時に。表に無い url は落ちる
+-}
+linkCards :
+    LinkCardsRequiredArguments
+    -> SelectionSet decodesTo Api.Admin.Object.LinkCard
+    -> SelectionSet (List decodesTo) RootQuery
+linkCards requiredArgs____ object____ =
+    Object.selectionForCompositeField "linkCards" [ Argument.required "urls" requiredArgs____.urls (Encode.string |> Encode.list) ] object____ (Basics.identity >> Decode.list)

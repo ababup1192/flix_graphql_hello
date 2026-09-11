@@ -169,7 +169,7 @@ function scenarios(entry) {
         await page.keyboard.press("Meta+a");
         await page.locator("button[title='リンク']").click();
       },
-      surface: ".tt-link",
+      surface: "[role='dialog']",
     },
     {
       name: "編集: 表の大きさの献立",

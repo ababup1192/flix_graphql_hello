@@ -1,10 +1,11 @@
-module Page.Editor exposing (Model, Msg(..), init, load, previewOf, richInputId, takeRichUpload, title, unsaved, update, view)
+module Page.Editor exposing (Model, Msg(..), SaveState(..), autosaveDelay, autosaveTick, init, load, previewOf, richInputId, takeRichUpload, title, unsaved, update, view)
 
 {-| コンテンツの編集。
 
-**保存は人が押す。** 上の帯に「下書き保存」と「公開する」を並べ、押した時だけ書く
-（Strapi / Payload / WordPress と同じ）。自動保存にすると、書きかけの下書きが
-勝手に版になり、公開前の確認を挟む余地が無くなる。
+**下書きは入力が止まって数秒で自動保存する**（note と同じ。`autosaveDelay`）。上の帯の
+「下書き保存」と ⌘S は残す。自動で書くのは下書きだけで、公開は「公開する」を押した時だけ。
+新しいコンテンツは最初の保存を人に任せる（自動で作ると URL が `/new` のまま裏に実体ができ、
+読み直すと空の画面に戻る）。
 
 **公開は下書き保存の後**。公開を押した時に未保存が残っていれば、先に保存してから
 公開前の確認を開く（人に 2 回押させない）。
@@ -27,6 +28,7 @@ import Html.Attributes exposing (class, placeholder, value)
 import Html.Events exposing (onClick, onInput)
 import Json.Decode as D
 import Json.Encode as E
+import LinkPick
 import Loaded exposing (Loaded)
 import Model exposing (ContentTypeDetail, EntryRow, FieldDef, Slug)
 import Queries
@@ -35,6 +37,8 @@ import Time
 import Ui
 import Ui.DateTime
 import Ui.Icon as Icon
+import Ui.Modal as Modal
+import Ui.Stage
 
 
 type alias Model =
@@ -45,6 +49,14 @@ type alias Model =
     , values : Dict String Value
     , version : Int
     , save : SaveState
+
+    {- 入力を変えた回数。自動保存の待ちはこの番号を持って戻り、**今と同じ時だけ書く**
+       （Elm はタイマーを取り消せないので、古い物は自分で捨てる）。
+    -}
+    , autosaveSeq : Int
+
+    {- 最後に保存できた時刻。「保存済み 12:34」に出す。 -}
+    , savedAt : Maybe Time.Posix
     , conflict : Maybe EntryRow
     , errors : List ( String, String )
     , stage : String
@@ -124,6 +136,17 @@ type alias Model =
     , expanded : Maybe String
     , schedulesOpen : Bool
 
+    {- 開いているリンクの面。**面は Elm が描く**（`src/LinkPick.elm`）。TS は
+       `linkopen` で「開きたい」だけを投げ、決まった物を `linkchoice` で受け取る。
+    -}
+    , linkPanel : Maybe LinkPick.State
+
+    {- TS に返す物。`seq` が新しい時だけ TS が mark を掛ける。 -}
+    , linkChoice : Maybe LinkPick.Sent
+
+    {- 「もっと見る」を押して、まだ返っていない。 -}
+    , linkWaiting : Bool
+
     {- 本文からリンクを張る時の候補。型をまたいで探す。 -}
     , linkCandidates : List Model.LinkCandidate
 
@@ -134,6 +157,11 @@ type alias Model =
     , linkPage : Int
     , linkQuery : String
     , linkedEntries : List Model.LinkCandidate
+
+    {- 本文の外部リンクのカードの OGP。url で引く。開いている間は溜めたままにする
+       （消して貼り直した時にもう一度取りに行かない）。
+    -}
+    , linkCards : Dict String Model.LinkCard
     }
 
 
@@ -165,6 +193,8 @@ type Msg
     | GotEntry (Result Api.Problem (Maybe EntryRow))
     | FieldTyped String Value
     | SaveWanted
+    | AutosaveDue Int
+    | SavedAtKnown Time.Zone Time.Posix
     | GotSaved (Result Api.Problem EntryRow)
     | GotTheirs (Result Api.Problem (Maybe EntryRow))
     | KeepMine
@@ -175,6 +205,7 @@ type Msg
     | UnpublishOpened
     | PublishClosed
     | EscapePressed
+    | EnterPressed
     | CheckWanted
     | GotReport (Result Api.Problem Model.PublishReport)
     | PublishWanted
@@ -182,11 +213,21 @@ type Msg
     | GotPublished (Result Api.Problem EntryRow)
     | GotHistory (Result Api.Problem (Maybe (List Model.EntryVersion)))
     | GotReferrers (Result Api.Problem (List Model.Referrer))
-    | LinkSearched String
+    | LinkOpened String LinkPick.Open
+    | LinkTyped String
+    | LinkMoved Int
+    | LinkConfirmed
+    | LinkPicked LinkPick.Row
+    | LinkRemoved
+    | LinkClosed
     | LinkMoreAsked
     | GotLinkCandidates TypeMark (Result Api.Problem Model.EntryList)
     | LinkResolveAsked (List String)
     | GotLinkedEntries TypeMark (Result Api.Problem Model.EntryList)
+    | LinkCardLookupAsked (List String)
+    | LinkCardFetchAsked String
+    | GotLinkCards (List String) (Result Api.Problem (List Model.LinkCard))
+    | GotLinkCard String (Result Api.Problem Model.LinkCard)
     | GotSchedules (Result Api.Problem (List Model.ScheduleRow))
     | GotRefs String String (Result Api.Problem Model.EntryList)
     | GotRefLabels (Result Api.Problem Model.EntryList)
@@ -204,6 +245,7 @@ type Msg
     | PickerClosed
     | GotAssets (Result Api.Problem Model.AssetList)
     | AssetPicked String
+    | AssetConfirmed String
     | ScheduleOpened
     | TodayKnown Time.Zone Int Int Int
     | SchedulerMsg Ui.DateTime.Msg
@@ -237,6 +279,8 @@ init project apiId entryId =
     , values = Dict.empty
     , version = 0
     , save = Saved
+    , autosaveSeq = 0
+    , savedAt = Nothing
     , conflict = Nothing
     , errors = []
     , stage = "DRAFT"
@@ -268,11 +312,15 @@ init project apiId entryId =
     , historyOpen = False
     , expanded = Nothing
     , schedulesOpen = False
+    , linkPanel = Nothing
+    , linkChoice = Nothing
+    , linkWaiting = False
     , linkCandidates = []
     , linkTotal = 0
     , linkPage = 0
     , linkQuery = ""
     , linkedEntries = []
+    , linkCards = Dict.empty
     , richPicking = Nothing
     , richPicked = []
     , insert = Nothing
@@ -332,19 +380,10 @@ update ctx msg model =
             )
 
         RichInsertWanted ->
-            case model.richPicking of
-                Just apiId ->
-                    ( { model
-                        | richPicking = Nothing
-                        , richPicked = []
-                        , insertSeq = model.insertSeq + 1
-                        , insert = Just { seq = model.insertSeq + 1, apiId = apiId, assetIds = model.richPicked }
-                      }
-                    , []
-                    )
+            ( insertPicked model.richPicked model, [] )
 
-                Nothing ->
-                    ( model, [] )
+        EnterPressed ->
+            ( insertPicked model.richPicked model, [] )
 
         RichUploadStarted apiId started ->
             ( model
@@ -501,6 +540,14 @@ update ctx msg model =
                 Nothing ->
                     pickForField assetId model
 
+        AssetConfirmed assetId ->
+            case model.richPicking of
+                Just _ ->
+                    ( insertPicked [ assetId ] model, [] )
+
+                Nothing ->
+                    pickForField assetId model
+
         GotRefs apiId asked (Ok page) ->
             -- **今 打ってある文字への答だけを採る。** 先に投げた検索が後から返る事があり、
             -- そのまま入れると絞った候補が広い方に戻る（実際に戻った）。
@@ -600,6 +647,18 @@ update ctx msg model =
 
         SaveWanted ->
             save { project = ctx.project } model
+
+        AutosaveDue seq ->
+            -- 待っている間にまた打たれていれば、その番号の待ちが後で来る。
+            -- 送信中なら queued の印が終わった後にもう一度書く。失敗と競合は人の手に返す。
+            if seq == model.autosaveSeq && model.save == Dirty && model.entryId /= Nothing then
+                save { project = ctx.project } model
+
+            else
+                ( model, [] )
+
+        SavedAtKnown zone now ->
+            ( { model | savedAt = Just now, zone = zone }, [] )
 
         GotSaved (Ok row) ->
             let
@@ -713,22 +772,90 @@ update ctx msg model =
         ReferrersClosed ->
             ( { model | referrersOpen = False }, [] )
 
-        LinkSearched query ->
-            -- **型ごとに 1 本ずつ投げる**（CMS の一覧は型の中しか探せない）。⌘K と同じやり方。
-            -- 一度に全部は引かない。足りなければ「もっと見る」で次を引く。
-            ( { model | linkCandidates = [], linkTotal = 0, linkPage = 0, linkQuery = query }
+        LinkOpened apiId open ->
+            -- 同じボタンをもう一度押した時は閉じる（TS は「開きたい」しか投げない）。
+            case model.linkPanel of
+                Just panel ->
+                    ( closeLink panel model, [] )
+
+                Nothing ->
+                    -- **型ごとに 1 本ずつ投げる**（CMS の一覧は型の中しか探せない）。⌘K と同じやり方。
+                    -- 一度に全部は引かない。足りなければ「もっと見る」で次を引く。
+                    ( { model
+                        | linkPanel = Just { apiId = apiId, open = open, query = "", at = 0 }
+                        , linkCandidates = []
+                        , linkTotal = 0
+                        , linkPage = 0
+                        , linkQuery = ""
+                        , linkWaiting = False
+                      }
+                    , linkFetch ctx "" 0
+                    )
+
+        LinkTyped query ->
+            ( { model
+                | linkPanel = Maybe.map (\panel -> { panel | query = query, at = 0 }) model.linkPanel
+                , linkCandidates = []
+                , linkTotal = 0
+                , linkPage = 0
+                , linkQuery = query
+                , linkWaiting = False
+              }
             , linkFetch ctx query 0
             )
 
+        LinkMoved step ->
+            ( { model | linkPanel = Maybe.map (\panel -> { panel | at = LinkPick.move step panel.at (linkRows model panel) }) model.linkPanel }
+            , []
+            )
+
+        LinkConfirmed ->
+            case model.linkPanel of
+                Just panel ->
+                    case LinkPick.chosen panel.at (linkRows model panel) of
+                        Just choice ->
+                            ( sendLink choice panel model, [] )
+
+                        Nothing ->
+                            ( model, [] )
+
+                Nothing ->
+                    ( model, [] )
+
+        LinkPicked row ->
+            case model.linkPanel of
+                Just panel ->
+                    ( sendLink (LinkPick.chosenRow row) panel model, [] )
+
+                Nothing ->
+                    ( model, [] )
+
+        LinkRemoved ->
+            case model.linkPanel of
+                Just panel ->
+                    ( sendLink { href = "", entryId = "", label = "", remove = True, cancel = False } panel model, [] )
+
+                Nothing ->
+                    ( model, [] )
+
+        LinkClosed ->
+            case model.linkPanel of
+                Just panel ->
+                    ( closeLink panel model, [] )
+
+                Nothing ->
+                    ( model, [] )
+
         LinkMoreAsked ->
             -- 面が出しているのは引いた分だけなので、続きは引き直して後ろに足す。
-            ( { model | linkPage = model.linkPage + 1 }
+            ( { model | linkPage = model.linkPage + 1, linkWaiting = True }
             , linkFetch ctx model.linkQuery (model.linkPage + 1)
             )
 
         GotLinkCandidates mark (Ok page) ->
             ( { model
-                | linkCandidates =
+                | linkWaiting = False
+                , linkCandidates =
                     model.linkCandidates
                         ++ List.map (\row -> { id = row.id, title = EntryLabel.forRow row, typeName = mark.name, typeIcon = mark.icon, stage = row.stage, path = row.path }) page.nodes
 
@@ -744,7 +871,7 @@ update ctx msg model =
             )
 
         GotLinkCandidates _ (Err _) ->
-            ( model, [] )
+            ( { model | linkWaiting = False }, [] )
 
         LinkResolveAsked ids ->
             -- **本文が指しているコンテンツを引き直す。** 面とツールチップで「今どこを
@@ -779,6 +906,40 @@ update ctx msg model =
 
         GotLinkedEntries _ (Err _) ->
             ( model, [] )
+
+        LinkCardLookupAsked urls ->
+            -- **開いた時に doc に居るカードは表から引く。** 表に無い物だけ、返ってから取りに行く。
+            if List.isEmpty urls then
+                ( model, [] )
+
+            else
+                ( model, [ Api.call (\id -> Queries.linkCards id ctx.project urls) (GotLinkCards urls) ] )
+
+        LinkCardFetchAsked url ->
+            ( model, [ fetchLinkCard ctx.project url ] )
+
+        GotLinkCards urls (Ok cards) ->
+            let
+                known : Dict String Model.LinkCard
+                known =
+                    List.foldl (\card -> Dict.insert card.url card) model.linkCards cards
+
+                -- 表に無い、または行はあるがまだ取っていない物
+                missing : List String
+                missing =
+                    List.filter (\url -> Dict.get url known |> Maybe.map (\card -> card.fetchedAt == Nothing && card.error == Nothing) |> Maybe.withDefault True) urls
+            in
+            ( { model | linkCards = known }, List.map (fetchLinkCard ctx.project) missing )
+
+        GotLinkCards urls (Err problem) ->
+            -- 引けなかった時も「…」のままにしない。理由をカードに出す。
+            ( { model | linkCards = List.foldl (\url -> Dict.insert url (failedCard url problem)) model.linkCards urls }, [] )
+
+        GotLinkCard _ (Ok card) ->
+            ( { model | linkCards = Dict.insert card.url card model.linkCards }, [] )
+
+        GotLinkCard url (Err problem) ->
+            ( { model | linkCards = Dict.insert url (failedCard url problem) model.linkCards }, [] )
 
         GotSchedules result ->
             ( { model | schedules = Result.withDefault [] result }, [] )
@@ -855,17 +1016,38 @@ pickForField : String -> Model -> ( Model, List (Api.Call Msg) )
 pickForField assetId model =
     case model.picking of
         Just apiId ->
-            ( { model
-                | picking = Nothing
-                , touched = True
-                , save = markDirty model.save
-                , values = Dict.insert apiId (pickedAsset model apiId assetId) model.values
-              }
+            ( dirty
+                { model
+                    | picking = Nothing
+                    , touched = True
+                    , values = Dict.insert apiId (pickedAsset model apiId assetId) model.values
+                }
             , []
             )
 
         Nothing ->
             ( model, [] )
+
+
+{-| 選んだメディアを本文に入れる指示を出し、ピッカーを閉じる。
+
+WhyNot: 0 枚では閉じない。ボタンは押せなくしてあるが Enter は画面のどこからでも届き、
+空の gallery が本文に入る。
+
+-}
+insertPicked : List String -> Model -> Model
+insertPicked assetIds model =
+    case ( model.richPicking, assetIds ) of
+        ( Just apiId, _ :: _ ) ->
+            { model
+                | richPicking = Nothing
+                , richPicked = []
+                , insertSeq = model.insertSeq + 1
+                , insert = Just { seq = model.insertSeq + 1, apiId = apiId, assetIds = assetIds }
+            }
+
+        _ ->
+            model
 
 
 togglePicked : String -> List String -> List String
@@ -1022,6 +1204,13 @@ save ctx model =
             ( model, [] )
 
 
+{-| 未保存にして、自動保存の待ちの番号を進める。親は番号が進んだのを見て待ちを出す。
+-}
+dirty : Model -> Model
+dirty model =
+    { model | save = markDirty model.save, autosaveSeq = model.autosaveSeq + 1 }
+
+
 markDirty : SaveState -> SaveState
 markDirty state =
     case state of
@@ -1030,6 +1219,21 @@ markDirty state =
 
         _ ->
             Dirty
+
+
+{-| 入力が止まってから自動保存までの間（ミリ秒）。note の 10 秒より短くする
+（長いと「閉じたら消えた」の窓が広い）。
+-}
+autosaveDelay : Float
+autosaveDelay =
+    3000
+
+
+{-| 自動保存の待ちの番号。親はこれが進んだ時に `Effect.Autosave` を出す。
+-}
+autosaveTick : Model -> Int
+autosaveTick model =
+    model.autosaveSeq
 
 
 {-| 画面の値を CMS に送る形にする。種類ごとの写しは `FieldValue` が持つ。
@@ -1402,16 +1606,16 @@ sliceInt from to text =
     String.toInt (String.slice from to text)
 
 
-{-| 1 つのフィールドの値を書く。**書いたら未保存にする**（保存は人が押す）。
+{-| 1 つのフィールドの値を書く。**書いたら未保存にし、自動保存の待ちを始め直す。**
 -}
 setField : String -> Value -> Model -> Model
 setField apiId typed model =
-    { model
-        | touched = True
-        , values = Dict.insert apiId typed model.values
-        , save = markDirty model.save
-        , errors = List.filter (\( key, _ ) -> key /= apiId) model.errors
-    }
+    dirty
+        { model
+            | touched = True
+            , values = Dict.insert apiId typed model.values
+            , errors = List.filter (\( key, _ ) -> key /= apiId) model.errors
+        }
 
 
 {-| 型と中身が揃ったら、画面の値を組み直す。
@@ -1483,7 +1687,7 @@ view args model =
         Loaded.view
             { loading = Ui.loadingCard
             , missing = Ui.messageCard "このコンテンツはありません" [ Ui.note [ text "消されたか、URL が違います。" ] ]
-            , failed = \message -> Ui.messageCard "読み込めませんでした" [ span [ class "text-xs text-[color:var(--color-bad)]" ] [ text message ] ]
+            , failed = Ui.failedCard
             , present = viewForm args model
             }
             model.contentType
@@ -1516,6 +1720,12 @@ viewForm args model detail =
                 ]
                 []
             ]
+        , case model.linkPanel of
+            Just panel ->
+                viewLinkPanel model panel
+
+            Nothing ->
+                text ""
         , viewReferrerDrawer args model
         , viewHistoryDrawer model
         , viewScheduleDrawer model
@@ -1554,8 +1764,8 @@ viewActionBar model detail =
             [ span [ class "truncate text-[15px] font-semibold text-ink", Html.Attributes.title (title model) ] [ text (title model) ]
             , span [ class "truncate font-mono text-[11px] text-ink-faint" ] [ text ("/" ++ detail.apiId) ]
             ]
-        , stageChip model.stage
-        , span [ class "text-xs text-ink-soft" ] [ text (saveText model.save) ]
+        , Ui.Stage.chip model.stage
+        , span [ class "text-xs text-ink-soft" ] [ text (saveText model) ]
         , div [ class "ml-auto flex items-center gap-2" ]
             [ case model.entryId of
                 Just _ ->
@@ -1587,6 +1797,16 @@ WhyNot: 競合（相手が先に保存した）はここで閉じない。閉じ
 -}
 escapeOne : Model -> ( Model, List (Api.Call Msg) )
 escapeOne model =
+    case model.linkPanel of
+        Just panel ->
+            ( closeLink panel model, [] )
+
+        Nothing ->
+            escapeRest model
+
+
+escapeRest : Model -> ( Model, List (Api.Call Msg) )
+escapeRest model =
     if model.asking /= NotAsking then
         ( { model | asking = NotAsking, pendingPublish = False, report = Nothing, actionError = Nothing }, [] )
 
@@ -1624,64 +1844,45 @@ nothingToPublish model =
 -}
 viewPublishDialog : Model -> Html Msg
 viewPublishDialog model =
-    Ui.overlay PublishClosed
-        [ class "items-center" ]
-        [ Ui.card
-            [ class "flex w-[440px] flex-col gap-3 p-5", keepOpen ]
-            [ Ui.subheading (publishLabel model)
-            , span [ class "truncate text-[13px] font-medium text-ink", Html.Attributes.title (title model) ] [ text (title model) ]
-            , case model.report of
-                Just report ->
-                    viewReport model report
-
-                Nothing ->
-                    Ui.note [ text "確認中…" ]
-            , case model.report of
-                Just report ->
-                    if report.ok then
-                        Ui.note
-                            [ text
-                                (if model.stage == "DRAFT" then
-                                    "公開すると、公開サイトから見えるようになります。"
-
-                                 else
-                                    -- **もう公開されている物に「見えるようになります」と言わない。**
-                                    -- 変わるのは公開サイトに出る内容の方。
-                                    "公開サイトに出ている内容が、今の下書きの内容に入れ替わります。"
-                                )
-                            ]
-
-                    else
-                        Ui.note [ text "直してから、もう一度確認してください。" ]
-
-                Nothing ->
-                    text ""
-            , viewActionError model
-            , div [ class "flex gap-2" ]
-                [ viewPublishConfirm model
-                , Ui.ghostButton [ onClick PublishClosed ] [ text "キャンセル" ]
+    -- 断られた理由（`actionError`）は確認の中に出す（上の帯に出しても確認の下に隠れる）。
+    Modal.dialog
+        { title = publishLabel model
+        , onClose = PublishClosed
+        , error = model.actionError
+        , footer =
+            div [ class "flex justify-end gap-2" ]
+                [ Ui.ghostButton [ onClick PublishClosed ] [ text "キャンセル" ]
+                , viewPublishConfirm model
                 ]
-            ]
+        }
+        [ span [ class "truncate text-[13px] font-medium text-ink", Html.Attributes.title (title model) ] [ text (title model) ]
+        , case model.report of
+            Just report ->
+                viewReport model report
+
+            Nothing ->
+                Ui.note [ text "確認中…" ]
+        , case model.report of
+            Just report ->
+                if report.ok then
+                    Ui.note
+                        [ text
+                            (if model.stage == "DRAFT" then
+                                "公開すると、公開サイトから見えるようになります。"
+
+                             else
+                                -- **もう公開されている物に「見えるようになります」と言わない。**
+                                -- 変わるのは公開サイトに出る内容の方。
+                                "公開サイトに出ている内容が、今の下書きの内容に入れ替わります。"
+                            )
+                        ]
+
+                else
+                    Ui.note [ text "直してから、もう一度確認してください。" ]
+
+            Nothing ->
+                text ""
         ]
-
-
-{-| 断られた理由。**確認の中に出す**（上の帯に出しても確認の下に隠れる）。
--}
-viewActionError : Model -> Html Msg
-viewActionError model =
-    case model.actionError of
-        Just message ->
-            Ui.callout Ui.toneBad [ class "gap-1 p-3 text-xs" ] [ text message ]
-
-        Nothing ->
-            text ""
-
-
-{-| 覆いの中。**押しても閉じない**（覆いそのものを押した時だけ閉じる）。
--}
-keepOpen : Html.Attribute Msg
-keepOpen =
-    Html.Events.stopPropagationOn "click" (D.succeed ( Ignored, True ))
 
 
 {-| 戻すの確認。
@@ -1692,21 +1893,22 @@ keepOpen =
 -}
 viewRestoreDialog : Model -> Model.EntryVersion -> Html Msg
 viewRestoreDialog model version =
-    Ui.overlay PublishClosed
-        [ class "items-center" ]
-        [ Ui.card
-            [ class "flex w-[440px] flex-col gap-3 p-5", keepOpen ]
-            [ Ui.subheading ("v" ++ String.fromInt version.version ++ " の内容に戻しますか")
-            , span [ class "text-[13px] text-ink-soft" ]
-                [ text (byText version ++ "（" ++ Ui.DateTime.formatLocal model.zone version.createdAt ++ "）") ]
-            , Ui.note [ text "今の下書きもバージョンとして残るので、戻した後でここから元に戻せます。公開中の内容は変わりません。" ]
-            , viewActionError model
-            , div [ class "flex gap-2" ]
-                [ Ui.button [ onClick RestoreWanted, Html.Attributes.disabled model.publishing ]
-                    [ text (publishText model "戻す") ]
-                , Ui.ghostButton [ onClick PublishClosed ] [ text "キャンセル" ]
-                ]
-            ]
+    Modal.dialog
+        { title = "v" ++ String.fromInt version.version ++ " の内容に戻しますか"
+        , onClose = PublishClosed
+        , error = model.actionError
+        , footer =
+            Modal.actions
+                { confirm = "戻す"
+                , danger = False
+                , onConfirm = RestoreWanted
+                , onCancel = PublishClosed
+                , busy = model.publishing
+                }
+        }
+        [ span [ class "text-[13px] text-ink-soft" ]
+            [ text (byText version ++ "（" ++ Ui.DateTime.formatLocal model.zone version.createdAt ++ "）") ]
+        , Ui.note [ text "今の下書きもバージョンとして残るので、戻した後でここから元に戻せます。公開中の内容は変わりません。" ]
         ]
 
 
@@ -1714,20 +1916,21 @@ viewRestoreDialog model version =
 -}
 viewUnpublishDialog : Model -> Html Msg
 viewUnpublishDialog model =
-    Ui.overlay PublishClosed
-        [ class "items-center" ]
-        [ Ui.card
-            [ class "flex w-[440px] flex-col gap-3 p-5", keepOpen ]
-            [ Ui.subheading "このコンテンツの公開を終えますか"
-            , span [ class "truncate text-[13px] font-medium text-ink", Html.Attributes.title (title model) ] [ text (title model) ]
-            , Ui.note [ text "公開サイトから見えなくなります。下書きは残るので、また公開できます。" ]
-            , viewActionError model
-            , div [ class "flex gap-2" ]
-                [ Ui.button [ onClick UnpublishWanted, Html.Attributes.disabled model.publishing ]
-                    [ text (publishText model "公開を終える") ]
-                , Ui.ghostButton [ onClick PublishClosed ] [ text "キャンセル" ]
-                ]
-            ]
+    Modal.dialog
+        { title = "このコンテンツの公開を終えますか"
+        , onClose = PublishClosed
+        , error = model.actionError
+        , footer =
+            Modal.actions
+                { confirm = "公開を終える"
+                , danger = True
+                , onConfirm = UnpublishWanted
+                , onCancel = PublishClosed
+                , busy = model.publishing
+                }
+        }
+        [ span [ class "truncate text-[13px] font-medium text-ink", Html.Attributes.title (title model) ] [ text (title model) ]
+        , Ui.note [ text "公開サイトから見えなくなります。下書きは残るので、また公開できます。" ]
         ]
 
 
@@ -1751,7 +1954,7 @@ viewRail : { types : List Model.ContentTypeSummary } -> Model -> Html Msg
 viewRail args model =
     div [ class "flex w-64 shrink-0 flex-col gap-4 border-l border-edge pl-5" ]
         [ span [ class "text-[11px] font-semibold tracking-wide text-ink-soft" ] [ text "公開" ]
-        , stageChip model.stage
+        , Ui.Stage.chip model.stage
         , case model.entryId of
             Nothing ->
                 Ui.note [ text "保存すると公開できます。" ]
@@ -2252,19 +2455,6 @@ fieldNameOf model path =
             Nothing
 
 
-stageChip : String -> Html msg
-stageChip stage =
-    case stage of
-        "PUBLISHED" ->
-            Ui.chip Ui.toneOk "公開中"
-
-        "CHANGED" ->
-            Ui.chip Ui.toneWarn "公開中 · 下書きあり"
-
-        _ ->
-            Ui.chip Ui.toneNeutral "下書き"
-
-
 publishText : Model -> String -> String
 publishText model label =
     if model.publishing then
@@ -2288,11 +2478,16 @@ viewConflict theirs =
         ]
 
 
-saveText : SaveState -> String
-saveText state =
-    case state of
+saveText : Model -> String
+saveText model =
+    case model.save of
         Saved ->
-            "保存済み"
+            case model.savedAt of
+                Just at ->
+                    "保存済み " ++ Ui.DateTime.pad 2 (Time.toHour model.zone at) ++ ":" ++ Ui.DateTime.pad 2 (Time.toMinute model.zone at)
+
+                Nothing ->
+                    "保存済み"
 
         Dirty ->
             "未保存"
@@ -2468,78 +2663,57 @@ viewRich model field current =
         big =
             model.expanded == Just field.apiId
     in
-    div
-        [ class
-            (if big then
-                "fixed inset-0 z-(--z-drawer) flex flex-col gap-2 bg-app p-4"
-
-             else
-                "flex flex-col gap-1.5"
-            )
-        ]
-        [ div
-            [ class "flex items-center gap-2"
-
-            -- 帯も本文と同じ幅に揃える（揃えないと畳む印だけが画面の端に離れる）。
-            , Html.Attributes.classList [ ( "mx-auto w-full max-w-[53rem]", big ) ]
-            ]
-            [ if big then
-                span [ class "truncate text-[13px] font-semibold text-ink" ] [ text field.name ]
-
-              else
-                text ""
+    -- 広げた時も畳んだ時も「外の div > [帯, エディタ]」の形を変えない
+    -- （形が変わると `tiptap-editor` が作り直され、取り消しの履歴が消える）。
+    if big then
+        Modal.fullscreen
+            { title = field.name
 
             -- **広げている間も保存できるようにする。** 覆いが上の帯を隠すので、
             -- 置かないと書いた物を保存するのに一度畳む事になる（実際に押せなかった）。
-            , if big then
-                span [ class "ml-auto text-xs text-ink-soft" ] [ text (saveText model.save) ]
-
-              else
-                text ""
-            , if big then
-                Ui.ghostButton
+            , trailing =
+                [ span [ class "ml-auto text-xs text-ink-soft" ] [ text (saveText model) ]
+                , Ui.ghostButton
                     [ onClick SaveWanted
                     , Html.Attributes.disabled (not (unsaved model))
                     , Html.Attributes.title "Command + S"
                     ]
                     [ text "下書き保存" ]
-
-              else
-                text ""
-            , Html.button
-                [ class "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-soft hover:bg-well hover:text-ink"
-
-                -- 広げている時は左隣の保存が右へ寄せているので、ここで 2 度寄せない
-                -- （寄せると保存だけが真ん中に取り残される）。
-                , Html.Attributes.classList [ ( "ml-auto", not big ) ]
-                , onClick
-                    (ExpandToggled
-                        (if big then
-                            Nothing
-
-                         else
-                            Just field.apiId
-                        )
-                    )
-                , Html.Attributes.title
-                    (if big then
-                        "元の大きさに戻す"
-
-                     else
-                        "広げて書く"
-                    )
                 ]
-                [ Icon.view
-                    (if big then
-                        Icon.collapse
+            , onClose = ExpandToggled Nothing
 
-                     else
-                        Icon.expand
-                    )
-                ]
+            -- 帯も本文と同じ幅に揃える（揃えないと畳む印だけが画面の端に離れる）。
+            , contentWidth = "max-w-[53rem]"
+            }
+            [ richEditor big model field.apiId current ]
+
+    else
+        div [ class "flex flex-col gap-1.5" ]
+            [ div [ class "flex items-center gap-2" ]
+                [ Ui.iconButton { title = "広げて書く", onClick = ExpandToggled (Just field.apiId) } [ class "ml-auto" ] Icon.expand ]
+            , richEditor big model field.apiId current
             ]
-        , richEditor big model field.apiId current
-        ]
+
+
+{-| リンクの面。**`tiptap-editor` の兄弟として描く**（custom element の中に Elm が
+子を書くと、TS が組んだツールバーと本体の箱を仮想 DOM が壊す）。
+-}
+viewLinkPanel : Model -> LinkPick.State -> Html Msg
+viewLinkPanel model panel =
+    LinkPick.view
+        { onInput = LinkTyped
+        , onMove = LinkMoved
+        , onConfirm = LinkConfirmed
+        , onPick = LinkPicked
+        , onRemove = LinkRemoved
+        , onMore = LinkMoreAsked
+        , onClose = LinkClosed
+        , candidates = model.linkCandidates
+        , linked = model.linkedEntries
+        , total = model.linkTotal
+        , waiting = model.linkWaiting
+        }
+        panel
 
 
 {-| リッチエディタ。TipTap を包んだ custom element に doc を渡し、変わったら受け取る。
@@ -2553,13 +2727,8 @@ richEditor big model apiId current =
         [ Html.Attributes.classList [ ( "is-big", big ) ]
         , Html.Attributes.attribute "doc" (FieldValue.toDocJson current)
 
-        -- **リンク先の候補は Elm が引く。** エディタは API を知らない
-        -- （URL もヘッダも `js/api.ts` と Elm が持つ）。打った文字が `linksearch` で来て、
-        -- 候補を属性で返す。
-        , Html.Attributes.attribute "entries" (E.encode 0 (E.list encodeCandidate model.linkCandidates))
-
-        -- **本文が指しているコンテンツ。** 候補（探した結果）とは別で、既にかかっている
-        -- リンクの指し先を出すのに使う。
+        -- **本文が指しているコンテンツ。** 乗せた時の吹き出しに出す（面は Elm が描くので
+        -- 面には渡さない）。
         , Html.Attributes.attribute "linked" (E.encode 0 (E.list encodeCandidate model.linkedEntries))
 
         -- **本文の画像は `assetId` しか持たない。** 描くのに要る URL はここで渡す。
@@ -2569,10 +2738,18 @@ richEditor big model apiId current =
         , Html.Attributes.attribute "resolved"
             (E.encode 0 (E.list encodeResolved (List.filter (\done -> done.apiId == apiId) model.resolved)))
         , Html.Events.on "docchange" (D.map (FieldValue.Rich >> FieldTyped apiId) (D.field "detail" D.string))
-        , Html.Attributes.attribute "entriestotal" (String.fromInt model.linkTotal)
-        , Html.Events.on "linksearch" (D.map LinkSearched (D.field "detail" D.string))
-        , Html.Events.on "linkmore" (D.succeed LinkMoreAsked)
         , Html.Events.on "linkresolve" (D.map LinkResolveAsked (D.field "detail" (D.list D.string)))
+
+        -- **リンクの面は Elm が描く**（`src/LinkPick.elm`）。TS は「開きたい」だけを
+        -- `linkopen` で投げ、決まった物を `linkchoice` の property で受け取る。
+        , Html.Events.on "linkopen" (D.map (LinkOpened apiId) (D.field "detail" linkOpenDecoder))
+        , Html.Attributes.property "linkchoice" (encodeLinkChoice apiId model.linkChoice)
+
+        -- **外部リンクのカードの OGP も Elm が引く。** 開いた時の分は `linkcardlookup`（表から）、
+        -- 貼った瞬間の 1 つは `linkcardfetch`（その場で取る）。答えは `cards` の属性で返す。
+        , Html.Attributes.attribute "cards" (E.encode 0 (E.list encodeLinkCard (Dict.values model.linkCards)))
+        , Html.Events.on "linkcardlookup" (D.map LinkCardLookupAsked (D.field "detail" (D.list D.string)))
+        , Html.Events.on "linkcardfetch" (D.map LinkCardFetchAsked (D.field "detail" D.string))
         , Html.Events.on "mediapick" (D.succeed (RichPickerOpened apiId))
         , Html.Events.on "mediaupload" (D.map (RichUploadStarted apiId) (D.field "detail" startedDecoder))
         ]
@@ -2640,6 +2817,30 @@ linkCandidatesPerType =
     20
 
 
+{-| 面が今出している行。上下の移動と Enter で同じ物を見る。
+-}
+linkRows : Model -> LinkPick.State -> List LinkPick.Row
+linkRows model panel =
+    LinkPick.rows panel.open.mode panel.query model.linkCandidates
+
+
+{-| 選んだ物を TS に渡し、面を畳む。
+-}
+sendLink : LinkPick.Choice -> LinkPick.State -> Model -> Model
+sendLink choice panel model =
+    { model
+        | linkPanel = Nothing
+        , linkChoice = Just { apiId = panel.apiId, seq = panel.open.seq, choice = choice }
+    }
+
+
+{-| 何も選ばずに畳む。**畳んだ事も TS に伝える**（本文へ focus を戻すのは TS の仕事）。
+-}
+closeLink : LinkPick.State -> Model -> Model
+closeLink panel model =
+    sendLink { href = "", entryId = "", label = "", remove = False, cancel = True } panel model
+
+
 {-| リンクの候補を型ごとに引く。`page` は 0 から数えた回数。
 -}
 linkFetch : { project : Slug, types : List Model.ContentTypeSummary } -> String -> Int -> List (Api.Call Msg)
@@ -2665,6 +2866,89 @@ linkFetch ctx query page =
             )
 
 
+fetchLinkCard : Slug -> String -> Api.Call Msg
+fetchLinkCard project url =
+    Api.call (\id -> Queries.fetchLinkCard id project url) (GotLinkCard url)
+
+
+{-| 取りに行けなかった時のカード。理由は API の失敗の文をそのまま出す。
+-}
+failedCard : String -> Api.Problem -> Model.LinkCard
+failedCard url problem =
+    { url = url
+    , title = Nothing
+    , description = Nothing
+    , imageUrl = Nothing
+    , siteName = Nothing
+    , fetchedAt = Nothing
+    , error = Just (Api.problemToText problem).message
+    }
+
+
+encodeLinkCard : Model.LinkCard -> E.Value
+encodeLinkCard card =
+    let
+        optional : Maybe String -> E.Value
+        optional value =
+            value |> Maybe.map E.string |> Maybe.withDefault E.null
+    in
+    E.object
+        [ ( "url", E.string card.url )
+        , ( "title", optional card.title )
+        , ( "description", optional card.description )
+        , ( "imageUrl", optional card.imageUrl )
+        , ( "siteName", optional card.siteName )
+        , ( "fetchedAt", optional card.fetchedAt )
+        , ( "error", optional card.error )
+        ]
+
+
+{-| TS が投げる「リンクの面を開きたい」。押した物の矩形と、その時の画面の大きさが付く
+（面の置き場所は Elm が決める）。
+-}
+linkOpenDecoder : D.Decoder LinkPick.Open
+linkOpenDecoder =
+    D.map5 (\seq mode href entryId at -> { seq = seq, mode = LinkPick.modeFromString mode, href = href, entryId = entryId, at = at })
+        (D.field "seq" D.int)
+        (D.field "mode" D.string)
+        (D.oneOf [ D.field "href" D.string, D.succeed "" ])
+        (D.oneOf [ D.field "entryId" (D.nullable D.string), D.succeed Nothing ])
+        (D.field "rect" anchorDecoder)
+
+
+anchorDecoder : D.Decoder Modal.Anchor
+anchorDecoder =
+    D.map5 (\left top bottom spaceWidth spaceHeight -> { left = left, top = top, bottom = bottom, spaceWidth = spaceWidth, spaceHeight = spaceHeight })
+        (D.field "left" D.float)
+        (D.field "top" D.float)
+        (D.field "bottom" D.float)
+        (D.field "spaceWidth" D.float)
+        (D.field "spaceHeight" D.float)
+
+
+{-| 決まった物。**同じ `tiptap-editor` にだけ渡す**（本文の項目は 1 画面に何本もある）。
+-}
+encodeLinkChoice : String -> Maybe LinkPick.Sent -> E.Value
+encodeLinkChoice apiId sent =
+    case sent of
+        Just found ->
+            if found.apiId == apiId then
+                E.object
+                    [ ( "seq", E.int found.seq )
+                    , ( "href", E.string found.choice.href )
+                    , ( "entryId", E.string found.choice.entryId )
+                    , ( "label", E.string found.choice.label )
+                    , ( "remove", E.bool found.choice.remove )
+                    , ( "cancel", E.bool found.choice.cancel )
+                    ]
+
+            else
+                E.null
+
+        Nothing ->
+            E.null
+
+
 encodeCandidate : Model.LinkCandidate -> E.Value
 encodeCandidate candidate =
     E.object
@@ -2675,7 +2959,10 @@ encodeCandidate candidate =
         -- 行の頭のアイコン。**`<svg>` の中身をそのまま渡す**（Web Component は Elm の
         -- Svg を受け取れない）。中身は `Ui.Icon` の表から出た物だけ。
         , ( "icon", E.string (Icon.markupByName candidate.typeIcon) )
-        , ( "stage", E.string candidate.stage )
+
+        -- 公開の状態は**語にして渡す**。TS 側に `case stage of` を置くと
+        -- `Ui.Stage` と二重になり、言葉が食い違う。
+        , ( "stageName", E.string (Ui.Stage.name candidate.stage) )
         , ( "path", candidate.path |> Maybe.map E.string |> Maybe.withDefault E.null )
         ]
 
@@ -3075,6 +3362,12 @@ assetOf model assetId =
 
 
 {-| メディアのピッカー。モーダルは 1 段（仕様 6.1）。
+
+**スクロールするのは一覧だけ。** 説明と決定の帯は面の上下に留まる。
+
+WhyNot: 決定のボタンを一覧の下に流さない。メディアが増えると、選んでから
+一番下まで送らないと押せない（WordPress / microCMS / Contentful は帯を固定している）。
+
 -}
 viewPicker : Model -> Html Msg
 viewPicker model =
@@ -3087,17 +3380,39 @@ viewPicker model =
                 many : Bool
                 many =
                     model.richPicking /= Nothing
-            in
-            Ui.overlay PickerClosed
-                [ class "items-center" ]
-                [ Ui.card [ class "flex max-h-[70vh] w-[760px] flex-col gap-3 overflow-auto p-5", keepOpen ]
-                    [ Ui.subheading "メディアから選ぶ"
-                    , if many then
-                        Ui.note [ text "2 枚以上えらぶと、本文には横並び（gallery）で入ります。" ]
 
-                      else
-                        text ""
-                    , Loaded.view
+                count : Int
+                count =
+                    List.length model.richPicked
+            in
+            Modal.sheet
+                { head =
+                    [ div [ class "flex flex-col gap-2 px-5 pt-5 pb-3" ]
+                        [ Ui.subheading "メディアから選ぶ"
+                        , if many then
+                            Ui.note [ text "2 枚以上選ぶと、本文には横並び（gallery）で入ります。ダブルクリックで 1 枚だけをすぐに挿入できます。" ]
+
+                          else
+                            text ""
+                        ]
+                    ]
+                , onClose = PickerClosed
+                , footer =
+                    if many then
+                        [ Ui.button
+                            [ onClick RichInsertWanted
+                            , Html.Attributes.disabled (count == 0)
+                            ]
+                            [ text (String.fromInt count ++ " 枚を本文に挿入") ]
+                        , Ui.ghostButton [ onClick PickerClosed ] [ text "閉じる" ]
+                        ]
+
+                    else
+                        [ Ui.ghostButton [ onClick PickerClosed ] [ text "閉じる" ] ]
+                , width = "w-[760px]"
+                }
+                [ div [ class "px-5 py-3" ]
+                    [ Loaded.view
                         { loading = Ui.loadingCard
                         , missing = Ui.note [ text "メディアがありません。「メディア」の画面からアップロードしてください。" ]
                         , failed = \message -> span [ class "text-xs text-[color:var(--color-bad)]" ] [ text message ]
@@ -3111,22 +3426,16 @@ viewPicker model =
                                         (List.map (viewPickable model.richPicked) (allAssets model))
                         }
                         model.assets
-                    , if many then
-                        div [ class "flex items-center gap-3" ]
-                            [ Ui.button
-                                [ onClick RichInsertWanted
-                                , Html.Attributes.disabled (List.isEmpty model.richPicked)
-                                ]
-                                [ text ("本文に挿入（" ++ String.fromInt (List.length model.richPicked) ++ "）") ]
-                            , Ui.ghostButton [ onClick PickerClosed ] [ text "キャンセル" ]
-                            ]
-
-                      else
-                        text ""
                     ]
                 ]
 
 
+{-| メディアの 1 枚。押して選び、ダブルクリックでその 1 枚をすぐに入れる。
+
+WhyNot: Enter を素のボタンに任せない。焦点は最後に押したサムネイルにあり、素の Enter は
+そのサムネイルの選択を外してしまう。
+
+-}
 viewPickable : List String -> Model.AssetRow -> Html Msg
 viewPickable picked asset =
     let
@@ -3145,6 +3454,18 @@ viewPickable picked asset =
                    )
             )
         , onClick (AssetPicked asset.id)
+        , Html.Events.onDoubleClick (AssetConfirmed asset.id)
+        , Html.Events.preventDefaultOn "keydown"
+            (D.field "key" D.string
+                |> D.andThen
+                    (\key ->
+                        if key == "Enter" then
+                            D.succeed ( EnterPressed, True )
+
+                        else
+                            D.fail "見ない"
+                    )
+            )
         ]
         [ div [ class "flex h-20 items-center justify-center bg-well" ]
             [ if String.startsWith "image/" asset.mime then

@@ -33,8 +33,10 @@ type Effect msg
     | OpenUrl String
     | Focus String {- その id の要素が画面の上の方に来るまで縦に送る（固定 URL で開いた行など）。 -}
     | ScrollTo String {- 少し待ってから Msg を出す。**打つ度に問い合わせない**ために使う。 -}
-    | After Float msg {- 今日は何日か。日付を選ぶ画面の初めの月を決めるのに要る。 -}
-    | Today (Time.Zone -> Int -> Int -> Int -> msg)
+    | After Float msg {- 下書きの自動保存の待ち。**入力が止まってから書く**ための間で、Msg は待ちの番号を持って戻る。 -}
+    | Autosave Float msg {- 今日は何日か。日付を選ぶ画面の初めの月を決めるのに要る。 -}
+    | Today (Time.Zone -> Int -> Int -> Int -> msg) {- 今の時刻と手元のタイムゾーン。「保存済み 12:34」の時刻に要る。 -}
+    | Now (Time.Zone -> Time.Posix -> msg)
     | PushRoute String
     | ReplaceRoute String
     | LoadUrl String
@@ -148,6 +150,13 @@ perform caps effect =
 
         After delay msg ->
             Task.perform (\_ -> msg) (Process.sleep delay)
+
+        Autosave delay msg ->
+            -- 待ちの取り消しは Elm にはできない。番号で捨てるのはページの側。
+            Task.perform (\_ -> msg) (Process.sleep delay)
+
+        Now toMsg ->
+            Task.perform (\( zone, now ) -> toMsg zone now) (Task.map2 Tuple.pair Time.here Time.now)
 
         Today toMsg ->
             -- WhyNot: UTC で数えない。人が見る「今日」は手元のタイムゾーンの今日で、

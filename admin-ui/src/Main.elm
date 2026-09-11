@@ -22,6 +22,7 @@ import Effect exposing (Effect)
 import Html exposing (Html)
 import Json.Decode as D
 import Json.Encode as E
+import LinkPick
 import Model exposing (ContentTypeSummary, Person, Project, Slug)
 import Page.Account as Account
 import Page.Audit as Audit
@@ -68,8 +69,7 @@ port setTheme_Shell_JS : String -> Cmd msg
 
 
 {-| 未保存の入力があるか。**画面を閉じる時の警告は JS 側が出す**
-（Elm から beforeunload は触れない）。保存は人が押す物になったので、
-これが無いと書きかけが黙って消える。
+（Elm から beforeunload は触れない）。自動保存が終わっていれば False になり、警告は出ない。
 -}
 port setUnsaved_Editor_JS : Bool -> Cmd msg
 
@@ -765,8 +765,8 @@ paletteUpdate paletteMsg model =
 
 {-| エディタの更新。
 
-**自動保存はしない**（保存は人が「下書き保存」を押した時だけ）。代わりに、未保存が
-あるかを毎回 JS へ知らせ、画面を閉じようとした時に警告を出させる。
+下書きの自動保存の待ちと「保存済み HH:MM」の時刻はここで出す（ページは `Api.Call` しか
+返せない）。未保存があるかは毎回 JS へ知らせ、画面を閉じようとした時に警告を出させる。
 
 -}
 editorUpdate : Editor.Msg -> ModelWith key -> ( ModelWith key, Effect Msg )
@@ -791,6 +791,16 @@ editorUpdate pageMsg model =
                         [ effect
                         , Effect.SetUnsaved (Editor.unsaved next)
                         , scheduleToday pageMsg next
+                        , autosaveDebounce page next
+                        , stampSavedAt pageMsg
+
+                        -- **開いたら入力に focus を当てる。** autofocus は Elm が要素を作り直す時に効かない。
+                        , case pageMsg of
+                            Editor.LinkOpened _ _ ->
+                                Effect.Focus LinkPick.inputId
+
+                            _ ->
+                                Effect.none
 
                         -- 本文に貼られた画像。メディアの画面と同じ道（署名付き URL に PUT）。
                         , case upload of
@@ -813,6 +823,29 @@ editorUpdate pageMsg model =
 
         _ ->
             ( model, Effect.none )
+
+
+{-| 入力が変わる度に待ちを出し直す。番号が今と同じ物だけがページで書く。
+-}
+autosaveDebounce : Editor.Model -> Editor.Model -> Effect Msg
+autosaveDebounce before after =
+    if Editor.autosaveTick after /= Editor.autosaveTick before then
+        Effect.Autosave Editor.autosaveDelay (EditorMsg (Editor.AutosaveDue (Editor.autosaveTick after)))
+
+    else
+        Effect.none
+
+
+{-| 保存できた時刻。「保存済み 12:34」に出す。
+-}
+stampSavedAt : Editor.Msg -> Effect Msg
+stampSavedAt pageMsg =
+    case pageMsg of
+        Editor.GotSaved (Ok _) ->
+            Effect.Now (\zone now -> EditorMsg (Editor.SavedAtKnown zone now))
+
+        _ ->
+            Effect.none
 
 
 {-| 予約の日付を選ぶ所は、開いた時に「今日」から始める。
@@ -1351,12 +1384,13 @@ subscriptions model =
 -}
 keyDecoder : Bool -> D.Decoder Msg
 keyDecoder paletteOpen =
-    D.map3 (\key meta ctrl -> ( key, meta || ctrl ))
+    D.map4 (\key meta ctrl tag -> ( key, meta || ctrl, tag ))
         (D.field "key" D.string)
         (D.field "metaKey" D.bool)
         (D.field "ctrlKey" D.bool)
+        (D.oneOf [ D.at [ "target", "tagName" ] D.string, D.succeed "" ])
         |> D.andThen
-            (\( key, modified ) ->
+            (\( key, modified, tag ) ->
                 if key == "k" && modified then
                     D.succeed (KeyPressed "k")
 
@@ -1367,6 +1401,11 @@ keyDecoder paletteOpen =
 
                 else if key == "Escape" then
                     D.succeed (KeyPressed "Escape")
+
+                else if key == "Enter" && not paletteOpen && tag /= "BUTTON" then
+                    -- WhyNot: ボタンに焦点がある Enter は拾わない。素の Enter がそのボタンを押すので、
+                    -- 二重に効く（メディアの「閉じる」が閉じつつ挿入する）。
+                    D.succeed (EditorMsg Editor.EnterPressed)
 
                 else if not paletteOpen then
                     D.fail "見ない"

@@ -15,7 +15,7 @@ import Dict
 import EntryLabel
 import Html exposing (Html, div, span, text)
 import Html.Attributes exposing (class)
-import Html.Events exposing (on, onClick, preventDefaultOn)
+import Html.Events exposing (on, preventDefaultOn)
 import Json.Decode as D
 import Loaded exposing (Loaded)
 import Model exposing (ContentTypeDetail, EntryList, EntryRow, Slug)
@@ -23,6 +23,8 @@ import Queries
 import Route
 import Ui
 import Ui.Icon as Icon
+import Ui.Modal as Modal
+import Ui.Stage
 
 
 type alias Model =
@@ -63,12 +65,7 @@ type Msg
 -}
 type alias Column =
     { stage : String
-    , name : String
     , hint : String
-    , tone : String
-
-    {- 列の状態を表す形。**色だけで分けない。** -}
-    , mark : List Icon.Shape
 
     {- ここへ落とせるか。
 
@@ -83,9 +80,9 @@ type alias Column =
 
 columns : List Column
 columns =
-    [ { stage = "DRAFT", name = "下書き", hint = "まだ公開していません", tone = "text-ink-faint", mark = Icon.stageDraft, droppable = True }
-    , { stage = "CHANGED", name = "公開中 · 下書きあり", hint = "公開中の内容と差があります。下書きを保存すると入ります", tone = "text-[color:var(--color-warn)]", mark = Icon.stageChanged, droppable = False }
-    , { stage = "PUBLISHED", name = "公開中", hint = "公開サイトから見えます", tone = "text-[color:var(--color-ok)]", mark = Icon.stagePublished, droppable = True }
+    [ { stage = "DRAFT", hint = "まだ公開していません", droppable = True }
+    , { stage = "CHANGED", hint = "公開中の内容と差があります。下書きを保存すると入ります", droppable = False }
+    , { stage = "PUBLISHED", hint = "公開サイトから見えます", droppable = True }
     ]
 
 
@@ -333,7 +330,7 @@ view model =
     Loaded.view
         { loading = Ui.loadingCard
         , missing = Ui.messageCard "この API はありません" []
-        , failed = \message -> Ui.messageCard "読み込めませんでした" [ span [ class "text-xs text-[color:var(--color-bad)]" ] [ text message ] ]
+        , failed = Ui.failedCard
         , present = viewBoard model
         }
         model.contentType
@@ -400,52 +397,50 @@ viewRestNote model detail =
 -}
 viewConfirm : Model -> { row : EntryRow, title : String, from : String, to : String } -> Html Msg
 viewConfirm model ask =
-    div [ class "fixed inset-0 z-(--z-dialog) flex items-center justify-center bg-black/30" ]
-        [ Ui.card [ class "flex w-[420px] flex-col gap-3 p-5" ]
-            [ Ui.subheading
+    Modal.dialog
+        { title =
+            if ask.to == "DRAFT" then
+                "このコンテンツの公開を終えますか"
+
+            else if ask.from == "CHANGED" then
+                -- **もう公開されている物は「公開しますか」ではない。**
+                -- 変わるのは公開サイトに出る内容で、見える・見えないは変わらない。
+                "下書きの内容を公開しますか"
+
+            else
+                "このコンテンツを公開しますか"
+        , onClose = Cancelled
+        , error = Nothing
+        , footer =
+            Modal.actions
+                { confirm =
+                    if ask.to == "DRAFT" then
+                        "公開を終える"
+
+                    else if ask.from == "CHANGED" then
+                        -- エディタの公開の確認と同じ語にする。
+                        "変更を公開"
+
+                    else
+                        "公開"
+                , danger = ask.to == "DRAFT"
+                , onConfirm = Confirmed
+                , onCancel = Cancelled
+                , busy = model.busy
+                }
+        }
+        [ span [ class "text-[13px] font-medium text-ink" ] [ text ask.title ]
+        , Ui.note
+            [ text
                 (if ask.to == "DRAFT" then
-                    "このコンテンツの公開を終えますか"
+                    "公開サイトから見えなくなります。下書きは残ります。"
 
                  else if ask.from == "CHANGED" then
-                    -- **もう公開されている物は「公開しますか」ではない。**
-                    -- 変わるのは公開サイトに出る内容で、見える・見えないは変わらない。
-                    "下書きの内容を公開しますか"
+                    "公開サイトに出ている内容が、下書きの内容に入れ替わります。未公開の参照先があれば一緒に公開されます。"
 
                  else
-                    "このコンテンツを公開しますか"
+                    "公開サイトから見えるようになります。未公開の参照先があれば一緒に公開されます。"
                 )
-            , span [ class "text-[13px] font-medium text-ink" ] [ text ask.title ]
-            , Ui.note
-                [ text
-                    (if ask.to == "DRAFT" then
-                        "公開サイトから見えなくなります。下書きは残ります。"
-
-                     else if ask.from == "CHANGED" then
-                        "公開サイトに出ている内容が、下書きの内容に入れ替わります。未公開の参照先があれば一緒に公開されます。"
-
-                     else
-                        "公開サイトから見えるようになります。未公開の参照先があれば一緒に公開されます。"
-                    )
-                ]
-            , div [ class "flex gap-2" ]
-                [ Ui.button [ onClick Confirmed ]
-                    [ text
-                        (if model.busy then
-                            "送信中…"
-
-                         else if ask.to == "DRAFT" then
-                            "公開を終える"
-
-                         else if ask.from == "CHANGED" then
-                            -- エディタの公開の確認と同じ語にする。
-                            "変更を公開"
-
-                         else
-                            "公開"
-                        )
-                    ]
-                , Ui.ghostButton [ onClick Cancelled ] [ text "キャンセル" ]
-                ]
             ]
         ]
 
@@ -491,8 +486,8 @@ viewColumn model detail column =
                )
         )
         [ div [ class "flex items-center gap-2" ]
-            [ span [ class column.tone ] [ Icon.view column.mark ]
-            , span [ class "text-sm font-semibold text-ink" ] [ text column.name ]
+            [ span [ class (Ui.Stage.tone column.stage) ] [ Icon.view (Ui.Stage.icon column.stage) ]
+            , span [ class "text-sm font-semibold text-ink" ] [ text (Ui.Stage.name column.stage) ]
             , span [ class "rounded-full bg-well px-2 py-0.5 text-[11px] font-medium text-ink-soft" ] [ text count ]
             ]
         , span [ class "pb-1 text-xs text-ink-soft" ] [ text column.hint ]

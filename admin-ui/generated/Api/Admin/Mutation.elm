@@ -678,3 +678,19 @@ recordAuditExport :
     -> SelectionSet Bool RootMutation
 recordAuditExport requiredArgs____ =
     Object.selectionForField "Bool" "recordAuditExport" [ Argument.required "input" requiredArgs____.input Api.Admin.InputObject.encodeAuditExportInput ] Decode.bool
+
+
+type alias FetchLinkCardRequiredArguments =
+    { url : String }
+
+
+{-| richText の linkCard の OGP を取る（writeEntries を持つ人）。編集画面が URL を貼った瞬間に呼ぶ。
+表に 7 日以内の物があれば取りに行かずそれを返す。取れなければ error に理由（bot 拒否 / 404 / OGP なし / タイムアウト）が入り、
+title 以下は null。http(s) 以外とプライベートアドレスは取りに行かず error だけ返す（表にも残らない）
+-}
+fetchLinkCard :
+    FetchLinkCardRequiredArguments
+    -> SelectionSet decodesTo Api.Admin.Object.LinkCard
+    -> SelectionSet decodesTo RootMutation
+fetchLinkCard requiredArgs____ object____ =
+    Object.selectionForCompositeField "fetchLinkCard" [ Argument.required "url" requiredArgs____.url Encode.string ] object____ Basics.identity

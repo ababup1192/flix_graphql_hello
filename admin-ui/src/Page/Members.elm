@@ -69,7 +69,6 @@ type Msg
     | GotCancelled (Result Api.Problem String)
     | TodayKnown Time.Zone Int Int Int
     | EscapePressed
-    | Ignored
 
 
 init : Model
@@ -212,9 +211,6 @@ update ctx msg model =
         EscapePressed ->
             ( { model | confirmRemove = Nothing, confirmCancel = Nothing }, [] )
 
-        Ignored ->
-            ( model, [] )
-
 
 keepIfFailed : ( String, Reply ) -> Maybe ( String, Reply )
 keepIfFailed ( userId, reply ) =
@@ -284,7 +280,6 @@ view args model =
                     , reply = model.removing
                     , onConfirm = RemoveConfirmed
                     , onCancel = RemoveCancelled
-                    , ignore = Ignored
                     }
 
             Nothing ->
@@ -299,7 +294,6 @@ view args model =
                     , reply = model.cancelling
                     , onConfirm = CancelConfirmed
                     , onCancel = CancelDismissed
-                    , ignore = Ignored
                     }
 
             Nothing ->

@@ -388,7 +388,6 @@ view model =
                     , reply = model.revoking
                     , onConfirm = RevokeConfirmed
                     , onCancel = RevokeCancelled
-                    , ignore = Ignored
                     }
 
             Nothing ->
@@ -403,7 +402,6 @@ view model =
                     , reply = model.deleting
                     , onConfirm = HookDeleteConfirmed
                     , onCancel = HookDeleteCancelled
-                    , ignore = Ignored
                     }
 
             Nothing ->

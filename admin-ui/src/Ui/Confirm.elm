@@ -12,9 +12,7 @@ WhyNot: 行の下に琥珀の帯を伸ばす形にしない。琥珀はスキー
 
 import Html exposing (Html)
 import Html.Attributes as A
-import Html.Events as E
-import Json.Decode as D
-import Ui
+import Ui.Modal as Modal
 import Ui.Reply as Reply exposing (Reply)
 
 
@@ -32,32 +30,30 @@ view :
     , reply : Reply
     , onConfirm : msg
     , onCancel : msg
-    , ignore : msg
     }
     -> Html msg
 view args =
-    Ui.overlay args.onCancel
-        [ A.class "items-center" ]
-        [ Ui.card
-            [ A.class "flex w-[440px] flex-col gap-3 p-5"
-            , A.attribute "role" "dialog"
-            , A.attribute "aria-modal" "true"
-            , E.stopPropagationOn "click" (D.succeed ( args.ignore, True ))
-            ]
-            (Ui.subheading args.title
-                :: args.details
-                ++ [ Html.p [ A.class "text-[13px] text-ink-soft" ] [ Html.text args.body ]
-                   , Reply.view args.reply
-                   , Html.div [ A.class "flex justify-end gap-2" ]
-                        [ Ui.ghostButton [ E.onClick args.onCancel ] [ Html.text "キャンセル" ]
-                        , Html.button
-                            [ A.type_ "button"
-                            , A.class "inline-flex h-8 items-center rounded-md bg-[color:var(--color-bad)] px-3 text-[13px] font-semibold text-white hover:opacity-90 disabled:opacity-40"
-                            , E.onClick args.onConfirm
-                            , A.disabled (Reply.isSending args.reply)
-                            ]
-                            [ Html.text args.confirm ]
-                        ]
-                   ]
-            )
-        ]
+    Modal.dialog
+        { title = args.title
+        , onClose = args.onCancel
+        , error = Nothing
+        , footer =
+            Modal.actions
+                { confirm = args.confirm
+                , danger = True
+                , onConfirm = args.onConfirm
+                , onCancel = args.onCancel
+                , busy = Reply.isSending args.reply
+                }
+        }
+        (args.details
+            ++ [ Html.p [ A.class "text-[13px] text-ink-soft" ] [ Html.text args.body ]
+
+               -- 送信中は確定のボタンが「送信中…」になるので、返事の方では出さない
+               , if Reply.isSending args.reply then
+                    Html.text ""
+
+                 else
+                    Reply.view args.reply
+               ]
+        )

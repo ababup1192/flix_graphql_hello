@@ -1,4 +1,5 @@
-// 画面に出す文字列の禁則。src/ の Elm の文字列リテラルだけを見る（コメントと識別子は見ない）。
+// 画面に出す文字列の禁則。src/ の Elm と web/ の TypeScript の文字列リテラルだけを見る
+// （コメントと識別子は見ない）。
 //
 // 使い方: npm run check の一部。単独なら  node scripts/wording-check.mjs
 //
@@ -29,30 +30,63 @@ const rules = [
   [/(作成|追加|削除|変更|修正|保存|公開|予約|検索|表示|取得|接続|通知|コピー)する$/u, "ボタンは体言止め（「削除する」→「削除」。spec 7.1）"],
   // 進行中は「〜中…」の体言止め。「〜しています…」は対象を言い分けられない
   [/(います|ています|んでいます)…/u, "進行中は「〜中…」（送信中… / 保存中… / 読み込み中… / 検索中…）"],
+  // WhyNot: 「〜中」を丸ごと見ない。「公開中」「レビュー中」は進行中ではなく状態で、「…」を付けない
+  [/(読み込み|保存|送信|検索|取得|作成|削除|接続|同期)中(?!…)/u, "進行中は「〜中…」で「…」まで付ける（状態の「公開中」「レビュー中」は別）"],
   [/ゴミ箱/u, "削除は「削除」。ゴミ箱の語は画面に無い"],
 ];
 
-// 「文字列リテラル」だけを拾う。""" … """ と "…"（エスケープ込み）。
-const literal = /"""([\s\S]*?)"""|"((?:[^"\\\n]|\\.)*)"/g;
+// Elm の「文字列リテラル」だけを拾う。""" … """ と "…"（エスケープ込み）。
+const elmLiteral = /"""([\s\S]*?)"""|"((?:[^"\\\n]|\\.)*)"/g;
 
-function* elmFiles(dir) {
+// TypeScript は quote が 3 種（" ' `）ある上に、コメントの中に日本語の引用（「やめる」は使わない、等）が
+// 多い。WhyNot: 正規表現で literal を拾わない。コメントを先に落とさないと仕様の引用に当たり、
+// コメントを正規表現で落とすと文字列の中の `https://` を切ってしまう。1 文字ずつ走る方が短く済む。
+function* tsLiterals(source) {
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (c === "/" && source[i + 1] === "/") {
+      while (i < source.length && source[i] !== "\n") i++;
+    } else if (c === "/" && source[i + 1] === "*") {
+      i = source.indexOf("*/", i + 2);
+      if (i < 0) return;
+      i++;
+    } else if (c === '"' || c === "'" || c === "`") {
+      const start = i + 1;
+      i++;
+      while (i < source.length && source[i] !== c) {
+        if (source[i] === "\\") i++;
+        i++;
+      }
+      yield { body: source.slice(start, i), index: start };
+    }
+  }
+}
+
+function* sourceFiles(dir, ext) {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
-    if (statSync(path).isDirectory()) yield* elmFiles(path);
-    else if (name.endsWith(".elm")) yield path;
+    if (statSync(path).isDirectory()) yield* sourceFiles(path, ext);
+    else if (name.endsWith(ext)) yield path;
+  }
+}
+
+function* literalsOf(path, source) {
+  if (path.endsWith(".elm")) {
+    for (const m of source.matchAll(elmLiteral)) yield { body: m[1] ?? m[2] ?? "", index: m.index };
+  } else {
+    yield* tsLiterals(source);
   }
 }
 
 const problems = [];
-for (const path of elmFiles("src")) {
+for (const path of [...sourceFiles("src", ".elm"), ...sourceFiles("web", ".ts")]) {
   const source = readFileSync(path, "utf8");
-  for (const match of source.matchAll(literal)) {
-    const body = match[1] ?? match[2] ?? "";
+  for (const { body, index } of literalsOf(path, source)) {
     // action 名（"entry.published" のような機械の綴り）と URL / クラス名は見ない
     if (/^[a-z_.]+$/.test(body) || /^https?:/.test(body) || /^[a-z0-9 :\-\[\]()_./%]+$/i.test(body)) continue;
     for (const [pattern, hint] of rules) {
       if (pattern.test(body)) {
-        const line = source.slice(0, match.index).split("\n").length;
+        const line = source.slice(0, index).split("\n").length;
         problems.push(`${path}:${line}: ${JSON.stringify(body.slice(0, 60))}\n    → ${hint}`);
       }
     }

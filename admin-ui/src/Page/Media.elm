@@ -68,7 +68,6 @@ type Msg
     | DeleteConfirmed
     | GotDeleted (Result Api.Problem String)
     | EscapePressed
-    | Ignored
 
 
 init : Model
@@ -222,9 +221,6 @@ update ctx msg model =
             else
                 ( { model | selected = Nothing, altReply = Reply.idle }, [] )
 
-        Ignored ->
-            ( model, [] )
-
         GotDeleted (Ok assetId) ->
             ( { model
                 | selected = Nothing
@@ -313,7 +309,6 @@ view model =
                     , reply = model.deleting
                     , onConfirm = DeleteConfirmed
                     , onCancel = DeleteCancelled
-                    , ignore = Ignored
                     }
 
             Nothing ->

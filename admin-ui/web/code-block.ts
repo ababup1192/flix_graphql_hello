@@ -7,6 +7,7 @@
 // セレクトボックスに 70 行並べても読めない。
 
 import type { Editor } from "@tiptap/core";
+import { dropPendingLine, leaveBlock } from "./block-edges";
 import { ensure, labelOf, search, type Language } from "./code-languages";
 import { dismissOn } from "./dismiss";
 import { placeUnder } from "./place";
@@ -204,10 +205,29 @@ export function codeBlockView(lowlight: Lowlight) {
       editor.view.dispatch(editor.view.state.tr.setNodeMarkup(pos, undefined, { ...found.attrs, fileName: value }));
     };
     fileName.addEventListener("blur", writeFileName);
+    // 置きっぱなしの疑似行を先に消す（残すと、欄から矢印で出た先が 1 つずれる）。
+    //
+    // WhyNot: 焦点が入った後（focus）に消さない。本文に焦点がある間に doc を変えると
+    // ProseMirror が DOM の選択を貼り直し、欄から焦点を奪う（欄に入れずに戻された）。
+    fileName.addEventListener("mousedown", () => dropPendingLine(editor.view));
     fileName.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter") return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        fileName.blur();
+        return;
+      }
+      // WhyNot: `stopEvent` に任せない。帯の中の鍵は node view が全部食べるので、上下の矢印が
+      // `BlockEdges` に届かず、ファイル名を打っている間は前後の行へ移れなかった
+      // （数式の TeX の欄と同じ負。`block-edges.ts` の `leaveBlock`）。
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+      const pos = getPos();
+      if (pos === undefined) return;
+      const found = editor.view.state.doc.nodeAt(pos);
+      if (!found) return;
       event.preventDefault();
-      fileName.blur();
+      writeFileName();
+      leaveBlock(editor.view, pos, found.nodeSize, event.key === "ArrowUp" ? -1 : 1);
     });
 
     searchBox.addEventListener("input", () => {

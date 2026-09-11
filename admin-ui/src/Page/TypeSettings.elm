@@ -11,7 +11,7 @@ module Page.TypeSettings exposing (Model, Msg(..), init, load, unsaved, update, 
 -}
 
 import Api
-import Html exposing (Html, div, span, text)
+import Html exposing (Html, div, text)
 import Html.Attributes exposing (class, placeholder, value)
 import Html.Events exposing (onInput)
 import Loaded exposing (Loaded)
@@ -50,7 +50,6 @@ type Msg
     | DeleteConfirmed
     | GotDeleted (Result Api.Problem String)
     | EscapePressed
-    | Ignored
 
 
 init : Slug -> String -> Model
@@ -160,9 +159,6 @@ update ctx msg model =
         EscapePressed ->
             ( { model | confirmDelete = False }, [] )
 
-        Ignored ->
-            ( model, [] )
-
 
 {-| 入力を触った。未保存にし、前の返事を下ろす。
 -}
@@ -181,7 +177,7 @@ view args model =
         Loaded.view
             { loading = Ui.loadingCard
             , missing = Ui.messageCard "この API はありません" []
-            , failed = \message -> Ui.messageCard "読み込めませんでした" [ span [ class "text-xs text-[color:var(--color-bad)]" ] [ text message ] ]
+            , failed = Ui.failedCard
             , present = viewSettings args model
             }
             model.detail
@@ -242,7 +238,6 @@ viewDanger model detail =
                 , reply = model.deleting
                 , onConfirm = DeleteConfirmed
                 , onCancel = DeleteCancelled
-                , ignore = Ignored
                 }
 
           else

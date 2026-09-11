@@ -79,7 +79,7 @@ async function save(step) {
 
 async function openDialog() {
   await linkButton().click();
-  await page.waitForSelector(".tt-link", { timeout: 5000 });
+  await page.waitForSelector("[role='dialog']", { timeout: 5000 });
   await page.waitForTimeout(400);
 }
 
@@ -89,11 +89,11 @@ try {
   await openNew(title1);
   await page.keyboard.type("前の文。");
   await openDialog();
-  await page.locator(".tt-link-input").fill("");
+  await page.locator("#link-pick-input").fill("");
   await page.waitForTimeout(700);
-  const rows = page.locator(".tt-link-item:not(.is-url)");
+  const rows = page.locator("[data-link-row='entry']");
   check((await rows.count()) > 0, "コンテンツの候補が出る", `${await rows.count()} 件`);
-  const pickedTitle = (await rows.first().locator(".tt-link-title").textContent()) ?? "";
+  const pickedTitle = (await rows.first().locator("span:nth-child(2)").textContent()) ?? "";
   await rows.first().click();
   await page.waitForTimeout(600);
   const one = JSON.parse((await docOf()) || "{}");
@@ -107,9 +107,9 @@ try {
   await openNew(title2);
   await page.keyboard.type("前の文。");
   await openDialog();
-  await page.locator(".tt-link-input").fill("https://example.com/a");
+  await page.locator("#link-pick-input").fill("https://example.com/a");
   await page.waitForTimeout(500);
-  await page.locator(".tt-link-item.is-url").first().click();
+  await page.locator("[data-link-row='url']").first().click();
   await page.waitForTimeout(600);
   const two = JSON.parse((await docOf()) || "{}");
   const hrefMark = marksOf(two).find((found) => found.mark.type === "link" && found.mark.attrs?.href);
@@ -127,9 +127,9 @@ try {
     await page.waitForTimeout(60);
   }
   await openDialog();
-  await page.locator(".tt-link-input").fill("https://example.com/b");
+  await page.locator("#link-pick-input").fill("https://example.com/b");
   await page.waitForTimeout(500);
-  await page.locator(".tt-link-item.is-url").first().click();
+  await page.locator("[data-link-row='url']").first().click();
   await page.waitForTimeout(600);
   const three = JSON.parse((await docOf()) || "{}");
   const onSelection = marksOf(three).find((found) => found.mark.type === "link");
@@ -141,42 +141,43 @@ try {
   // 4. 閉じ方の 4 通り
   await openNew(`link-check-dismiss ${Date.now()}`);
   await openDialog();
-  await page.locator(".tt-link-input").click();
+  await page.locator("#link-pick-input").click();
   await page.waitForTimeout(200);
-  check((await page.locator(".tt-link").count()) === 1, "面の中のクリックでは閉じない", "閉じました");
+  check((await page.locator("[role='dialog']").count()) === 1, "面の中のクリックでは閉じない", "閉じました");
   // 面の外だが、画面が変わらない所を押す（左の帯を押すと別の画面に移ってしまう）。
-  await page.locator("tiptap-editor .tt-body").click();
+  // `force` は覆い（`Ui.dismissLayer`）が受けるため。押した物には届かず、面だけが畳まれる。
+  await page.locator("tiptap-editor .tt-body").click({ force: true });
   await page.waitForTimeout(300);
-  check((await page.locator(".tt-link").count()) === 0, "面の外のクリックで閉じる", "残っています");
+  check((await page.locator("[role='dialog']").count()) === 0, "面の外のクリックで閉じる", "残っています");
 
   await openDialog();
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
-  check((await page.locator(".tt-link").count()) === 0, "Escape で閉じる", "残っています");
+  check((await page.locator("[role='dialog']").count()) === 0, "Escape で閉じる", "残っています");
 
   await openDialog();
-  await linkButton().click();
+  await linkButton().click({ force: true });
   await page.waitForTimeout(300);
-  check((await page.locator(".tt-link").count()) === 0, "ボタンの再押下で閉じる", "残っています");
+  check((await page.locator("[role='dialog']").count()) === 0, "開いている間にボタンの所を押すと閉じる", "残っています");
 
   // 外のクリックで閉じた直後に、同じクリックで開き直らない
   await openDialog();
-  await linkButton().click();
+  await linkButton().click({ force: true });
   await page.waitForTimeout(400);
-  check((await page.locator(".tt-link").count()) === 0, "閉じた直後に開き直らない", "開き直りました");
+  check((await page.locator("[role='dialog']").count()) === 0, "閉じた直後に開き直らない", "開き直りました");
 
   // 5. ホバーで選択位置が移る
   await openDialog();
-  await page.locator(".tt-link-input").fill("");
+  await page.locator("#link-pick-input").fill("");
   await page.waitForTimeout(800);
-  const all = page.locator(".tt-link-item");
+  const all = page.locator("[data-link-row]");
   if ((await all.count()) >= 2) {
     await all.nth(1).hover();
     await page.waitForTimeout(200);
     const at = await page.evaluate(() =>
-      Array.from(document.querySelectorAll(".tt-link-item")).findIndex((el) => el.classList.contains("is-at"))
+      Array.from(document.querySelectorAll("[data-link-row]")).findIndex((el) => el.getAttribute("data-at") === "1")
     );
-    check(at === 1, "乗せた候補が選択位置になる", `is-at は ${at} 番目`);
+    check(at === 1, "乗せた候補が選択位置になる", `選択は ${at} 番目`);
     const cursor = await all.nth(1).evaluate((el) => getComputedStyle(el).cursor);
     check(cursor === "pointer", "候補のカーソルが指になる", cursor);
   } else {
@@ -235,12 +236,12 @@ try {
   await anchors.first().click();
   await page.waitForTimeout(300);
   await page.locator('.tt-tool[title="リンク"]').click();
-  await page.waitForSelector(".tt-link", { timeout: 4000 });
+  await page.waitForSelector("[role='dialog']", { timeout: 4000 });
   await page.waitForTimeout(600);
   check(
-    ((await page.locator(".tt-link-now").textContent()) ?? "").includes("https://example.com/a"),
+    ((await page.locator("[data-link-now]").textContent()) ?? "").includes("https://example.com/a"),
     "面の頭に今のリンク先が出る",
-    (await page.locator(".tt-link-now").textContent()) ?? "出ません"
+    (await page.locator("[data-link-now]").textContent()) ?? "出ません"
   );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
@@ -251,7 +252,7 @@ try {
     await page.waitForTimeout(300);
     await openDialog();
     await page.waitForTimeout(900);
-    const shown = (await page.locator(".tt-link-now-path").textContent()) ?? "";
+    const shown = (await page.locator("[data-link-now] code").textContent()) ?? "";
     check(shown === linkedBlog.path, "面の今のリンク先に配信のパスが出る", `${shown} ≠ ${linkedBlog.path}`);
     await page.keyboard.press("Escape");
   }
@@ -260,26 +261,25 @@ try {
   await page.waitForTimeout(900);
 
   // 6. URL とコンテンツの見分けが付く（5 の面を開いたまま使う）
-  await page.locator(".tt-link-input").fill("");
+  await page.locator("#link-pick-input").fill("");
   await page.waitForTimeout(900);
   check(
-    (await page.locator(".tt-link-head").allTextContents()).join("/") === "コンテンツ",
-    "コンテンツだけの時は見出しが 1 つ",
-    (await page.locator(".tt-link-head").allTextContents()).join("/")
+    (await page.locator("[role='dialog'] .text-\\[10px\\].font-semibold").allTextContents()).join("/") === "最近のコンテンツ",
+    "打つ前の見出しは「最近のコンテンツ」",
+    (await page.locator("[role='dialog'] .text-\\[10px\\].font-semibold").allTextContents()).join("/")
   );
-  const shown = await page.locator(".tt-link-item").count();
-  check(shown <= 8, "候補は 8 件までしか出さない", `${shown} 件`);
-  const more = page.locator(".tt-link-more");
+  const shown = await page.locator("[data-link-row]").count();
+  check(shown > 0, "打つ前にも候補が出る", `${shown} 件`);
+  const more = page.locator("[data-link-more]");
   if ((await more.count()) === 1) {
-    // mousedown で開くので dispatchEvent。click だと押した瞬間に行が描き直されて待ち続ける。
-    await more.dispatchEvent("mousedown");
-    await page.waitForTimeout(300);
-    check((await page.locator(".tt-link-item").count()) > shown, "もっと見るで残りが出る", `${shown} 件のまま`);
+    await more.click();
+    await page.waitForTimeout(900);
+    check((await page.locator("[data-link-row]").count()) > shown, "もっと見るで残りが出る", `${shown} 件のまま`);
   } else {
-    note("候補が 8 件以下なので「もっと見る」は出ない");
+    note("引いた分で全件なので「もっと見る」は出ない");
   }
   const stages = await page.evaluate(() =>
-    Array.from(document.querySelectorAll(".tt-link-item:not(.is-url) .tt-link-kind")).map((el) => el.textContent ?? "")
+    Array.from(document.querySelectorAll("[data-link-row='entry'] span:last-child")).map((el) => el.textContent ?? "")
   );
   check(
     stages.every((kind) => /（?(下書き|公開中)/.test(kind) || kind.includes("下書き") || kind.includes("公開中")),
@@ -287,23 +287,23 @@ try {
     JSON.stringify(stages).slice(0, 200)
   );
   check(
-    (await page.locator(".tt-link-item:not(.is-url) .tt-link-icon svg").count()) > 0,
+    (await page.locator("[data-link-row='entry'] svg").count()) > 0,
     "候補の行に印が出る"
   );
 
-  await page.locator(".tt-link-input").fill("https://example.com/z");
+  await page.locator("#link-pick-input").fill("https://example.com/z");
   await page.waitForTimeout(700);
   check(
-    (await page.locator(".tt-link-head").first().textContent()) === "URL",
+    (await page.locator("[role='dialog'] .text-\\[10px\\].font-semibold").first().textContent()) === "URL",
     "URL を打つと URL の見出しが先頭に出る",
-    (await page.locator(".tt-link-head").allTextContents()).join("/")
+    (await page.locator("[role='dialog'] .text-\\[10px\\].font-semibold").allTextContents()).join("/")
   );
   check(
-    (await page.locator(".tt-link-item.is-url .tt-link-kind").textContent()) === "外部のページ",
+    (await page.locator("[data-link-row='url'] span:last-child").textContent()) === "外部のページ",
     "URL の行は外部のページと出る",
-    (await page.locator(".tt-link-item.is-url .tt-link-kind").textContent()) ?? ""
+    (await page.locator("[data-link-row='url'] span:last-child").textContent()) ?? ""
   );
-  await page.locator(".tt-link-input").fill("");
+  await page.locator("#link-pick-input").fill("");
   await page.waitForTimeout(800);
 
   // 6. 長い題で折り返さない・種類が出る
@@ -311,11 +311,11 @@ try {
     await page.setViewportSize({ width, height: 900 });
     await page.waitForTimeout(300);
     const heights = await page.evaluate(() =>
-      Array.from(document.querySelectorAll(".tt-link-item")).map((el) => el.getBoundingClientRect().height)
+      Array.from(document.querySelectorAll("[data-link-row]")).map((el) => el.getBoundingClientRect().height)
     );
     check(heights.every((height) => height < 32), `幅 ${width} で候補が 1 行に収まる`, `高さ ${JSON.stringify(heights)}`);
     const kinds = await page.evaluate(() =>
-      Array.from(document.querySelectorAll(".tt-link-item:not(.is-url) .tt-link-kind")).map((el) => el.textContent)
+      Array.from(document.querySelectorAll("[data-link-row='entry'] span:last-child")).map((el) => el.textContent)
     );
     check(kinds.length > 0 && kinds.every((kind) => (kind ?? "").length > 0), `幅 ${width} で種類が出る`, JSON.stringify(kinds).slice(0, 200));
   }

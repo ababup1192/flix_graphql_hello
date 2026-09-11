@@ -7,6 +7,7 @@ module Ui exposing
     , checkbox
     , chip
     , codeBlock
+    , dangerButton
     , dangerLink
     , dismissLayer
     , drawer
@@ -20,13 +21,13 @@ module Ui exposing
     , headRow
     , headRowOf
     , heading
+    , iconButton
     , initialMark
     , input
     , link
     , loadingCard
     , messageCard
     , note
-    , overlay
     , page
     , pageHeader
     , plainLink
@@ -81,6 +82,28 @@ button attrs =
 ghostButton : List (Html.Attribute msg) -> List (Html msg) -> Html msg
 ghostButton attrs =
     Html.button (A.class "inline-flex h-8 items-center gap-1.5 rounded-md border border-edge bg-panel px-3 text-[13px] font-medium text-ink hover:bg-raised disabled:opacity-40" :: attrs)
+
+
+{-| 戻せない操作の確定（削除・公開を終える）。**確認の中でだけ**使う（下の「危ない操作」）。
+-}
+dangerButton : List (Html.Attribute msg) -> List (Html msg) -> Html msg
+dangerButton attrs =
+    Html.button (A.class "inline-flex h-8 items-center gap-1.5 rounded-md bg-[color:var(--color-bad)] px-3 text-[13px] font-semibold text-white hover:opacity-90 disabled:opacity-40" :: A.type_ "button" :: attrs)
+
+
+{-| アイコンだけのボタン。語は `title` に持つ（画面には出さない）。
+大きさは 1 つ（h-7 w-7）。向きや寄せは `attrs` で足す（`rotate-90`、`ml-auto`）。
+-}
+iconButton : { title : String, onClick : msg } -> List (Html.Attribute msg) -> List Icon.Shape -> Html msg
+iconButton args attrs shapes =
+    Html.button
+        (A.class "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-soft hover:bg-well hover:text-ink"
+            :: A.type_ "button"
+            :: A.title args.title
+            :: E.onClick args.onClick
+            :: attrs
+        )
+        [ Icon.view shapes ]
 
 
 {-| リンクの見た目はここだけが持つ。
@@ -507,12 +530,7 @@ viewHeaderIcon : Maybe ( List Icon.Shape, msg ) -> Html msg
 viewHeaderIcon icon =
     case icon of
         Just ( paths, onPick ) ->
-            Html.button
-                [ A.class "flex h-8 w-8 items-center justify-center rounded-md text-ink-soft hover:bg-well hover:text-ink"
-                , A.title "アイコンを選ぶ"
-                , E.onClick onPick
-                ]
-                [ Html.div [ A.class "scale-125" ] [ Icon.view paths ] ]
+            iconButton { title = "アイコンを選ぶ", onClick = onPick } [] paths
 
         Nothing ->
             Html.text ""
@@ -682,13 +700,6 @@ drawer args children =
                 :: children
             )
         ]
-
-
-{-| 画面を覆う層。押すと閉じる。**縦の寄せは呼ぶ側**が決める（検索は上、ピッカーは中央）。
--}
-overlay : msg -> List (Html.Attribute msg) -> List (Html msg) -> Html msg
-overlay onClose attrs =
-    Html.div (A.class "fixed inset-0 z-(--z-dialog) flex justify-center bg-black/40" :: E.onClick onClose :: attrs)
 
 
 {-| 開いている面の外を押したら閉じるための、**見た目を持たない**層。

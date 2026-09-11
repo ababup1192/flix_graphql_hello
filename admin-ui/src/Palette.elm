@@ -13,10 +13,10 @@ import EntryLabel
 import Html exposing (Html, div, span, text)
 import Html.Attributes exposing (class, id, placeholder, value)
 import Html.Events exposing (onClick, onInput)
-import Json.Decode as D
 import Model exposing (ContentTypeSummary, EntryList, EntryRow, Slug)
 import Queries
 import Route exposing (Route)
+import Ui.Modal as Modal
 
 
 type alias Model =
@@ -281,29 +281,27 @@ view project types model =
             picked =
                 pickedIndex project types model
         in
-        div
-            [ class "fixed inset-0 z-(--z-dialog) flex items-start justify-center bg-black/30 pt-32"
-            , onClick Closed
-            ]
-            [ div
-                [ class "w-[560px] overflow-hidden rounded-xl border border-edge bg-panel shadow-2xl"
-                , Html.Events.stopPropagationOn "click" (D.succeed ( Moved 0, True ))
-                ]
+        Modal.sheet
+            { head =
                 [ Html.input
                     [ id inputId
-                    , class "w-full border-b border-edge bg-panel px-4 py-3 text-sm text-ink outline-none"
+                    , class "w-full bg-panel px-4 py-3 text-sm text-ink outline-none"
                     , placeholder "API・コンテンツ・メディア・設定を検索"
                     , value model.query
                     , onInput Typed
                     , Html.Attributes.autofocus True
                     ]
                     []
-                , if List.isEmpty items then
-                    div [ class "px-4 py-6 text-center text-[13px] text-ink-faint" ] [ text "見つかりません" ]
-
-                  else
-                    div [ class "max-h-80 overflow-auto py-1" ] (List.indexedMap (viewItem picked) items)
                 ]
+            , onClose = Closed
+            , footer = []
+            , width = "w-[560px]"
+            }
+            [ if List.isEmpty items then
+                div [ class "px-4 py-6 text-center text-[13px] text-ink-faint" ] [ text "見つかりません" ]
+
+              else
+                div [ class "max-h-80 overflow-auto py-1" ] (List.indexedMap (viewItem picked) items)
             ]
 
 

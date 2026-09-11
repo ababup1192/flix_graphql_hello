@@ -590,29 +590,24 @@ viewRow surround model row =
                 , span [ class "truncate", title row.actor ] [ text row.actor ]
                 ]
             , viewWhat surround.existing model zone row
-            , Html.button
-                [ class "flex h-7 w-7 cursor-pointer items-center justify-center rounded text-ink-soft hover:bg-well hover:text-ink"
-                , type_ "button"
-                , title
-                    (if open then
+            , Ui.iconButton
+                { title =
+                    if open then
                         "閉じる"
 
-                     else
+                    else
                         "詳しく"
-                    )
-                , onClick (Toggled row.id)
-                ]
-                [ span
-                    [ class
-                        (if open then
-                            "transition-transform"
+                , onClick = Toggled row.id
+                }
+                [ class
+                    (if open then
+                        "transition-transform"
 
-                         else
-                            "-rotate-90 transition-transform"
-                        )
-                    ]
-                    [ Icon.view Icon.caret ]
+                     else
+                        "-rotate-90 transition-transform"
+                    )
                 ]
+                Icon.caret
             ]
         ]
         :: (if open then

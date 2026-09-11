@@ -1,4 +1,4 @@
-module Model exposing (ApiKeyRow, AssetList, AssetRow, AuditRow, ContentTypeDetail, ContentTypeSummary, EntryList, EntryRow, EntryVersion, FieldConfig, FieldDef, Invite, IssuedKey, IssuedPat, IssuedWebhook, LinkCandidate, MemberRow, Org, PatRow, Person, Project, PublishReport, Referrer, ScheduleRow, SchemaEffect, SchemaImpact, Slug, Upload, ViewerInfo, Violation, WebhookRow)
+module Model exposing (ApiKeyRow, AssetList, AssetRow, AuditRow, ContentTypeDetail, ContentTypeSummary, EntryList, EntryRow, EntryVersion, FieldConfig, FieldDef, Invite, IssuedKey, IssuedPat, IssuedWebhook, LinkCandidate, LinkCard, MemberRow, Org, PatRow, Person, Project, PublishReport, Referrer, ScheduleRow, SchemaEffect, SchemaImpact, Slug, Upload, ViewerInfo, Violation, WebhookRow)
 
 {-| API から来る値の形。Html を作らない。
 
@@ -173,6 +173,22 @@ type alias LinkCandidate =
     , typeIcon : String
     , stage : String
     , path : Maybe String
+    }
+
+
+{-| 本文の外部リンクのカードに出す OGP。CMS が取って表に残した物で、doc には持たない。
+
+`fetchedAt` も `error` も無い行は「まだ取っていない」。
+
+-}
+type alias LinkCard =
+    { url : String
+    , title : Maybe String
+    , description : Maybe String
+    , imageUrl : Maybe String
+    , siteName : Maybe String
+    , fetchedAt : Maybe String
+    , error : Maybe String
     }
 
 

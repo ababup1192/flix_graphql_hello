@@ -206,7 +206,6 @@ type Msg
     | PanelClosed
     | BannerClosed
     | EscapePressed
-    | Ignored
     | NameTyped String
     | ApiIdTyped String
     | KindChosen String
@@ -326,10 +325,6 @@ update ctx msg model =
 
         BannerClosed ->
             ( { model | banner = Nothing }, [] )
-
-        Ignored ->
-            -- 確認のモーダルの中を押した時。外側の「押したら閉じる」を止めるためだけに要る。
-            ( model, [] )
 
         EscapePressed ->
             -- 開いている物を 1 段閉じる。確認が出ていれば確認だけ、でなければ右の面。
@@ -1356,7 +1351,6 @@ viewRemove model form =
                     , reply = model.reply
                     , onConfirm = RemoveConfirmed
                     , onCancel = RemoveCancelled
-                    , ignore = Ignored
                     }
 
             else

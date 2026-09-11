@@ -6,7 +6,7 @@
 // doc の形は CMS の RichText が正。**知らない node は消さずに素通しする**
 // （画面が対応していない node を含む記事を開いて保存しても壊さない）。
 
-import { Editor } from "@tiptap/core";
+import { Editor, posToDOMRect } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import TaskList from "@tiptap/extension-task-list";
@@ -22,14 +22,35 @@ import { codeBlockView, ensureUsed } from "./code-block";
 import { BlockEdges, hasPendingLine } from "./block-edges";
 import { CodeEditing } from "./code-editing";
 import { MarkdownRules } from "./markdown-rules";
-import { LinkDialog, stageLabel, type Candidate, type LinkChoice } from "./link-dialog";
+// 本文が指しているコンテンツ（`linked` の属性で Elm から来る）。**乗せた時の吹き出し**に出す。
+// 公開の状態の語は Elm の `Ui.Stage` が作った物をそのまま受ける（TS 側で言い換えない）。
+type Linked = {
+  id: string;
+  title: string;
+  type: string;
+  // 型に人が選んだアイコン。`<svg>` の中身の markup で、Elm の `Ui.Icon` の表から来る。
+  icon?: string;
+  stageName?: string;
+  path?: string | null;
+};
+
+// Elm が返す「決まった物」。`seq` は `linkopen` で投げた番号。
+type LinkChoice = { seq: number; href: string; entryId: string; label: string; remove: boolean; cancel: boolean };
 import { dismissOn } from "./dismiss";
 import { placeUnder } from "./place";
 import { isDraggingTable, tableHandles } from "./table-drag";
 import { Highlight, RaisedCaret, Subscript, Superscript } from "./text-marks";
 import { type Align, alignColumn, columnAlign, resizeTable, tableSize } from "./table-tools";
 import { MathBlock, MathMark } from "./math";
-import { AssetStore, galleryNode, imageDropExtension, imageNode, insertionOf, UploadingImage } from "./image-node";
+import { AssetStore, galleryNode, imageDropExtension, imageNode, insertionOf, insideImage, liftCaption, trimCaption, UploadingImage } from "./image-node";
+import { QuoteNode } from "./quote-node";
+import { ICONS, svg } from "./icons";
+import { CardStore, linkCardNode } from "./link-card-node";
+import { EmbedNode } from "./embed-node";
+import { UrlPaste } from "./url-cards";
+import { BlockMenu } from "./block-menu";
+import BubbleMenu from "@tiptap/extension-bubble-menu";
+import { NodeSelection } from "@tiptap/pm/state";
 import { createLowlight } from "lowlight";
 
 // 色付けの入れ物。言語の文法は使われた時に入る（`web/code-languages.ts`）。
@@ -78,40 +99,6 @@ const BLOCKS: Array<[string, string]> = [
   ["h3", "見出し 3"],
   ["h4", "見出し 4"],
 ];
-
-// ツールバーのアイコン。24px の枠、線 1.8（Ui.Icon と同じ流儀）。
-const ICONS = {
-  paragraph: '<path d="M13 4v16"/><path d="M17 4v16"/><path d="M19 4H9.5a4.5 4.5 0 0 0 0 9H13"/>',
-  code: '<path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/>',
-  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
-  bulletList: '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>',
-  orderedList: '<path d="M10 6h11"/><path d="M10 12h11"/><path d="M10 18h11"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/>',
-  taskList: '<path d="M11 6h10"/><path d="M11 12h10"/><path d="M11 18h10"/><path d="M3 6l1.5 1.5L7 5"/><path d="M3 12l1.5 1.5L7 11"/><path d="M3 18l1.5 1.5L7 17"/>',
-  quote: '<path d="M9 6H5a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h2v2a2 2 0 0 1-2 2H4"/><path d="M19 6h-4a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h2v2a2 2 0 0 1-2 2h-1"/>',
-  codeBlock: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M10 10l-2 2 2 2"/><path d="M14 10l2 2-2 2"/>',
-  rule: '<path d="M3 12h18"/>',
-  underline: '<path d="M7 4v6a5 5 0 0 0 10 0V4"/><path d="M5 20h14"/>',
-  table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M3 15h18"/><path d="M9 10v10"/>',
-  size: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
-  alignLeft: '<path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h13"/>',
-  alignCenter: '<path d="M4 6h16"/><path d="M7 12h10"/><path d="M6 18h12"/>',
-  alignRight: '<path d="M4 6h16"/><path d="M10 12h10"/><path d="M7 18h13"/>',
-  sub: '<path d="M4 5l8 10"/><path d="M12 5l-8 10"/><path d="M20 20h-4c0-2 4-2 4-4a2 2 0 0 0-4 0"/>',
-  sup: '<path d="M4 9l8 10"/><path d="M12 9l-8 10"/><path d="M20 8h-4c0-2 4-2 4-4a2 2 0 0 0-4 0"/>',
-  highlight: '<path d="M4 20h16"/><path d="M6 16l8-8 3 3-8 8z"/><path d="M12 6l3-3 3 3-3 3z"/>',
-  trash: '<path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
-  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="m4 17 4.5-4.5 3 3L15 12l5 5"/>',
-  entry: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
-  external: '<path d="M7 17 17 7"/><path d="M9 7h8v8"/>',
-  // WhyNot: 丸い矢印（rotate-ccw / rotate-cw）にしない。16px では左右の違いが読めず、
-  // 2 つ並ぶと同じ印に見える。矢の頭が横を向く形にして、向きを一目で分かるようにする。
-  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5A5.5 5.5 0 0 1 20 14.5 5.5 5.5 0 0 1 14.5 20H11"/>',
-  redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13"/>',
-};
-
-function svg(paths: string): string {
-  return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
-}
 
 // TipTap が知らない node を Passthrough に畳む。
 function foldUnknown(node: any, known: Set<string>): any {
@@ -173,7 +160,7 @@ function unfold(node: any): any {
   if (Array.isArray(node.content)) {
     next.content = node.content.filter((child: any) => child?.type !== "uploading").map(unfold);
   }
-  return dropEmptyAttrs(next);
+  return dropEmptyAttrs(trimCaption(next));
 }
 
 // セルの寄せ。**CMS は attrs.align、画面は style の text-align。**
@@ -251,21 +238,35 @@ function dropEmptyAttrs(node: any): any {
 class TiptapEditor extends HTMLElement {
   private editor: Editor | null = null;
   private lastSent = "";
-  private dialog: LinkDialog | null = null;
-  private undismiss: (() => void) | null = null;
+  // リンクの面は Elm が描く。TS は「開きたい」を投げた番号と、実行した番号だけ持つ。
+  private linkSeq = 0;
+  private linkDoneAt = -1;
   private menu: HTMLElement | null = null;
   private unmenu: (() => void) | null = null;
   private unwatchScroll: (() => void) | null = null;
-  private candidates: Candidate[] = [];
-  private candidateTotal = 0;
   // 本文が指しているコンテンツ。**面とツールチップで「今どこを指しているか」を出す。**
   // 候補（探した結果）とは別で、id から引く。
-  private linked = new Map<string, Candidate>();
+  private linked = new Map<string, Linked>();
   private asked = "";
   private tip: HTMLElement | null = null;
   private assets = new AssetStore();
+  // 外部リンクのカードの OGP。**エディタは API を知らない**（`linkresolve` と同じ決まり）。
+  // 開いた時に doc に居る URL は `linkcardlookup`（表から引く）、貼った瞬間の 1 つは
+  // `linkcardfetch`（その場で取る）で外に出し、答えは `cards` の属性で受ける。
+  private cards = new CardStore((urls, mode) => {
+    if (mode === "lookup") this.dispatchEvent(new CustomEvent("linkcardlookup", { detail: urls }));
+    else for (const url of urls) this.dispatchEvent(new CustomEvent("linkcardfetch", { detail: url }));
+  });
   private insertedAt = -1;
   private handled = new Set<string>();
+  private blocks: BlockMenu | null = null;
+  private bubble: HTMLElement | null = null;
+  // キャプションの帯の中身。3 つの道具か、リンクの URL の入力（入れ替わる）。
+  private captionTools: HTMLElement | null = null;
+  private captionLink: HTMLElement | null = null;
+  private captionLinkOpen = false;
+  // キャプションのリンクの掛かった文字を選んだ時、選択の下に出す URL の面。
+  private captionUrl: HTMLElement | null = null;
 
   // **送るのは 1 つずつ。** 隠した input は 1 件しか持てないので、
   // 前の 1 枚が片付くまで次を渡さない。
@@ -273,7 +274,7 @@ class TiptapEditor extends HTMLElement {
   private sending = false;
 
   static get observedAttributes() {
-    return ["doc", "entries", "entriestotal", "assets", "insert", "resolved", "linked"];
+    return ["doc", "assets", "insert", "resolved", "linked", "cards"];
   }
 
   connectedCallback() {
@@ -289,7 +290,9 @@ class TiptapEditor extends HTMLElement {
       // codeBlock は色付きの物に差し替える。
       // gapcursor は切る。**置ける所と置けない所ができ、見た目も横一本の線で
       // 区切り線と紛れる。** ブロックの間は `BlockEdges` が疑似行で揃える。
-      StarterKit.configure({ heading: { levels: [1, 2, 3, 4] }, codeBlock: false, gapcursor: false }),
+      StarterKit.configure({ heading: { levels: [1, 2, 3, 4] }, codeBlock: false, gapcursor: false, blockquote: false }),
+      // blockquote は出典（cite / citeUrl）を持つ物に差し替える（`web/quote-node.ts`）。
+      QuoteNode,
       CodeBlockLowlight.extend({
         addNodeView: () => codeBlockView(lowlight),
         // CMS の codeBlock は language の他に fileName と highlightLines を受ける
@@ -355,17 +358,109 @@ class TiptapEditor extends HTMLElement {
       MarkdownRules,
       MathMark,
       MathBlock,
+      // linkCard / embed は自前の node（`web/link-card-node.ts` / `web/embed-node.ts`）。
+      // 灰色枠（Passthrough）は他の知らない node のためだけに残す。
+      linkCardNode(this.cards),
+      EmbedNode,
+      UrlPaste,
+      // 文字を選んだ時に選択の下に浮く帯。note の本文の帯と同じ 7 つ（`bubbleTools`）。
+      // 画像のキャプションの中ではカーソルがある間ずっと、キャプションの真上に 3 つ（太字 / 打ち消し / リンク）。
+      // 表のセルとコードブロックの中では出さない（既に帯と言語の面がある）。
+      BubbleMenu.configure({
+        element: this.buildBubble(),
+        updateDelay: 80,
+        tippyOptions: {
+          placement: "bottom",
+          duration: 80,
+          offset: [0, 6],
+          // WhyNot: キャプションでは placement を top にしない。placement は configure で固定なので、
+          // 基準の矩形をキャプションの上に持ち上げて、bottom のまま「キャプションの真上」に置く。
+          getReferenceClientRect: () => {
+            const view = this.editor!.view;
+            const { from, to } = this.editor!.state.selection;
+            if (!insideImage(this.editor!.state)) return posToDOMRect(view, from, to);
+            // 文字の端では domAtPos が figcaption そのものを返す（text node ではない）。
+            const at = view.domAtPos(from).node as globalThis.Node;
+            const figcaption = (at.nodeType === 3 ? at.parentElement : (at as Element))?.closest("figcaption");
+            if (!figcaption) return posToDOMRect(view, from, to);
+            const cap = figcaption.getBoundingClientRect();
+            const height = this.bubble?.offsetHeight ?? 52;
+            const top = cap.top - 12 - height;
+            return new DOMRect(cap.left, top, cap.width, 0);
+          },
+        },
+        shouldShow: ({ state, from, to }) => {
+          if (state.selection instanceof NodeSelection) return false;
+          if (insideImage(state)) return true;
+          if (from === to) return false;
+          // 選択の端のどちらかが表かコードブロックの中なら出さない（セルから外へ伸びた選択も含む）。
+          const inBlocked = ($pos: { depth: number; node: (depth: number) => { type: { name: string } } }) => {
+            for (let depth = $pos.depth; depth > 0; depth -= 1) {
+              const name = $pos.node(depth).type.name;
+              if (name === "table" || name === "codeBlock") return true;
+            }
+            return false;
+          };
+          if (inBlocked(state.selection.$from) || inBlocked(state.selection.$to)) return false;
+          return state.doc.textBetween(from, to).trim().length > 0;
+        },
+      }),
       Passthrough,
     ];
 
+    // カードの node view は作られた時に OGP を頼む。開いた時の分は表から引く物なので、まとめる。
+    this.cards.batch(() => this.buildEditor(mount, extensions));
+
+    this.blocks = new BlockMenu({
+      editor: this.editor!,
+      host: this,
+      mount,
+      onImage: () => this.dispatchEvent(new CustomEvent("mediapick")),
+    });
+    this.buildBar(bar);
+    this.watchTableHover(mount);
+    this.watchLinkHover(mount);
+    this.paint();
+    this.syncAssets();
+    this.syncCards();
+    this.applyInsert();
+    this.askLinked();
+    this.applyResolved();
+
+    // 開いた時点で入っているコードに色を付ける。読み終わってから塗り直す。
+    void ensureUsed(lowlight, this.editor!.getJSON()).then(() => this.repaintCode());
+  }
+
+  private buildEditor(mount: HTMLElement, extensions: any[]) {
     this.editor = new Editor({
       element: mount,
       extensions,
       content: this.docFromAttribute(extensions),
-      editorProps: { attributes: { class: "tt-body" } },
+      editorProps: {
+        attributes: { class: "tt-body" },
+        // 「+」の一覧（`web/block-menu.ts`）。開いている間は上下と Enter を先に取り、`/` で開く。
+        handleKeyDown: (_view, event) => {
+          if (this.blocks?.onKey(event)) return true;
+          if (event.key === "/") return this.blocks?.onSlash() ?? false;
+          return false;
+        },
+        // 画像のキャプションの中では入力規則を効かせない。
+        // WhyNot: schema に任せない。「# 」の見出しや「> 」の引用は画像の node ごと置き換えたり包んだりして、
+        // キャプションを打っていたつもりの画像が消える（doc は見出しを受けるので schema では止まらない）。
+        handleTextInput: (view, from, to, text) => {
+          if (!insideImage(view.state)) return false;
+          view.dispatch(view.state.tr.insertText(text, from, to));
+          return true;
+        },
+      },
       onUpdate: () => {
         this.emit();
         this.askLinked();
+      },
+      onFocus: () => this.blocks?.update(),
+      onBlur: () => {
+        this.blocks?.update();
+        this.paint();
       },
 
       // **道具の押した状態は、どの変化でも塗り直す。**
@@ -374,20 +469,9 @@ class TiptapEditor extends HTMLElement {
       onTransaction: () => {
         this.paint();
         this.paintTableTools();
+        this.blocks?.update();
       },
     });
-
-    this.buildBar(bar);
-    this.watchTableHover(mount);
-    this.watchLinkHover(mount);
-    this.paint();
-    this.syncAssets();
-    this.applyInsert();
-    this.askLinked();
-    this.applyResolved();
-
-    // 開いた時点で入っているコードに色を付ける。読み終わってから塗り直す。
-    void ensureUsed(lowlight, this.editor.getJSON()).then(() => this.repaintCode());
   }
 
   // ツールバーの中身。**群に分けて区切り線で束ねる**（Contentful と同じ並び）:
@@ -395,6 +479,8 @@ class TiptapEditor extends HTMLElement {
   private tools(): Array<Tool> {
     const chain = () => this.editor!.chain().focus();
     const is = (name: string, attrs?: Record<string, unknown>) => () => this.editor!.isActive(name, attrs);
+    // 画像のキャプションの中では、かたまりを変える物は押せない（キャプションは 1 行の文字だけ）。
+    const outsideImage = () => !insideImage(this.editor!.state);
     return [
       { kind: "block" },
       { kind: "divider" },
@@ -415,15 +501,16 @@ class TiptapEditor extends HTMLElement {
         title: "画像",
         run: () => this.dispatchEvent(new CustomEvent("mediapick")),
         active: is("image"),
+        enabled: outsideImage,
       },
       { kind: "divider" },
-      { kind: "button", icon: ICONS.bulletList, title: "箇条書き", run: () => chain().toggleBulletList().run(), active: is("bulletList") },
-      { kind: "button", icon: ICONS.orderedList, title: "番号付き", run: () => chain().toggleOrderedList().run(), active: is("orderedList") },
-      { kind: "button", icon: ICONS.taskList, title: "チェックリスト", run: () => chain().toggleTaskList().run(), active: is("taskList") },
-      { kind: "button", icon: ICONS.quote, title: "引用", run: () => chain().toggleBlockquote().run(), active: is("blockquote") },
-      { kind: "button", icon: ICONS.codeBlock, title: "コードブロック", run: () => chain().toggleCodeBlock().run(), active: is("codeBlock") },
-      { kind: "button", icon: ICONS.rule, title: "区切り線", run: () => chain().setHorizontalRule().run() },
-      { kind: "button", icon: ICONS.table, title: "表", run: () => this.tableMenu(), active: is("table") },
+      { kind: "button", icon: ICONS.bulletList, title: "箇条書き", run: () => chain().toggleBulletList().run(), active: is("bulletList"), enabled: outsideImage },
+      { kind: "button", icon: ICONS.orderedList, title: "番号付き", run: () => chain().toggleOrderedList().run(), active: is("orderedList"), enabled: outsideImage },
+      { kind: "button", icon: ICONS.taskList, title: "チェックリスト", run: () => chain().toggleTaskList().run(), active: is("taskList"), enabled: outsideImage },
+      { kind: "button", icon: ICONS.quote, title: "引用", run: () => chain().toggleBlockquote().run(), active: is("blockquote"), enabled: outsideImage },
+      { kind: "button", icon: ICONS.codeBlock, title: "コードブロック", run: () => chain().toggleCodeBlock().run(), active: is("codeBlock"), enabled: outsideImage },
+      { kind: "button", icon: ICONS.rule, title: "区切り線", run: () => chain().setHorizontalRule().run(), enabled: outsideImage },
+      { kind: "button", icon: ICONS.table, title: "表", run: () => this.tableMenu(), active: is("table"), enabled: outsideImage },
       { kind: "spacer" },
       {
         kind: "button",
@@ -440,6 +527,160 @@ class TiptapEditor extends HTMLElement {
         enabled: () => Boolean(this.editor?.can().redo()),
       },
     ];
+  }
+
+  // 選択の下に浮く帯の中身。note の本文の帯と同じ順。押した状態は `paint` が aria-pressed で塗る。
+  //
+  // **見出しの 2 つは段落ごとに効く**（部分文字列には掛からない）。title の文言でそれを伝える。
+  private bubbleTools(): Array<{ label?: string; icon?: string; title: string; extra?: string; run: () => void; active: () => boolean }> {
+    const chain = () => this.editor!.chain().focus();
+    return [
+      { label: "T", extra: "tt-bubble-h2", title: "段落を H2 に", run: () => chain().toggleHeading({ level: 2 }).run(), active: () => this.editor!.isActive("heading", { level: 2 }) },
+      { label: "T", extra: "tt-bubble-h3", title: "段落を H3 に", run: () => chain().toggleHeading({ level: 3 }).run(), active: () => this.editor!.isActive("heading", { level: 3 }) },
+      { label: "B", title: "太字", run: () => chain().toggleBold().run(), active: () => this.editor!.isActive("bold") },
+      { label: "S", title: "打ち消し", run: () => chain().toggleStrike().run(), active: () => this.editor!.isActive("strike") },
+      { icon: ICONS.code, title: "コード（文の中）", run: () => chain().toggleCode().run(), active: () => this.editor!.isActive("code") },
+      { icon: ICONS.quote, title: "引用", run: () => chain().toggleBlockquote().run(), active: () => this.editor!.isActive("blockquote") },
+      { icon: ICONS.link, title: "リンク", run: () => this.link(this.bubble?.querySelector<HTMLElement>('[data-bubble="リンク"]') ?? undefined), active: () => this.editor!.isActive("link") },
+    ];
+  }
+
+  private buildBubble(): HTMLElement {
+    const dom = document.createElement("div");
+    dom.className = "tt-bubble";
+    for (const tool of this.bubbleTools()) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "tt-bubble-tool" + (tool.icon ? " tt-bubble-icon" : "") + (tool.extra ? " " + tool.extra : "");
+      if (tool.icon) button.innerHTML = svg(tool.icon);
+      else button.textContent = tool.label ?? "";
+      button.title = tool.title;
+      button.setAttribute("aria-label", tool.title);
+      button.setAttribute("aria-pressed", "false");
+      button.dataset.bubble = tool.title;
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("click", tool.run);
+      dom.appendChild(button);
+    }
+    // キャプションの帯（3 つ）。本文の 7 つとは別の要素で、paint が出し分ける。
+    const caption = document.createElement("div");
+    caption.className = "tt-bubble-caption";
+    caption.hidden = true;
+    for (const tool of this.captionBubbleTools()) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "tt-bubble-tool tt-bubble-icon";
+      button.innerHTML = svg(tool.icon, 22);
+      button.title = tool.title;
+      button.setAttribute("aria-label", tool.title);
+      button.setAttribute("aria-pressed", "false");
+      button.dataset.caption = tool.title;
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("click", tool.run);
+      caption.appendChild(button);
+    }
+    // キャプションのリンク: 帯が URL の欄 + 適用 + × に入れ替わる（note と同じ。コンテンツの候補は出さない）。
+    const link = document.createElement("div");
+    link.className = "tt-bubble-link";
+    link.hidden = true;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "url";
+    input.className = "tt-bubble-field";
+    input.placeholder = "https://";
+    input.setAttribute("aria-label", "リンクの URL");
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "tt-bubble-apply";
+    apply.textContent = "適用";
+    apply.addEventListener("mousedown", (event) => event.preventDefault());
+    apply.addEventListener("click", () => this.applyCaptionLink(input.value.trim()));
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "tt-bubble-close";
+    close.textContent = "×";
+    close.title = "閉じる";
+    close.setAttribute("aria-label", "閉じる");
+    close.addEventListener("mousedown", (event) => event.preventDefault());
+    close.addEventListener("click", () => this.closeCaptionLink());
+    // 欄の中のキーはエディタにも Elm（Esc で画面を閉じる）にも漏らさない。
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        this.applyCaptionLink(input.value.trim());
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        this.closeCaptionLink();
+      }
+    });
+    link.append(input, apply, close);
+    dom.append(caption, link);
+    this.captionTools = caption;
+    this.captionLink = link;
+    this.bubble = dom;
+    return dom;
+  }
+
+  private captionBubbleTools(): Array<{ icon: string; title: string; run: () => void; active: () => boolean }> {
+    const chain = () => this.editor!.chain().focus();
+    return [
+      { icon: ICONS.bold, title: "太字", run: () => chain().toggleBold().run(), active: () => this.editor!.isActive("bold") },
+      { icon: ICONS.strike, title: "打ち消し", run: () => chain().toggleStrike().run(), active: () => this.editor!.isActive("strike") },
+      { icon: ICONS.link, title: "リンク", run: () => this.openCaptionLink(), active: () => this.editor!.isActive("link") },
+    ];
+  }
+
+  private openCaptionLink() {
+    if (!this.editor || !this.captionLink) return;
+    const input = this.captionLink.querySelector<HTMLInputElement>("input");
+    if (!input) return;
+    const current = this.editor.isActive("link") ? this.editor.getAttributes("link").href : null;
+    input.value = typeof current === "string" ? current : "";
+    this.captionLinkOpen = true;
+    this.paint();
+    input.focus();
+    input.select();
+  }
+
+  private closeCaptionLink() {
+    this.captionLinkOpen = false;
+    this.paint();
+    this.editor?.commands.focus();
+  }
+
+  // 空なら外す。選択が無ければリンクの範囲ごと掛け直す。
+  private applyCaptionLink(href: string) {
+    if (!this.editor) return;
+    const chain = this.editor.chain().focus().extendMarkRange("link");
+    if (href === "") chain.unsetLink().run();
+    else chain.setLink({ href }).run();
+    this.captionLinkOpen = false;
+    this.paint();
+  }
+
+  // キャプションでリンクの掛かった文字にいる時、選択の下に URL を文字で出す。
+  // WhyNot: 本文のリンクの hover の面（`showLinkTip`）を使い回さない。あれは乗せた時だけで、
+  // note はキャプションの選択に対して出す。
+  private paintCaptionUrl(inCaption: boolean) {
+    if (!this.editor) return;
+    const { from, to } = this.editor.state.selection;
+    const href = inCaption && from !== to && !this.captionLinkOpen && this.editor.isActive("link") ? this.editor.getAttributes("link").href : null;
+    if (typeof href !== "string" || href === "" || !this.editor.isFocused) {
+      this.captionUrl?.remove();
+      this.captionUrl = null;
+      return;
+    }
+    if (!this.captionUrl) {
+      this.captionUrl = document.createElement("div");
+      this.captionUrl.className = "tt-caption-url";
+      this.appendChild(this.captionUrl);
+    }
+    this.captionUrl.textContent = href;
+    const at = posToDOMRect(this.editor.view, from, to);
+    const width = this.captionUrl.offsetWidth;
+    this.captionUrl.style.top = `${Math.round(at.bottom + 6)}px`;
+    this.captionUrl.style.left = `${Math.round(Math.max(8, at.left + at.width / 2 - width / 2))}px`;
   }
 
   private buildBar(bar: HTMLElement) {
@@ -509,37 +750,84 @@ class TiptapEditor extends HTMLElement {
       if (tool.enabled) button.disabled = !tool.enabled();
     });
 
+    // 画像のキャプションの中では本文の 7 つを出さず、3 つ（太字 / 打ち消し / リンク）に入れ替える。
+    const inImage = insideImage(this.editor.state);
+    if (!inImage) this.captionLinkOpen = false;
+    if (this.bubble && this.captionTools && this.captionLink) {
+      const bubble = this.bubble;
+      bubble.classList.toggle("is-caption", inImage);
+      bubble.classList.toggle("is-input", inImage && this.captionLinkOpen);
+      for (const tool of this.bubbleTools()) {
+        const button = bubble.querySelector<HTMLElement>(`[data-bubble="${tool.title}"]`);
+        if (!button) continue;
+        const on = tool.active();
+        button.classList.toggle("is-on", on);
+        button.setAttribute("aria-pressed", on ? "true" : "false");
+        button.hidden = inImage;
+      }
+      this.captionTools.hidden = !inImage || this.captionLinkOpen;
+      this.captionLink.hidden = !inImage || !this.captionLinkOpen;
+      for (const tool of this.captionBubbleTools()) {
+        const button = this.captionTools.querySelector<HTMLElement>(`[data-caption="${tool.title}"]`);
+        if (!button) continue;
+        const on = tool.active();
+        button.classList.toggle("is-on", on);
+        button.setAttribute("aria-pressed", on ? "true" : "false");
+      }
+    }
+    this.paintCaptionUrl(inImage);
+
     const select = this.querySelector<HTMLSelectElement>(".tt-block");
     if (select) {
       const level = [1, 2, 3, 4].find((n) => this.editor!.isActive("heading", { level: n }));
       select.value = level ? `h${level}` : "paragraph";
+      select.disabled = inImage;
     }
   }
 
-  // リンクを張る面。**URL とコンテンツを 1 つの面で切り替える。**
-  private link() {
+  // リンクを張る面。**TS は「開きたい」だけを投げる。**
+  //
+  // 面そのもの（URL の欄・コンテンツの候補・上下キー）は Elm が持つ（`src/LinkPick.elm`）。
+  // 候補は API から来る物で、エディタは API を知らない。
+  //
+  // `anchor` は押した物（浮く帯のボタン）。無ければツールバーのリンクのボタン。
+  // **押した所から離れた場所に出さない**ので、置き場所の元になる矩形をここで測って渡す。
+  private link(anchor?: HTMLElement) {
     if (!this.editor) return;
-    if (this.dialog) {
-      this.closeDialog();
-      return;
-    }
+    const button = anchor ?? this.querySelector<HTMLElement>('.tt-tool[title="リンク"]') ?? this;
+    const box = button.getBoundingClientRect();
     const current = this.editor.isActive("link") ? this.editor.getAttributes("link") : null;
-    const dialog = new LinkDialog({
-      current,
-      linkedOf: (entryId) => this.linked.get(entryId) ?? null,
-      onSearch: (query) => this.dispatchEvent(new CustomEvent("linksearch", { detail: query })),
-      onMore: () => this.dispatchEvent(new CustomEvent("linkmore")),
-      onDone: (choice) => this.applyLink(choice),
-    });
-    this.dialog = dialog;
-    this.appendChild(dialog.dom);
-    this.placeDialog(dialog.dom);
-    dialog.setCandidates(this.candidates, this.candidateTotal);
-    dialog.focusInput();
-    // 開いたボタンも「面の中」に数える。外さないと、外のクリックで閉じた直後に
-    // 同じクリックのボタン側の click が面を開き直す。
-    const button = this.querySelector<HTMLElement>('.tt-tool[title="リンク"]');
-    this.undismiss = dismissOn({ inside: button ? [dialog.dom, button] : [dialog.dom], onClose: () => this.closeDialog() });
+    this.linkSeq += 1;
+    this.dispatchEvent(
+      new CustomEvent("linkopen", {
+        detail: {
+          seq: this.linkSeq,
+          // 本文のリンクは URL とコンテンツの両方。URL しか受けない所は "url"。
+          mode: "link",
+          href: typeof current?.href === "string" ? current.href : "",
+          entryId: typeof current?.entryId === "string" ? current.entryId : null,
+          rect: {
+            left: box.left,
+            top: box.top,
+            bottom: box.bottom,
+            spaceWidth: window.innerWidth,
+            spaceHeight: window.innerHeight,
+          },
+        },
+      }),
+    );
+  }
+
+  // Elm が決めた物。**`seq` が新しい時だけ実行する**（property は同じ値のまま
+  // 描き直される事がある）。
+  set linkchoice(value: unknown) {
+    const choice = value as LinkChoice | null;
+    if (!choice || typeof choice.seq !== "number" || choice.seq <= this.linkDoneAt) return;
+    this.linkDoneAt = choice.seq;
+    // **doc を変える物は 1 拍おく**（`insert` と同じ）。property が入るのは Elm が DOM を
+    // 書いている最中で、その場で doc を変えると `docchange` が Elm の描き直しの中に飛び込み、
+    // 入れた物が Elm 側に残らない（画面には出るのに保存されなかった）。
+    window.setTimeout(() => this.applyLink(choice), 0);
   }
 
   // 表を**作る**面。大きさを升目で選ぶ（Word / Google ドキュメント / Notion の `/table` と同じ）。
@@ -702,7 +990,7 @@ class TiptapEditor extends HTMLElement {
       const found = this.linked.get(entryId);
       icon.innerHTML = svg(ICONS.entry);
       if (found) {
-        name.textContent = `${found.title}（${found.type} · ${stageLabel(found.stage)}）`;
+        name.textContent = `${found.title}（${found.type} · ${found.stageName ?? ""}）`;
         where.textContent = found.path ?? `#entry:${entryId}`;
         // **型紙が無ければ、出るのは `#entry:{id}` だとそのまま見せる。** 配信で
         // 何が出るかを隠すと、サイト側が置き換えを書いていない事に気付けない。
@@ -909,31 +1197,25 @@ class TiptapEditor extends HTMLElement {
   //
   // WhyNot: entry へのリンクに setLink を使わない。setLink は href を URL として検査し、
   // href の無い（entryId だけの）リンクを弾く。
+  // ProseMirror の mark を掛けるのはここに残る（面がどこにあっても doc を触るのは TS）。
   private applyLink(choice: LinkChoice) {
     if (!this.editor) return;
-    const chain = this.editor.chain().focus();
-    if (choice === null) {
-      chain.extendMarkRange("link").unsetLink().run();
-      this.closeDialog();
+    // 何も選ばずに畳んだ時は、本文に focus を戻すだけ。
+    if (choice.cancel) {
+      this.editor.commands.focus();
       return;
     }
-    const attrs = "href" in choice ? { href: choice.href, entryId: null } : { href: null, entryId: choice.entryId };
+    const chain = this.editor.chain().focus();
+    if (choice.remove) {
+      chain.extendMarkRange("link").unsetLink().run();
+      return;
+    }
+    const attrs = choice.entryId ? { href: null, entryId: choice.entryId } : { href: choice.href, entryId: null };
+    // 選んだ物には**入れる文字**を添える。選択が空の時にこれを本文へ挿し込む
+    // （Notion / Craft / Zenn / Google ドキュメントが揃って、選んだ物の名前を入れる）。
     const bare = this.editor.state.selection.empty && !this.editor.isActive("link");
     if (bare) chain.insertContent({ type: "text", text: choice.label, marks: [{ type: "link", attrs }] }).run();
     else chain.extendMarkRange("link").setMark("link", attrs).run();
-    this.closeDialog();
-  }
-
-  // 押したボタンの下に付ける。
-  //
-  // **押した所から離れた場所に出さない。** 面の中身（コンテンツの候補）は打つ度に変わるので、
-  // 目がボタンと面を往復する。ツールバーは本文の上にも下にも来る（本文が長いと下）ため、
-  // 位置は開く時に測る。
-  //
-  // WhyNot: エディタの箱を基準にした `absolute` にしない。箱は本文の長さで伸びるので、
-  // ボタンが箱の下端にあっても面は箱の上端に出る（実際に画面の右上に出ていた）。
-  private placeDialog(dom: HTMLElement) {
-    this.placeUnder(dom, '.tt-tool[title="リンク"]', 300);
   }
 
   private placeUnder(dom: HTMLElement, anchor: string | HTMLElement, width: number) {
@@ -942,40 +1224,24 @@ class TiptapEditor extends HTMLElement {
     placeUnder(dom, button, width);
   }
 
-  private closeDialog() {
-    this.undismiss?.();
-    this.undismiss = null;
-    this.dialog?.dom.remove();
-    this.dialog = null;
-    this.editor?.commands.focus();
-  }
-
   disconnectedCallback() {
+    this.blocks?.destroy();
+    this.blocks = null;
     this.editor?.destroy();
     this.editor = null;
   }
 
   attributeChangedCallback(name: string) {
-    if (name === "entries") {
-      try {
-        this.candidates = JSON.parse(this.getAttribute("entries") ?? "[]");
-      } catch {
-        this.candidates = [];
-      }
-      this.dialog?.setCandidates(this.candidates, this.candidateTotal);
-      return;
-    }
-    if (name === "entriestotal") {
-      this.candidateTotal = Number(this.getAttribute("entriestotal") ?? "0") || 0;
-      this.dialog?.setCandidates(this.candidates, this.candidateTotal);
-      return;
-    }
     if (name === "assets") {
       this.syncAssets();
       return;
     }
     if (name === "linked") {
       this.syncLinked();
+      return;
+    }
+    if (name === "cards") {
+      this.syncCards();
       return;
     }
     // **doc を変える物は 1 拍おく。** 属性が変わるのは Elm が DOM を書いている
@@ -999,7 +1265,7 @@ class TiptapEditor extends HTMLElement {
     const incoming = this.getAttribute("doc") ?? "";
     if (incoming === this.lastSent) return;
     if (incoming === JSON.stringify(unfold(this.editor.getJSON()))) return;
-    this.editor.commands.setContent(this.docFromAttribute(this.editor.extensionManager.extensions), false);
+    this.cards.batch(() => this.editor!.commands.setContent(this.docFromAttribute(this.editor!.extensionManager.extensions), false));
     this.askLinked();
   }
 
@@ -1017,17 +1283,22 @@ class TiptapEditor extends HTMLElement {
     this.assets.set(Array.isArray(list) ? list : []);
   }
 
+  // url → OGP の対応。**エディタは相手のサイトを読みに行かない**（CMS が取って表に残す）。
+  private syncCards() {
+    const list = this.parsed("cards");
+    this.cards.set(Array.isArray(list) ? list : []);
+  }
+
   private syncLinked() {
     const list = this.parsed("linked");
     if (!Array.isArray(list)) return;
-    this.linked = new Map((list as Candidate[]).filter((found) => found?.id).map((found) => [found.id, found]));
-    this.dialog?.setLinked((entryId) => this.linked.get(entryId) ?? null);
+    this.linked = new Map((list as Linked[]).filter((found) => found?.id).map((found) => [found.id, found]));
   }
 
   //
   // 本文が指しているコンテンツを引き直してもらう。
   //
-  // **エディタは API を知らない**（`linksearch` と同じ決まり）。doc に居る entryId を
+  // **エディタは API を知らない**（`linkopen` と同じ決まり）。doc に居る entryId を
   // `linkresolve` の event で外に出し、答えは `linked` の属性で受ける。
   //
   private askLinked() {
@@ -1158,7 +1429,7 @@ class TiptapEditor extends HTMLElement {
     try {
       const parsed = JSON.parse(raw);
       if (!parsed || parsed.type !== "doc") return EMPTY_DOC;
-      const doc = flatten(toTaskList(foldUnknown(parsed, this.knownNames(extensions))));
+      const doc = flatten(toTaskList(foldUnknown(liftCaption(parsed), this.knownNames(extensions))));
       return Array.isArray(doc.content) && doc.content.length > 0 ? doc : EMPTY_DOC;
     } catch {
       return EMPTY_DOC;

@@ -246,12 +246,7 @@ topBar config =
           else
             Ui.dismissLayer (config.onMenu NoMenu)
         , div [ class "flex min-w-0 items-center gap-2.5" ]
-            [ Html.button
-                [ class "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-soft hover:bg-well"
-                , Html.Events.onClick config.onToggleSidebar
-                , Html.Attributes.title "サイドバーを畳む"
-                ]
-                [ Icon.view Icon.panel ]
+            [ Ui.iconButton { title = "サイドバーを畳む", onClick = config.onToggleSidebar } [] Icon.panel
             , Html.button
                 [ class "flex min-w-0 items-center gap-2 rounded-md bg-well px-2.5 py-1.5 text-[13px] font-semibold text-ink hover:bg-edge"
                 , Html.Events.onClick (config.onMenu (toggledProjectMenu config.menu))

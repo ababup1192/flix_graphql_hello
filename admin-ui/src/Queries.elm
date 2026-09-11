@@ -30,8 +30,10 @@ module Queries exposing
     , deleteWebhook
     , entries
     , entry
+    , fetchLinkCard
     , invitations
     , inviteMember
+    , linkCards
     , me
     , members
     , organizationProjects
@@ -119,6 +121,7 @@ import Api.Admin.Object.Impact as Impact
 import Api.Admin.Object.Invitation as Invitation
 import Api.Admin.Object.IssuedApiKey as IssuedApiKey
 import Api.Admin.Object.IssuedWebhook as IssuedWebhook
+import Api.Admin.Object.LinkCard as LinkCard
 import Api.Admin.Object.Member as Member
 import Api.Admin.Object.Project as AdminProject
 import Api.Admin.Object.PublishReport as PublishReport
@@ -154,9 +157,15 @@ type Kind
     | OrgProjects
     | AuditEvents
     | AuditEventsCount
+    | LinkCardsQuery
+    | FetchLinkCardMutation
 
 
 {-| 確認に投げる読むだけの物。書く物は投げない（実データが増える）。
+
+WhyNot: `fetchLinkCard` は mutation だが例外で載せる。private アドレスの URL は
+取りに行かず表にも残らない（error だけ返る）ので、実データを増やさずに document の形を試せる。
+
 -}
 all : { project : Slug } -> List ( Kind, Api.Request )
 all args =
@@ -170,6 +179,8 @@ all args =
     , ( OrgProjects, organizationProjects "c8" "1" |> Tuple.first )
     , ( AuditEvents, auditEvents "c9" args.project { first = 5, after = Nothing, actorKind = Nothing, action = Nothing, since = Nothing, until = Nothing } |> Tuple.first )
     , ( AuditEventsCount, auditEventsCount "c10" args.project { first = 5, after = Nothing, actorKind = Nothing, action = Nothing, since = Nothing, until = Nothing } |> Tuple.first )
+    , ( LinkCardsQuery, linkCards "c11" args.project [ "https://example.com/" ] |> Tuple.first )
+    , ( FetchLinkCardMutation, fetchLinkCard "c12" args.project "http://127.0.0.1/" |> Tuple.first )
     ]
 
 
@@ -1037,6 +1048,34 @@ publishCheck id project entryId =
                 (PublishReport.unpublishedDependencies entryRow |> SS.map List.length)
             )
         )
+
+
+{-| 本文の外部リンクのカードの OGP を表から引く。開いた時に doc に居る URL をまとめて。
+-}
+linkCards : String -> Slug -> List String -> ( Api.Request, D.Decoder (List Model.LinkCard) )
+linkCards id project urls =
+    Api.query { id = id, kind = "linkCards", project = project }
+        (Api.Admin.Query.linkCards { urls = urls } linkCardSelection)
+
+
+{-| 貼った瞬間に OGP を取りに行く。CMS が相手のページを読み、表に残して返す。
+-}
+fetchLinkCard : String -> Slug -> String -> ( Api.Request, D.Decoder Model.LinkCard )
+fetchLinkCard id project url =
+    Api.mutation { id = id, kind = "fetchLinkCard", project = project }
+        (AdminMutation.fetchLinkCard { url = url } linkCardSelection)
+
+
+linkCardSelection : SelectionSet Model.LinkCard Api.Admin.Object.LinkCard
+linkCardSelection =
+    SS.map7 Model.LinkCard
+        LinkCard.url
+        LinkCard.title
+        LinkCard.description
+        LinkCard.imageUrl
+        LinkCard.siteName
+        (LinkCard.fetchedAt |> SS.map Just)
+        LinkCard.error
 
 
 {-| このコンテンツを参照している物。

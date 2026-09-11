@@ -32,25 +32,29 @@ view args =
             [ Html.code
                 [ A.class "min-w-0 flex-1 overflow-x-auto py-2 font-mono text-sm text-ink select-all" ]
                 [ Html.text args.value ]
-            , Html.button
-                [ A.type_ "button"
-                , A.class "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-soft hover:bg-panel hover:text-ink"
-                , A.title
-                    (if args.copied then
+            , Ui.iconButton
+                { title =
+                    if args.copied then
                         "コピーしました"
 
-                     else
+                    else
                         "コピー"
-                    )
-                , A.attribute "aria-label" "コピー"
-                , E.onClick args.onCopy
-                ]
-                [ if args.copied then
-                    Html.span [ A.class "text-[color:var(--color-ok)]" ] [ Icon.view Icon.check ]
+                , onClick = args.onCopy
+                }
+                (A.attribute "aria-label" "コピー"
+                    :: (if args.copied then
+                            [ A.style "color" "var(--color-ok)" ]
 
-                  else
-                    Icon.view Icon.copy
-                ]
+                        else
+                            []
+                       )
+                )
+                (if args.copied then
+                    Icon.check
+
+                 else
+                    Icon.copy
+                )
             , if args.copied then
                 Html.span [ A.class "pr-2 text-xs text-[color:var(--color-ok)]" ] [ Html.text "コピーしました" ]
 

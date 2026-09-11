@@ -12,6 +12,7 @@ module Ui.DateTime exposing
     , init
     , isDayChosen
     , localDate
+    , pad
     , plusDays
     , toIso
     , toIsoDate
@@ -687,22 +688,16 @@ numberOption unit value =
 
 arrow : Msg -> String -> Bool -> Html Msg
 arrow msg label back =
-    Html.button
-        [ class "flex h-6 w-6 items-center justify-center rounded text-ink-soft hover:bg-well hover:text-ink"
-        , Html.Attributes.title label
-        , onClick msg
-        ]
-        [ div
-            [ class
-                (if back then
-                    "rotate-90"
+    Ui.iconButton { title = label, onClick = msg }
+        [ class
+            (if back then
+                "rotate-90"
 
-                 else
-                    "-rotate-90"
-                )
-            ]
-            [ Icon.view Icon.caret ]
+             else
+                "-rotate-90"
+            )
         ]
+        Icon.caret
 
 
 viewWeekday : Int -> String -> Html Msg

@@ -9,6 +9,7 @@ module Ui.Icon exposing
     , copy
     , entry
     , expand
+    , external
     , grip
     , markupByName
     , media
@@ -337,6 +338,13 @@ Contentful / Notion / Sanity / Google ドキュメントが揃ってこの形を
 expand : List Shape
 expand =
     [ path "M15 3h6v6", path "M9 21H3v-6", path "M21 3l-7 7", path "M3 21l7-7" ]
+
+
+{-| 外へ出る矢印。この CMS の外にある物（リンクの面の URL の行）の印。
+-}
+external : List Shape
+external =
+    [ path "M7 17L17 7", path "M9 7h8v8" ]
 
 
 collapse : List Shape

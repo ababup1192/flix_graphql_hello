@@ -370,23 +370,16 @@ viewDay model number =
 
 arrow : Msg -> String -> Bool -> Html Msg
 arrow msg title back =
-    Html.button
-        [ class "flex h-6 w-6 items-center justify-center rounded text-ink-soft hover:bg-well hover:text-ink"
-        , Html.Attributes.title title
-        , Html.Attributes.type_ "button"
-        , onClick msg
-        ]
-        [ div
-            [ class
-                (if back then
-                    "rotate-90"
+    Ui.iconButton { title = title, onClick = msg }
+        [ class
+            (if back then
+                "rotate-90"
 
-                 else
-                    "-rotate-90"
-                )
-            ]
-            [ Icon.view Icon.caret ]
+             else
+                "-rotate-90"
+            )
         ]
+        Icon.caret
 
 
 

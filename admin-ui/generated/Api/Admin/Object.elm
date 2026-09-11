@@ -77,6 +77,10 @@ type IssuedWebhook
     = IssuedWebhook
 
 
+type LinkCard
+    = LinkCard
+
+
 type Me
     = Me
 

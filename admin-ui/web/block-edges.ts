@@ -160,6 +160,29 @@ function eatFirstEmptyLine(view: EditorView): boolean {
 }
 
 /**
+ * ブロックの中の欄（数式の TeX など）に入る時に呼ぶ。置きっぱなしの疑似行を消す。
+ *
+ * **欄に入っても本文の選択は動かない**（node view が押下を食べる）ので、疑似行は
+ * 「まだそこに居る」ままになる。その状態で欄から矢印で出ると、消える疑似行を基準に
+ * 場所を数えてしまい、焦点も選択も元の行へ落ちた（実際に落ちた）。
+ */
+export function dropPendingLine(view: EditorView): void {
+  const state = view.state;
+  const line = pendingLine(state);
+  if (!line) return;
+  if (!line.empty) {
+    view.dispatch(clear(state));
+    return;
+  }
+  view.dispatch(
+    state.tr
+      .delete(line.pos, line.pos + line.size)
+      .setMeta(key, { pos: null } satisfies Pending)
+      .setMeta("addToHistory", false)
+  );
+}
+
+/**
  * ブロックの中の入力欄（画像の代替テキストなど）から、上（-1）か下（1）の行へ出る。
  *
  * **画像の中に居るので、上下の矢印が本文に届かない。** 入力欄が矢印を食べるため、

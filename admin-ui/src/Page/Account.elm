@@ -190,7 +190,6 @@ view model =
                     , reply = model.revoking
                     , onConfirm = RevokeConfirmed
                     , onCancel = RevokeCancelled
-                    , ignore = Ignored
                     }
 
             Nothing ->
