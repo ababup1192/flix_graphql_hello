@@ -21,6 +21,7 @@ import Queries
 import Route
 import Ui
 import Ui.Icon as Icon
+import Ui.Reply as Reply exposing (Reply)
 
 
 {-| 型を作るフォーム。`apiId` が "new" の時だけ出す。
@@ -42,8 +43,12 @@ type alias Model =
 
     {- 保存の前に見た影響。影響があれば箱を出し、見た物を付けて送る。 -}
     , confirmSave : Maybe Model.SchemaImpact
-    , errors : List String
-    , busy : Bool
+
+    {- フォームの返事（送信中・失敗）。失敗の違反は欄の下に振り分ける。 -}
+    , reply : Reply
+
+    {- 一覧に起きた事の帯。**フォームの返事とは別に持つ**（次の入力で消えないように）。 -}
+    , banner : Maybe String
     , newType : NewType
     , created : Maybe String
     , dragging : Maybe FieldDef
@@ -187,6 +192,7 @@ type Msg
     | IconChosen String
     | GotIcon (Result Api.Problem Model.ContentTypeSummary)
     | PanelClosed
+    | BannerClosed
     | EscapePressed
     | NameTyped String
     | ApiIdTyped String
@@ -230,8 +236,8 @@ init project apiId =
     , confirmRemove = Nothing
     , removeImpact = Loaded.Loading
     , confirmSave = Nothing
-    , errors = []
-    , busy = False
+    , reply = Reply.idle
+    , banner = Nothing
     , newType = { name = "", apiId = "", singleton = False }
     , created = Nothing
     , dragging = Nothing
@@ -257,19 +263,19 @@ update : Context -> Msg -> Model -> ( Model, List (Api.Call Msg) )
 update ctx msg model =
     case msg of
         GotType result ->
-            ( { model | detail = Loaded.fromResult result, errors = [] }, [] )
+            ( { model | detail = Loaded.fromResult result, reply = Reply.idle }, [] )
 
         PickerOpened ->
-            ( { model | panel = Picking, errors = [] }, [] )
+            ( { model | panel = Picking, reply = Reply.idle }, [] )
 
         IconPickerOpened ->
-            ( { model | panel = PickingIcon, errors = [] }, [] )
+            ( { model | panel = PickingIcon, reply = Reply.idle }, [] )
 
         IconChosen icon ->
             case Loaded.toMaybe model.detail of
                 Just detail ->
                     -- **省いた項目は触らない**ので、名前は今の値をそのまま渡す（CMS の決まり）。
-                    ( { model | busy = True, errors = [] }
+                    ( { model | reply = Reply.sending }
                     , [ Api.call
                             (\id ->
                                 Queries.updateContentType id
@@ -285,7 +291,8 @@ update ctx msg model =
 
         GotIcon (Ok summary) ->
             ( { model
-                | busy = False
+                | reply = Reply.idle
+                , banner = Just "アイコンを変えました"
                 , panel = Closed
                 , detail = Loaded.map (\detail -> { detail | icon = summary.icon }) model.detail
               }
@@ -296,7 +303,10 @@ update ctx msg model =
             ( failed problem model, [] )
 
         PanelClosed ->
-            ( { model | panel = Closed, confirmRemove = Nothing, errors = [] }, [] )
+            ( { model | panel = Closed, confirmRemove = Nothing, reply = Reply.idle }, [] )
+
+        BannerClosed ->
+            ( { model | banner = Nothing }, [] )
 
         EscapePressed ->
             -- 開いている物を 1 段閉じる。確認が出ていれば確認だけ、でなければ右の面。
@@ -308,18 +318,18 @@ update ctx msg model =
                     ( { model | confirmRemove = Nothing }, [] )
 
                 ( Nothing, Nothing ) ->
-                    ( { model | panel = Closed, errors = [] }, [] )
+                    ( { model | panel = Closed, reply = Reply.idle }, [] )
 
         NameTyped name ->
-            ( { model | panel = mapAdding (\form -> { form | name = name, apiId = camelize name }) model }, [] )
+            ( { model | panel = mapAdding (\form -> { form | name = name, apiId = camelize name }) model, reply = Reply.touched model.reply }, [] )
 
         ApiIdTyped apiId ->
-            ( { model | panel = mapAdding (\form -> { form | apiId = apiId }) model }, [] )
+            ( { model | panel = mapAdding (\form -> { form | apiId = apiId }) model, reply = Reply.touched model.reply }, [] )
 
         KindChosen chosen ->
             -- **種類を選んだら下書きの行に進む**（Directus / Strapi と同じ。種類は後から
             -- 変えられないので、名前より先に決めさせる）。
-            ( { model | panel = Adding { emptyField | kind = kindOf chosen }, errors = [] }, [] )
+            ( { model | panel = Adding { emptyField | kind = kindOf chosen }, reply = Reply.idle }, [] )
 
         SourceFieldChosen apiId ->
             ( { model | panel = mapAdding (\form -> { form | sourceField = apiId }) model }, [] )
@@ -339,7 +349,7 @@ update ctx msg model =
         AddSubmitted ->
             case ( addingOf model, Loaded.toMaybe model.detail ) of
                 ( Just form, Just detail ) ->
-                    ( { model | busy = True, errors = [] }
+                    ( { model | reply = Reply.sending }
                     , [ Api.call
                             (\id ->
                                 Queries.addField id
@@ -363,13 +373,24 @@ update ctx msg model =
                     ( model, [] )
 
         GotField (Ok field) ->
-            ( { model | busy = False, panel = Closed, detail = Loaded.map (upsertField field) model.detail }, [] )
+            -- **面は閉じる**ので、成功は一覧の上の帯に出す（Ui.Reply の決め）。
+            let
+                said : String
+                said =
+                    case model.panel of
+                        Editing _ ->
+                            "「" ++ field.name ++ "」を保存しました"
+
+                        _ ->
+                            "「" ++ field.name ++ "」を追加しました"
+            in
+            ( { model | reply = Reply.idle, banner = Just said, panel = Closed, detail = Loaded.map (upsertField field) model.detail }, [] )
 
         GotField (Err problem) ->
             ( failed problem model, [] )
 
         EditOpened field ->
-            ( { model | panel = Editing (formOf field), confirmRemove = Nothing, confirmSave = Nothing, errors = [] }, [] )
+            ( { model | panel = Editing (formOf field), confirmRemove = Nothing, confirmSave = Nothing, reply = Reply.idle }, [] )
 
         EditChanged change ->
             ( { model
@@ -380,6 +401,7 @@ update ctx msg model =
 
                         other ->
                             other
+                , reply = Reply.touched model.reply
               }
             , []
             )
@@ -387,7 +409,7 @@ update ctx msg model =
         EditSubmitted ->
             case model.panel of
                 Editing form ->
-                    ( { model | busy = True, errors = [], confirmSave = Nothing }
+                    ( { model | reply = Reply.sending, confirmSave = Nothing }
                     , [ Api.call (\id -> Queries.updateFieldImpact id ctx.project (patchOf form)) GotSaveImpact ]
                     )
 
@@ -400,7 +422,7 @@ update ctx msg model =
                 ( model, saveCalls ctx model impact )
 
             else
-                ( { model | busy = False, confirmSave = Just impact }, [] )
+                ( { model | reply = Reply.idle, confirmSave = Just impact }, [] )
 
         GotSaveImpact (Err problem) ->
             ( failed problem model, [] )
@@ -408,7 +430,7 @@ update ctx msg model =
         SaveConfirmed ->
             case model.confirmSave of
                 Just impact ->
-                    ( { model | busy = True, confirmSave = Nothing }, saveCalls ctx model impact )
+                    ( { model | reply = Reply.sending, confirmSave = Nothing }, saveCalls ctx model impact )
 
                 Nothing ->
                     ( model, [] )
@@ -432,7 +454,7 @@ update ctx msg model =
                 Just field ->
                     case Loaded.toMaybe model.removeImpact of
                         Just impact ->
-                            ( { model | busy = True, confirmRemove = Nothing }
+                            ( { model | reply = Reply.sending, confirmRemove = Nothing }
                             , [ Api.call (\id -> Queries.removeField id ctx.project { fieldId = field.id, expected = impact }) GotRemoved ]
                             )
 
@@ -444,7 +466,8 @@ update ctx msg model =
 
         GotRemoved (Ok fieldId) ->
             ( { model
-                | busy = False
+                | reply = Reply.idle
+                , banner = removedName model fieldId
                 , panel = Closed
                 , detail = Loaded.map (\detail -> { detail | fields = List.filter (\f -> f.id /= fieldId) detail.fields }) model.detail
               }
@@ -478,22 +501,22 @@ update ctx msg model =
                     ( model, [] )
 
         GotReordered (Ok detail) ->
-            ( { model | busy = False, detail = Present detail }, [] )
+            ( { model | reply = Reply.idle, detail = Present detail }, [] )
 
         GotReordered (Err problem) ->
             ( failed problem model, [] )
 
         TypeNameTyped name ->
-            ( { model | newType = updateNewType (\form -> { form | name = name, apiId = pluralize (camelize name) }) model }, [] )
+            ( { model | newType = updateNewType (\form -> { form | name = name, apiId = pluralize (camelize name) }) model, reply = Reply.touched model.reply }, [] )
 
         TypeApiIdTyped apiId ->
-            ( { model | newType = updateNewType (\form -> { form | apiId = apiId }) model }, [] )
+            ( { model | newType = updateNewType (\form -> { form | apiId = apiId }) model, reply = Reply.touched model.reply }, [] )
 
         TypeKindToggled ->
             ( { model | newType = updateNewType (\form -> { form | singleton = not form.singleton }) model }, [] )
 
         TypeSubmitted ->
-            ( { model | busy = True, errors = [] }
+            ( { model | reply = Reply.sending }
             , [ Api.call
                     (\id ->
                         Queries.createContentType id
@@ -505,7 +528,7 @@ update ctx msg model =
             )
 
         GotNewType (Ok summary) ->
-            ( { model | busy = False, created = Just summary.apiId }, [] )
+            ( { model | reply = Reply.idle, created = Just summary.apiId }, [] )
 
         GotNewType (Err problem) ->
             ( failed problem model, [] )
@@ -544,7 +567,7 @@ reorder ctx model change =
                 ids =
                     change detail.fields |> List.map .id
             in
-            ( { model | busy = True }
+            ( { model | reply = Reply.sending }
             , [ Api.call (\id -> Queries.reorderFields id ctx.project { typeId = detail.id, ids = ids }) GotReordered ]
             )
 
@@ -610,9 +633,18 @@ ifSame current updated =
         current
 
 
+{-| 外したフィールドの名前。帯に「何を外したか」を入れるために、消す前の一覧から引く。
+-}
+removedName : Model -> String -> Maybe String
+removedName model fieldId =
+    Loaded.toMaybe model.detail
+        |> Maybe.andThen (\detail -> detail.fields |> List.filter (\field -> field.id == fieldId) |> List.head)
+        |> Maybe.map (\field -> "「" ++ field.name ++ "」を外しました")
+
+
 failed : Api.Problem -> Model -> Model
 failed problem model =
-    { model | busy = False, errors = [ (Api.problemToText problem).message ] }
+    { model | reply = Reply.failed problem }
 
 
 updateNewType : (NewType -> NewType) -> Model -> NewType
@@ -763,14 +795,13 @@ viewNewType model =
             Ui.page [ class "max-w-xl" ]
                 [ Ui.pageHeader { title = "API を作る", icon = Nothing, meta = [], actions = [] }
                 , Ui.note [ text "API はコンテンツの型です。作成した後にフィールドを追加します。エンドポイントは後から変更できません。" ]
-                , Ui.errors model.errors
                 , Ui.card [ class "flex flex-col gap-4 p-4" ]
-                    [ Ui.field { label = "表示名", hint = Nothing, errors = [] }
+                    [ Ui.field { label = "表示名", hint = Nothing, errors = Reply.errorsFor "name" model.reply }
                         [ Ui.input [ value model.newType.name, onInput TypeNameTyped, placeholder "ブログ" ] ]
                     , Ui.field
                         { label = "エンドポイント"
                         , hint = Just "URL と API に出る名前。英小文字の複数形"
-                        , errors = apiIdError model.newType.apiId |> Maybe.map List.singleton |> Maybe.withDefault []
+                        , errors = (apiIdError model.newType.apiId |> Maybe.map List.singleton |> Maybe.withDefault []) ++ Reply.errorsFor "apiId" model.reply
                         }
                         [ Ui.input [ value model.newType.apiId, onInput TypeApiIdTyped, class "font-mono", placeholder "blogs" ] ]
                     , Ui.checkbox
@@ -778,7 +809,12 @@ viewNewType model =
                         , checked = model.newType.singleton
                         , onToggle = TypeKindToggled
                         }
-                    , div [ class "flex gap-2" ] [ Ui.button [ onClick TypeSubmitted, Html.Attributes.disabled (apiIdError model.newType.apiId /= Nothing || model.busy) ] [ text (busyText model "作る") ] ]
+                    , Reply.addButton
+                        { label = "作る"
+                        , ready = apiIdError model.newType.apiId == Nothing
+                        , reply = model.reply
+                        , onAdd = TypeSubmitted
+                        }
                     ]
                 ]
 
@@ -808,7 +844,8 @@ viewType args model detail =
                 else
                     []
             }
-        , Ui.errors model.errors
+        , Reply.banner { message = model.banner, onClose = BannerClosed }
+        , Ui.errors (Reply.general model.reply)
         , div [ class "flex items-start gap-5" ]
             [ div [ class "min-w-0 flex-1" ] [ viewFields args model detail ]
             , if args.canManage then
@@ -950,12 +987,12 @@ viewAddPanel args model form =
             , Ui.sectionTitle (kindText kind ++ " を追加")
             , div [ class "ml-auto" ] [ Ui.ghostButton [ onClick PickerOpened ] [ text "種類を選び直す" ] ]
             ]
-        , Ui.field { label = "表示名", hint = Just "画面に出る名前", errors = [] }
+        , Ui.field { label = "表示名", hint = Just "画面に出る名前", errors = Reply.errorsFor "name" model.reply }
             [ Ui.input [ value form.name, onInput NameTyped, placeholder "タイトル" ] ]
         , Ui.field
             { label = "フィールド ID"
             , hint = Just "API に出る名前。作成した後は変更できません"
-            , errors = apiIdError form.apiId |> Maybe.map List.singleton |> Maybe.withDefault []
+            , errors = (apiIdError form.apiId |> Maybe.map List.singleton |> Maybe.withDefault []) ++ Reply.errorsFor "apiId" model.reply
             }
             [ Ui.input [ value form.apiId, onInput ApiIdTyped, class "font-mono", placeholder "title" ] ]
         , viewKindConfig args model form
@@ -963,10 +1000,13 @@ viewAddPanel args model form =
             [ Ui.checkbox { label = "必須（公開する時にチェックします）", checked = form.required, onToggle = RequiredToggled }
             , Ui.checkbox { label = "複数（値をいくつも入れられます）", checked = form.many, onToggle = ManyToggled }
             ]
-        , div [ class "flex gap-2" ]
-            [ Ui.button
-                [ onClick AddSubmitted, Html.Attributes.disabled (apiIdError form.apiId /= Nothing || model.busy) ]
-                [ text (busyText model "追加する") ]
+        , div [ class "flex items-center gap-2" ]
+            [ Reply.addButton
+                { label = "追加する"
+                , ready = apiIdError form.apiId == Nothing
+                , reply = model.reply
+                , onAdd = AddSubmitted
+                }
             , Ui.ghostButton [ onClick PanelClosed ] [ text "やめる" ]
             ]
         ]
@@ -1059,9 +1099,13 @@ viewEditPanel model detail form =
             ]
         , viewEditConfig detail form
         , viewSaveConfirm model form
-        , div [ class "flex gap-2 border-t border-edge pt-4" ]
-            [ Ui.button [ onClick EditSubmitted, Html.Attributes.disabled (not form.dirty || model.busy) ]
-                [ text (busyText model "保存") ]
+        , div [ class "flex items-center gap-2 border-t border-edge pt-4" ]
+            [ Reply.saveButton
+                { label = "保存"
+                , dirty = form.dirty
+                , reply = model.reply
+                , onSave = EditSubmitted
+                }
             , Ui.ghostButton [ onClick PanelClosed ] [ text "やめる" ]
             ]
         , viewRemove model form
@@ -1454,7 +1498,7 @@ viewField args model field =
 
 busyText : Model -> String -> String
 busyText model label =
-    if model.busy then
+    if Reply.isSending model.reply then
         "送っています…"
 
     else
