@@ -102,14 +102,14 @@ update ctx msg model =
             ( { model | contentType = Loaded.fromResult result }
             , case result of
                 Ok (Just detail) ->
-                    entriesCall ctx.project detail.id 0 :: tagLabelCalls ctx detail
+                    [ entriesCall ctx.project detail.id 0 ]
 
                 _ ->
                     []
             )
 
         GotTagLabels (Ok page) ->
-            ( { model | tagLabels = Dict.fromList (List.map (\row -> ( row.id, EntryLabel.forRow row )) page.nodes) }, [] )
+            ( { model | tagLabels = Dict.union (Dict.fromList (List.map (\row -> ( row.id, EntryLabel.forRow row )) page.nodes)) model.tagLabels }, [] )
 
         GotTagLabels (Err _) ->
             ( model, [] )
@@ -127,16 +127,24 @@ update ctx msg model =
                         ++ page.nodes
             in
             ( { model | entries = Loaded.Present { page | nodes = rows } }
-            , if List.isEmpty page.nodes || List.length rows >= min page.totalCount boardLimit then
+            , (if List.isEmpty page.nodes || List.length rows >= min page.totalCount boardLimit then
                 []
 
-              else
+               else
                 case Loaded.toMaybe model.contentType of
                     Just detail ->
                         [ entriesCall model.project detail.id (List.length rows) ]
 
                     Nothing ->
                         []
+              )
+                ++ (case Loaded.toMaybe model.contentType of
+                        Just detail ->
+                            tagLabelCalls ctx model detail page.nodes
+
+                        Nothing ->
+                            []
+                   )
             )
 
         GotEntries _ (Err problem) ->
@@ -214,22 +222,53 @@ update ctx msg model =
 
 
 {-| タグがコンテンツ（REFERENCE）なら、名前を引く。
+
+WhyNot: タグの型を頭から 100 件引いて当てにしない。101 個目のタグが付いた
+カードは、名前を引けず 12 桁の id を出す。**カードに載っている id だけ**を
+名指しして引く。
+
 -}
-tagLabelCalls : { project : Slug } -> ContentTypeDetail -> List (Api.Call Msg)
-tagLabelCalls ctx detail =
+tagLabelCalls : { project : Slug } -> Model -> ContentTypeDetail -> List EntryRow -> List (Api.Call Msg)
+tagLabelCalls ctx model detail rows =
+    let
+        wanted : List String
+        wanted =
+            rows
+                |> List.concatMap tagIdsOf
+                |> List.filter (\entryId -> not (Dict.member entryId model.tagLabels))
+                |> unique
+    in
     detail.fields
         |> List.filter (\field -> field.apiId == "tags" && field.kind == "REFERENCE")
         |> List.filterMap .targetTypeId
-        |> List.map
+        |> List.concatMap
             (\typeId ->
-                Api.call
-                    (\id ->
-                        Queries.entries id
-                            ctx.project
-                            { typeId = typeId, search = "", stage = "", conditions = [], ids = [], order = "", first = 100, skip = 0 }
-                    )
-                    GotTagLabels
+                Queries.chunkIds wanted
+                    |> List.map
+                        (\ids ->
+                            Api.call
+                                (\id ->
+                                    Queries.entries id
+                                        ctx.project
+                                        { typeId = typeId, search = "", stage = "", conditions = [], ids = ids, order = "", first = List.length ids, skip = 0 }
+                                )
+                                GotTagLabels
+                        )
             )
+
+
+unique : List String -> List String
+unique values =
+    List.foldl
+        (\value kept ->
+            if List.member value kept then
+                kept
+
+            else
+                kept ++ [ value ]
+        )
+        []
+        values
 
 
 {-| 1 回に引く件数と、盤に並べる上限。
@@ -497,6 +536,9 @@ viewTag label =
 
 tagsOf : Model -> EntryRow -> List String
 tagsOf model row =
-    D.decodeValue (D.field "tags" (D.list D.string)) row.fields
-        |> Result.withDefault []
-        |> List.map (\value -> Dict.get value model.tagLabels |> Maybe.withDefault value)
+    tagIdsOf row |> List.map (\value -> Dict.get value model.tagLabels |> Maybe.withDefault value)
+
+
+tagIdsOf : EntryRow -> List String
+tagIdsOf row =
+    D.decodeValue (D.field "tags" (D.list D.string)) row.fields |> Result.withDefault []
