@@ -1,0 +1,106 @@
+<title>コードブロックモック</title>
+<style>
+  :root { --bg: #373b40; --code: #2f3235; --bar: #3a3e42; --fg: #e6edf0; --fg-2: #9aa3aa; --fg-3: #767d84; --frame: #7fb3d5; --menu: #5b6167; --menu-hi: #6a7076; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 0; padding: 32px; }
+  h1 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+  p.lead { color: var(--fg-2); font-size: 13px; margin: 0 0 32px; }
+  .grid { display: flex; flex-direction: column; gap: 40px; }
+  .state { border: 1px dashed #4a4f55; border-radius: 8px; padding: 44px 32px 40px; position: relative; }
+  .state > h2 { position: absolute; top: 12px; left: 16px; font-size: 12px; font-weight: 500; color: var(--fg-2); margin: 0; }
+
+  .block { position: relative; }
+  .code { background: var(--code); border-radius: 2px; padding: 18px 22px; min-height: 72px;
+    font-family: ui-monospace, "SF Mono", monospace; font-size: 14px; line-height: 2; white-space: pre; overflow-x: auto; color: var(--fg); }
+  .code .kw { color: #7ee0a0; } .code .fn { color: #a08cf0; }
+
+  /* 下の帯。左にファイル名、右に言語 */
+  .foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--bar); padding: 6px 10px; border-radius: 0 0 2px 2px; }
+  .foot input { all: unset; box-sizing: border-box; height: 28px; padding: 0 10px; border-radius: 4px; font-size: 13px; color: var(--fg); }
+  .foot input::placeholder { color: var(--fg-3); }
+  .foot .file { flex: 0 1 16rem; }
+  .foot .lang { flex: 0 0 14rem; text-align: center; }
+  .foot .lang.is-focus { outline: 2px solid var(--frame); }
+  .block.is-idle .foot input::placeholder { color: transparent; }
+  .langname { flex: 0 0 14rem; text-align: center; font-size: 13px; color: var(--fg); }
+
+  /* 候補の一覧 */
+  .menu { position: absolute; z-index: 5; width: 14rem; max-height: 13rem; overflow-y: auto; overflow-x: auto;
+    background: var(--menu); border-radius: 6px; box-shadow: 0 6px 20px rgb(0 0 0 / .35); padding: 6px 0; }
+  .menu .row { display: flex; align-items: center; gap: 12px; padding: 7px 14px; font-size: 15px; color: var(--fg); }
+  .menu .row.is-on { background: var(--menu-hi); }
+  .mark { flex: 0 0 22px; height: 22px; border-radius: 4px; display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, monospace; font-size: 11px; font-weight: 700; color: #fff; }
+  .menu::-webkit-scrollbar { width: 10px; height: 10px; }
+  .menu::-webkit-scrollbar-thumb { background: #8a9098; border-radius: 5px; }
+
+  .note { font-size: 12px; color: var(--fg-3); margin-top: 10px; }
+</style>
+
+<h1>コードブロックモック（note の実物に合わせる）</h1>
+<p class="lead">docs/design/richtext-note-codeblock-ui.md の表を HTML にした物。言語の欄はブロックの下・右寄せ。アイコンは外部の画像を使わず、言語ごとの色の四角に頭文字。</p>
+
+<div class="grid">
+
+  <section class="state">
+    <h2>1. 入れた直後（カーソルが言語の欄にある）</h2>
+    <div class="block">
+      <div class="code"> </div>
+      <div class="foot">
+        <input class="file" placeholder="ファイル名">
+        <input class="lang is-focus" placeholder="コーディング言語">
+      </div>
+    </div>
+    <p class="note">ファイル名は note に無いこちらの決め。左端に置き、言語は右端。</p>
+  </section>
+
+  <section class="state">
+    <h2>2. フォーカスが外れている時（帯だけが残る）</h2>
+    <div class="block is-idle">
+      <div class="code"> </div>
+      <div class="foot">
+        <input class="file" placeholder="ファイル名">
+        <input class="lang" placeholder="コーディング言語">
+      </div>
+    </div>
+  </section>
+
+  <section class="state" style="padding-bottom: 200px">
+    <h2>3. 打っている時（候補の一覧が下に出る）</h2>
+    <div class="block">
+      <div class="code"> </div>
+      <div class="foot">
+        <input class="file" placeholder="ファイル名">
+        <input class="lang is-focus" value="c">
+      </div>
+      <div class="menu" style="right: 10px; top: calc(100% + 6px)">
+        <div class="row"><span class="mark" style="background:#2f7de1">C</span>c</div>
+        <div class="row"><span class="mark" style="background:#7b4fd0">C#</span>c#</div>
+        <div class="row"><span class="mark" style="background:#2f7de1">C+</span>c++</div>
+        <div class="row"><span class="mark" style="background:#c9a227">Ca</span>cassandra</div>
+        <div class="row"><span class="mark" style="background:#b8651b">Ce</span>ceylon</div>
+        <div class="row"><span class="mark" style="background:#7a8189">Cr</span>crystal</div>
+        <div class="row"><span class="mark" style="background:#7b4fd0">C#</span>csharp</div>
+        <div class="row is-on"><span class="mark" style="background:#2f7de1">CS</span>css</div>
+        <div class="row"><span class="mark" style="background:#c9a227">Cy</span>cypher</div>
+        <div class="row"><span class="mark" style="background:#2f9e5e">Cy</span>cython</div>
+      </div>
+    </div>
+    <p class="note">別名（c# と csharp）は候補に両方出し、決めた後は正の名前に寄せる。doc に入るのは正の名前だけ。</p>
+  </section>
+
+  <section class="state">
+    <h2>4. 決めた後（帯に整った名前、本文はハイライト）</h2>
+    <div class="block is-idle">
+      <div class="code"><span class="kw">void</span> <span class="fn">main</span> () {
+  <span class="kw">int</span> x;
+  x++;
+}</div>
+      <div class="foot">
+        <input class="file" value="main.cpp">
+        <span class="langname">C++</span>
+      </div>
+    </div>
+    <p class="note">候補の一覧は素の名前（c++）、決めた後の表示は整った名前（C++）。対は表で持つ。</p>
+  </section>
+
+</div>

@@ -1,0 +1,120 @@
+<title>数式ブロックモック</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400&display=swap">
+<style>
+  :root { --bg: #0d1117; --panel: #161b22; --well: #1c2128; --edge: #30363d; --fg: #e6edf0; --fg-2: #8b949e; --fg-3: #6e7681; --frame: #7fb3d5; --bar: #2b2f33; --bad: #f2807a; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 0; padding: 32px; }
+  h1 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+  p.lead { color: var(--fg-2); font-size: 13px; margin: 0 0 32px; }
+  .grid { display: flex; flex-direction: column; gap: 40px; }
+  .state { border: 1px dashed var(--edge); border-radius: 8px; padding: 72px 32px 32px; position: relative; }
+  .state > h2 { position: absolute; top: 12px; left: 16px; font-size: 12px; font-weight: 500; color: var(--fg-2); margin: 0; }
+
+  .mb { position: relative; margin: 12px 0; border: 1px solid var(--edge); border-radius: 6px; }
+  .mb > .out:first-child { border-radius: 6px 6px 0 0; }
+  .mb > .out:only-child { border-radius: 6px; }
+  .mb.is-selected { outline: 4px solid var(--frame); }
+  .out { padding: 18px 12px; background: var(--panel); text-align: center; font-family: "Times New Roman", serif; font-size: 22px; font-style: italic; }
+  .out sup { font-size: .6em; font-style: normal; vertical-align: super; }
+  .out.is-empty { color: var(--fg-3); font-family: -apple-system, sans-serif; font-size: 14px; font-style: normal; }
+  .out.is-bad { color: var(--bad); font-family: "IBM Plex Mono", monospace; font-size: 12px; text-align: left; font-style: normal; }
+  .src { display: block; width: 100%; box-sizing: border-box; padding: 8px 12px; border: 0; border-top: 1px solid var(--edge);
+    background: var(--well); color: var(--fg-2); font-family: "IBM Plex Mono", monospace; font-size: 12px; line-height: 1.6; resize: none; outline: none; }
+  .src:focus { color: var(--fg); }
+
+  .bar { position: absolute; top: -64px; left: 50%; transform: translateX(-50%); display: flex; align-items: center;
+    height: 52px; padding: 0 16px; border-radius: 6px; background: var(--bar); box-shadow: 0 2px 8px rgb(0 0 0 / .3); }
+  .bar button { all: unset; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 4px; color: #fff; cursor: pointer; }
+  .bar svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+
+  /* 案 A: 掴み（⋮⋮）。ホバーで左に出る */
+  .grip { position: absolute; left: -34px; top: 50%; transform: translateY(-50%); width: 24px; height: 28px;
+    display: flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--fg-3); cursor: grab; }
+  .grip:hover { background: var(--well); color: var(--fg-2); }
+  .grip svg { width: 14px; height: 18px; fill: currentColor; }
+  /* 案 B: ホバーで右上にゴミ箱 */
+  .corner { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+    border-radius: 4px; background: var(--bar); color: #fff; }
+  .corner svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .hint { display: inline-block; margin-left: 8px; padding: 1px 6px; border-radius: 3px; background: var(--well); color: var(--fg-3); font-size: 11px; }
+  .note { font-size: 12px; color: var(--fg-3); margin-top: 10px; }
+  .para { color: var(--fg-2); font-size: 15px; }
+</style>
+
+<h1>数式ブロックモック</h1>
+<p class="lead">docs/design/richtext-math-ui.md の決めを HTML にした物。「普段は組版だけ、押すと TeX、選ぶと削除の帯」の 3 状態。</p>
+
+<div class="grid">
+
+  <section class="state">
+    <h2>1. 普段（焦点も選択も無い）— 組版された数式だけ</h2>
+    <p class="para">アインシュタインの式は次のとおりです。</p>
+    <div class="mb"><div class="out">E = mc<sup>2</sup></div></div>
+    <p class="para">質量とエネルギーは等価です。</p>
+    <p class="note">TeX の欄は見せない。高さは組版の分だけ。</p>
+  </section>
+
+  <section class="state">
+    <h2>2. 押した時 — 下に TeX の欄が開く（組版は上に残る）</h2>
+    <div class="mb">
+      <div class="out">E = mc<sup>2</sup></div>
+      <textarea class="src" rows="2">E = mc^2</textarea>
+    </div>
+    <p class="note">欄は中身の行数に合わせて自動で伸びる。掴み（resize）は出さない。</p>
+  </section>
+
+  <section class="state">
+    <h2>3. 選んだ時 — 水色の枠と、上に削除だけの帯</h2>
+    <div class="mb is-selected">
+      <div class="bar"><button title="削除"><svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button></div>
+      <div class="out">E = mc<sup>2</sup></div>
+    </div>
+    <p class="note">帯・枠・アイコンは画像とリンクカードと同じ部品。TeX が空の時は Backspace でも段落に戻る。</p>
+  </section>
+
+  <section class="state">
+    <h2>4. 空の時</h2>
+    <div class="mb">
+      <div class="out is-empty">数式を入力</div>
+      <textarea class="src" rows="2" placeholder="TeX で書く（例: E = mc^2）"></textarea>
+    </div>
+  </section>
+
+  <section class="state">
+    <h2>5. TeX が壊れている時</h2>
+    <div class="mb">
+      <div class="out is-bad">KaTeX parse error: Expected '}', got 'EOF' at end of input: E = \frac{1</div>
+      <textarea class="src" rows="2">E = \frac{1</textarea>
+    </div>
+  </section>
+
+
+  <section class="state">
+    <h2>案 A-1. ホバー — 左に掴み（押す場所で迷わない）</h2>
+    <div class="mb" style="margin-left: 34px">
+      <div class="grip"><svg viewBox="0 0 6 16"><circle cx="1.5" cy="3" r="1.2"/><circle cx="4.5" cy="3" r="1.2"/><circle cx="1.5" cy="8" r="1.2"/><circle cx="4.5" cy="8" r="1.2"/><circle cx="1.5" cy="13" r="1.2"/><circle cx="4.5" cy="13" r="1.2"/></svg></div>
+      <div class="out">E = mc<sup>2</sup></div>
+    </div>
+    <p class="note">箱のどこを押しても TeX の欄が開く。消すのは掴みから。<span class="hint">押す = 編集</span><span class="hint">掴み = 選ぶ</span></p>
+  </section>
+
+  <section class="state">
+    <h2>案 A-2. 掴みを押した後 — 選んだ状態（水色の枠と削除の帯）</h2>
+    <div class="mb is-selected" style="margin-left: 34px">
+      <div class="bar"><button title="削除"><svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button></div>
+      <div class="grip"><svg viewBox="0 0 6 16"><circle cx="1.5" cy="3" r="1.2"/><circle cx="4.5" cy="3" r="1.2"/><circle cx="1.5" cy="8" r="1.2"/><circle cx="4.5" cy="8" r="1.2"/><circle cx="1.5" cy="13" r="1.2"/><circle cx="4.5" cy="13" r="1.2"/></svg></div>
+      <div class="out">E = mc<sup>2</sup></div>
+    </div>
+    <p class="note">Esc でもこの状態に入る。掴みはドラッグでブロックの移動にも使える（設計 §6.7 の前倒し）。</p>
+  </section>
+
+  <section class="state">
+    <h2>案 B. ホバーで右上にゴミ箱（選択の概念を使わない）</h2>
+    <div class="mb">
+      <div class="corner"><svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></div>
+      <div class="out">E = mc<sup>2</sup></div>
+    </div>
+    <p class="note">単純だが、画像・リンクカード・引用が「選ぶと上に帯」なので形が揃わない。</p>
+  </section>
+
+</div>

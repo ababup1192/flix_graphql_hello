@@ -1,0 +1,293 @@
+<title>richText note 風モック</title>
+<style>
+  :root {
+    --fg: #222; --fg-2: #666; --fg-3: #999; --line: #e5e5e5; --bg: #fff; --bg-2: #f7f7f7; --accent: #2d7a4f;
+    --measure: 40rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --fg: #eee; --fg-2: #aaa; --fg-3: #777; --line: #333; --bg: #151515; --bg-2: #1e1e1e; --accent: #7bc79a; }
+  }
+  :root[data-theme="dark"] { --fg: #eee; --fg-2: #aaa; --fg-3: #777; --line: #333; --bg: #151515; --bg-2: #1e1e1e; --accent: #7bc79a; }
+
+  body { background: var(--bg); color: var(--fg); }
+  .page { max-width: var(--measure); margin: 3rem auto; padding: 0 1.25rem; }
+  .page > h1 { font-size: 1.6rem; margin-bottom: .25rem; }
+  .page > .lead { color: var(--fg-2); margin: 0 0 2.5rem; }
+
+  /* ---- ここから下が「本文の HTML」に当てる CSS。要素名と data 属性だけで当たる ---- */
+  .body { font-size: 1.05rem; line-height: 1.95; letter-spacing: .01em; }
+  .body p { margin: 0 0 1.6em; }
+  .body h2 { font-size: 1.5rem; line-height: 1.5; margin: 2.8em 0 .9em; }
+  .body h3 { font-size: 1.2rem; line-height: 1.5; margin: 2.2em 0 .8em; }
+  .body a { color: var(--accent); text-decoration: underline; text-underline-offset: .2em; }
+  .body hr { border: 0; text-align: center; margin: 3em 0; }
+  .body hr::before { content: "＊　＊　＊"; color: var(--fg-3); letter-spacing: .3em; }
+
+  /* 画像 + キャプション + 出典 */
+  .body figure { margin: 2.2em 0; }
+  .body figure > img { display: block; width: 100%; height: auto; border-radius: 4px; }
+  .body figcaption { margin-top: .6em; font-size: .85rem; line-height: 1.7; color: var(--fg-2); text-align: center; }
+  .body figcaption cite { font-style: normal; color: var(--fg-3); }
+  .body figcaption cite::before { content: "（"; }
+  .body figcaption cite::after { content: "）"; }
+  .body figcaption cite a { color: inherit; }
+
+  /* 引用 + 出典（出典は figcaption に置く。blockquote の外） */
+  .body figure[data-quote] blockquote { margin: 0; padding: .2em 0 .2em 1.25em; border-left: 3px solid var(--line); color: var(--fg-2); }
+  .body figure[data-quote] blockquote p:last-child { margin-bottom: 0; }
+  .body figure[data-quote] figcaption { text-align: right; }
+  .body figure[data-quote] figcaption cite::before { content: "— "; }
+  .body figure[data-quote] figcaption cite::after { content: ""; }
+  /* 出典なしの素の blockquote も同じ見た目になる */
+  .body > blockquote { margin: 2.2em 0; padding: .2em 0 .2em 1.25em; border-left: 3px solid var(--line); color: var(--fg-2); }
+
+  /* 外部リンクのカード（a 1 つ。iframe は使わない） */
+  .body a[data-link-card] {
+    display: grid; grid-template-columns: 1fr 8rem; grid-template-rows: auto auto auto; column-gap: 1rem;
+    margin: 2.2em 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; text-decoration: none; color: inherit;
+    min-height: 7.5rem;
+  }
+  .body a[data-link-card]:hover { background: var(--bg-2); }
+  .body a[data-link-card] > span { display: block; padding: 0 1.25rem; }
+  .body a[data-link-card] > [data-title] { grid-column: 1; margin-top: 1rem; font-weight: 600; line-height: 1.5;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .body a[data-link-card] > [data-description] { grid-column: 1; font-size: .8rem; color: var(--fg-2); line-height: 1.6; margin-top: .3rem;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .body a[data-link-card] > [data-site] { grid-column: 1; font-size: .75rem; color: var(--fg-3); margin: .5rem 0 1rem; display: flex; align-items: center; gap: .4rem; }
+  .body a[data-link-card] > [data-site] img { width: 1rem; height: 1rem; }
+  .body a[data-link-card] > img[data-thumbnail] { grid-column: 2; grid-row: 1 / span 3; width: 100%; height: 100%; object-fit: cover; }
+  /* OGP がまだ取れていない時は url だけが入る。その時も破綻しない */
+  .body a[data-link-card]:not(:has([data-title])) { display: block; padding: 1rem 1.25rem; word-break: break-all; color: var(--accent); }
+  @media (max-width: 30rem) {
+    .body a[data-link-card] { grid-template-columns: 1fr; }
+    .body a[data-link-card] > img[data-thumbnail] { grid-column: 1; grid-row: 1; height: 10rem; }
+  }
+
+  /* 目次（見出しの id を使う。エディタは入れず表示側が作る想定） */
+  .body nav[data-toc] { border: 1px solid var(--line); border-radius: 6px; padding: 1rem 1.25rem; margin: 2.2em 0; font-size: .9rem; }
+  .body nav[data-toc] ol { margin: .4em 0 0; padding-left: 1.2em; }
+
+  .note { font-size: .8rem; color: var(--fg-3); border-top: 1px dashed var(--line); margin-top: 3rem; padding-top: 1rem; }
+
+  /* ---- 編集画面のモック（admin-ui 側。CMS の HTML ではない） ---- */
+  .editor { margin-top: 5rem; border-top: 1px solid var(--line); padding-top: 2rem; }
+  .editor > h2 { font-size: 1.2rem; margin: 0 0 .25rem; }
+  .editor > .lead { color: var(--fg-2); font-size: .9rem; margin: 0 0 1.5rem; }
+  .frame { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow: hidden; font-size: .95rem; }
+  .frame-top { display: flex; align-items: center; gap: .75rem; padding: .5rem .9rem; border-bottom: 1px solid var(--line); background: var(--bg-2); font-size: .8rem; color: var(--fg-2); }
+  .frame-top .spacer { flex: 1; }
+  .frame-top .saved::before { content: "●"; color: var(--accent); margin-right: .35em; font-size: .6em; vertical-align: middle; }
+  .frame-top .count { font-variant-numeric: tabular-nums; }
+  .frame-body { display: grid; grid-template-columns: 11rem 1fr; }
+  .outline { border-right: 1px solid var(--line); padding: 1rem .9rem; font-size: .8rem; color: var(--fg-2); }
+  .outline b { display: block; color: var(--fg-3); font-weight: 500; font-size: .7rem; letter-spacing: .08em; margin-bottom: .5rem; }
+  .outline ol { list-style: none; margin: 0; padding: 0; }
+  .outline li { padding: .2rem 0; }
+  .outline li.h3 { padding-left: 1rem; }
+  .outline li.now { color: var(--accent); }
+  .canvas { padding: 3.5rem 2rem 2rem 2.5rem; position: relative; line-height: 1.9; }
+  .canvas p { margin: 0 0 1.2em; }
+  .canvas h2 { font-size: 1.3rem; margin: 1.2em 0 .6em; }
+  .row { position: relative; }
+  .handle { position: absolute; left: -1.7rem; top: .35em; color: var(--fg-3); font-size: .9rem; letter-spacing: -.15em; cursor: grab; opacity: .7; }
+  .plus { position: absolute; left: -1.9rem; top: .1em; width: 1.4rem; height: 1.4rem; border: 1px solid var(--line); border-radius: 50%; display: grid; place-items: center; color: var(--fg-2); font-size: 1rem; line-height: 1; background: var(--bg); }
+  .caret { border-left: 1.5px solid var(--fg); height: 1.1em; display: inline-block; vertical-align: text-bottom; }
+  .placeholder { color: var(--fg-3); }
+  .menu { position: absolute; left: -.2rem; top: 2.2em; z-index: 2; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.08); padding: .35rem; font-size: .85rem; min-width: 13rem; }
+  .menu div { padding: .35rem .6rem; border-radius: 4px; display: flex; justify-content: space-between; gap: 1rem; }
+  .menu div.on { background: var(--bg-2); }
+  .menu kbd { color: var(--fg-3); font-family: inherit; font-size: .75rem; }
+  .sel { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  .bubble { position: absolute; left: 6rem; top: -2.4rem; display: flex; gap: .1rem; background: var(--fg); color: var(--bg); border-radius: 6px; padding: .25rem .35rem; font-size: .8rem; box-shadow: 0 4px 14px rgba(0,0,0,.18); }
+  .bubble span { padding: .15rem .5rem; border-radius: 4px; }
+  .bubble span.on { background: rgba(255,255,255,.18); }
+  .bubble span.sep { padding: 0; width: 1px; background: rgba(255,255,255,.25); margin: .2rem .2rem; }
+  .fields { display: grid; grid-template-columns: 6rem 1fr; gap: .35rem .75rem; margin: .6rem 0 0; font-size: .8rem; align-items: center; }
+  .fields label { color: var(--fg-3); text-align: right; }
+  .fields input { border: 1px solid var(--line); border-radius: 4px; padding: .3rem .5rem; font: inherit; color: var(--fg); background: var(--bg); }
+  .fields input::placeholder { color: var(--fg-3); }
+  .canvas figure { margin: 1.2em 0; outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+  .canvas figure img { display: block; width: 100%; border-radius: 4px; }
+  .canvas blockquote { margin: 1.2em 0 0; padding: .2em 0 .2em 1.25em; border-left: 3px solid var(--line); color: var(--fg-2); }
+  .cite-add { text-align: right; font-size: .8rem; color: var(--fg-3); margin: .2rem 0 1.2em; }
+  .cite-fields { display: flex; justify-content: flex-end; gap: .5rem; margin: .4rem 0 1.2em; }
+  .cite-fields input { border: 1px solid var(--line); border-radius: 4px; padding: .3rem .5rem; font: inherit; font-size: .8rem; color: var(--fg); background: var(--bg); width: 12rem; }
+  .card-edit { border: 1px dashed var(--line); border-radius: 6px; padding: .8rem 1rem; margin: 1.2em 0; font-size: .85rem; display: grid; gap: .25rem; }
+  .card-edit .url { color: var(--accent); word-break: break-all; }
+  .card-edit .state { color: var(--fg-3); font-size: .8rem; }
+  .card-edit .state.warn { color: #b0551e; }
+  .card-edit .actions { display: flex; gap: .6rem; font-size: .78rem; color: var(--fg-2); }
+  .card-edit .actions span { text-decoration: underline; text-underline-offset: .2em; }
+  .caption-note { font-size: .78rem; color: var(--fg-3); margin: .3rem 0 0 .2rem; }
+  .steps { margin: 1.5rem 0 0; padding: 0 0 0 1.2rem; font-size: .9rem; line-height: 1.8; color: var(--fg-2); }
+  @media (max-width: 40rem) { .frame-body { grid-template-columns: 1fr; } .outline { display: none; } }
+</style>
+
+<div class="page">
+  <h1>richText の note 風モック</h1>
+  <p class="lead">下の本文は CMS が返す HTML そのもの。class は使わず、要素名と data 属性だけで CSS を当てる。</p>
+
+  <div class="body">
+    <p>note の記事は、本文の幅を狭く取り、行間を広く、画像とキャプションを中央に置く。装飾は少なく、読み手の目を本文から離さない。</p>
+
+    <nav data-toc>
+      目次
+      <ol>
+        <li><a href="#h-image">画像とキャプション</a></li>
+        <li><a href="#h-quote">引用と出典</a></li>
+        <li><a href="#h-card">外部リンクのカード</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="h-image">画像とキャプション</h2>
+    <p>画像の下に説明を置き、必要なら出典を付ける。出典はテキストだけでも、リンク付きでもよい。</p>
+
+    <figure>
+      <img src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='800' height='450' fill='%23c9d6cf'/%3E%3Ctext x='400' y='235' font-size='28' text-anchor='middle' fill='%23557'%3E800 × 450%3C/text%3E%3C/svg%3E" alt="夕方の港" width="800" height="450">
+      <figcaption>夕方の港。西日が水面に映る <cite><a href="https://example.com/photos/123" target="_blank" rel="noopener noreferrer">撮影: 山田太郎</a></cite></figcaption>
+    </figure>
+
+    <figure>
+      <img src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='300'%3E%3Crect width='800' height='300' fill='%23d9d2c5'/%3E%3C/svg%3E" alt="" width="800" height="300">
+      <figcaption>出典だけの場合 <cite>Unsplash</cite></figcaption>
+    </figure>
+
+    <h2 id="h-quote">引用と出典</h2>
+    <p>出典は blockquote の外の figcaption に置く。HTML の仕様が求める形で、CSS の当て方も画像と揃う。</p>
+
+    <figure data-quote>
+      <blockquote>
+        <p>Simplicity is the ultimate sophistication.</p>
+      </blockquote>
+      <figcaption><cite><a href="https://example.com/quote" target="_blank" rel="noopener noreferrer">Leonardo da Vinci（とされる言葉）</a></cite></figcaption>
+    </figure>
+
+    <blockquote>
+      <p>出典の無い引用は今まで通り素の blockquote のまま。見た目は同じになる。</p>
+    </blockquote>
+
+    <h2 id="h-card">外部リンクのカード</h2>
+    <p>URL を単独の行に貼るとカードになる。カードは a 要素 1 つで、中身は span と img だけ。JavaScript も iframe も要らない。</p>
+
+    <a data-link-card href="https://example.com/articles/how-to-write" target="_blank" rel="noopener noreferrer">
+      <span data-title>読みやすい文章を書くための 7 つの習慣</span>
+      <span data-description>一文を短くする、主語を隠さない、比喩を自作しない。編集部が毎日使っているチェックリストを公開します。</span>
+      <span data-site><img src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%232d7a4f'/%3E%3C/svg%3E" alt="">example.com</span>
+      <img data-thumbnail src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Crect width='300' height='300' fill='%23b8c4d9'/%3E%3C/svg%3E" alt="">
+    </a>
+
+    <p>OGP がまだ取れていない、あるいは取れなかった時は URL だけが入る。</p>
+
+    <a data-link-card href="https://example.com/no-ogp-yet">https://example.com/no-ogp-yet</a>
+
+    <hr>
+
+    <p>区切り線は note と同じく「＊」の並びで出す。これも hr に CSS を当てるだけで、HTML は素の hr。</p>
+  </div>
+
+
+  <section class="editor">
+    <h2>編集画面（admin-ui 側）</h2>
+    <p class="lead">同じ本文を書いている途中。番号は設計文書の 6 章の場面に対応する。</p>
+
+    <div class="frame">
+      <div class="frame-top">
+        <span>下書き</span>
+        <span class="spacer"></span>
+        <span class="count">1,284 文字</span>
+        <span class="saved">保存済み 12:34</span>
+      </div>
+      <div class="frame-body">
+        <aside class="outline">
+          <b>見出し</b>
+          <ol>
+            <li>画像とキャプション</li>
+            <li class="now">引用と出典</li>
+            <li class="h3">出典の書き方</li>
+            <li>外部リンクのカード</li>
+          </ol>
+        </aside>
+        <div class="canvas">
+
+          <div class="row">
+            <span class="bubble"><span class="on">B</span><span><i>I</i></span><span><s>S</s></span><span>&lt;/&gt;</span><span class="sep"></span><span>リンク</span><span>引用</span><span class="sep"></span><span>H2</span><span>H3</span></span>
+            <span class="handle">⋮⋮</span>
+            <p>note の記事は、<span class="sel">本文の幅を狭く取り、行間を広く</span>、画像とキャプションを中央に置く。</p>
+          </div>
+          <p class="caption-note">6.2 文字を選ぶと直上に浮くツールバー。中身は 8 つに絞る。上付き・蛍光ペンなどは上の固定ツールバーに残す</p>
+
+          <div class="row">
+            <span class="handle">⋮⋮</span>
+            <figure>
+              <img src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='320'%3E%3Crect width='800' height='320' fill='%23c9d6cf'/%3E%3C/svg%3E" alt="">
+              <div class="fields">
+                <label>代替テキスト</label><input value="夕方の港">
+                <label>キャプション</label><input value="夕方の港。西日が水面に映る">
+                <label>出典</label><input value="撮影: 山田太郎">
+                <label>出典の URL</label><input placeholder="https://" value="https://example.com/photos/123">
+              </div>
+            </figure>
+          </div>
+          <p class="caption-note">6.4 画像を選ぶと下に 4 欄。キャプションは 1 行。出典に URL を入れると公開側でリンクになる</p>
+
+          <div class="row">
+            <span class="handle">⋮⋮</span>
+            <blockquote>Simplicity is the ultimate sophistication.</blockquote>
+            <div class="cite-fields"><input value="Leonardo da Vinci"><input placeholder="出典の URL" value="https://example.com/quote"></div>
+          </div>
+          <div class="row">
+            <span class="handle">⋮⋮</span>
+            <blockquote>出典の無い引用。</blockquote>
+            <div class="cite-add">+ 出典を追加</div>
+          </div>
+          <p class="caption-note">6.5 引用の右下に「出典を追加」。空のままなら doc に書かない</p>
+
+          <div class="row">
+            <span class="handle">⋮⋮</span>
+            <div class="card-edit">
+              <span class="url">https://example.com/articles/how-to-write</span>
+              <span class="state">保存すると、リンク先のタイトルと画像を取りに行きます</span>
+              <span class="actions"><span>URL に戻す</span><span>開く</span></span>
+            </div>
+          </div>
+          <div class="row">
+            <span class="handle">⋮⋮</span>
+            <div class="card-edit">
+              <span class="url">https://example.com/private-page</span>
+              <span class="state warn">カードにできませんでした: リンク先が自動取得を拒んでいます。公開側では URL だけのリンクになります</span>
+              <span class="actions"><span>URL に戻す</span><span>もう一度取る</span></span>
+            </div>
+          </div>
+          <p class="caption-note">6.6 空段落に URL を貼った時点でカードになる。OGP は保存後に取り、取れない理由をここに出す</p>
+
+          <div class="row">
+            <span class="plus">+</span>
+            <p><span class="caret"></span><span class="placeholder">「+」か「/」でブロックを挿入</span></p>
+            <div class="menu">
+              <div class="on"><span>画像</span><kbd>asset から</kbd></div>
+              <div><span>引用</span><kbd>&gt;</kbd></div>
+              <div><span>コード</span><kbd>```</kbd></div>
+              <div><span>区切り線</span><kbd>---</kbd></div>
+              <div><span>表</span></div>
+              <div><span>埋め込み・リンクカード</span><kbd>URL を貼る</kbd></div>
+              <div><span>補足（callout）</span></div>
+              <div><span>折りたたみ</span></div>
+              <div><span>Markdown として貼る</span></div>
+            </div>
+          </div>
+          <div style="height: 15rem"></div>
+        </div>
+      </div>
+    </div>
+
+    <ol class="steps">
+      <li>空の段落にカーソルがある間、左に「+」が出続ける（6.1）</li>
+      <li>右上は文字数と「保存済み 12:34」。入力が止まって数秒で自動保存（6.8 / 6.9）</li>
+      <li>左は見出し一覧。押すとその見出しへ送る。公開側の目次と同じ物（6.9）</li>
+      <li>各ブロックの左のハンドルでドラッグ。Ctrl+Shift+↑↓ でも動く（6.7）</li>
+      <li>本文の幅・行間・画像とキャプションの見た目は上の公開側モックと同じ値（6.12）</li>
+    </ol>
+  </section>
+
+  <p class="note">このページは設計の見本。実際の CSS は公開サイト側が持ち、CMS は HTML だけを返す。</p>
+</div>
