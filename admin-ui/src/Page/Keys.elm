@@ -318,7 +318,7 @@ view model =
             Just hook ->
                 Ui.Confirm.view
                     { title = "「" ++ hook.name ++ "」を削除しますか"
-                    , body = "この URL への通知が止まります。配信の記録も見られなくなります。元には戻せません。"
+                    , body = "この URL への通知が止まります。元には戻せません。"
                     , confirm = "削除"
                     , reply = model.deleting
                     , onConfirm = HookDeleteConfirmed
