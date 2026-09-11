@@ -45,6 +45,17 @@ type alias Model =
     {- 保存の前に見た影響。影響があれば箱を出し、見た物を付けて送る。 -}
     , confirmSave : Maybe Model.SchemaImpact
 
+    {- 追加の前に見た影響。**前に同じフィールド ID で削除した値が残っていると、
+       足した瞬間に API へ戻る。** 見せてから押してもらう。
+    -}
+    , confirmAdd : Maybe Model.SchemaImpact
+
+    {- 影響を聞いている間、何を足そうとしているか。ask が False なら確認を挟まない（復元）。 -}
+    , pendingAdd : Maybe { field : Queries.NewField, ask : Bool }
+
+    {- 直前に削除したフィールド。バナーの「復元」で同じ内容を作り直す。 -}
+    , removed : Maybe FieldDef
+
     {- フォームの返事（送信中・失敗）。失敗の違反は欄の下に振り分ける。 -}
     , reply : Reply
 
@@ -210,6 +221,9 @@ type Msg
     | EditChanged (EditForm -> EditForm)
     | EditSubmitted
     | GotSaveImpact (Result Api.Problem Model.SchemaImpact)
+    | GotAddImpact (Result Api.Problem Model.SchemaImpact)
+    | AddConfirmed
+    | RestoreRequested
     | SaveConfirmed
     | SaveCancelled
     | RemoveAsked FieldDef
@@ -238,6 +252,9 @@ init project apiId =
     , confirmRemove = Nothing
     , removeImpact = Loaded.Loading
     , confirmSave = Nothing
+    , confirmAdd = Nothing
+    , pendingAdd = Nothing
+    , removed = Nothing
     , reply = Reply.idle
     , banner = Nothing
     , newType = { name = "", apiId = "", singleton = False }
@@ -353,44 +370,69 @@ update ctx msg model =
             ( { model | panel = mapAdding (\form -> { form | many = not form.many }) model }, [] )
 
         AddSubmitted ->
+            -- **足す前に影響を引く。** 前に同じフィールド ID で削除した値が DB に残っていると、
+            -- 足した瞬間に API へ戻る。CMS はそれを見ずに足す事を止める。
             case ( addingOf model, Loaded.toMaybe model.detail ) of
                 ( Just form, Just detail ) ->
-                    ( { model | reply = Reply.sending }
-                    , [ Api.call
-                            (\id ->
-                                Queries.addField id
-                                    ctx.project
-                                    { typeId = detail.id
-                                    , apiId = form.apiId
-                                    , name = form.name
-                                    , kind = form.kind
-                                    , required = form.required
-                                    , many = form.many
-                                    , sourceField = form.sourceField
-                                    , options = optionsOf form.options
-                                    , targetTypeId = form.targetTypeId
-                                    }
-                            )
-                            GotField
-                      ]
+                    askAddImpact ctx { field = newFieldOf detail.id form, ask = True } model
+
+                _ ->
+                    ( model, [] )
+
+        AddConfirmed ->
+            case ( model.pendingAdd, model.confirmAdd ) of
+                ( Just pending, Just impact ) ->
+                    ( { model | reply = Reply.sending, confirmAdd = Nothing }
+                    , [ Api.call (\id -> Queries.addField id ctx.project pending.field (Just impact)) GotField ]
                     )
 
                 _ ->
                     ( model, [] )
+
+        RestoreRequested ->
+            -- 直前に削除した物を、同じ内容で作り直す。確認は挟まない（人が「復元」を押している）。
+            case ( model.removed, Loaded.toMaybe model.detail ) of
+                ( Just field, Just detail ) ->
+                    askAddImpact ctx { field = restorable detail.id field, ask = False } { model | banner = Nothing }
+
+                _ ->
+                    ( model, [] )
+
+        GotAddImpact (Ok impact) ->
+            case model.pendingAdd of
+                Just pending ->
+                    if impact.safe || not pending.ask then
+                        ( model, [ Api.call (\id -> Queries.addField id ctx.project pending.field (Just impact)) GotField ] )
+
+                    else
+                        ( { model | reply = Reply.idle, confirmAdd = Just impact }, [] )
+
+                Nothing ->
+                    ( model, [] )
+
+        GotAddImpact (Err problem) ->
+            ( failed problem model, [] )
 
         GotField (Ok field) ->
             -- **面は閉じる**ので、成功は一覧の上の帯に出す（Ui.Reply の決め）。
             let
                 said : String
                 said =
-                    case model.panel of
-                        Editing _ ->
+                    case ( model.pendingAdd, model.panel ) of
+                        ( Just pending, _ ) ->
+                            if pending.ask then
+                                "「" ++ field.name ++ "」を追加しました"
+
+                            else
+                                "「" ++ field.name ++ "」を復元しました"
+
+                        ( Nothing, Editing _ ) ->
                             "「" ++ field.name ++ "」を保存しました"
 
                         _ ->
                             "「" ++ field.name ++ "」を追加しました"
             in
-            ( { model | reply = Reply.idle, banner = Just said, panel = Closed, detail = Loaded.map (upsertField field) model.detail }, [] )
+            ( { model | reply = Reply.idle, banner = Just said, panel = Closed, pendingAdd = Nothing, confirmAdd = Nothing, removed = Nothing, detail = Loaded.map (upsertField field) model.detail }, [] )
 
         GotField (Err problem) ->
             ( failed problem model, [] )
@@ -474,6 +516,7 @@ update ctx msg model =
             ( { model
                 | reply = Reply.idle
                 , banner = removedName model fieldId
+                , removed = fieldOf model fieldId
                 , panel = Closed
                 , detail = Loaded.map (\detail -> { detail | fields = List.filter (\f -> f.id /= fieldId) detail.fields }) model.detail
               }
@@ -639,6 +682,53 @@ ifSame current updated =
         current
 
 
+{-| 影響を引いてから足す。引いている間は押せなくする。
+-}
+askAddImpact : Context -> { field : Queries.NewField, ask : Bool } -> Model -> ( Model, List (Api.Call Msg) )
+askAddImpact ctx pending model =
+    ( { model | reply = Reply.sending, pendingAdd = Just pending, confirmAdd = Nothing }
+    , [ Api.call (\id -> Queries.addFieldImpact id ctx.project pending.field) GotAddImpact ]
+    )
+
+
+{-| 追加の下書きから、CMS に送る形を作る。
+-}
+newFieldOf : String -> NewField -> Queries.NewField
+newFieldOf typeId form =
+    { typeId = typeId
+    , apiId = form.apiId
+    , name = form.name
+    , kind = form.kind
+    , required = form.required
+    , many = form.many
+    , sourceField = form.sourceField
+    , options = optionsOf form.options
+    , targetTypeId = form.targetTypeId
+    }
+
+
+{-| 削除したフィールドから、同じ内容を作り直す形を作る。
+-}
+restorable : String -> FieldDef -> Queries.NewField
+restorable typeId field =
+    { typeId = typeId
+    , apiId = field.apiId
+    , name = field.name
+    , kind = kindOf field.kind
+    , required = field.required
+    , many = field.many
+    , sourceField = field.config.sourceField |> Maybe.withDefault ""
+    , options = field.config.options
+    , targetTypeId = field.targetTypeId |> Maybe.withDefault ""
+    }
+
+
+fieldOf : Model -> String -> Maybe FieldDef
+fieldOf model fieldId =
+    Loaded.toMaybe model.detail
+        |> Maybe.andThen (\detail -> detail.fields |> List.filter (\field -> field.id == fieldId) |> List.head)
+
+
 {-| 右の面が出している欄の名前。**ここに無い名前で来た理由は、まとめて面に出す。**
 -}
 panelFields : List String
@@ -650,9 +740,7 @@ panelFields =
 -}
 removedName : Model -> String -> Maybe String
 removedName model fieldId =
-    Loaded.toMaybe model.detail
-        |> Maybe.andThen (\detail -> detail.fields |> List.filter (\field -> field.id == fieldId) |> List.head)
-        |> Maybe.map (\field -> "「" ++ field.name ++ "」を削除しました")
+    fieldOf model fieldId |> Maybe.map (\field -> "「" ++ field.name ++ "」を削除しました")
 
 
 failed : Api.Problem -> Model -> Model
@@ -857,7 +945,11 @@ viewType args model detail =
                 else
                     []
             }
-        , Reply.banner { message = model.banner, onClose = BannerClosed }
+        , Reply.banner
+            { message = model.banner
+            , action = model.removed |> Maybe.map (\_ -> { label = "復元", onAction = RestoreRequested })
+            , onClose = BannerClosed
+            }
         , Ui.errors (Reply.general model.reply)
         , div [ class "flex items-start gap-5" ]
             [ div [ class "min-w-0 flex-1" ] [ viewFields args model detail ]
@@ -1014,16 +1106,38 @@ viewAddPanel args model form =
             , Ui.checkbox { label = "複数（値をいくつも入れられます）", checked = form.many, onToggle = ManyToggled }
             ]
         , Ui.errors (Reply.unmatched panelFields model.reply)
+        , viewAddConfirm model
         , div [ class "flex items-center gap-2" ]
             [ Reply.addButton
                 { label = "追加"
                 , ready = apiIdError form.apiId == Nothing
                 , reply = model.reply
-                , onAdd = AddSubmitted
+                , onAdd =
+                    if model.confirmAdd == Nothing then
+                        AddSubmitted
+
+                    else
+                        AddConfirmed
                 }
             , Ui.ghostButton [ onClick PanelClosed ] [ text "キャンセル" ]
             ]
         ]
+
+
+{-| 足すと既存のデータに何が起きるか。**影響がある時だけ出す。**
+
+WhyNot: 「影響を確かめてから押してください」で止めない。前はここで止まったまま、
+確かめる手段が画面に無く、同じフィールド ID は二度と作れなかった。
+
+-}
+viewAddConfirm : Model -> Html Msg
+viewAddConfirm model =
+    case model.confirmAdd of
+        Just impact ->
+            Ui.callout Ui.toneWarn [ class "gap-2 p-3" ] (viewImpact model (Present impact))
+
+        Nothing ->
+            text ""
 
 
 {-| 種類ごとに要る設定。足りないと CMS が INVALID で断るので、ここで入れさせる。
@@ -1272,7 +1386,7 @@ viewImpact model loaded =
 
         Loaded.Present impact ->
             if impact.safe then
-                [ Ui.note [ text "このフィールドに値を入れているコンテンツはありません。消しても配信は変わりません" ] ]
+                [ Ui.note [ text "このフィールドに値が入力されているコンテンツはありません。削除しても API の応答は変わりません" ] ]
 
             else
                 viewEffects model impact.effects

@@ -2,7 +2,9 @@ module Queries exposing
     ( AuditQuery
     , FieldPatch
     , Kind
+    , NewField
     , addField
+    , addFieldImpact
     , all
     , apiKeys
     , assets
@@ -518,39 +520,70 @@ type alias NewField =
     }
 
 
-addField : String -> Slug -> NewField -> ( Api.Request, D.Decoder FieldDef )
-addField id project args =
+addField : String -> Slug -> NewField -> Maybe Model.SchemaImpact -> ( Api.Request, D.Decoder FieldDef )
+addField id project args seen =
     Api.mutation { id = id, kind = "addField", project = project }
         (AdminMutation.addField
-            identity
+            (\optional -> { optional | expected = maybeExpected seen })
             { typeId = args.typeId
-            , input =
-                { apiId = args.apiId
-                , name = args.name
-                , kind = args.kind
-                , many = Opt.Present args.many
-                , required = Opt.Present args.required
-                , unique = Opt.Absent
-                , localized = Opt.Absent
-                , targetTypeId = presentIf (not (String.isEmpty args.targetTypeId)) args.targetTypeId
-                , parentFieldId = Opt.Absent
-                , config =
-                    if String.isEmpty args.sourceField && List.isEmpty args.options then
-                        Opt.Absent
-
-                    else
-                        Opt.Present
-                            { maxLength = Opt.Absent
-                            , sourceField = presentIf (not (String.isEmpty args.sourceField)) args.sourceField
-                            , min = Opt.Absent
-                            , max = Opt.Absent
-                            , integer = Opt.Absent
-                            , options = presentIf (not (List.isEmpty args.options)) args.options
-                            }
-                }
+            , input = fieldInput args
             }
             fieldDef
         )
+
+
+{-| フィールドを足すと既存のデータに何が起きるか。**書き込まない。**
+
+WhyNot: 追加に影響は無い、としない。前に同じフィールド ID で消した値が DB に残っていると、
+足した瞬間にその値が API へ戻る。CMS はそれを見ずに足す事を止める。
+
+-}
+addFieldImpact : String -> Slug -> NewField -> ( Api.Request, D.Decoder Model.SchemaImpact )
+addFieldImpact id project args =
+    Api.query { id = id, kind = "fieldImpact", project = project }
+        (Api.Admin.Query.fieldImpact
+            { input =
+                { action = SchemaAction.AddField
+                , fieldId = Opt.Absent
+                , typeId = Opt.Present args.typeId
+                , patch = Opt.Absent
+                , field = Opt.Present (fieldInput args)
+                }
+            }
+            schemaImpact
+        )
+
+
+fieldInput : NewField -> Input.FieldInput
+fieldInput args =
+    let
+        input : Input.FieldInput
+        input =
+            { apiId = args.apiId
+            , name = args.name
+            , kind = args.kind
+            , many = Opt.Present args.many
+            , required = Opt.Present args.required
+            , unique = Opt.Absent
+            , localized = Opt.Absent
+            , targetTypeId = presentIf (not (String.isEmpty args.targetTypeId)) args.targetTypeId
+            , parentFieldId = Opt.Absent
+            , config =
+                if String.isEmpty args.sourceField && List.isEmpty args.options then
+                    Opt.Absent
+
+                else
+                    Opt.Present
+                        { maxLength = Opt.Absent
+                        , sourceField = presentIf (not (String.isEmpty args.sourceField)) args.sourceField
+                        , min = Opt.Absent
+                        , max = Opt.Absent
+                        , integer = Opt.Absent
+                        , options = presentIf (not (List.isEmpty args.options)) args.options
+                        }
+            }
+    in
+    input
 
 
 presentIf : Bool -> a -> Opt.OptionalArgument a
@@ -691,6 +724,18 @@ removeField id project args =
             (\optional -> { optional | expected = Opt.Present (expectedOf args.expected) })
             { id = args.fieldId }
         )
+
+
+{-| 見た影響を、押す時に送る形にする。まだ見ていなければ送らない（影響があれば CMS が止める）。
+-}
+maybeExpected : Maybe Model.SchemaImpact -> Opt.OptionalArgument Input.SchemaImpactInput
+maybeExpected seen =
+    case seen of
+        Just impact ->
+            Opt.Present (expectedOf impact)
+
+        Nothing ->
+            Opt.Absent
 
 
 {-| 見た影響を、押す時に送る形にする。

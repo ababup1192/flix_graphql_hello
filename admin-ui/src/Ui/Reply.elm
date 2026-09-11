@@ -237,13 +237,20 @@ addButton args =
 同じ物にすると、次の入力を打ち始めた瞬間に（エラーを下ろすのと一緒に）消える。
 
 -}
-banner : { message : Maybe String, onClose : msg } -> Html msg
+banner : { message : Maybe String, action : Maybe { label : String, onAction : msg }, onClose : msg } -> Html msg
 banner args =
     case args.message of
         Just message ->
             Ui.callout Ui.toneOk
                 [ A.class "flex-row items-center justify-between gap-3 px-4 py-2.5" ]
                 [ Html.span [ A.class "text-[13px]" ] [ Html.text message ]
+                , case args.action of
+                    Just action ->
+                        -- **説明で手順を教えず、操作を置く**（Notion の「復元」と同じ）。
+                        Ui.actionLink [ E.onClick action.onAction, A.class "ml-auto text-[13px]" ] [ Html.text action.label ]
+
+                    Nothing ->
+                        Html.text ""
                 , Html.button
                     [ A.type_ "button"
                     , A.class "shrink-0 text-xs text-ink-soft hover:text-ink"

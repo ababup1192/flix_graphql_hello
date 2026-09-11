@@ -271,7 +271,7 @@ view args model =
 
           else
             text ""
-        , Reply.banner { message = model.invited, onClose = InviteBannerClosed }
+        , Reply.banner { message = model.invited, action = Nothing, onClose = InviteBannerClosed }
         , viewMembers args model
         , viewInvitations args model
         , case model.confirmRemove of
