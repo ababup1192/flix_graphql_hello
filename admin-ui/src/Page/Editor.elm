@@ -121,6 +121,13 @@ type alias Model =
 
     {- 本文からリンクを張る時の候補。型をまたいで探す。 -}
     , linkCandidates : List Model.LinkCandidate
+
+    {- 探した文字に当たるコンテンツの件数（型をまたいだ合計）と、何回引いたか。
+       「もっと見る」で次を引くのに要る。
+    -}
+    , linkTotal : Int
+    , linkPage : Int
+    , linkQuery : String
     , linkedEntries : List Model.LinkCandidate
     }
 
@@ -170,6 +177,7 @@ type Msg
     | GotHistory (Result Api.Problem (Maybe (List Model.EntryVersion)))
     | GotReferrers (Result Api.Problem (List Model.Referrer))
     | LinkSearched String
+    | LinkMoreAsked
     | GotLinkCandidates String (Result Api.Problem Model.EntryList)
     | LinkResolveAsked (List String)
     | GotLinkedEntries String (Result Api.Problem Model.EntryList)
@@ -254,6 +262,9 @@ init project apiId entryId =
     , expanded = Nothing
     , schedulesOpen = False
     , linkCandidates = []
+    , linkTotal = 0
+    , linkPage = 0
+    , linkQuery = ""
     , linkedEntries = []
     , richPicking = Nothing
     , richPicked = []
@@ -693,20 +704,15 @@ update ctx msg model =
 
         LinkSearched query ->
             -- **型ごとに 1 本ずつ投げる**（CMS の一覧は型の中しか探せない）。⌘K と同じやり方。
-            -- 型ごとの上限は面が出す数（8）より多く取る。少ないと「残り N 件」が出ず、
-            -- 打って絞る前に諦める事になる。全部は引かない（打てば CMS 側で絞れる）。
-            ( { model | linkCandidates = [] }
-            , ctx.types
-                |> List.map
-                    (\summary ->
-                        Api.call
-                            (\id ->
-                                Queries.entries id
-                                    ctx.project
-                                    { typeId = summary.id, search = query, stage = "", conditions = [], ids = [], order = "", first = linkCandidatesPerType, skip = 0 }
-                            )
-                            (GotLinkCandidates summary.name)
-                    )
+            -- 一度に全部は引かない。足りなければ「もっと見る」で次を引く。
+            ( { model | linkCandidates = [], linkTotal = 0, linkPage = 0, linkQuery = query }
+            , linkFetch ctx query 0
+            )
+
+        LinkMoreAsked ->
+            -- 面が出しているのは引いた分だけなので、続きは引き直して後ろに足す。
+            ( { model | linkPage = model.linkPage + 1 }
+            , linkFetch ctx model.linkQuery (model.linkPage + 1)
             )
 
         GotLinkCandidates typeName (Ok page) ->
@@ -714,6 +720,14 @@ update ctx msg model =
                 | linkCandidates =
                     model.linkCandidates
                         ++ List.map (\row -> { id = row.id, title = EntryLabel.forRow row, typeName = typeName, stage = row.stage, path = row.path }) page.nodes
+
+                -- 件数は最初の 1 回で数える（2 回目からは同じ数が返り、足すと二重になる）。
+                , linkTotal =
+                    if model.linkPage == 0 then
+                        model.linkTotal + page.totalCount
+
+                    else
+                        model.linkTotal
               }
             , []
             )
@@ -2492,7 +2506,9 @@ richEditor big model apiId current =
         , Html.Attributes.attribute "resolved"
             (E.encode 0 (E.list encodeResolved (List.filter (\done -> done.apiId == apiId) model.resolved)))
         , Html.Events.on "docchange" (D.map (FieldValue.Rich >> FieldTyped apiId) (D.field "detail" D.string))
+        , Html.Attributes.attribute "entriestotal" (String.fromInt model.linkTotal)
         , Html.Events.on "linksearch" (D.map LinkSearched (D.field "detail" D.string))
+        , Html.Events.on "linkmore" (D.succeed LinkMoreAsked)
         , Html.Events.on "linkresolve" (D.map LinkResolveAsked (D.field "detail" (D.list D.string)))
         , Html.Events.on "mediapick" (D.succeed (RichPickerOpened apiId))
         , Html.Events.on "mediaupload" (D.map (RichUploadStarted apiId) (D.field "detail" startedDecoder))
@@ -2543,11 +2559,36 @@ encodeInsert apiId order =
             ""
 
 
-{-| 本文のリンクの候補を、型ごとに何件まで引くか。
+{-| 本文のリンクの候補を、型ごとに 1 回で何件引くか。
 -}
 linkCandidatesPerType : Int
 linkCandidatesPerType =
     20
+
+
+{-| リンクの候補を型ごとに引く。`page` は 0 から数えた回数。
+-}
+linkFetch : { project : Slug, types : List Model.ContentTypeSummary } -> String -> Int -> List (Api.Call Msg)
+linkFetch ctx query page =
+    ctx.types
+        |> List.map
+            (\summary ->
+                Api.call
+                    (\id ->
+                        Queries.entries id
+                            ctx.project
+                            { typeId = summary.id
+                            , search = query
+                            , stage = ""
+                            , conditions = []
+                            , ids = []
+                            , order = ""
+                            , first = linkCandidatesPerType
+                            , skip = page * linkCandidatesPerType
+                            }
+                    )
+                    (GotLinkCandidates summary.name)
+            )
 
 
 encodeCandidate : Model.LinkCandidate -> E.Value

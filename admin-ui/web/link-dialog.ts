@@ -15,9 +15,6 @@
 
 export type Candidate = { id: string; title: string; type: string; stage?: string; path?: string | null };
 
-// 一度に出す候補の数。**型ごとに 5 件ずつ来る**ので、型が 8 つあると 40 件並ぶ。
-const SHOWN = 8;
-
 // 選んだ物には**入れる文字**を添える。選択が空の時にこれを本文へ挿し込む
 // （Notion / Craft / Zenn / Google ドキュメントが揃って、選んだ物の名前を入れる）。
 export type LinkChoice = { href: string; label: string } | { entryId: string; label: string } | null;
@@ -28,6 +25,8 @@ type Args = {
   // entry の id から、その中身を引く。まだ引けていなければ null。
   linkedOf: (entryId: string) => Candidate | null;
   onSearch: (query: string) => void;
+  // 引いた分では足りない時、続きを頼む。
+  onMore: () => void;
   onDone: (choice: LinkChoice) => void;
 };
 
@@ -39,10 +38,13 @@ export class LinkDialog {
   private input: HTMLInputElement;
   private list: HTMLDivElement;
   private candidates: Candidate[] = [];
+  // 探した文字に当たるコンテンツの件数。引いた分（candidates）はこの一部。
+  private total = 0;
   private rows: LinkChoice[] = [];
   private at = 0;
-  // 「もっと見る」を押したか。押すまでは上位 SHOWN 件だけ出す。
-  private all = false;
+  // 続きを頼んで、まだ返っていない。
+  private waiting = false;
+  private onMore: Args["onMore"];
   // 上下キーで動かした直後は、カーソルの下の候補に取られない。
   // WhyNot: mouseenter で拾わない。キーで動かすと面が動かなくてもカーソルの下の行が
   // 変わり、触っていないマウスに選択を奪われる。
@@ -54,6 +56,7 @@ export class LinkDialog {
 
   constructor(args: Args) {
     this.onDone = args.onDone;
+    this.onMore = args.onMore;
     this.current = args.current;
     this.linkedOf = args.linkedOf;
 
@@ -98,7 +101,7 @@ export class LinkDialog {
     let typed = 0;
     this.input.addEventListener("input", () => {
       this.at = 0;
-      this.all = false;
+      this.waiting = false;
       this.paint();
       // 打つたびに投げると 1 文字ごとに飛ぶ。少し待つ。
       window.clearTimeout(typed);
@@ -127,8 +130,10 @@ export class LinkDialog {
     this.paint();
   }
 
-  setCandidates(candidates: Candidate[]) {
+  setCandidates(candidates: Candidate[], total: number) {
     this.candidates = candidates;
+    this.total = total;
+    this.waiting = false;
     this.paint();
   }
 
@@ -185,7 +190,7 @@ export class LinkDialog {
   private paint() {
     const typed = this.input.value.trim();
     const urlRow: LinkChoice[] = URL_LIKE.test(typed) ? [{ href: typed, label: typed }] : [];
-    const shown = this.all ? this.candidates : this.candidates.slice(0, SHOWN);
+    const shown = this.candidates;
     this.rows = [...urlRow, ...shown.map((candidate) => ({ entryId: candidate.id, label: candidate.title }))];
     this.at = Math.min(this.at, Math.max(this.rows.length - 1, 0));
 
@@ -201,8 +206,8 @@ export class LinkDialog {
         children.push(this.row(candidate.title, `${candidate.type} · ${stageLabel(candidate.stage)}`, urlRow.length + index, ""));
       });
     }
-    if (!this.all && this.candidates.length > SHOWN) {
-      children.push(this.more(this.candidates.length - SHOWN));
+    if (this.candidates.length < this.total) {
+      children.push(this.more(this.total - this.candidates.length));
     }
     if (children.length === 0) {
       children.push(note(typed ? "見つかりません" : "コンテンツ名か URL を入力してください"));
@@ -212,15 +217,20 @@ export class LinkDialog {
     this.byKey = false;
   }
 
+  // WhyNot: 押した分だけ面の中で出し直す、にしない。引いてあるのは上位の何件かで、
+  // その外にある物は何回押しても出ない。ここは CMS に続きを頼む。
   private more(rest: number): HTMLElement {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "tt-link-more";
-    button.textContent = `もっと見る（あと ${rest} 件）`;
+    button.disabled = this.waiting;
+    button.textContent = this.waiting ? "読み込み中" : `もっと見る（あと ${rest} 件）`;
     button.addEventListener("mousedown", (event) => {
       event.preventDefault();
-      this.all = true;
+      if (this.waiting) return;
+      this.waiting = true;
       this.paint();
+      this.onMore();
     });
     return button;
   }

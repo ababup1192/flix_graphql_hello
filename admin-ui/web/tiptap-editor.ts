@@ -257,6 +257,7 @@ class TiptapEditor extends HTMLElement {
   private unmenu: (() => void) | null = null;
   private unwatchScroll: (() => void) | null = null;
   private candidates: Candidate[] = [];
+  private candidateTotal = 0;
   // 本文が指しているコンテンツ。**面とツールチップで「今どこを指しているか」を出す。**
   // 候補（探した結果）とは別で、id から引く。
   private linked = new Map<string, Candidate>();
@@ -272,7 +273,7 @@ class TiptapEditor extends HTMLElement {
   private sending = false;
 
   static get observedAttributes() {
-    return ["doc", "entries", "assets", "insert", "resolved", "linked"];
+    return ["doc", "entries", "entriestotal", "assets", "insert", "resolved", "linked"];
   }
 
   connectedCallback() {
@@ -527,12 +528,13 @@ class TiptapEditor extends HTMLElement {
       current,
       linkedOf: (entryId) => this.linked.get(entryId) ?? null,
       onSearch: (query) => this.dispatchEvent(new CustomEvent("linksearch", { detail: query })),
+      onMore: () => this.dispatchEvent(new CustomEvent("linkmore")),
       onDone: (choice) => this.applyLink(choice),
     });
     this.dialog = dialog;
     this.appendChild(dialog.dom);
     this.placeDialog(dialog.dom);
-    dialog.setCandidates(this.candidates);
+    dialog.setCandidates(this.candidates, this.candidateTotal);
     dialog.focusInput();
     // 開いたボタンも「面の中」に数える。外さないと、外のクリックで閉じた直後に
     // 同じクリックのボタン側の click が面を開き直す。
@@ -960,7 +962,12 @@ class TiptapEditor extends HTMLElement {
       } catch {
         this.candidates = [];
       }
-      this.dialog?.setCandidates(this.candidates);
+      this.dialog?.setCandidates(this.candidates, this.candidateTotal);
+      return;
+    }
+    if (name === "entriestotal") {
+      this.candidateTotal = Number(this.getAttribute("entriestotal") ?? "0") || 0;
+      this.dialog?.setCandidates(this.candidates, this.candidateTotal);
       return;
     }
     if (name === "assets") {
