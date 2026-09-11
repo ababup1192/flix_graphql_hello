@@ -71,6 +71,7 @@ type alias Invite =
     { id : String
     , email : String
     , role : String
+    , invitedAt : String
     }
 
 

@@ -616,6 +616,16 @@ update msg model =
                         _ ->
                             ( workspace, [] )
                 )
+                |> Tuple.mapSecond
+                    (\effect ->
+                        case pageMsg of
+                            -- 権限を変えた印は数秒で下ろす（行の横に出しっぱなしにしない）
+                            Members.RoleChanged _ _ ->
+                                Effect.batch [ effect, Effect.After copiedMillis (MembersMsg Members.RoleReplyShown) ]
+
+                            _ ->
+                                effect
+                    )
 
         AuditMsg pageMsg ->
             case model.phase of
@@ -838,6 +848,9 @@ escapeToPage model =
 
                 KeysPage _ ->
                     update (KeysMsg Keys.EscapePressed) model
+
+                MembersPage _ ->
+                    update (MembersMsg Members.EscapePressed) model
 
                 _ ->
                     ( model, Effect.none )
@@ -1226,6 +1239,11 @@ enterPage route model =
 loadMembers : Slug -> ModelWith key -> ( ModelWith key, Effect Msg )
 loadMembers slug model =
     sendAll (List.map (Api.mapCall MembersMsg) (Members.load slug)) model
+        |> Tuple.mapSecond
+            (\effect ->
+                -- 招待した日を「3 日前」で出すのに、手元のタイムゾーンと今日が要る
+                Effect.batch [ effect, Effect.Today (\zone year month day -> MembersMsg (Members.TodayKnown zone year month day)) ]
+            )
 
 
 

@@ -132,6 +132,23 @@ mod TestAuthPg {
             expected = Ok(Ok((true, Ok(ApiKeyScope.Read), Err(ApiKeyRejection.Unknown), Err(ApiKeyRejection.Unknown), Err(ApiKeyRejection.Revoked), List#{ ("site", true) }))),
             result)
 
+    ///
+    /// すでにメンバーの人を招待すると断る。招待のつもりで既存のメンバーの権限を書き換えない。
+    ///
+    @Test
+    def testPgInviteExistingMemberIsRefused(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> {
+            discard Accounts.resolveUser(bootstrap(), principal("u-e", "editor@test.dev"));
+            PgTestSupport.asOwner(() -> {
+                discard Members.invite(Session.grant(), "editor@test.dev", Role.Editor);
+                let roleBefore = Members.list(Session.grant()) |> List.filterMap(member -> if (member#email == "editor@test.dev") Some(member#role) else None);
+                let refused = CmsTestKit.runWithResult(() -> Members.invite(Session.grant(), "editor@test.dev", Role.Owner)) |> CmsTestKit.failurePaths;
+                let roleAfter = Members.list(Session.grant()) |> List.filterMap(member -> if (member#email == "editor@test.dev") Some(member#role) else None);
+                (roleBefore, refused, roleAfter)
+            })
+        });
+        Assert.assertEq(expected = Ok(Ok((List#{Role.Editor}, List#{"email"}, List#{Role.Editor}))), result)
+
     /// 期限無しの read の鍵の入力。
     def readKey(name: String): ApiKeyDraft = { name = name, scope = ApiKeyScope.Read, expiresAt = None }
 

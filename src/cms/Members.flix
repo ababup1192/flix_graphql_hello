@@ -26,11 +26,23 @@ mod Members {
         CmsErr.raiseIfAny(if (String.isMatch(regex = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", normalized)) Nil else Violation.Violation("email", "'${email}' は email の形ではありません") :: Nil);
         let inviter = Session.currentUser();
         let invitation = match Accounts.findByEmail(normalized) {
-            case Some(user) => addNow(normalized, role, user)
+            case Some(user) => { requireNotMember(normalized, user); addNow(normalized, role, user) }
             case None       => placeInvitation(proof, normalized, role, inviter)
         };
         Audit.record(AuditChange.MemberInvited(normalized, role));
         invitation
+
+    ///
+    /// すでにこのプロジェクトのメンバーなら断る。
+    ///
+    /// WhyNot: 黙って upsert しない。招待のつもりで押した操作が、既存のメンバーの権限を書き換える事になる。
+    /// GitHub も「すでにメンバーです」で断り、権限は一覧から変えさせる。
+    ///
+    def requireNotMember(email: String, user: User): Unit \ DbRead + CmsErr + Tenant =
+        CmsErr.raiseIfAny(match roleOf(user#id) {
+            case Some(_) => Violation.Violation("email", "「${email}」はすでにメンバーです。権限は一覧で変更できます") :: Nil
+            case None    => Nil
+        })
 
     ///
     /// 既にログインした事のある人はその場でメンバーにする。招待の行は作らない。

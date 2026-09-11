@@ -296,10 +296,11 @@ invitations : String -> Slug -> ( Api.Request, D.Decoder (List Invite) )
 invitations id project =
     Api.query { id = id, kind = "invitations", project = project }
         (Api.Admin.Query.invitations
-            (SS.map3 (\inviteId email role -> { id = inviteId, email = email, role = AdminRole.toString role })
+            (SS.map4 (\inviteId email role invitedAt -> { id = inviteId, email = email, role = AdminRole.toString role, invitedAt = invitedAt })
                 Invitation.id
                 Invitation.email
                 Invitation.role
+                Invitation.createdAt
             )
         )
 
@@ -308,10 +309,11 @@ inviteMember : String -> Slug -> { email : String, role : AdminRole.Role } -> ( 
 inviteMember id project args =
     Api.mutation { id = id, kind = "inviteMember", project = project }
         (AdminMutation.inviteMember { email = args.email, role = args.role }
-            (SS.map3 (\inviteId email role -> { id = inviteId, email = email, role = AdminRole.toString role })
+            (SS.map4 (\inviteId email role invitedAt -> { id = inviteId, email = email, role = AdminRole.toString role, invitedAt = invitedAt })
                 Invitation.id
                 Invitation.email
                 Invitation.role
+                Invitation.createdAt
             )
         )
 
