@@ -428,7 +428,7 @@ viewTarget existing model row =
 
         link : Route.Route -> Html Msg
         link route =
-            Ui.titleLink [ href (Route.toString route), class "truncate", title label ] [ text label ]
+            Ui.link [ href (Route.toString route), class "truncate", title label ] [ text label ]
 
         linkIfTypeExists : String -> Route.Route -> Html Msg
         linkIfTypeExists typeApiId route =
