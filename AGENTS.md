@@ -89,9 +89,10 @@ MCP サーバ（`POST /mcp`）の繋ぎ方、本番とセルフホスト（docke
 
 ## 破ると事故る決まり
 
-- **Tx の入口は `DbRunner` の 3 つだけ**（`transact` / `withTx` / `withRequestTx`）。`withLazyTx` や `Pool.borrow` を直に呼べるのは `scripts/tx-allowlist.txt` の 2 つで、`scripts/check-tx.sh` が見張る。破ると接続が漏れる
+- **Tx の入口は `DbRunner` の 3 つだけ**（`transact` / `withTx` / `withRequestTx`）。接続や Tx を自分で開いて良いのは `scripts/tx-allowlist.txt` のファイルだけ（業務の外で 1 本だけ繋ぐ物は理由付きで載せる）で、`scripts/check-tx.sh` が見張る。破ると接続が漏れる
 - **業務エラー（CmsErr）を値に潰すのは Tx の境界とテストキットだけ。** 途中で潰すと失敗が Tx の中で握り潰される
-- **Session の handler を入れるのは `DbRunner.transact` だけ。** ユースケースは `Granted[p]` を引数で受け、自分では権限を判定しない
+- **Session の handler を入れるのは `DbRunner.transact` だけ。** ユースケースは `Granted[p]` を引数で受け、自分では権限を判定しない。Session / Tenant / CmsErr の handler と `Granted` の組み立ては `scripts/handler-allowlist.txt` の 3 ファイルだけで、`scripts/check-handlers.sh` が見張る（Flix は非 pub の enum も pub eff も他の mod から隠せない）
+- **スキーマを壊す mutation は `SchemaGuard.withImpact` を通す。** `fieldImpact` で見た `expected` を Tx の中で数え直し、食い違えば止める。操作の種類で除外を書かない（影響が空なら通る）
 - **認証はリクエストに 1 回**（`Main.runRoute`）。Runner とリゾルバは認証をしない
 - **テナントは三重で守る**（Tenant effect / `make gen --scope project_id` / RLS）。跨ぐ query は `// unscoped: 理由`
 - **ルート表に行を足したら `TestServer` の describe にも 1 行**

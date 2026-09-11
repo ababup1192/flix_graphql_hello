@@ -13,9 +13,14 @@ microCMS の移行先として作っている（動的に content type を定義
 | `/admin/graphql` | **管理 API**。型とフィールドの定義、entry の読み書き、公開、asset、Webhook、予約公開、鍵。SDL は `admin.graphql`（正） |
 | `/account/graphql` | **Account API**。プロジェクトを選ぶ前の操作（me / 組織 / プロジェクト作成 / PAT）。SDL は `account.graphql` |
 | `/mcp` | **MCP サーバ**。AI エージェントから読み書きする 15 のツール。管理 API への GraphQL クライアント |
+| `/admin/audit.csv` `/admin/audit.jsonl` | **監査ログの書き出し**（owner だけ。GET。引数は `auditEvents` と同じ絞り込み、上限 100,000 件）。MCP と同じく管理 API への GraphQL クライアント |
 | `/health` | DB に届けば `{"status":"ok","version":"<git の sha>"}`。接続プールが張り付いていれば 200 のまま `"status":"degraded"`、DB に届かないかワーカーが止まっていれば 503（[deploy/README.md](deploy/README.md)） |
 
 管理画面は Elm で `admin-ui/`（別のビルド。`make ui-dev`）。CMS 本体は API だけを出す。
+画面にあるのは、プロジェクト選択と組織、API スキーマ（型とフィールド。消す前・締める前に当たるコンテンツの件数と見本を出す）、
+コンテンツの一覧とボード、エディタ（TipTap。表・callout・数式・チェックリストなど）、バージョン履歴と差分、メディア、メンバー、
+API キーと PAT（GitHub と同じ「権限のチェックと有効期限」の形）、Webhook、監査ログ（絞り込みと CSV / JSON Lines の書き出し、行の固定 URL）、
+API プレビュー、⌘K。画面の文言は [docs/design/admin-ui-spec.md](docs/design/admin-ui-spec.md) の 7.1 の表に揃え、`wording-check.mjs` が見張る。
 
 管理 API と Account API は SDL が正で、そこから型付きの Flix コードを生成する。人が書くのは SDL と、生成されたレコード型に合わせたリゾルバだけで、**スキーマとリゾルバのズレはコンパイルで落ちる**。
 
@@ -59,19 +64,28 @@ curl -s -X POST localhost:8080/admin/graphql \
 再公開で反映する。`unpublishEntry` で取り下げ、`restoreVersion` で版から戻す。名前の規則（lowerCamel の apiId、予約名、他の型との衝突）に
 合わない入力は `errors[].message` に理由が並ぶ。
 
-**押す前に分かる / 壊れない**ための入口が 3 つある（前の 2 つは query）。
+**押す前に分かる / 壊れない**ための入口が 4 つある（前の 3 つは query）。
 
 - `publishCheck(id)` — required / unique / 参照 / asset の違反と未公開の参照先を**全部一度に**返す（dry-run）
 - `impact(id)` — 取り下げ・削除で壊れる entry（フィールドの参照・本文内のリンク・asset の使用先）
+- `fieldImpact(input)` — 型を変える前の影響（dry-run）。フィールドを消す・締める（maxLength / min / max / integer / 選択肢）・型を消す・消した apiId で足し直す時に、下書きと公開中の件数と見本を返す。`safe` なら確認なしで押せる
 - `publishPlan(ids, withDependencies)` / `publishMany` — 参照先が先の順に並べ、1 つでも通らなければ何も公開しない
+
+**スキーマの破壊は見た物しか通らない。** `removeField` / `updateField` / `addField` / `deleteContentType` は、`fieldImpact` で見た影響を `expected` で渡す。
+Tx の中でもう一度数え直し、見た時より影響の種類が増えるか公開中の件数が増えていれば止める（`expected` 無しで影響のある操作を押しても止まる）。
+影響が空の操作は何も渡さずに通る。
 
 `Entry.path` は、その entry がサイト上で持つ path（型の `linkPath` から作る。型紙が無い型は null）。本文からこの entry を指した時に出る href と同じ物で、
 管理画面が「今どこを指しているか」を出すのに使う。
 
-**版の残らない変更は監査ログに残る。** 型・フィールド・メンバー・招待・API キーを変える mutation は、業務の書き込みと同じ Tx で
-`audit_events` に 1 行積む（誰が・いつ・何を・どの対象に）。失敗した操作は一緒に ROLLBACK されるので記録も残らない。表は RLS で append-only
-（SELECT と INSERT の policy しか無く、アプリも表の所有者も書き換えられない）。entry の変更を入れないのは `entry_versions` が版として全部持っているため。
-読むのは管理 API の `auditEvents(first, after)`（owner だけ。新しい順）。画面はまだ（#18）。
+**版の残らない変更は監査ログに残る。** 型・フィールド・メンバー・招待・API キー・Webhook・asset・公開範囲と、entry の取り下げ・削除・予約公開の実行は、
+業務の書き込みと同じ Tx で `audit_events` に 1 行積む（誰が・いつ・何を・どの対象に。消した物は変更前の姿を `detail.before` に持つ）。
+失敗した操作は一緒に ROLLBACK されるので記録も残らない。表は RLS で append-only（SELECT と INSERT の policy しか無く、アプリも表の所有者も書き換えられない）。
+主体は `actorKind`（USER / API_KEY / PAT / SYSTEM）と `actorId` で分け、secret と asset のファイル名は入れない（Webhook の URL は host と hash に落とす）。
+entry の編集と手での公開を入れないのは `entry_versions` が版として全部持っているため。
+読むのは管理 API の `auditEvents(first, after, actorKind, action, since, until)` と `auditEventsCount`（owner だけ。新しい順）、
+書き出しは `GET /admin/audit.csv` / `audit.jsonl`（書き出した事も `audit.exported` として残る）。画面はプロジェクト設定 › 監査ログ。
+詳しくは [docs/design/audit-log.md](docs/design/audit-log.md)。
 
 ### コンテンツ API で読む
 
@@ -141,8 +155,10 @@ Java のオブジェクトはリゾルバに出さない。スカラーと引数
 ### 守り方を型と機構に落とす
 
 - **権限は証明で運ぶ** — DB に触るユースケースは `Granted[ManageTypes]` のような証明を最初の引数で受け、自分では判定しない。作り忘れは引数不足でコンパイルが落ちる
-- **テナントは三重** — 型（`Tenant` effect）、生成器（`make gen --scope project_id` が条件の無い query を通さない）、DB（RLS。印の無い Tx は 0 行）
-- **Tx の入口は 3 つだけ** — `scripts/check-tx.sh` が allowlist の増減を見張る。読むだけの文書は 1 リクエスト 1 Tx、mutation はルートフィールドごと
+- **テナントは三重** — 型（`Tenant` effect）、生成器（`make gen --scope project_id` が条件の無い query を通さない）、DB（RLS。印の無い Tx は 0 行。`entry_contents` も含めた 8 表）
+- **Tx の入口は 3 つだけ** — `scripts/check-tx.sh` が allowlist の増減を見張る（業務の外で 1 本だけ繋ぐ起動時の確認 / ロール作成 / `/health` / 自己回復は理由付きで allowlist）。読むだけの文書は 1 リクエスト 1 Tx、mutation はルートフィールドごと
+- **Session / Tenant / CmsErr の handler と `Granted` の組み立ては 3 ファイルだけ** — `scripts/check-handlers.sh`。Flix は非 pub の enum も pub eff も他の mod から隠せないので、型の代わりに見張りで守る
+- **スキーマの破壊は Tx の中で数え直す** — `SchemaGuard.withImpact`。`fieldImpact` で見た影響（`expected`）と食い違えば CmsErr で止め、`DbRunner.transact` が戻す
 - **1 リクエストの SQL と Tx の数に上限** — `test/Pg/TestQueryBudgetPg`
 - **ログのキーの一覧** — `scripts/check-log-keys.sh`
 
@@ -156,7 +172,7 @@ SIGTERM は listen を閉じる → 接続を待つ → 仕事を drain → プ�
 ## 開発
 
 ```bash
-make check     # 型検査（+ tx allowlist と log キーの検査）
+make check     # 型検査（+ tx / handler の allowlist と log キーの検査）
 make test      # DB 無しのテスト（test/Pg を除いた写しを build/unit/ に作って回す）
 make test-pg   # 実 PostgreSQL と MinIO 込み（コンテナの起動と停止まで）
 make generate  # admin.graphql / account.graphql → src/generated/graphql/
@@ -165,7 +181,7 @@ make fatjar    # 実行可能な jar（artifact/）
 
 make ui-gen    # admin.graphql / account.graphql → admin-ui/generated/（elm-graphql）
 make ui-dev    # 管理画面の dev サーバ（CMS は別のターミナルで make run）
-make ui-check  # elm-format の検査・elm-review・elm-test・tsc
+make ui-check  # 文言の見張り（wording-check.mjs）・elm-format の検査・elm-review・elm-test・tsc
 ```
 
 `bin/flix` は `--Xsubeffecting=lambdas` を付けて呼ぶ（純粋なリゾルバのラムダをそのまま effect 付きの関数型に置くため）。

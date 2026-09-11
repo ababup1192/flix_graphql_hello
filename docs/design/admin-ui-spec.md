@@ -287,6 +287,7 @@ CMS 側の並走は 10 章の優先順に従う。
 - メンバー・招待・API キー・Webhook・配信履歴・再送・公開範囲
 
 ### 10.2 画面が要るのに無い物（優先順）
+- `fieldImpact` と `expected`（型の変更の影響。2026-09-11）、`auditEvents` / `auditEventsCount` と `GET /admin/audit.csv` / `audit.jsonl`（監査ログ。2026-09-10〜11）
 
 | # | 項目 | 効く画面 | 目安 |
 |---|---|---|---|
@@ -298,7 +299,7 @@ CMS 側の並走は 10 章の優先順に従う。
 | 6 | `Entry.referrers`（逆参照。ページング付き） | 執筆者などの「このコンテンツ」 | 小〜中 半日 |
 | 7 | メディアの `AssetWhere` / `orderBy`、`AssetUse.via`、容量の集計 | メディア | 中 1 日 |
 | 8 | 違反にフィールドを紐づける（references / assets の violation に apiId）と、`Violation.path` と `extensions.violations` の**キーの統一** | 公開前の確認をフォームに写す | 小 半日 |
-| 9 | 型編集の安全化（`fieldImpact` / `replaceSelectOption` / 子フィールドの並び替え） | API スキーマ | 中 1 日 |
+| 9 | 型編集の安全化（~~`fieldImpact`~~ 済み 2026-09-11 / `replaceSelectOption` / 子フィールドの並び替え） | API スキーマ | 中 1 日 |
 | 10 | プロジェクトの rename / 削除、招待の期限と再送、`me` の件数集計 | 設定、プロジェクト選択 | 小 |
 | 11 | 画像変換 URL（プリセット・srcset）。方針は外部委任なので当面は原寸表示 | メディア | 中〜大 |
 | 12 | 保存したビューの API 化（最初は localStorage） | 一覧 | 中 1 日 |
@@ -313,7 +314,7 @@ CMS 側の並走は 10 章の優先順に従う。
 - **認証の失敗は 200 + path 無しの errors 1 件**。`/mcp` だけ 401
 - **部分的失敗がある**（data に読めた分 + errors[].path）。errors の有無だけで成否を決めない
 - `required` は**公開時だけ**効く（下書き保存は通る）。`unique` は**公開中の値とだけ**照合する
-- **フィールドの種類（kind）は後から変えられない**。`removeField` と選択肢の削除は影響を検査しない
+- **フィールドの種類（kind）は後から変えられない**。`removeField` / `updateField` / `addField` / `deleteContentType` は `fieldImpact` で見た影響を `expected` で渡す。渡さずに押すと影響のある操作は止まり、影響が空なら渡さなくて通る。見た時より影響の種類が増えるか公開中の件数が増えていれば violations 付きの `INVALID` で止まる（件数は他人の保存で動くので完全一致では見ない）
 - `createPreviewToken` の `url` は型に `previewUrl` が無いと null
 - 型の `linkPath` は**サイト上の path の型紙**（`/blog/{slug}`）。使える印は `{id}` と `{slug}` の 2 つで、`{slug}` は値が無ければ id に落ちる。`/` か `http(s)://` で始める。設定すると本文のコンテンツへのリンクの `href` がその path になり、無ければ `#entry:{id}`（`data-entry-id` はどちらでも付く）。`RichText { links { id apiId path } }` でも同じ物が引ける
 - `EntryVersion.author` は表示名の文字列（email か `api-key:<名前>`）。userId は無いのでアバターは出せない
