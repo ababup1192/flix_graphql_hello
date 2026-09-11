@@ -44,7 +44,7 @@ type alias Model =
 
 type Msg
     = GotType (Result Api.Problem (Maybe ContentTypeDetail))
-    | GotEntries (Result Api.Problem EntryList)
+    | GotEntries Int (Result Api.Problem EntryList)
     | Grabbed EntryRow
     | Dropped String
     | Released
@@ -102,7 +102,7 @@ update ctx msg model =
             ( { model | contentType = Loaded.fromResult result }
             , case result of
                 Ok (Just detail) ->
-                    entriesCall ctx.project detail.id :: tagLabelCalls ctx detail
+                    entriesCall ctx.project detail.id 0 :: tagLabelCalls ctx detail
 
                 _ ->
                     []
@@ -114,8 +114,33 @@ update ctx msg model =
         GotTagLabels (Err _) ->
             ( model, [] )
 
-        GotEntries result ->
-            ( { model | entries = Loaded.fromResult (Result.map Just result) }, [] )
+        GotEntries skip (Ok page) ->
+            let
+                rows : List EntryRow
+                rows =
+                    (if skip == 0 then
+                        []
+
+                     else
+                        heldRows model
+                    )
+                        ++ page.nodes
+            in
+            ( { model | entries = Loaded.Present { page | nodes = rows } }
+            , if List.isEmpty page.nodes || List.length rows >= min page.totalCount boardLimit then
+                []
+
+              else
+                case Loaded.toMaybe model.contentType of
+                    Just detail ->
+                        [ entriesCall model.project detail.id (List.length rows) ]
+
+                    Nothing ->
+                        []
+            )
+
+        GotEntries _ (Err problem) ->
+            ( { model | entries = Loaded.Failed (Api.problemToText problem).message }, [] )
 
         Grabbed row ->
             ( { model | dragging = Just row }, [] )
@@ -178,7 +203,7 @@ update ctx msg model =
             ( { model | busy = False }
             , case Loaded.toMaybe model.contentType of
                 Just detail ->
-                    [ entriesCall ctx.project detail.id ]
+                    [ entriesCall ctx.project detail.id 0 ]
 
                 Nothing ->
                     []
@@ -207,21 +232,44 @@ tagLabelCalls ctx detail =
             )
 
 
+{-| 1 回に引く件数と、盤に並べる上限。
+-}
+boardPageSize : Int
+boardPageSize =
+    100
+
+
+boardLimit : Int
+boardLimit =
+    500
+
+
+{-| 今持っているコンテンツ。続きを足す時と、件数を数える時に使う。
+-}
+heldRows : Model -> List EntryRow
+heldRows model =
+    Loaded.toMaybe model.entries |> Maybe.map .nodes |> Maybe.withDefault []
+
+
 {-| **1 本だけ引いて画面で列に分ける。**
 
 CMS の絞り込みは DRAFT と PUBLISHED しか持たない（「公開中・下書きあり」は無い）。
 列ごとに引くと、その列だけ絞り込みが効かず全件が出る（実際に出た）。
 
+WhyNot: 1 回引いて終わりにしない。列のバッジは引いた分を数えた数なので、
+引き残すとその数が実際と食い違う。上限までは続きを引き、それでも余る時は
+盤の上に「ほかに N 件」と出す。
+
 -}
-entriesCall : Slug -> String -> Api.Call Msg
-entriesCall project typeId =
+entriesCall : Slug -> String -> Int -> Api.Call Msg
+entriesCall project typeId skip =
     Api.call
         (\id ->
             Queries.entries id
                 project
-                { typeId = typeId, search = "", stage = "", conditions = [], ids = [], order = "", first = 100, skip = 0 }
+                { typeId = typeId, search = "", stage = "", conditions = [], ids = [], order = "", first = boardPageSize, skip = skip }
         )
-        GotEntries
+        (GotEntries skip)
 
 
 view : Model -> Html Msg
@@ -252,6 +300,7 @@ viewBoard model detail =
           else
             div [ class "flex flex-col gap-1" ]
                 (List.map (\message -> span [ class "text-xs text-[color:var(--color-bad)]" ] [ text message ]) model.errors)
+        , viewRestNote model detail
         , div [ class "grid grid-cols-3 items-start gap-4" ] (List.map (viewColumn model detail) columns)
         , case model.asking of
             Just ask ->
@@ -260,6 +309,35 @@ viewBoard model detail =
             Nothing ->
                 text ""
         ]
+
+
+{-| 盤に載り切らなかった分の断り。
+
+WhyNot: 列のバッジだけで済ませない。バッジは盤に載っている分の数なので、
+載り切らない時は「これで全部」と読めてしまう。
+
+-}
+viewRestNote : Model -> ContentTypeDetail -> Html Msg
+viewRestNote model detail =
+    case model.entries of
+        Loaded.Present page ->
+            let
+                rest : Int
+                rest =
+                    page.totalCount - List.length page.nodes
+            in
+            if rest > 0 then
+                span [ class "text-xs text-ink-soft" ]
+                    [ text ("新しい順に " ++ String.fromInt (List.length page.nodes) ++ " 件を並べています。ほかに " ++ String.fromInt rest ++ " 件あり、")
+                    , Ui.plainLink [ Html.Attributes.href (Route.toString (Route.Entries model.project detail.apiId [])) ] [ text "一覧" ]
+                    , text "から探せます。"
+                    ]
+
+            else
+                text ""
+
+        _ ->
+            text ""
 
 
 {-| 列を移す = 公開状態を変える。**何が起きるかを言葉で出してから実行する。**
@@ -309,10 +387,7 @@ viewColumn model detail column =
     let
         rows : List EntryRow
         rows =
-            Loaded.toMaybe model.entries
-                |> Maybe.map .nodes
-                |> Maybe.withDefault []
-                |> List.filter (\row -> row.stage == column.stage)
+            heldRows model |> List.filter (\row -> row.stage == column.stage)
 
         count : String
         count =
