@@ -67,24 +67,24 @@ mod SchemaGuard {
         effects |> List.foldLeft((acc, effect) -> acc + effect#published, 0i64)
 
     def unconfirmed(effect: SchemaEffect): Violation =
-        Violation.Violation(pathOf(effect), "${describe(effect#kind)}（${effect#draft + effect#published} 件）。影響を確かめてから押してください")
+        Violation.Violation(pathOf(effect), "${describe(effect#kind)}（${effect#draft + effect#published} 件）。影響を確認してから実行してください")
 
     def worsening(expected: Fingerprint, effects: List[SchemaEffect]): Violation =
         let published = publishedTotal(effects);
-        Violation.Violation("expected", "見た時から影響が増えています（公開中 ${expected#published} 件 → ${published} 件）。もう一度確かめてください")
+        Violation.Violation("expected", "確認時より影響が増えています（公開中 ${expected#published} 件 → ${published} 件）。もう一度確認してください")
 
     /// 影響の場所。フィールドの物は apiId、型ごとの物は型を指す。
     def pathOf(effect: SchemaEffect): String =
         effect#apiId |> Option.map(apiId -> "fields.${ApiId.text(apiId)}") |> Option.getWithDefault("id")
 
     def describe(kind: SchemaEffectKind): String = match kind {
-        case SchemaEffectKind.ValuesHidden       => "値が配信から消えます"
-        case SchemaEffectKind.ReferencesHidden   => "参照が配信から消えます"
-        case SchemaEffectKind.AssetsHidden       => "asset の参照が配信から消えます"
-        case SchemaEffectKind.ValuesResurrected  => "消したはずの値が配信に戻ります"
-        case SchemaEffectKind.PublishBlocked     => "公開中の entry が再公開できなくなります"
-        case SchemaEffectKind.DraftBlocked       => "下書きの保存が通らなくなります"
-        case SchemaEffectKind.EntriesRemoved     => "型と一緒に entry が消えます"
+        case SchemaEffectKind.ValuesHidden       => "値が API から見えなくなります"
+        case SchemaEffectKind.ReferencesHidden   => "参照が API から見えなくなります"
+        case SchemaEffectKind.AssetsHidden       => "メディアの参照が API から見えなくなります"
+        case SchemaEffectKind.ValuesResurrected  => "削除した値が API に再表示されます"
+        case SchemaEffectKind.PublishBlocked     => "公開中のコンテンツが再公開できなくなります"
+        case SchemaEffectKind.DraftBlocked       => "下書きの保存ができなくなります"
+        case SchemaEffectKind.EntriesRemoved     => "API と一緒にコンテンツが削除されます"
     }
 
 }
