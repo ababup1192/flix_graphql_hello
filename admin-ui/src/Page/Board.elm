@@ -65,14 +65,23 @@ type alias Column =
     , name : String
     , hint : String
     , tone : String
+
+    {- ここへ落とせるか。
+
+       WhyNot: 3 列とも落とせる、にしない。「公開中 · 下書きあり」は公開済みの物の
+       下書きを保存すると入る**導かれた状態**で、人が盤の上で作れる状態ではない。
+       落とせるままにすると、差の無い公開が走って版だけ 1 つ積まれ、カードは
+       「公開中」に戻る。
+    -}
+    , droppable : Bool
     }
 
 
 columns : List Column
 columns =
-    [ { stage = "DRAFT", name = "下書き", hint = "まだ公開していません", tone = "text-ink-faint" }
-    , { stage = "CHANGED", name = "公開中 · 下書きあり", hint = "公開中の内容と差があります", tone = "text-[color:var(--color-warn)]" }
-    , { stage = "PUBLISHED", name = "公開中", hint = "公開サイトから見えます", tone = "text-[color:var(--color-ok)]" }
+    [ { stage = "DRAFT", name = "下書き", hint = "まだ公開していません", tone = "text-ink-faint", droppable = True }
+    , { stage = "CHANGED", name = "公開中 · 下書きあり", hint = "公開中の内容と差があります。下書きを保存すると入ります", tone = "text-[color:var(--color-warn)]", droppable = False }
+    , { stage = "PUBLISHED", name = "公開中", hint = "公開サイトから見えます", tone = "text-[color:var(--color-ok)]", droppable = True }
     ]
 
 
@@ -438,18 +447,29 @@ viewColumn model detail column =
                     "—"
     in
     div
-        [ class
+        (class
             ("flex min-w-0 flex-col gap-2 rounded-md border p-3 "
                 ++ (if model.dragging == Nothing then
                         "border-edge bg-raised"
 
-                    else
+                    else if column.droppable then
                         "border-accent bg-raised"
+
+                    else
+                        -- **落とせない列は掴んでいる間だけ薄くする。** 枠を光らせると、
+                        -- 落とせる先と見分けが付かない。
+                        "border-edge bg-raised opacity-50"
                    )
             )
-        , preventDefaultOn "dragover" (D.succeed ( Hovered, True ))
-        , preventDefaultOn "drop" (D.succeed ( Dropped column.stage, True ))
-        ]
+            :: (if column.droppable then
+                    [ preventDefaultOn "dragover" (D.succeed ( Hovered, True ))
+                    , preventDefaultOn "drop" (D.succeed ( Dropped column.stage, True ))
+                    ]
+
+                else
+                    []
+               )
+        )
         [ div [ class "flex items-center gap-2" ]
             [ span [ class column.tone ] [ Icon.view Icon.stage ]
             , span [ class "text-sm font-semibold text-ink" ] [ text column.name ]
