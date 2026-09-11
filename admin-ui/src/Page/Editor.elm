@@ -1605,7 +1605,17 @@ viewPublishDialog model =
             , case model.report of
                 Just report ->
                     if report.ok then
-                        Ui.note [ text "公開すると、公開サイトから見えるようになります。" ]
+                        Ui.note
+                            [ text
+                                (if model.stage == "DRAFT" then
+                                    "公開すると、公開サイトから見えるようになります。"
+
+                                 else
+                                    -- **もう公開されている物に「見えるようになります」と言わない。**
+                                    -- 変わるのは公開サイトに出る内容の方。
+                                    "公開サイトに出ている内容が、今の下書きの内容に入れ替わります。"
+                                )
+                            ]
 
                     else
                         Ui.note [ text "直してから、もう一度確認してください。" ]

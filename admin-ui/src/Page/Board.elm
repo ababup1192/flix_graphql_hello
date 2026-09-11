@@ -398,6 +398,11 @@ viewConfirm model ask =
                 (if ask.to == "DRAFT" then
                     "このコンテンツの公開を終えますか"
 
+                 else if ask.from == "CHANGED" then
+                    -- **もう公開されている物は「公開しますか」ではない。**
+                    -- 変わるのは公開サイトに出る内容で、見える・見えないは変わらない。
+                    "下書きの内容を公開しますか"
+
                  else
                     "このコンテンツを公開しますか"
                 )
@@ -406,6 +411,9 @@ viewConfirm model ask =
                 [ text
                     (if ask.to == "DRAFT" then
                         "公開サイトから見えなくなります。下書きは残ります。"
+
+                     else if ask.from == "CHANGED" then
+                        "公開サイトに出ている内容が、下書きの内容に入れ替わります。未公開の参照先があれば一緒に公開されます。"
 
                      else
                         "公開サイトから見えるようになります。未公開の参照先があれば一緒に公開されます。"
@@ -419,6 +427,10 @@ viewConfirm model ask =
 
                          else if ask.to == "DRAFT" then
                             "公開を終える"
+
+                         else if ask.from == "CHANGED" then
+                            -- エディタの公開の確認と同じ語にする。
+                            "変更を公開する"
 
                          else
                             "公開する"
