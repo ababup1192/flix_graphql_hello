@@ -4,6 +4,7 @@
 
 module Api.Admin.Query exposing (..)
 
+import Api.Admin.Enum.ActorKind
 import Api.Admin.Enum.ImpactAction
 import Api.Admin.InputObject
 import Api.Admin.Interface
@@ -309,10 +310,16 @@ schedules fillInOptionals____ object____ =
 type alias AuditEventsOptionalArguments =
     { first : OptionalArgument Int
     , after : OptionalArgument ScalarCodecs.Id
+    , actorKind : OptionalArgument Api.Admin.Enum.ActorKind.ActorKind
+    , action : OptionalArgument String
+    , since : OptionalArgument String
+    , until : OptionalArgument String
     }
 
 
-{-| 監査の記録。新しい順（owner だけ）。誰が・いつ・何を変えたか。after は前のページの最後の id
+{-| 監査の記録。新しい順（owner だけ）。誰が・いつ・何を変えたか。after は前のページの最後の id。
+絞り込みは全部任意: actorKind は主体の種類、action は前方一致（"webhook." で Webhook の全部）、
+since / until は ISO 8601 の時刻（since 以上 until 未満。id が時刻順なので id の範囲で引く）
 -}
 auditEvents :
     (AuditEventsOptionalArguments -> AuditEventsOptionalArguments)
@@ -321,10 +328,10 @@ auditEvents :
 auditEvents fillInOptionals____ object____ =
     let
         filledInOptionals____ =
-            fillInOptionals____ { first = Absent, after = Absent }
+            fillInOptionals____ { first = Absent, after = Absent, actorKind = Absent, action = Absent, since = Absent, until = Absent }
 
         optionalArgs____ =
-            [ Argument.optional "first" filledInOptionals____.first Encode.int, Argument.optional "after" filledInOptionals____.after (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId) ]
+            [ Argument.optional "first" filledInOptionals____.first Encode.int, Argument.optional "after" filledInOptionals____.after (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId), Argument.optional "actorKind" filledInOptionals____.actorKind (Encode.enum Api.Admin.Enum.ActorKind.toString), Argument.optional "action" filledInOptionals____.action Encode.string, Argument.optional "since" filledInOptionals____.since Encode.string, Argument.optional "until" filledInOptionals____.until Encode.string ]
                 |> List.filterMap Basics.identity
     in
     Object.selectionForCompositeField "auditEvents" optionalArgs____ object____ (Basics.identity >> Decode.list)

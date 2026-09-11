@@ -16,6 +16,13 @@ mod Ulid {
         let low = padded |> Vector.drop(5) |> toInt64;
         chars(10, timeMs) + chars(8, high) + chars(8, low)
 
+    ///
+    /// その時刻に作られ得る ULID の最小値（乱数の部分が全部 0）。時刻の範囲を id の範囲に変えるのに使う
+    /// （`id >= lowerBoundAt(since) AND id < lowerBoundAt(until)`）。
+    ///
+    pub def lowerBoundAt(timeMs: Int64): String =
+        encode(timeMs, Vector.empty())
+
     /// 5 バイトを 40 bit の整数に。
     def toInt64(bytes: Vector[Int8]): Int64 =
         Vector.foldLeft((acc, byte) -> (acc * 256i64) + Int32.toInt64(Int8.toInt32(byte) |> Int32.bitwiseAnd(255)), 0i64, bytes)

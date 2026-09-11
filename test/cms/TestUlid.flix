@@ -12,3 +12,10 @@ def testUlidOrderAndRandom(): Unit \ Assert =
     let later = Ulid.encode(1469918176386i64, Vector.repeat(10, 0i8));
     let earlier = Ulid.encode(1469918176385i64, Vector.repeat(10, -1i8));
     Assert.assertEq(expected = ("01ARYZ6S41ZZZZZZZZZZZZZZZZ", true), (earlier, later > earlier))
+
+/// その時刻の下限は、同じ時刻のどの ULID 以下で、1 ミリ秒前のどの ULID より大きい（時刻の範囲を id の範囲に変えられる）。
+@Test
+def testUlidLowerBoundAt(): Unit \ Assert =
+    let bound = Ulid.lowerBoundAt(1469918176385i64);
+    Assert.assertEq(expected = ("01ARYZ6S410000000000000000", true, true),
+        (bound, bound <= Ulid.encode(1469918176385i64, Vector.repeat(10, 0i8)), bound > Ulid.encode(1469918176384i64, Vector.repeat(10, -1i8))))

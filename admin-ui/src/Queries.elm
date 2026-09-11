@@ -1,10 +1,12 @@
 module Queries exposing
-    ( FieldPatch
+    ( AuditQuery
+    , FieldPatch
     , Kind
     , addField
     , all
     , apiKeys
     , assets
+    , auditEvents
     , cancelInvitation
     , cancelSchedule
     , changeMemberRole
@@ -78,6 +80,7 @@ import Api.Account.Object.PersonalAccessToken as Pat
 import Api.Account.Object.Project as AccountProject
 import Api.Account.Object.ProjectMembership as ProjectMembership
 import Api.Account.Query
+import Api.Admin.Enum.ActorKind as ActorKind exposing (ActorKind)
 import Api.Admin.Enum.ApiKeyScope as ApiKeyScope exposing (ApiKeyScope)
 import Api.Admin.Enum.AssetStatus as AssetStatus
 import Api.Admin.Enum.ContentStage as ContentStage
@@ -101,6 +104,7 @@ import Api.Admin.Object
 import Api.Admin.Object.ApiKey as ApiKey
 import Api.Admin.Object.Asset as Asset
 import Api.Admin.Object.AssetPage as AssetPage
+import Api.Admin.Object.AuditEvent as AuditEvent
 import Api.Admin.Object.ContentType as ContentType
 import Api.Admin.Object.Entry as Entry
 import Api.Admin.Object.EntryPage as EntryPage
@@ -129,7 +133,7 @@ import Graphql.OptionalArgument as Opt
 import Graphql.SelectionSet as SS exposing (SelectionSet)
 import Json.Decode as D
 import Json.Encode as E
-import Model exposing (ContentTypeDetail, ContentTypeSummary, EntryList, EntryRow, FieldDef, Invite, MemberRow, Org, Person, Slug, ViewerInfo)
+import Model exposing (AuditRow, ContentTypeDetail, ContentTypeSummary, EntryList, EntryRow, FieldDef, Invite, MemberRow, Org, Person, Slug, ViewerInfo)
 import ScalarCodecs
 
 
@@ -144,6 +148,7 @@ type Kind
     | OneContentType
     | EntriesQuery
     | OrgProjects
+    | AuditEvents
 
 
 {-| 確認に投げる読むだけの物。書く物は投げない（実データが増える）。
@@ -158,6 +163,7 @@ all args =
     , ( OneContentType, contentType "c6" args.project "blogs" |> Tuple.first )
     , ( EntriesQuery, entries "c7" args.project { typeId = "1", search = "", stage = "", conditions = [], ids = [], order = "", first = 5, skip = 0 } |> Tuple.first )
     , ( OrgProjects, organizationProjects "c8" "1" |> Tuple.first )
+    , ( AuditEvents, auditEvents "c9" args.project { first = 5, after = Nothing, actorKind = Nothing, action = Nothing, since = Nothing, until = Nothing } |> Tuple.first )
     ]
 
 
@@ -333,6 +339,51 @@ cancelInvitation : String -> Slug -> String -> ( Api.Request, D.Decoder String )
 cancelInvitation id project inviteId =
     Api.mutation { id = id, kind = "cancelInvitation", project = project }
         (AdminMutation.cancelInvitation { id = inviteId })
+
+
+{-| 監査ログ。新しい順。`after` は前のページの最後の id、`action` は前方一致、
+`since` / `until` は UTC の ISO 8601（since 以上 until 未満）。
+-}
+auditEvents : String -> Slug -> AuditQuery -> ( Api.Request, D.Decoder (List AuditRow) )
+auditEvents id project args =
+    Api.query { id = id, kind = "auditEvents", project = project }
+        (Api.Admin.Query.auditEvents
+            (\optional ->
+                { optional
+                    | first = Opt.Present args.first
+                    , after = presentOr args.after
+                    , actorKind = presentOr args.actorKind
+                    , action = presentOr args.action
+                    , since = presentOr args.since
+                    , until = presentOr args.until
+                }
+            )
+            auditRow
+        )
+
+
+type alias AuditQuery =
+    { first : Int
+    , after : Maybe String
+    , actorKind : Maybe ActorKind
+    , action : Maybe String
+    , since : Maybe String
+    , until : Maybe String
+    }
+
+
+auditRow : SelectionSet AuditRow Api.Admin.Object.AuditEvent
+auditRow =
+    SS.succeed AuditRow
+        |> SS.with AuditEvent.id
+        |> SS.with (AuditEvent.actorKind |> SS.map ActorKind.toString)
+        |> SS.with AuditEvent.actorId
+        |> SS.with AuditEvent.actor
+        |> SS.with AuditEvent.action
+        |> SS.with AuditEvent.targetKind
+        |> SS.with AuditEvent.targetId
+        |> SS.with AuditEvent.detail
+        |> SS.with AuditEvent.createdAt
 
 
 {-| 型 1 つとそのフィールド。API スキーマの画面が使う。

@@ -152,12 +152,14 @@ mod ContentEntries {
     /// 公開中の物には取り下げの証明も要る。無ければ（writer が公開中の物を消そうとした）forbidden(publishEntries)。
     /// 呼ぶ側は `Session.tryGrant()` で持てるだけ渡す。
     ///
-    pub def delete(proof: Granted[WriteEntries], unpublishing: Option[Granted[PublishEntries]], id: EntryId): Unit \ Db + CmsErr + IdGen + Tenant =
+    pub def delete(proof: Granted[WriteEntries], unpublishing: Option[Granted[PublishEntries]], id: EntryId): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let existing = load(id);
         if (existing#stage == Stage.Published) discard unpublish(unpublishing |> CmsErr.orForbidden(Permission.PublishEntries), id) else ();
         discard EntriesQueries.deleteLinks({ fromEntryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft), projectId = Tenant.currentId() });
         discard EntriesQueries.softDeleteEntry({ id = EntryId.text(id), projectId = Tenant.currentId() });
-        Publishing.notify(PublishingEvent.EntryDeleted(id, apiIdOf(Session.readDraftOfWriter(proof), existing#typeId)))
+        let apiId = apiIdOf(Session.readDraftOfWriter(proof), existing#typeId);
+        Publishing.notify(PublishingEvent.EntryDeleted(id, apiId));
+        Audit.record(AuditChange.EntryDeleted(id, apiId, existing#version))
 
     /// 出来事に載せる型の apiId。
     def apiIdOf(reader: Granted[ReadDraft], typeId: TypeId): ApiId \ DbRead + CmsErr + Tenant =
@@ -172,6 +174,17 @@ mod ContentEntries {
     ///
     pub def publish(proof: Granted[PublishEntries], id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant =
         publishWithin(proof, Nil, id, author, withDependencies)
+
+    ///
+    /// 予約からの公開。公開の本体は `publish` と同じで、版の author は "scheduler"。監査に entry.published を積む（主体は system、予約の時刻付き）。
+    ///
+    /// WhyNot: 手での公開（`publish`）では積まない。版が author を持っていて、監査に二重に持つと片方だけ残る形が作れてしまう。
+    /// 予約の実行は版の author が "scheduler" になり誰の予約かが版から読めないので、こちらだけ積む。
+    ///
+    pub def publishScheduled(proof: Granted[PublishEntries], id: EntryId, scheduledFor: Timestamp.Timestamp, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant + Session =
+        let published = publishWithin(proof, Nil, id, "scheduler", withDependencies);
+        Audit.record(AuditChange.EntryPublishedBySchedule(id, apiIdOf(Session.readDraftOfPublisher(proof), published#typeId), published#version, scheduledFor));
+        published
 
     /// 公開の本体。visited は withDependencies で辿った entry（循環を 1 度で止める）。
     def publishWithin(proof: Granted[PublishEntries], visited: List[EntryId], id: EntryId, author: String, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant =
@@ -319,14 +332,18 @@ mod ContentEntries {
     ///
     /// 公開を取り下げる。published の行と一意の値を消す。下書きは残る。未公開なら何もしない。
     ///
-    pub def unpublish(proof: Granted[PublishEntries], id: EntryId): Entry \ Db + CmsErr + IdGen + Tenant =
+    pub def unpublish(proof: Granted[PublishEntries], id: EntryId): Entry \ Db + CmsErr + IdGen + Tenant + Session =
         let existing = load(id);
         // 公開中の他の entry が参照していれば取り下げられない
         CmsErr.raiseIfAny(publishedReferrerViolations(id));
         // published の行（参照・中身・印）を消す
         deletePublished(id);
-        // 公開中だった時だけ出来事になる
-        if (existing#stage == Stage.Published) Publishing.notify(PublishingEvent.EntryUnpublished(id, apiIdOf(Session.readDraftOfPublisher(proof), existing#typeId))) else ();
+        // 公開中だった時だけ出来事（Webhook と監査）になる
+        if (existing#stage == Stage.Published) {
+            let apiId = apiIdOf(Session.readDraftOfPublisher(proof), existing#typeId);
+            Publishing.notify(PublishingEvent.EntryUnpublished(id, apiId));
+            Audit.record(AuditChange.EntryUnpublished(id, apiId, existing#version))
+        } else ();
         load(id)
 
     ///

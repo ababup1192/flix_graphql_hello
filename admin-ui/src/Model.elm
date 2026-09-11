@@ -1,4 +1,4 @@
-module Model exposing (ApiKeyRow, AssetList, AssetRow, ContentTypeDetail, ContentTypeSummary, EntryList, EntryRow, EntryVersion, FieldConfig, FieldDef, Invite, IssuedKey, IssuedPat, IssuedWebhook, LinkCandidate, MemberRow, Org, PatRow, Person, Project, PublishReport, Referrer, ScheduleRow, SchemaEffect, SchemaImpact, Slug, Upload, ViewerInfo, Violation, WebhookRow)
+module Model exposing (ApiKeyRow, AssetList, AssetRow, AuditRow, ContentTypeDetail, ContentTypeSummary, EntryList, EntryRow, EntryVersion, FieldConfig, FieldDef, Invite, IssuedKey, IssuedPat, IssuedWebhook, LinkCandidate, MemberRow, Org, PatRow, Person, Project, PublishReport, Referrer, ScheduleRow, SchemaEffect, SchemaImpact, Slug, Upload, ViewerInfo, Violation, WebhookRow)
 
 {-| API から来る値の形。Html を作らない。
 
@@ -308,4 +308,20 @@ type alias IssuedPat =
     { id : String
     , name : String
     , token : String
+    }
+
+
+{-| 監査の 1 件。`detail` の形は action ごとに違うので JSON のまま持つ。
+`actorId` は列を足す前の行では空。
+-}
+type alias AuditRow =
+    { id : String
+    , actorKind : String
+    , actorId : String
+    , actor : String
+    , action : String
+    , targetKind : String
+    , targetId : String
+    , detail : Json.Decode.Value
+    , createdAt : String
     }

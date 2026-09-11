@@ -35,6 +35,8 @@ suite =
                 , "https://x/p/tech-blog/c/blogs/e1"
                 , "https://x/p/tech-blog/assets"
                 , "https://x/p/tech-blog/settings/api-keys"
+                , "https://x/p/tech-blog/settings/audit"
+                , "https://x/p/tech-blog/settings/audit?kind=USER&action=webhook.&since=2026-08-01&until=2026-09-11&id=01J7Q"
                 ]
                     |> List.map roundTrip
                     |> Expect.equal
@@ -51,6 +53,8 @@ suite =
                          , "/p/tech-blog/c/blogs/e1"
                          , "/p/tech-blog/assets"
                          , "/p/tech-blog/settings/api-keys"
+                         , "/p/tech-blog/settings/audit"
+                         , "/p/tech-blog/settings/audit?kind=USER&action=webhook.&since=2026-08-01&until=2026-09-11&id=01J7Q"
                          ]
                             |> List.map Just
                         )
@@ -60,6 +64,12 @@ suite =
                     |> Url.fromString
                     |> Maybe.map Route.fromUrl
                     |> Expect.equal (Just (Entries "tech-blog" "blogs" [ ( "q", "flix" ), ( "order", "publishedAt" ) ]))
+        , test "監査ログの絞り込みは URL に残る（知らないキーは捨てる）" <|
+            \_ ->
+                "https://x/p/tech-blog/settings/audit?action=member.&q=x&kind=SYSTEM"
+                    |> Url.fromString
+                    |> Maybe.map Route.fromUrl
+                    |> Expect.equal (Just (Settings "tech-blog" (Audit [ ( "kind", "SYSTEM" ), ( "action", "member." ) ])))
         , test "知らない URL は NotFound" <|
             \_ ->
                 "https://x/nope/nope"

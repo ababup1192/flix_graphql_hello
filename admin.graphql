@@ -40,8 +40,10 @@ type Query {
   webhookDeliveries(webhookId: ID!, first: Int = 20, after: ID): [WebhookDelivery!]!
   """予約公開の一覧。新しい順。entryId を渡せばその entry の物だけ。after は前のページの最後の id"""
   schedules(entryId: ID, first: Int = 50, after: ID): [Schedule!]!
-  """監査の記録。新しい順（owner だけ）。誰が・いつ・何を変えたか。after は前のページの最後の id"""
-  auditEvents(first: Int = 50, after: ID): [AuditEvent!]!
+  """監査の記録。新しい順（owner だけ）。誰が・いつ・何を変えたか。after は前のページの最後の id。
+  絞り込みは全部任意: actorKind は主体の種類、action は前方一致（"webhook." で Webhook の全部）、
+  since / until は ISO 8601 の時刻（since 以上 until 未満。id が時刻順なので id の範囲で引く）"""
+  auditEvents(first: Int = 50, after: ID, actorKind: ActorKind, action: String, since: String, until: String): [AuditEvent!]!
   """スキーマを変える前の影響。書き込まない。safe なら確認なしで押せる。
   押す時は effects から組んだ expected を渡す（渡さずに押すと、影響がある操作は止まる）"""
   fieldImpact(input: SchemaChangeInput!): SchemaImpact!
@@ -475,20 +477,38 @@ type Invitation {
   createdAt: String!
 }
 
-"""監査の 1 件。版の残らない変更（メンバー・役割・鍵・型）を積んだ物。
-entry の変更は entry_versions に版として残るので、ここには出ない"""
+"""監査の主体の種類"""
+enum ActorKind {
+  """ログインした人"""
+  USER
+  """プロジェクトの API キー"""
+  API_KEY
+  """PAT で来た人"""
+  PAT
+  """サーバ自身（予約公開の実行）"""
+  SYSTEM
+}
+
+"""監査の 1 件。版の残らない変更（メンバー・役割・鍵・型・Webhook・asset・公開範囲と、entry の取り下げ・削除・予約公開の実行）を積んだ物。
+entry の編集と手での公開は entry_versions に版として残るので、ここには出ない"""
 type AuditEvent {
   id: ID!
-  """した人。人は email、鍵は "api-key:<鍵の名前>"（版の author と同じ形）"""
+  """主体の種類"""
+  actorKind: ActorKind!
+  """主体の id。人は users.public_id（Member.userId と同じ物）、鍵は鍵の名前、SYSTEM は空。actorKind の列を足す前の行も空"""
+  actorId: String!
+  """した人の表示名。人は email、鍵は "api-key:<鍵の名前>"（版の author と同じ形）"""
   actor: String!
-  """した事。"member.role_changed" / "type.deleted" / "field.removed" など"""
+  """した事。"member.role_changed" / "type.deleted" / "webhook.deleted" / "entry.unpublished" など"""
   action: String!
-  """対象の種類。"member" / "invitation" / "api_key" / "type" / "field" の 5 つ"""
+  """対象の種類。"member" / "invitation" / "api_key" / "type" / "field" / "project" / "webhook" / "webhook_delivery" / "asset" / "entry" """
   targetKind: String!
-  """対象。型は apiId、フィールドは "<型の apiId>.<フィールドの apiId>"、メンバーは id か email"""
+  """対象。型は apiId、フィールドは "<型の apiId>.<フィールドの apiId>"、メンバーは id か email、Webhook・asset・entry は id、プロジェクトは slug"""
   targetId: String!
-  """付随する値。役割の変更なら {"role": "editor"}、鍵の発行なら {"name": "CI"}"""
+  """付随する値。役割の変更なら {"role": "editor"}、消した物は {"before": 変更前の姿}（Webhook の url は host / pathHint / urlHash に落とした物）、
+  entry なら {"typeApiId", "version"}"""
   detail: JSON!
+  """UTC の ISO 8601"""
   createdAt: String!
 }
 

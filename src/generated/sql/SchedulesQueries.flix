@@ -7,7 +7,7 @@ mod SchedulesQueries {
     ///
     /// 生成元 schedules.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -263824162
+    pub def sourceHash(): Int32 = 1404495144
 
     ///
     /// insertSchedule: INSERT INTO scheduled_actions (id, project_id, entry_id, action, run_at, with_dependencies, requested_by) VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -171,7 +171,7 @@ mod SchedulesQueries {
     ///
     /// claimDueSchedules の 1 行。
     ///
-    pub type alias ClaimDueSchedulesRow = { id = String, projectId = Int64, projectSlug = String, entryId = String, action = String, withDependencies = Bool }
+    pub type alias ClaimDueSchedulesRow = { id = String, projectId = Int64, projectSlug = String, entryId = String, action = String, withDependencies = Bool, runAt = Timestamp.Timestamp }
 
     def claimDueSchedulesDecoder(): Decoder[ClaimDueSchedulesRow] =
         forA (
@@ -180,14 +180,15 @@ mod SchedulesQueries {
             projectSlug <- Decoder.str("project_slug");
             entryId <- Decoder.str("entry_id");
             action <- Decoder.str("action");
-            withDependencies <- Decoder.bool("with_dependencies")
-        ) yield { id = id, projectId = projectId, projectSlug = projectSlug, entryId = entryId, action = action, withDependencies = withDependencies }
+            withDependencies <- Decoder.bool("with_dependencies");
+            runAt <- Decoder.timestamp("run_at")
+        ) yield { id = id, projectId = projectId, projectSlug = projectSlug, entryId = entryId, action = action, withDependencies = withDependencies, runAt = runAt }
 
     ///
-    /// claimDueSchedules: UPDATE scheduled_actions AS s SET status = 'running', claimed_at = now() FROM projects AS p WHERE p.id = s.project_id AND s.id IN ( SELECT id FROM scheduled_actions WHERE status = 'pending' AND run_at <= now() ORDER BY run_at LIMIT $1 FOR UPDATE SKIP LOCKED ) RETURNING s.id, s.project_id, p.slug AS project_slug, s.entry_id, s.action, s.with_dependencies
+    /// claimDueSchedules: UPDATE scheduled_actions AS s SET status = 'running', claimed_at = now() FROM projects AS p WHERE p.id = s.project_id AND s.id IN ( SELECT id FROM scheduled_actions WHERE status = 'pending' AND run_at <= now() ORDER BY run_at LIMIT $1 FOR UPDATE SKIP LOCKED ) RETURNING s.id, s.project_id, p.slug AS project_slug, s.entry_id, s.action, s.with_dependencies, s.run_at
     ///
     pub def claimDueSchedules(limit: Int64): List[ClaimDueSchedulesRow] \ DbWrite =
-        let sql = "UPDATE scheduled_actions AS s SET status = 'running', claimed_at = now()\n    FROM projects AS p\n    WHERE p.id = s.project_id AND s.id IN (\n        SELECT id FROM scheduled_actions WHERE status = 'pending' AND run_at <= now()\n        ORDER BY run_at LIMIT $1 FOR UPDATE SKIP LOCKED\n    )\n    RETURNING s.id, s.project_id, p.slug AS project_slug, s.entry_id, s.action, s.with_dependencies";
+        let sql = "UPDATE scheduled_actions AS s SET status = 'running', claimed_at = now()\n    FROM projects AS p\n    WHERE p.id = s.project_id AND s.id IN (\n        SELECT id FROM scheduled_actions WHERE status = 'pending' AND run_at <= now()\n        ORDER BY run_at LIMIT $1 FOR UPDATE SKIP LOCKED\n    )\n    RETURNING s.id, s.project_id, p.slug AS project_slug, s.entry_id, s.action, s.with_dependencies, s.run_at";
         let params = List#{SqlValue.Int64(limit)};
         RawSql.runWithAllow(() -> Sql.executeReturningAs(claimDueSchedulesDecoder(), sql, params))
 

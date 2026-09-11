@@ -78,7 +78,7 @@ mod ApiKeys {
     ///
     /// 失効する。行は残す。
     ///
-    pub def revoke(_proof: Granted[ManageApiKeys], publicId: String): Unit \ DbWrite + CmsErr + IdGen + Tenant + Session =
+    pub def revoke(_proof: Granted[ManageApiKeys], publicId: String): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let changed = AuthQueries.revokeApiKey({ publicId = publicId, projectId = Tenant.currentId() });
         if (changed == 0) CmsErr.notFound(Entity.ApiKey, publicId) else ();
         Audit.record(AuditChange.ApiKeyRevoked(publicId))

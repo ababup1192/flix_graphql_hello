@@ -131,7 +131,7 @@ viewTypeTabs config =
             text ""
 
 
-{-| プロジェクト設定のタブ。メンバー / API キーと Webhook / プロジェクトと MCP を並べる。
+{-| プロジェクト設定のタブ。メンバー / API キーと Webhook / プロジェクトと MCP / 監査ログ を並べる。
 
 型の画面のタブと同じ部品。ここが無いと、API キーの画面には ⌘K か URL の直打ちでしか着けない
 （Contentful の Settings メニュー、GitHub の設定の左の一覧に当たる物）。
@@ -171,6 +171,11 @@ viewSettingsTabs config =
 
                           else
                             []
+                        , if Permission.has Permission.ManageMembers config.permissions then
+                            [ tab "監査ログ" (Route.Audit []) ]
+
+                          else
+                            []
                         ]
                     )
                 ]
@@ -183,7 +188,15 @@ viewSettingsTabs config =
 -}
 sameSettings : Route.SettingsTab -> Route.SettingsTab -> Bool
 sameSettings current target =
-    current == target || (current == Route.Webhooks && target == Route.ApiKeys)
+    case ( current, target ) of
+        ( Route.Audit _, Route.Audit _ ) ->
+            True
+
+        ( Route.Webhooks, Route.ApiKeys ) ->
+            True
+
+        _ ->
+            current == target
 
 
 {-| 型の画面か。エディタと新規作成では出さない（そこは 1 件の話なので）。

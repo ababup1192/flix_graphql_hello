@@ -173,6 +173,23 @@ mod AdminMapping {
     pub def timestampOf(argument: String, text: String): Timestamp.Timestamp \ CmsErr =
         Timestamp.fromIso8601(text) |> CmsErr.orInvalid(argument, "'${text}' は ISO 8601 の時刻ではありません（例: 2026-09-08T09:00:00Z）")
 
+    pub def actorKindOf(kind: GeneratedAdmin.ActorKind): ActorKind = match kind {
+        case GeneratedAdmin.ActorKind.User   => ActorKind.User
+        case GeneratedAdmin.ActorKind.ApiKey => ActorKind.ApiKey
+        case GeneratedAdmin.ActorKind.Pat    => ActorKind.Pat
+        case GeneratedAdmin.ActorKind.System => ActorKind.System
+    }
+
+    /// 監査の主体の種類。Anonymous / Preview は監査に積む操作ができないので SDL に無く、None。
+    pub def actorKindToGql(kind: ActorKind): Option[GeneratedAdmin.ActorKind] = match kind {
+        case ActorKind.User      => Some(GeneratedAdmin.ActorKind.User)
+        case ActorKind.ApiKey    => Some(GeneratedAdmin.ActorKind.ApiKey)
+        case ActorKind.Pat       => Some(GeneratedAdmin.ActorKind.Pat)
+        case ActorKind.System    => Some(GeneratedAdmin.ActorKind.System)
+        case ActorKind.Anonymous => None
+        case ActorKind.Preview   => None
+    }
+
     pub def visibilityToGql(visibility: Visibility): GeneratedAdmin.Visibility = match visibility {
         case Visibility.Public  => GeneratedAdmin.Visibility.Public
         case Visibility.Private => GeneratedAdmin.Visibility.Private

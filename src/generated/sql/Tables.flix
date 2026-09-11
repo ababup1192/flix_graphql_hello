@@ -155,6 +155,8 @@ mod AuditEventsTable {
     pub def targetId(): Fragment.Col[AuditEventsTable, String, Fragment.NotNull] = Fragment.Col.Col("target_id", SqlValue.Str)
     pub def detail(): Fragment.Col[AuditEventsTable, Util.Json.Json, Fragment.NotNull] = Fragment.Col.Col("detail", SqlValue.ofJson)
     pub def createdAt(): Fragment.Col[AuditEventsTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("created_at", SqlValue.ofTimestamp)
+    pub def actorKind(): Fragment.Col[AuditEventsTable, String, Fragment.NotNull] = Fragment.Col.Col("actor_kind", SqlValue.Str)
+    pub def actorId(): Fragment.Col[AuditEventsTable, String, Fragment.NotNull] = Fragment.Col.Col("actor_id", SqlValue.Str)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。

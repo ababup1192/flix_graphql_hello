@@ -24,6 +24,7 @@ import Json.Decode as D
 import Json.Encode as E
 import Model exposing (ContentTypeSummary, Person, Project, Slug)
 import Page.Account as Account
+import Page.Audit as Audit
 import Page.Board as Board
 import Page.Editor as Editor
 import Page.Entries as Entries
@@ -134,6 +135,7 @@ type alias Workspace =
 type Page
     = ProjectsPage Projects.Model
     | MembersPage Members.Model
+    | AuditPage Audit.Model
     | SchemaPage Schema.Model
     | TypeSettingsPage TypeSettings.Model
     | EntriesPage Entries.Model
@@ -158,6 +160,7 @@ type Msg
     | GotTypes (Result Api.Problem (List ContentTypeSummary))
     | ProjectsMsg Projects.Msg
     | MembersMsg Members.Msg
+    | AuditMsg Audit.Msg
     | SchemaMsg Schema.Msg
     | TypeSettingsMsg TypeSettings.Msg
     | EntriesMsg Entries.Msg
@@ -614,6 +617,41 @@ update msg model =
                             ( workspace, [] )
                 )
 
+        AuditMsg pageMsg ->
+            case model.phase of
+                Ready workspace ->
+                    case workspace.page of
+                        AuditPage page ->
+                            let
+                                ( next, calls ) =
+                                    Audit.update pageMsg page
+
+                                ( sent, effect ) =
+                                    sendAll (List.map (Api.mapCall AuditMsg) calls)
+                                        { model | phase = Ready { workspace | page = AuditPage next } }
+
+                                url : String
+                                url =
+                                    Audit.urlOf next
+                            in
+                            -- 絞り込みを URL に書き戻す。一覧と同じで履歴は増やさない。
+                            ( { sent | route = Route.fromString url |> Maybe.withDefault sent.route }
+                            , Effect.batch
+                                [ effect
+                                , if url == Route.toString model.route then
+                                    Effect.none
+
+                                  else
+                                    Effect.ReplaceRoute url
+                                ]
+                            )
+
+                        _ ->
+                            ( model, Effect.none )
+
+                _ ->
+                    ( model, Effect.none )
+
 
 {-| 一覧の検索は**手が止まってから引く**。打つ度に投げると、1 文字ごとに問い合わせが
 飛び、画面が描き直されて入力欄の焦点が外れる（実際に外れた）。
@@ -1021,7 +1059,7 @@ enterRoute route model =
 
 
 {-| 同じ画面のままか。**今その画面が出ている事まで見る**（route だけを比べると、
-最初に開いた時にページが作られない）。今は一覧だけ（絞り込みを URL に持つのがここだけ）。
+最初に開いた時にページが作られない）。一覧と監査ログ（絞り込みを URL に持つ 2 つ）。
 -}
 staysOnPage : ModelWith key -> Route -> Bool
 staysOnPage model to =
@@ -1030,6 +1068,14 @@ staysOnPage model to =
             case workspace.page of
                 EntriesPage _ ->
                     fromProject == toProject && fromApiId == toApiId
+
+                _ ->
+                    False
+
+        ( Ready workspace, Route.Settings fromProject (Route.Audit _), Route.Settings toProject (Route.Audit _) ) ->
+            case workspace.page of
+                AuditPage _ ->
+                    fromProject == toProject
 
                 _ ->
                     False
@@ -1163,6 +1209,12 @@ enterPage route model =
                 Route.Settings _ Route.Members ->
                     { model | route = route, phase = Ready { workspace | page = MembersPage Members.init } }
                         |> loadMembers slug
+
+                Route.Settings _ (Route.Audit params) ->
+                    -- 引くのはタイムゾーンが分かってから（ページの ZoneKnown が引く）。
+                    ( { model | route = route, phase = Ready { workspace | page = AuditPage (Audit.init slug params) } }
+                    , Effect.Today (\zone _ _ _ -> AuditMsg (Audit.ZoneKnown zone))
+                    )
 
                 _ ->
                     ( { model | route = route, phase = Ready { workspace | page = Placeholder (Route.toString route) } }, Effect.none )
@@ -1391,6 +1443,9 @@ settingsName tab =
         Route.ProjectSettings ->
             "プロジェクトと MCP"
 
+        Route.Audit _ ->
+            "監査ログ"
+
 
 pageView : Workspace -> Html Msg
 pageView workspace =
@@ -1401,6 +1456,10 @@ pageView workspace =
         MembersPage page ->
             Members.view { canManage = Permission.has Permission.ManageMembers workspace.permissions } page
                 |> Html.map MembersMsg
+
+        AuditPage page ->
+            Audit.view { canManage = Permission.has Permission.ManageMembers workspace.permissions } page
+                |> Html.map AuditMsg
 
         EntriesPage page ->
             Entries.view page |> Html.map EntriesMsg
