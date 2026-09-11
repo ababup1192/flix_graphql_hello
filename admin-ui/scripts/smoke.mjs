@@ -105,7 +105,7 @@ try {
     else fail("ツールバーで見出しにできる", `doc = ${doc.slice(0, 160)}`);
   }
 
-  // 7.5 コードブロック（``` で作り、言語はブロックの上で選ぶ）
+  // 7.5 コードブロック（``` で作り、言語はブロックの下の帯で選ぶ）
   await page.goto(base + "/p/default/c/blogs/new", { waitUntil: "networkidle" });
   await page.waitForTimeout(1000);
   await page.locator("tiptap-editor .tt-body").click();
@@ -119,20 +119,20 @@ try {
   else fail("ツールバーに言語のセレクトが無い", "残っています");
   const langButton = page.locator(".tt-code-lang").first();
   if ((await langButton.count()) === 1) {
-    note("ブロックの上で言語を選べる");
+    note("ブロックの下の帯で言語を選べる");
     await langButton.click();
     await page.waitForTimeout(400);
-    await page.locator(".tt-code-search").fill("fli");
+    await langButton.fill("fli");
     await page.waitForTimeout(300);
     const hits = await page.locator(".tt-code-item").allTextContents();
-    if (hits.join("/") === "Flix") note("打って言語を絞れる");
+    if (hits.join("/") === "FLflix") note("打って言語を絞れる");
     else fail("打って言語を絞れる", hits.join("/"));
     await page.keyboard.press("Enter");
     await page.waitForTimeout(1200);
     if ((await page.locator(".tt-body pre code span").count()) > 0) note("選んだ言語で色が付く");
     else fail("選んだ言語で色が付く", "色の span がありません");
   } else {
-    fail("ブロックの上で言語を選べる", "ボタンがありません");
+    fail("ブロックの下の帯で言語を選べる", "欄がありません");
   }
 
   // 7.55 数式と図（CMS は元から受ける。管理画面が追いついていなかった）

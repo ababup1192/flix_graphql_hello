@@ -16,6 +16,7 @@ import type { Editor } from "@tiptap/core";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { hostnameOf } from "./url-cards";
 import { ICONS, svg } from "./icons";
+import { bar as barOf, iconButton, owns } from "./ui";
 
 export type LinkCard = {
   url: string;
@@ -104,6 +105,9 @@ export function cardView(name: string, className: string, head: (url: string) =>
   return ({ node }: ViewArgs) => {
     const dom = document.createElement("div");
     dom.className = `tt-card ${className}`;
+    // WhyNot: atom の node view だから安全、で済ませない。提供元名と URL は手で書いた DOM なので、
+    // 枠の中を押して打てると doc に入らない文字が残る（帯と同じ形の負）。
+    dom.contentEditable = "false";
     const title = document.createElement("span");
     title.className = "tt-card-head";
     const url = document.createElement("span");
@@ -154,21 +158,17 @@ function linkCardView(store: CardStore) {
     dom.contentEditable = "false";
 
     // 上に浮く帯。削除だけ（画像の帯と同じ見た目）。
-    const bar = element("div", "tt-image-bar");
-    bar.hidden = true;
-    const trash = document.createElement("button");
-    trash.type = "button";
-    trash.className = "tt-image-tool tt-image-icon";
-    trash.innerHTML = svg(ICONS.trash, BAR_ICON);
-    trash.title = "削除";
-    trash.setAttribute("aria-label", "削除");
-    // mousedown を止めないと ProseMirror が node の選択を外し、帯ごと消える。
-    trash.addEventListener("mousedown", (event) => event.preventDefault());
-    trash.addEventListener("click", () => {
-      revertToUrl(editor, "linkCard");
-      editor.view.focus();
+    const trash = iconButton({
+      className: "tt-image-tool tt-image-icon",
+      icon: svg(ICONS.trash, BAR_ICON),
+      title: "削除",
+      onClick: () => {
+        revertToUrl(editor, "linkCard");
+        editor.view.focus();
+      },
     });
-    bar.append(trash);
+    const bar = barOf({ className: "tt-image-bar", children: [trash] });
+    bar.hidden = true;
 
     // 取りに行っている間の「…」。3 秒を超えたら薄く文字。
     const loading = element("div", "tt-link-card-loading");
@@ -262,7 +262,7 @@ function linkCardView(store: CardStore) {
       dom,
       // 帯はこちらが描く物なので、触っても doc は動かさない。
       ignoreMutation: () => true,
-      stopEvent: (event: Event) => bar.contains(event.target as globalThis.Node),
+      stopEvent: (event: Event) => owns([bar], event),
       update(updated: { type: { name: string }; attrs: Record<string, unknown> }) {
         if (updated.type.name !== "linkCard") return false;
         load(updated.attrs);

@@ -9,6 +9,8 @@
   --color-panel: #ffffff;
   --color-raised: #f6f8fa;
   --color-well: #eff2f5;
+  /* 引用の箱の面。本文の面より少し暗い（コードブロックの well より一段濃い） */
+  --color-quote: #e7ecf1;
   --color-edge: #d1d9e0;
   --color-ink: #1f2328;
   --color-ink-soft: #59636e;
@@ -72,6 +74,7 @@
   --color-panel: #0d1117;
   --color-raised: #151b23;
   --color-well: #212830;
+  --color-quote: #010409;
   --color-edge: #3d444d;
   --color-ink: #f0f6fc;
   --color-ink-soft: #9198a1;
@@ -102,6 +105,7 @@
     --color-panel: #0d1117;
     --color-raised: #151b23;
     --color-well: #212830;
+    --color-quote: #010409;
     --color-edge: #3d444d;
     --color-ink: #f0f6fc;
     --color-ink-soft: #9198a1;
@@ -161,6 +165,8 @@ code, pre, .font-mono {
 /* リッチエディタ。見た目は管理画面のテーマに従う（公開サイトの見た目ではない）。 */
 tiptap-editor {
   display: block;
+  /* 貼り付いた道具の帯が止まる高さ。エディタの画面の上の帯（下書き保存 / 公開）の分。 */
+  --tt-bar-top: 64px;
   /* 吹き出しをこの箱を基準に置く。 */
   position: relative;
   border: 1px solid var(--color-edge);
@@ -181,7 +187,10 @@ tiptap-editor.is-big {
   max-width: 53rem;
   margin: 0 auto;
 }
-tiptap-editor.is-big .tt-bar { flex: 0 0 auto; }
+/* 広げて書く時は、送るのが本文（`.tt-mount`）の方なので帯は貼り付ける必要が無い。
+   WhyNot: sticky のままにしない。基準が画面の帯ではなくこの箱になり、本文の枠の中で
+   64px 下にずれる。 */
+tiptap-editor.is-big .tt-bar { flex: 0 0 auto; position: static; }
 tiptap-editor.is-big .tt-mount {
   flex: 1;
   min-height: 0;
@@ -191,7 +200,7 @@ tiptap-editor.is-big .tt-mount {
 tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 
 /* 本文は「素直な記事の見た目」に寄せる（docs/design/richtext-note-style.md 6.12）。
-   幅 40rem・16px・行間 1.9・画像とキャプションは中央・引用は薄い箱・区切り線は「＊」。
+   幅 40rem・16px・行間 1.9・画像とキャプションは中央・引用は濃い箱・区切り線は横線。
    WhyNot: サイト側の CSS を読み込まない。サイトごとに違う CSS が管理画面に混ざり、
    壊れた時に切り分けられない。値はモック（richtext-mock.html の .body）を写す。 */
 .tt-body {
@@ -206,8 +215,9 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
   color: var(--color-ink);
 }
 .tt-body > * + * { margin-top: 0.7rem; }
-.tt-body hr { border: 0; height: auto; text-align: center; margin: var(--tt-block-gap) 0; }
-.tt-body hr::before { content: "＊　＊　＊"; color: var(--color-ink-faint); letter-spacing: 0.3em; }
+/* note と同じ 1 本の横線。
+   WhyNot: 「＊　＊　＊」にしない（2026-09-11 に note の実物で確認。調査の誤りだった）。 */
+.tt-body hr { border: 0; border-top: 1px solid var(--color-edge); height: 0; margin: var(--tt-block-gap) 0; }
 
 /* 塊（表・画像・並べた画像・コードブロック）の上下。
    **文章より広く、上下は同じ値。** 塊は前後の文と地続きに読む物ではないので、
@@ -237,34 +247,31 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 
 .tt-body ul { list-style: disc; padding-left: 1.4rem; }
 .tt-body ol { list-style: decimal; padding-left: 1.4rem; }
-/* 引用は薄い灰色の箱（note と同じ）。箱は node view の外側（.tt-quote）に付ける。
-   WhyNot: blockquote 自体を箱にしない。出典の欄は blockquote の外（contentDOM の外）にあり、
-   blockquote を箱にすると出典が箱の外に落ちる。出典は箱の右下に置きたい（6.5）。 */
-.tt-body blockquote { border: 0; padding: 0; color: var(--color-ink-soft); }
-.tt-body blockquote > * + * { margin-top: 0.7rem; }
-.tt-quote {
-  margin: var(--tt-block-gap) 0;
-  padding: 1em 1.25em;
-  border-radius: 4px;
-  background: var(--color-well);
-}
-.tt-quote-add {
-  display: block;
-  margin: 2px 0 0 auto;
-  padding: 2px 4px;
+/* 引用の本文は本文より濃い面の箱、出典はその外の下の右（note の実物。
+   `docs/design/richtext-quote-mock.html`）。
+   WhyNot: 左に縦線も枠も引かない。実物に無く、箱の面だけで引用と分かる。
+   WhyNot: 出典を箱の中に入れない。箱の中に置くと引用の最後の行に見え、
+   誰の言葉かの境目が消える。 */
+.tt-body blockquote {
   border: 0;
   border-radius: 4px;
-  background: transparent;
-  color: var(--color-ink-faint);
-  font-size: 11px;
-  font-family: inherit;
-  cursor: pointer;
-  visibility: hidden;
+  padding: 1.1rem 1.4rem;
+  background: var(--color-quote);
+  color: var(--color-ink);
 }
-.tt-quote:hover .tt-quote-add,
-.tt-quote:focus-within .tt-quote-add { visibility: visible; }
-.tt-quote-add:hover { background: var(--color-panel); color: var(--color-ink-soft); }
-.tt-quote-fields { display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px; }
+.tt-body blockquote > * + * { margin-top: 0.7rem; }
+.tt-quote { margin: var(--tt-block-gap) 0; }
+/* 箱と出典の間はモックと同じ 18px。 */
+.tt-quote-cite-row { display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 18px; }
+/* 焦点も出典も無い引用は、出典の文字を見せない。
+   WhyNot: display: none で消さない。乗せた時に行が現れると、その分だけ下の本文が動く
+   （実測で 47px）。書いている間にマウスを動かすたび本文が上下するのを避け、
+   場所は先に空けておいて中身だけ隠す。
+   WhyNot: hidden 属性で隠さない。node view の中で hidden を立てた行は、出し直しても
+   中の欄が焦点を受け付けず、打った字が引用の本文に落ちた。 */
+.tt-quote-cite-row.is-quiet { visibility: hidden; }
+/* 乗せている間は空の出典も見せる（押して入る道が要る）。 */
+.tt-quote:hover .tt-quote-cite-row.is-quiet { visibility: visible; }
 .tt-body pre { background: var(--color-well); border-radius: 6px; padding: 0.7rem 0.9rem; font-size: 12px; overflow-x: auto; }
 .tt-body code { font-family: ui-monospace, monospace; font-size: 0.9em; }
 .tt-body a { color: var(--color-link); text-decoration: underline; }
@@ -282,8 +289,18 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
   font-size: 12px;
 }
 
-/* リッチエディタのツールバー。群を区切り線で束ねる（Contentful と同じ並び） */
+/* リッチエディタのツールバー。群を区切り線で束ねる（Contentful と同じ並び）
+
+   **本文の枠の中で上に貼り付く。** 本文が長いと道具が上に流れて押せなくなる。
+   基準は画面ではなく本文の枠なので、他のフィールドを見ている間は出てこない。
+   WhyNot: `top: 0` にしない。エディタの画面の上には「下書き保存 / 公開」の帯が同じく
+   貼り付いていて（`Page/Editor.elm` の `sticky top-0`、高さ 64px）、0 だとその下に潜る。
+   WhyNot: 浮く面より上に置かない。`--z-sticky`（20）は `--z-dropdown`（30）より下なので、
+   言語の候補・ブロックの一覧・表の帯・吹き出しは貼り付いた帯の上に出る。 */
 .tt-bar {
+  position: sticky;
+  top: var(--tt-bar-top, 0px);
+  z-index: var(--z-sticky);
   display: flex;
   align-items: center;
   gap: 2px;
@@ -330,95 +347,202 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 .tt-tool:disabled { opacity: 0.35; cursor: default; }
 .tt-tool:disabled:hover { background: transparent; color: var(--color-ink-soft); }
 
-/* コードブロック。言語は帯の中で選ぶ（GitHub と同じ） */
+/* コードブロック。ファイル名と言語はブロックの下の帯、行番号は左
+   （note の実物。docs/design/richtext-note-codeblock-ui.md） */
 .tt-code {
   position: relative;
   margin: var(--tt-block-gap) 0;
   border: 1px solid var(--color-edge);
   border-radius: 6px;
   background: var(--color-well);
+  /* 行の高さと上の余白。**行番号・地の帯・コードの 3 つが同じ値を使う**
+     （別々に書くと、片方だけ変えた時に番号と行がずれる）。 */
+  --tt-code-line: 28px;
+  --tt-code-pad: 16px;
   /* WhyNot: overflow: hidden にしない。言語を選ぶ面が枠で切られる（実際に切れた）。
      角の丸みは中の帯とコードに個別に付ける。 */
 }
+/* エディタの中の帯と浮く面に共通で掛かる保証（web/ui.ts の bar / popover）。
+   帯そのものは contenteditable="false" にしてあるが、余白を掴んで引くと選択の青が帯に伸び、
+   そこから打てるように見える。選択を止めるのは帯だけで、中の欄は普通に選べる。
+   WhyNot: 見た目はここに書かない。色と大きさは帯ごとの class が持つ。 */
+.tt-block-bar { user-select: none; }
+.tt-block-bar input,
+.tt-block-bar textarea { user-select: text; }
+/* 浮く面は必ず親を基準に置く（top/left は ui.ts が付ける）。
+   WhyNot: position: fixed を許さない。開いた時の座標しか測れず、本文を送ると面だけが
+   元の高さに取り残される。 */
+.tt-block-pop { position: absolute; user-select: none; }
+.tt-block-pop input,
+.tt-block-pop textarea { user-select: text; }
+.tt-block-pop[hidden] { display: none; }
+
 .tt-code-bar {
-  border-radius: 5px 5px 0 0;
+  border-radius: 0 0 5px 5px;
   position: relative;
   display: flex;
   align-items: center;
-  padding: 4px 6px;
-  border-bottom: 1px solid var(--color-edge);
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--color-edge);
   background: var(--color-raised);
 }
-.tt-code-lang {
-  height: 22px;
-  padding: 0 8px;
-  border: 1px solid transparent;
+/* 帯の中の 2 つの欄は同じ見た目。左にファイル名、右に言語 */
+.tt-code-bar input {
+  height: 28px;
+  padding: 0 10px;
+  border: 2px solid transparent;
   border-radius: 4px;
   background: transparent;
-  color: var(--color-ink-soft);
-  font-size: 11px;
-  font-family: inherit;
-  cursor: pointer;
+  color: var(--color-ink);
+  font-size: 13px;
+  outline: none;
 }
-.tt-code-lang:hover { border-color: var(--color-edge); background: var(--color-panel); color: var(--color-ink); }
-.tt-code-lang.is-unset { color: var(--color-ink-faint); }
+.tt-code-bar input:focus { border-color: var(--color-link); }
+.tt-code-bar input::placeholder { color: var(--color-ink-faint); }
+/* CMS が受けない形（空白や " < > が入っている）はその場で分かるようにする */
+.tt-code-bar input.is-bad { border-color: var(--color-bad); }
+
+.tt-code-file { flex: 0 1 16rem; min-width: 0; font-family: var(--font-mono); }
+.tt-code-lang { flex: 0 0 14rem; margin-left: auto; text-align: center; font-family: inherit; }
+
+/* 焦点がこのブロックの外にある時は、帯だけを残して placeholder を消す（note と同じ）。
+   WhyNot: 帯ごと畳まない。畳むとコードブロックの高さが焦点で動き、本文が跳ねる。 */
+.tt-code.is-idle .tt-code-bar input::placeholder { color: transparent; }
 
 /* 打って絞る（70 以上あるのでセレクトボックスでは読めない）。
-   場所は開く時に `placeUnder` が入れる（帯の中に絶対位置で置くと、広げて書く時に
-   本文の `overflow` に切られる）。 */
+   場所は帯の中の絶対位置（言語の欄の右端に合わせて、帯の下）。
+   WhyNot: 画面座標で置かない。開いた時の座標しか測れず、本文を送ると一覧だけが
+   元の高さに取り残される（実際に離れた）。 */
 .tt-code-pop {
-  position: fixed;
+  /* 場所（top / left）は ui.ts の popover が付ける（言語の欄の右端に合わせて、帯の下）。 */
   z-index: var(--z-dropdown);
   display: flex;
   flex-direction: column;
-  width: 240px;
+  width: 224px;
   max-width: calc(100vw - 40px);
   border: 1px solid var(--color-edge);
   border-radius: 6px;
   background: var(--color-panel);
   box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
 }
-.tt-code-search {
-  height: 30px;
-  padding: 0 8px;
+/* WhyNot: ここで高さを止めない。面が画面に収まる高さは開いた場所で変わるので、
+   上限は ui.ts の popover が付ける（面そのものが送る）。 */
+.tt-code-list { padding: 6px 0; }
+.tt-code-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 14px;
   border: 0;
-  border-bottom: 1px solid var(--color-edge);
-  border-radius: 6px 6px 0 0;
   background: transparent;
   color: var(--color-ink);
-  font-size: 12px;
-  font-family: inherit;
-  outline: none;
-}
-.tt-code-list { max-height: 240px; overflow: auto; padding: 4px; }
-.tt-code-item {
-  display: block;
-  width: 100%;
-  padding: 5px 8px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--color-ink-soft);
-  font-size: 12px;
+  font-size: 14px;
   font-family: inherit;
   text-align: left;
   cursor: pointer;
 }
-.tt-code-item.is-at { background: var(--color-well); color: var(--color-ink); }
+.tt-code-item.is-at { background: var(--color-well); }
 .tt-code-item.is-on { font-weight: 600; color: var(--color-link); }
+.tt-code-name { flex: 0 0 auto; }
+/* 別名は正式名の右に薄く。長い並び（ini の toml, conf）は省略する */
+.tt-code-alias { flex: 0 1 auto; min-width: 0; color: var(--color-ink-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 言語の印。`Ui.initialMark` と同じで、頭の 2 文字を id から決まる色の四角に載せる
+   （外部のアイコンを読むと依存が増え、オフラインで崩れる） */
+.tt-code-mark {
+  flex: 0 0 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+.tt-code-mark.is-tone-1 { background: var(--color-mark-1); }
+.tt-code-mark.is-tone-2 { background: var(--color-mark-2); }
+.tt-code-mark.is-tone-3 { background: var(--color-mark-3); }
+.tt-code-mark.is-tone-4 { background: var(--color-mark-4); }
+.tt-code-mark.is-tone-5 { background: var(--color-mark-5); }
+.tt-code-mark.is-tone-6 { background: var(--color-mark-6); }
+.tt-code-mark.is-tone-7 { background: var(--color-mark-7); }
+.tt-code-mark.is-tone-8 { background: var(--color-mark-8); }
 
-.tt-code pre { margin: 0; padding: 12px; border: 0; border-radius: 0 0 5px 5px; background: transparent; overflow-x: auto; }
+/* 行番号・地の帯・コードを横に並べる。地の帯は一番下に敷く */
+.tt-code-main { position: relative; display: flex; align-items: stretch; }
+.tt-code-gutter {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  padding: var(--tt-code-pad) 0;
+  border-right: 1px solid var(--color-edge);
+  user-select: none;
+}
+/* 行番号。**強調行が無くても常に出す**（本文から「3 行目」と指せる） */
+.tt-code-line {
+  height: var(--tt-code-line);
+  min-width: 3rem;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink-faint);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: var(--tt-code-line);
+  text-align: right;
+}
+.tt-code-line:hover { color: var(--color-ink); background: var(--color-raised); }
+.tt-code-line.is-on { color: var(--color-link); font-weight: 700; }
+
+/* 強調した行の地。**行は要素になっていない**ので、行の高さの倍数で帯を置く */
+.tt-code-bands { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.tt-code-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--tt-code-line);
+  background: var(--color-accent-bg);
+}
+
+/* 本文が 16px なので、コードは 14px まで上げて行間を広く取る（note と同じ）。
+   WhyNot: 折り返さない。折り返すと 1 行が 2 行分の高さになり、左の行番号とずれる。
+   長い行は横に送る。 */
+.tt-code pre {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  padding: var(--tt-code-pad) 18px;
+  border: 0;
+  border-radius: 5px 5px 0 0;
+  background: transparent;
+  overflow-x: auto;
+}
+.tt-code pre code { display: block; font-size: 14px; line-height: var(--tt-code-line); white-space: pre; }
 
 /* コードの色付け（highlight.js の class 名）。GitHub の配色に合わせる */
 .tt-body pre code { display: block; }
 .hljs-comment, .hljs-quote { color: #59636e; font-style: italic; }
 .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-meta { color: #cf222e; }
-.hljs-string, .hljs-regexp, .hljs-addition { color: #0a3069; }
+.hljs-string, .hljs-regexp { color: #0a3069; }
 .hljs-number, .hljs-symbol { color: #0550ae; }
 .hljs-type, .hljs-class .hljs-title, .hljs-title.class_ { color: #953800; }
 .hljs-title, .hljs-title.function_, .hljs-section { color: #8250df; }
 .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable { color: #0550ae; }
 .hljs-built_in { color: #953800; }
+/* 差分。`+` は緑、`-` は赤（GitHub と同じ読み方）。
+   WhyNot: 文字列と同じ色にしない。差分の `+` の行が濃い紺になり、ダークでは地に沈んで読めない。
+   地の色はごく薄く敷く。濃く敷くと、行の頭の `+` と `-` の印が背景に負ける。 */
+.hljs-addition { color: #1a7f37; background: #e6ffec; }
+.hljs-deletion { color: #cf222e; background: #ffebe9; }
+/* `@@ -1,3 +1,4 @@` とファイル名の行。赤（キーワード）のままだと消した行と見分けが付かない。 */
+.tt-code[data-language="diff"] .hljs-meta { color: #8250df; }
 
 :root[data-theme="dark"] .hljs-comment, :root[data-theme="dark"] .hljs-quote { color: #9198a1; }
 :root[data-theme="dark"] .hljs-keyword, :root[data-theme="dark"] .hljs-literal, :root[data-theme="dark"] .hljs-meta { color: #ff7b72; }
@@ -427,6 +551,9 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 :root[data-theme="dark"] .hljs-type, :root[data-theme="dark"] .hljs-title.class_, :root[data-theme="dark"] .hljs-built_in { color: #ffa657; }
 :root[data-theme="dark"] .hljs-title, :root[data-theme="dark"] .hljs-title.function_ { color: #d2a8ff; }
 :root[data-theme="dark"] .hljs-attr, :root[data-theme="dark"] .hljs-variable { color: #79c0ff; }
+:root[data-theme="dark"] .hljs-addition { color: #3fb950; background: rgb(46 160 67 / 15%); }
+:root[data-theme="dark"] .hljs-deletion { color: #f85149; background: rgb(248 81 73 / 15%); }
+:root[data-theme="dark"] .tt-code[data-language="diff"] .hljs-meta { color: #d2a8ff; }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .hljs-comment { color: #9198a1; }
@@ -436,6 +563,9 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
   :root:not([data-theme="light"]) .hljs-type, :root:not([data-theme="light"]) .hljs-built_in { color: #ffa657; }
   :root:not([data-theme="light"]) .hljs-title { color: #d2a8ff; }
   :root:not([data-theme="light"]) .hljs-attr, :root:not([data-theme="light"]) .hljs-variable { color: #79c0ff; }
+  :root:not([data-theme="light"]) .hljs-addition { color: #3fb950; background: rgb(46 160 67 / 15%); }
+  :root:not([data-theme="light"]) .hljs-deletion { color: #f85149; background: rgb(248 81 73 / 15%); }
+  :root:not([data-theme="light"]) .tt-code[data-language="diff"] .hljs-meta { color: #d2a8ff; }
 }
 
 /* リンクに乗せた時の吹き出しの頭の印。外部か、この CMS のコンテンツか。 */
@@ -625,7 +755,8 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 .tt-image[data-align="right"] { align-items: flex-end; }
 .tt-image[data-align="right"] .tt-image-caption { text-align: right; }
 
-/* 画像の上に浮く帯（リンク / ALT / 縮小 / 配置 / 横に並べる / 削除。ALT 以外はアイコン）と、
+/* 画像の上に浮く帯（リンク / ALT / キャプション / 縮小 / 配置 / 横に並べる / 削除。並べている間は
+   1 枚ずつに戻す / キャプション / 削除。ALT とキャプション以外はアイコン）と、
    キャプションの真上に浮く帯（.tt-bubble.is-caption）の共通の見た目。note と同じ置き方。
    ライトは選択の帯（.tt-bubble）と同じ濃い帯、ダークは note の帯の色（#2b2f33）。
    掛かっている物（aria-pressed: リンク / ALT の値あり、縮小中、今の配置）はどちらのテーマでも緑（note のアクセント）。
@@ -734,35 +865,17 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
   :root:not([data-theme="light"]) .tt-caption-url { background: #2b2f33; color: var(--color-ink); }
 }
 
-/* 画像の横並び。列の数はブロックの上で選ぶ。 */
-.tt-gallery {
-  margin: var(--tt-block-gap) 0;
-  border: 1px solid var(--color-edge);
-  border-radius: 6px;
-  background: var(--color-raised);
-}
-.tt-gallery-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--color-edge);
-}
-.tt-gallery-cols {
-  height: 24px;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--color-ink-soft);
-  font-size: 11px;
-  padding: 0 4px;
-  cursor: pointer;
-}
-.tt-gallery-cols:hover { border-color: var(--color-edge); background: var(--color-panel); color: var(--color-ink); }
-.tt-gallery-grid { display: grid; gap: 8px; padding: 8px; }
-.tt-gallery-grid .tt-image img { width: 100%; object-fit: cover; }
+/* 画像の横並び。**列の数は選ばせず枚数から決まる**（`docs/design/richtext-gallery-ui.md` 2）。
+   WhyNot: 枠と面を持たせない。列を選ぶ帯が消えて中身が画像だけになったので、囲うと本文の中で
+   ここだけ部品のように浮く（公開側の figure[data-gallery] にも枠は無い）。 */
+.tt-gallery { margin: var(--tt-block-gap) 0; }
+.tt-gallery-grid { display: grid; gap: 8px; }
+/* WhyNot: 中の 1 枚に最小の幅を残さない。単独の画像の `min-width`（画像 4rem・キャプション 8rem）は
+   本文の幅を前提にした値で、列に分けた枡はそれより狭くなる。狭い画面や 4 列で枠の右に溢れる。 */
+.tt-gallery-grid .tt-image img { width: 100%; object-fit: cover; min-width: 0; }
+.tt-gallery-grid .tt-image-caption { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 /* 並べた画像の中の 1 枚は塊ではない。上下の余白は枠が持つ。 */
-.tt-gallery-grid .tt-image { margin: 0; }
+.tt-gallery-grid .tt-image { margin: 0; min-width: 0; }
 
 /* 送っている間の仮の見た目。保存には出さない。 */
 .tt-uploading {
@@ -914,49 +1027,67 @@ body.tt-dragging-row, body.tt-dragging-row * { cursor: ns-resize !important; }
   box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
 }
 
-/* ボタンが増えても溢れさせない。狭い幅では折り返す
-   WhyNot: 「…」に畳まない。畳んだ物は押すまで何があるか分からず、
-   本文の飾りは押す前に見えている方が速い（Notion / Contentful も折り返す） */
+/* 出す物は 9 個 +「…」だが、狭い幅では折り返す
+   WhyNot: 溢れた分を「…」に流し込まない。入っている物が幅で入れ替わると、
+   同じ道具が日によって違う場所にある（畳む物は幅に関わらず固定） */
 .tt-bar { flex-wrap: wrap; row-gap: 2px; }
-.tt-spacer { flex: 1 1 0; min-width: 0; }
 
-/* 引用の出典の 2 欄。下線だけの軽い入力。
-   WhyNot: 常に濃く出さない。出典は、書いている間に読む物ではない。 */
-.tt-quote-field {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  border-bottom: 1px dashed transparent;
-  background: transparent;
+/* 「…」に畳んだ書式。見出し付きの縦の一覧（docs/design/toolbar-mock.html の案 A） */
+.tt-more-pop { width: 180px; padding: 4px; }
+.tt-more-group {
+  padding: 6px 8px 2px;
   color: var(--color-ink-faint);
   font-size: 11px;
-  font-family: inherit;
-  outline: none;
 }
-.tt-quote-field:focus { border-bottom-color: var(--color-accent); color: var(--color-ink-soft); }
-.tt-quote-field::placeholder { color: var(--color-ink-faint); }
-.tt-quote-field { width: 12rem; max-width: 48%; text-align: right; }
-/* 出典の URL が http(s) でない。CMS の validate が断るので、画面でも同じ理由を赤で出す。 */
-.tt-quote-field.is-bad { color: var(--color-bad); border-bottom-color: var(--color-bad); border-bottom-style: solid; }
-
-/* コードブロックのファイル名。言語の隣で打つ（microCMS も同じ場所） */
-.tt-code-file {
-  flex: 1;
-  min-width: 0;
-  margin-left: 8px;
-  height: 22px;
-  border: 1px solid transparent;
+.tt-more-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--color-ink-soft);
-  font-size: 11px;
-  font-family: ui-monospace, monospace;
+  color: var(--color-ink);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tt-more-item svg { color: var(--color-ink-soft); flex: 0 0 auto; }
+.tt-more-item:hover { background: var(--color-well); }
+.tt-more-item.is-on { color: var(--color-link); }
+.tt-more-item.is-on svg { color: var(--color-link); }
+.tt-more-item:disabled { opacity: 0.35; cursor: default; }
+.tt-more-item:disabled:hover { background: transparent; }
+.tt-spacer { flex: 1 1 0; min-width: 0; }
+
+/* 引用の出典の欄。入れた出典は本文と同じ濃さで、下線も枠も出さない（note の実物）。
+   WhyNot: 薄いまま出さない。出典は読ませる物で、箱の外に出た時点で本文の一部。
+   placeholder だけを薄くする。 */
+.tt-quote-field {
+  width: 16rem;
+  max-width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  font-size: 0.95em;
+  font-family: inherit;
+  text-align: right;
   outline: none;
 }
-.tt-code-file:hover, .tt-code-file:focus { border-color: var(--color-edge); background: var(--color-panel); color: var(--color-ink); }
-.tt-code-file::placeholder { color: var(--color-ink-faint); }
-/* CMS が受けない形（空白や " < > が入っている）はその場で分かるようにする */
-.tt-code-file.is-bad { border-color: var(--color-bad); }
+/* 中身の幅まで縮める。印（🔗）が出典の文字のすぐ左に並ぶ。 */
+@supports (field-sizing: content) {
+  .tt-quote-field { field-sizing: content; width: auto; }
+}
+/* WhyNot: focus に破線を出さない。note の出典には下線が無く、画像の欄でも消した。 */
+.tt-quote-field:focus { color: var(--color-ink); }
+.tt-quote-field::placeholder { color: var(--color-ink-faint); }
+/* URL が掛かっている出典はリンクとして見せる（公開側の `<cite><a>` と同じ読み方）。 */
+.tt-quote-field.is-linked { text-decoration: underline; text-underline-offset: 0.2em; }
+/* 出典の URL が http(s) でない。CMS の validate が断るので、画面でも同じ理由を赤で出す。 */
+.tt-quote-field.is-bad { color: var(--color-bad); }
+
 
 /* 外部リンクのカードと埋め込み。編集中は URL と見出し（ホスト名 / 提供元）だけの薄い枠
    （docs/design/richtext-note-style.md 6.6。OGP は保存後に仕事が取るので、ここには無い）。 */

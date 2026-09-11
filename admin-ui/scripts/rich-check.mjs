@@ -2,11 +2,19 @@
 //
 // 使い方: CMS と vite を上げてから  node scripts/rich-check.mjs
 // 見る物:
-//   1. 下線（underline の mark）
+//   1. 下線（underline の mark。「…」に畳んだ物）
 //   2. 表（table / tableRow / tableHeader / tableCell）と、行と列の足し引き
 //   3. 画像の代替テキスト
 //   4. 入れ子（表 in 表・上付き＋下付き）が作れない事と、CMS が断る事
 //   4d.「+」と `/` の一覧から埋め込み（embed / linkCard）を入れられる
+//   4d2. ツールバーの数式で文中の数式（math の mark）、「+」の一覧の「数式」でブロックの数式（mathBlock）
+//   4f. すべての帯とすべての浮く面（横断。部品は `web/ui.ts`）
+//   4g. ブロックの中の全選択がそのブロックの中だけに閉じる
+//   4h. ファイル名の拡張子から言語が入る
+//   4i. ツールバーが本文の枠の中で上に貼り付く
+//   4j. ツールバーが 9 個 +「…」で、「…」が開いて中の物が効く（案 A）
+//   4k. `` `x` `` が前の 1 文字を巻き込まない / バッククォート 1 つでは変わらない
+//   4l. 入力規則の一覧（記法 → 付くマーク）。記号が重なる組で片方が片方を食わない
 //   5. ツールバーが幅 1440 / 1024 / 768 で溢れない
 
 import { chromium } from "playwright";
@@ -58,6 +66,31 @@ async function openNew(title) {
   await page.locator("tiptap-editor .tt-body").click();
 }
 
+// 道具を 1 つ使う。**ツールバーは 9 個 +「…」しか出さない**（`docs/design/toolbar-mock.html` の案 A）ので、
+// 畳んだ物は「…」から、ブロックを入れる物は「+」の一覧から押す。
+const FOLDED = new Set(["下線", "蛍光ペン", "上付き", "下付き", "チェックリスト", "引用"]);
+// ツールバーから外した物と、「+」の一覧でのその名前。
+const IN_PLUS = { 画像: "画像", コードブロック: "コード", 区切り線: "区切り線", 表: "表" };
+
+async function use(title) {
+  if (FOLDED.has(title)) {
+    await page.locator(".tt-more").click();
+    await page.waitForTimeout(250);
+    await page.locator(`.tt-more-item[data-more="${title}"]`).click();
+    await page.waitForTimeout(250);
+    return;
+  }
+  if (IN_PLUS[title]) {
+    await page.locator(".tt-plus").click();
+    await page.waitForTimeout(250);
+    await page.locator(".tt-blocks-item", { hasText: IN_PLUS[title] }).first().click();
+    await page.waitForTimeout(300);
+    return;
+  }
+  await page.locator(`.tt-tool[title="${title}"]`).click();
+  await page.waitForTimeout(200);
+}
+
 async function save(step) {
   await page.getByRole("button", { name: "下書き保存" }).click();
   await page.waitForTimeout(1800);
@@ -72,21 +105,26 @@ try {
   await openNew(`rich-underline ${marker}`);
   await page.keyboard.type("したせん");
   for (let i = 0; i < 4; i += 1) await page.keyboard.press("Shift+ArrowLeft");
-  const underline = page.locator('.tt-tool[title="下線"]');
-  check((await underline.count()) === 1, "ツールバーに下線がある", `${await underline.count()} 個`);
-  await underline.click();
-  await page.waitForTimeout(400);
+  check((await page.locator('.tt-tool[title="下線"]').count()) === 0, "下線はツールバーに出さない（「…」に畳む）", "出ています");
+  await use("下線");
   check(types(JSON.parse((await docOf()) || "{}")).has("mark:underline"), "下線の mark が入る", (await docOf()).slice(0, 200));
-  check(await underline.evaluate((el) => el.classList.contains("is-on")), "下線のボタンに印が付く", "付きません");
+  await page.locator(".tt-more").click();
+  await page.waitForTimeout(250);
+  check(
+    await page.locator('.tt-more-item[data-more="下線"]').evaluate((el) => el.classList.contains("is-on")),
+    "「…」の中の下線に印が付く",
+    "付きません"
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
   await save("下線を入れた下書きが保存できる");
 
   // 2. 表
   await openNew(`rich-table ${marker}`);
   await page.keyboard.type("表のテスト");
   await page.keyboard.press("Enter");
-  const table = page.locator('.tt-tool[title="表"]');
-  check((await table.count()) === 1, "ツールバーに表がある", `${await table.count()} 個`);
-  await table.click();
+  check((await page.locator('.tt-tool[title="表"]').count()) === 0, "表はツールバーに出さない（「+」の一覧だけ）", "出ています");
+  await use("表");
   await page.waitForSelector(".tt-size-grid", { timeout: 4000 });
   check((await page.locator(".tt-size-cell").count()) === 64, "大きさを升目で選べる", `${await page.locator(".tt-size-cell").count()} 升`);
   // 3 行 × 4 列（升目の 3 行目 4 列目）
@@ -171,7 +209,7 @@ try {
   // 2b. 列が多い表・長い文字でも本文の枠からはみ出さない
   await openNew(`rich-table-wide ${marker}`);
   await page.keyboard.press("Enter");
-  await page.locator('.tt-tool[title="表"]').click();
+  await use("表");
   await page.waitForSelector(".tt-size-grid", { timeout: 4000 });
   await page.locator(".tt-size-cell").nth(1 * 8 + 7).click();
   await page.waitForTimeout(600);
@@ -201,36 +239,115 @@ try {
   await page.setViewportSize({ width: 1440, height: 900 });
   await save("列の多い表の下書きが保存できる");
 
-  // 2c. コードブロックのファイル名
+  // 2c. コードブロックの下の帯（ファイル名 / 言語）と、左の行番号（強調行）
   await openNew(`rich-codefile ${marker}`);
   await page.keyboard.press("Enter");
-  await page.locator('.tt-tool[title="コードブロック"]').click();
+  await use("コードブロック");
   await page.waitForTimeout(500);
   await page.keyboard.type("const a = 1;");
+  await page.waitForSelector(".tt-code pre", { timeout: 5000 });
   await page.waitForTimeout(300);
+  const codeAt = (attr) =>
+    docOf().then(
+      (raw) => (JSON.parse(raw || "{}").content ?? []).find((node) => node.type === "codeBlock")?.attrs?.[attr]
+    );
+  // 帯はコードの下（note と同じ）
+  const barBox = await page.evaluate(() => {
+    const pre = document.querySelector(".tt-code pre");
+    const bar = document.querySelector(".tt-code-bar");
+    return { pre: pre?.getBoundingClientRect().bottom ?? 0, bar: bar?.getBoundingClientRect().top ?? 0 };
+  });
+  check(barBox.bar >= barBox.pre - 1, "言語とファイル名の帯がコードの下にある", JSON.stringify(barBox));
+
   const file = page.locator(".tt-code-file").first();
   check((await file.count()) === 1, "コードブロックにファイル名の入力がある", `${await file.count()} 個`);
   await file.fill("src/main.ts");
-  await page.locator("tiptap-editor .tt-body").click();
+  await file.press("Enter");
   await page.waitForTimeout(600);
-  const withFile = JSON.parse((await docOf()) || "{}");
-  const codeBlock = (withFile.content ?? []).find((node) => node.type === "codeBlock");
-  check(codeBlock?.attrs?.fileName === "src/main.ts", "ファイル名が codeBlock の attrs に入る", JSON.stringify(codeBlock?.attrs ?? {}));
+  check((await codeAt("fileName")) === "src/main.ts", "ファイル名が codeBlock の attrs に入る", JSON.stringify(await codeAt("fileName")));
   // CMS が受けない形はその場で断る
   await file.fill('bad name<>"');
-  await page.locator("tiptap-editor .tt-body").click();
+  await file.press("Enter");
   await page.waitForTimeout(500);
   check(await file.evaluate((el) => el.classList.contains("is-bad")), "受けない形のファイル名に印が付く", "付きません");
-  const stillOk = (JSON.parse((await docOf()) || "{}").content ?? []).find((node) => node.type === "codeBlock");
-  check(!("fileName" in (stillOk?.attrs ?? {})) || stillOk?.attrs?.fileName === null, "受けない形は doc に入らない", JSON.stringify(stillOk?.attrs ?? {}));
+  check((await codeAt("fileName")) == null, "受けない形は doc に入らない", JSON.stringify(await codeAt("fileName")));
   await file.fill("src/main.ts");
-  await page.locator("tiptap-editor .tt-body").click();
+  await file.press("Enter");
+  await page.waitForTimeout(400);
+
+  // 強調行は左の行番号を押して選ぶ（帯に欄は置かない）
+  check((await page.locator(".tt-code-lines").count()) === 0, "帯に強調行の入力は無い", "残っています");
+  await page.locator(".tt-code pre").first().click();
+  await page.keyboard.press("End");
+  await page.keyboard.type("\nconst b = 2;\nconst c = 3;\nconst d = 4;\nconst e = 5;");
   await page.waitForTimeout(500);
+  const numbers = page.locator(".tt-code-line");
+  check((await numbers.count()) === 5, "行番号が行の数だけ出る", `${await numbers.count()} 個`);
+  check((await numbers.allTextContents()).join(",") === "1,2,3,4,5", "行番号は 1 から並ぶ", (await numbers.allTextContents()).join(","));
+  await numbers.nth(0).click();
+  await page.waitForTimeout(400);
+  check((await codeAt("highlightLines")) === "1", "行番号を押すとその行が強調に入る", JSON.stringify(await codeAt("highlightLines")));
+  check((await page.locator(".tt-code-band").count()) === 1, "強調した行に地の帯が出る", `${await page.locator(".tt-code-band").count()} 本`);
+  await numbers.nth(2).click();
+  await page.waitForTimeout(300);
+  await numbers.nth(4).click({ modifiers: ["Shift"] });
+  await page.waitForTimeout(400);
+  check((await codeAt("highlightLines")) === "1,3-5", "Shift で押すと範囲が強調に入る", JSON.stringify(await codeAt("highlightLines")));
+  await numbers.nth(0).click();
+  await page.waitForTimeout(400);
+  check((await codeAt("highlightLines")) === "3-5", "もう一度押すと解除できる", JSON.stringify(await codeAt("highlightLines")));
+  const linedUp = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll(".tt-code-line")).map((el) => el.getBoundingClientRect());
+    const bands = Array.from(document.querySelectorAll(".tt-code-band")).map((el) => el.getBoundingClientRect());
+    return bands.length > 0 && bands.every((band) => rows.some((row) => Math.abs(row.top - band.top) < 2));
+  });
+  check(linedUp, "強調の帯が行番号と縦で揃う", "ずれています");
+
+  // 言語は打って絞る。候補は正式名 + 別名 + 色の印、決めた後は整った名前
+  const lang = page.locator(".tt-code-lang").first();
+  await lang.click();
+  await lang.fill("c++");
+  await page.waitForTimeout(400);
+  const rows = await page.locator(".tt-code-item").allTextContents();
+  check(rows.length === 1 && rows[0] === "CPcppc++, cc", "別名は正式名の行に添えて出る", rows.slice(0, 3).join(" / "));
+  check(
+    await page
+      .locator(".tt-code-item .tt-code-mark")
+      .first()
+      .evaluate((el) => getComputedStyle(el).backgroundColor !== "rgba(0, 0, 0, 0)"),
+    "候補の印に色が付く",
+    "透明のままです"
+  );
+  await lang.press("Enter");
+  await page.waitForTimeout(1200);
+  check((await codeAt("language")) === "cpp", "別名で選んでも doc には正の名前が入る", JSON.stringify(await codeAt("language")));
+  check((await lang.inputValue()) === "C++", "決めた後は整った名前が出る", await lang.inputValue());
+  check((await page.locator(".tt-body pre code span").count()) > 0, "選んだ言語で色が付く", "色の span がありません");
+
+  // 帯の余白は打てない（contenteditable="false"）
+  const barGap = await page.locator(".tt-code-bar").first().boundingBox();
+  await page.mouse.click(barGap.x + barGap.width / 2, barGap.y + barGap.height / 2);
+  await page.keyboard.type("aaaa");
+  await page.waitForTimeout(400);
+  check(
+    !(await page.locator(".tt-code-bar").first().innerText()).includes("aaaa"),
+    "帯の余白を押して打っても何も入らない",
+    await page.locator(".tt-code-bar").first().innerText()
+  );
+
+  // 焦点が離れると帯だけが残る（placeholder は消える）
+  await page.locator("tiptap-editor .tt-body p").first().click();
+  await page.waitForTimeout(500);
+  check(
+    await page.locator(".tt-code").first().evaluate((el) => el.classList.contains("is-idle")),
+    "焦点が外れると帯の placeholder が消える",
+    "is-idle が付きません"
+  );
   await save("ファイル名付きのコードブロックが保存できる");
 
   // 3. 画像の代替テキスト
   await openNew(`rich-caption ${marker}`);
-  await page.locator('.tt-tool[aria-label="画像"]').click();
+  await use("画像");
   await page.waitForTimeout(900);
   await page.locator(".fixed .grid button").nth(0).click();
   await page.getByRole("button", { name: /本文に挿入/ }).click();
@@ -311,14 +428,14 @@ try {
 
   // 4. 入れ子ができない
   await openNew(`rich-nest ${marker}`);
-  await page.locator('.tt-tool[title="表"]').click();
+  await use("表");
   await page.waitForSelector(".tt-size-grid", { timeout: 4000 });
   await page.locator(".tt-size-cell").nth(1 * 8 + 1).click();
   await page.waitForTimeout(600);
-  for (const title of ["引用", "コードブロック", "箇条書き", "区切り線"]) {
+  for (const title of ["引用", "箇条書き"]) {
     await page.locator(".tt-body table th").first().click();
     await page.waitForTimeout(200);
-    await page.locator(`.tt-tool[title="${title}"]`).click();
+    await use(title);
     await page.waitForTimeout(400);
     const inside = (JSON.parse((await docOf()) || "{}").content ?? [])
       .flatMap((node) => (node.type === "table" ? node.content ?? [] : []))
@@ -327,20 +444,16 @@ try {
       .filter((kind) => kind !== "paragraph");
     check(inside.length === 0, `表のセルに「${title}」は入らない`, inside.join(" "));
   }
-  // 表の中に表
+  // ブロックを入れる口は「+」だけになったので、セルの中では口そのものが出ない
+  // （表の中の表・セルの中のコードブロックは押せる所が無い）。
   await page.locator(".tt-body table th").first().click();
-  await page.locator('.tt-tool[title="表"]').click();
-  await page.waitForSelector(".tt-size-grid", { timeout: 4000 });
-  await page.locator(".tt-size-cell").nth(1 * 8 + 1).click();
-  await page.waitForTimeout(600);
-  const tables = (JSON.parse((await docOf()) || "{}").content ?? []).filter((node) => node.type === "table").length;
-  const nested = JSON.stringify(JSON.parse((await docOf()) || "{}")).includes('"tableCell","content":[{"type":"table"');
-  check(!nested, "表のセルに表は入らない", `表 ${tables} 個`);
+  await page.waitForTimeout(400);
+  check(await page.locator(".tt-plus").isHidden(), "表のセルの中では「+」が出ない", "出ています");
 
   // 上付き＋下付き
   await openNew(`rich-raised ${marker}`);
-  await page.locator('.tt-tool[title="上付き"]').click();
-  await page.locator('.tt-tool[title="下付き"]').click();
+  await use("上付き");
+  await use("下付き");
   await page.keyboard.type("a");
   await page.waitForTimeout(400);
   const raised = (JSON.parse((await docOf()) || "{}").content?.[0]?.content?.[0]?.marks ?? []).map((m) => m.type);
@@ -507,37 +620,85 @@ try {
   await page.waitForTimeout(300);
   check(JSON.stringify(JSON.parse((await docOf()) || "{}")).includes("もどった"), "消した後は段落に続きが打てる", (await docOf()).slice(0, 200));
 
-  // 引用の出典の欄も、端の欄でだけ引用の外へ出る（間は欄を渡る）
+  // 引用の出典は箱の外の下の右に 1 欄。↑ も ↓ も引用の外の行へ出る
   const classOf = () => page.evaluate(() => String(document.activeElement?.className ?? ""));
   await openNew(`rich-quote-cite ${marker}`);
   await page.keyboard.type("いんようのまえ");
   await page.keyboard.press("Enter");
   await page.keyboard.type("> ひきよう");
   await page.waitForTimeout(400);
-  await page.locator(".tt-quote-add").first().click();
-  await page.waitForTimeout(300);
-  check((await focusOf()).dom === "tt-quote-field", "「出典を追加」で出典の欄へ入る", JSON.stringify(await focusOf()));
-  await page.keyboard.press("ArrowDown");
-  await page.waitForTimeout(300);
-  check((await classOf()).includes("tt-quote-cite-url"), "出典の ↓ は出典の URL の欄へ渡る", await classOf());
-  await page.keyboard.press("ArrowUp");
-  await page.waitForTimeout(300);
+  const citeField = page.locator(".tt-quote-cite").first();
+  check((await page.locator(".tt-quote-field").count()) === 1, "出典の欄は 1 つだけ", `${await page.locator(".tt-quote-field").count()} 個`);
+  check((await page.locator(".tt-quote-link").count()) === 0, "出典の行に印（ボタン）は出さない", `${await page.locator(".tt-quote-link").count()} 個`);
   check(
-    (await classOf()).includes("tt-quote-cite") && !(await classOf()).includes("tt-quote-cite-url"),
-    "出典の URL の ↑ は出典の欄へ戻る",
-    await classOf()
+    (await citeField.getAttribute("placeholder")) === "出典を入力",
+    "空の出典には placeholder「出典を入力」が出る",
+    String(await citeField.getAttribute("placeholder"))
   );
+  const citeBelow = await page.evaluate(() => {
+    const box = document.querySelector(".tt-quote blockquote").getBoundingClientRect();
+    const row = document.querySelector(".tt-quote-cite-row").getBoundingClientRect();
+    return row.top >= box.bottom - 1 && row.right >= box.right - 4;
+  });
+  check(citeBelow, "出典は箱の外の下、右に出る", "箱の中か左にあります");
+
+  // 出典の行は node view の中（contentDOM の外）にある。引用の箱の高さにこの行が入らないと、
+  // 次のブロックが行の上に乗る。次に来る 5 種で、行の下端が次のブロックの上端を越えない事を測る。
+  for (const [kind, node] of Object.entries({
+    数式: { type: "mathBlock", attrs: { tex: "\\sum_{i=1}^{n} \\frac{x_i^2}{\\sqrt{y_i}}" } },
+    段落: { type: "paragraph", content: [{ type: "text", text: "次の段落" }] },
+    画像: { type: "image", attrs: { src: "https://placehold.co/600x200.png", alt: "え" } },
+    コード: { type: "codeBlock", attrs: { language: "javascript" }, content: [{ type: "text", text: "const a = 1;" }] },
+    引用: { type: "blockquote", attrs: { cite: "つぎのしゅってん" }, content: [{ type: "paragraph", content: [{ type: "text", text: "つぎのいんよう" }] }] },
+  })) {
+    for (const cite of ["しゅってん", null]) {
+      await page.evaluate(
+        ([cite, node]) => {
+          document.querySelector("tiptap-editor").editor.commands.setContent({
+            type: "doc",
+            content: [
+              { type: "blockquote", attrs: { cite }, content: [{ type: "paragraph", content: [{ type: "text", text: "ひきよう" }] }] },
+              node,
+              { type: "paragraph", content: [{ type: "text", text: "おわり" }] },
+            ],
+          });
+        },
+        [cite, node]
+      );
+      await page.waitForTimeout(500);
+      const gap = await page.evaluate(() => {
+        const quote = document.querySelector("tiptap-editor .tt-body .tt-quote");
+        const row = quote.querySelector(".tt-quote-cite-row");
+        // 行を出さない時は箱の下端で測る（出典が空の引用は行ごと出さない）。
+        const above = getComputedStyle(row).display === "none" ? quote.querySelector("blockquote") : row;
+        return above.getBoundingClientRect().bottom - quote.nextElementSibling.getBoundingClientRect().top;
+      });
+      check(gap <= 0, `引用の出典の行が次のブロック（${kind}・出典${cite ? "あり" : "なし"}）に重ならない`, `${gap.toFixed(1)}px 食い込んでいます`);
+    }
+  }
+
+  await openNew(`rich-quote-cite2 ${marker}`);
+  await page.keyboard.type("> ひきよう");
+  await page.waitForTimeout(400);
+  await citeField.click();
+  await page.waitForTimeout(300);
+  check((await classOf()).includes("tt-quote-cite"), "出典の欄を押すと焦点が入る", await classOf());
+  await page.keyboard.type("でんき");
+  await page.waitForTimeout(300);
+  check(await citeField.inputValue() === "でんき", "出典の欄に打った字が入る（本文に落ちない）", await citeField.inputValue());
   await page.keyboard.press("ArrowUp");
   await page.waitForTimeout(300);
   check((await focusOf()).dom !== "tt-quote-field", "出典の ↑ で引用の外の行へ出る", JSON.stringify(await focusOf()));
-  await page.locator(".tt-quote-add").first().click();
+  check(
+    JSON.stringify(JSON.parse((await docOf()) || "{}")).includes('"cite":"でんき"'),
+    "出典が blockquote の cite に入る",
+    (await docOf()).slice(0, 300)
+  );
+  await citeField.click();
   await page.waitForTimeout(300);
-  check((await focusOf()).dom === "tt-quote-field", "外へ出た後も「出典を追加」で欄へ入り直せる", JSON.stringify(await focusOf()));
   await page.keyboard.press("ArrowDown");
   await page.waitForTimeout(300);
-  await page.keyboard.press("ArrowDown");
-  await page.waitForTimeout(300);
-  check((await focusOf()).dom !== "tt-quote-field", "出典の URL の ↓ で引用の外の行へ出る", JSON.stringify(await focusOf()));
+  check((await focusOf()).dom !== "tt-quote-field", "出典の ↓ でも引用の外の行へ出る", JSON.stringify(await focusOf()));
 
   // コードブロックのファイル名の欄も、↑↓ で前後の行へ出る
   await openNew(`rich-code-file ${marker}`);
@@ -574,7 +735,7 @@ try {
 
   // 表は最初の升。
   await openNew(`rich-focus-table ${marker}`);
-  await page.locator('.tt-tool[title="表"]').click();
+  await use("表");
   await page.waitForSelector(".tt-size-grid", { timeout: 4000 });
   await page.locator(".tt-size-cell").nth(2 * 8 + 2).click();
   await page.waitForTimeout(500);
@@ -624,6 +785,486 @@ try {
     await page.waitForTimeout(800);
     const embedDoc = JSON.parse((await docOf()) || "{}");
     check(types(embedDoc).has(way.want), `${way.name} から ${way.url.includes("youtube") ? "YouTube" : "他"} の URL が ${way.want} になる`, JSON.stringify(embedDoc).slice(0, 200));
+  }
+
+  // 4d2. 数式は `$…$` を知らなくても入る（ツールバーの Σ と「+」の一覧の「数式」）
+  await openNew(`rich-math-inline ${marker}`);
+  await page.keyboard.type("速さは");
+  await page.locator('.tt-tool[title="数式（文の中）"]').click();
+  await page.waitForTimeout(300);
+  await page.keyboard.type("E = mc^2");
+  await page.waitForTimeout(400);
+  const inlineDoc = JSON.parse((await docOf()) || "{}");
+  check(types(inlineDoc).has("mark:math"), "ツールバーの数式で文中の数式が入る", JSON.stringify(inlineDoc).slice(0, 200));
+  check(JSON.stringify(inlineDoc).includes("E = mc^2"), "文中の数式にそのまま TeX が打てる", JSON.stringify(inlineDoc).slice(0, 200));
+
+  await openNew(`rich-math-block ${marker}`);
+  await page.locator(".tt-plus").click();
+  await page.waitForTimeout(300);
+  await page.locator(".tt-blocks-item", { hasText: "数式" }).click();
+  await page.waitForTimeout(500);
+  const openedMath = page.locator(".tt-mathblock-src:not([hidden])");
+  check((await openedMath.count()) === 1, "「+」の一覧の「数式」で TeX の欄が開く", `${await openedMath.count()} 個`);
+  await page.keyboard.type("\\frac{1}{2}");
+  await page.waitForTimeout(400);
+  const blockDoc = JSON.parse((await docOf()) || "{}");
+  check(types(blockDoc).has("mathBlock"), "+ からブロックの数式が入る", JSON.stringify(blockDoc).slice(0, 200));
+  check(JSON.stringify(blockDoc).includes("\\\\frac{1}{2}"), "ブロックの数式の欄に打った TeX が入る", JSON.stringify(blockDoc).slice(0, 200));
+
+  // 4e. gallery（画像の横並び）の下の空の段落でも「+」が本文の枠の中に出る。
+  // キャプションの開閉や画像の読み込みは transaction を伴わずに高さを変えるので、
+  // 一度測っただけの位置は取り残され、枠の外（下のフィールド）に出ていた。
+  const galleryIds = await fetch(`${cms}/p/default/admin/graphql`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Dev-User": process.env.VITE_DEV_USER ?? "dev@localhost" },
+    body: JSON.stringify({ query: `query { assets(first: 3) { edges { node { id } } } }` }),
+  })
+    .then((response) => response.json())
+    .then((answer) => (answer.data?.assets?.edges ?? []).map((edge) => edge.node.id));
+  if (galleryIds.length < 2) {
+    fail("gallery を確かめるメディアがある", `${galleryIds.length} 個`);
+  } else {
+    await openNew(`rich-gallery ${marker}`);
+    await page.evaluate((ids) => {
+      document.querySelector("tiptap-editor").setAttribute(
+        "doc",
+        JSON.stringify({
+          type: "doc",
+          content: [
+            { type: "paragraph", content: [{ type: "text", text: "まえがき" }] },
+            { type: "gallery", attrs: { columns: 2 }, content: ids.map((id) => ({ type: "image", attrs: { assetId: id } })) },
+            { type: "paragraph" },
+          ],
+        }),
+      );
+    }, galleryIds);
+    await page.waitForTimeout(1200);
+    // gallery の中のキャプションを開いてから末尾の空の段落へ移す（高さが変わる道）。
+    await page.evaluate(() => {
+      const editor = document.querySelector("tiptap-editor").editor;
+      let at = null;
+      editor.state.doc.descendants((node, pos) => {
+        if (at === null && node.type.name === "image") at = pos + 1;
+      });
+      editor.commands.focus();
+      editor.commands.setTextSelection(at);
+    });
+    await page.waitForTimeout(500);
+    await page.evaluate(() => document.querySelector("tiptap-editor").editor.commands.focus("end"));
+    await page.waitForTimeout(600);
+    const plusAt = await page.evaluate(() => {
+      const plus = document.querySelector(".tt-plus");
+      const bodyBox = document.querySelector(".tt-body").getBoundingClientRect();
+      const plusBox = plus.getBoundingClientRect();
+      const editor = document.querySelector("tiptap-editor").editor;
+      const paragraph = editor.view.nodeDOM(editor.state.selection.$from.before());
+      const paraBox = paragraph?.getBoundingClientRect?.();
+      return {
+        hidden: plus.hidden,
+        inside: plusBox.top >= bodyBox.top && plusBox.bottom <= bodyBox.bottom,
+        off: paraBox ? Math.round(plusBox.top + plusBox.height / 2 - (paraBox.top + paraBox.height / 2)) : null,
+      };
+    });
+    check(plusAt.hidden === false && plusAt.inside, "gallery の下の空の段落でも「+」が本文の枠の中に出る", JSON.stringify(plusAt));
+    check(Math.abs(plusAt.off ?? 999) <= 4, "「+」が空の段落の高さに並ぶ", `${plusAt.off} px ずれています`);
+
+    // 中の画像が gallery の枠からはみ出さない。
+    const outs = await page.evaluate(() => {
+      const box = document.querySelector(".tt-gallery").getBoundingClientRect();
+      return [...document.querySelectorAll(".tt-gallery-grid .tt-image")].map((one) => Math.round(one.getBoundingClientRect().right - box.right));
+    });
+    check(outs.every((out) => out <= 0), "gallery の中の画像が枠に収まる", `はみ出し ${JSON.stringify(outs)}`);
+
+    // 列を選ぶ帯は無く、列は枚数から決まる（2 枚なら 2 列、3 枚以上は 3 列で折り返す）。
+    check((await page.locator(".tt-gallery-bar").count()) === 0, "列を選ぶ帯が無い");
+    const columns = await page.evaluate(() => getComputedStyle(document.querySelector(".tt-gallery-grid")).gridTemplateColumns.split(" ").length);
+    const wantColumns = Math.min(galleryIds.length, 3);
+    check(columns === wantColumns, `${galleryIds.length} 枚の gallery は ${wantColumns} 列になる`, `${columns} 列`);
+
+    // 並べている間の帯は 1 枚ずつに戻す / 削除 の 2 つ（縮小と配置は出さない）。
+    await page.locator(".tt-gallery-grid .tt-image img").first().click();
+    await page.waitForTimeout(300);
+    const galleryBar = await page.locator(".tt-image-bar .tt-image-tool").evaluateAll((els) => els.filter((el) => !el.hidden).map((el) => el.getAttribute("aria-label")));
+    check(galleryBar.join("/") === "1 枚ずつに戻す/削除", "並べている画像の帯は 1 枚ずつに戻す / 削除", galleryBar.join("/"));
+
+    // 「1 枚ずつに戻す」で gallery が解け、枚数ぶんの image が並ぶ。
+    await page.locator('.tt-image-tool[title="1 枚ずつに戻す"]').first().click();
+    await page.waitForTimeout(600);
+    const loosened = JSON.parse((await docOf()) || "{}").content ?? [];
+    check(
+      loosened.filter((node) => node.type === "image").length === galleryIds.length && !loosened.some((node) => node.type === "gallery"),
+      "「1 枚ずつに戻す」で gallery が解ける",
+      loosened.map((node) => node.type).join(" ")
+    );
+
+    // 1 枚だけになった gallery は解けて単独の画像に戻る。
+    await page.evaluate((ids) => {
+      document.querySelector("tiptap-editor").setAttribute(
+        "doc",
+        JSON.stringify({
+          type: "doc",
+          content: [
+            { type: "gallery", attrs: { columns: 2 }, content: ids.slice(0, 2).map((id) => ({ type: "image", attrs: { assetId: id } })) },
+            { type: "paragraph" },
+          ],
+        }),
+      );
+    }, galleryIds);
+    await page.waitForTimeout(1000);
+    await page.locator(".tt-gallery-grid .tt-image img").first().click();
+    await page.waitForTimeout(300);
+    await page.locator('.tt-image-tool[title="削除"]').first().click();
+    await page.waitForTimeout(600);
+    const unfolded = types(JSON.parse((await docOf()) || "{}"));
+    check(!unfolded.has("gallery") && unfolded.has("image"), "1 枚になった gallery は解けて単独の画像に戻る", [...unfolded].join(" "));
+  }
+
+  // 4f. 帯と浮く面の横断の確認（部品は `web/ui.ts`。`docs/design/editor-dom-parts.md`）。
+  // ブロックごとに書かず、**すべての帯とすべての面**を同じ物差しで見る。
+  await openNew(`rich-parts ${marker}`);
+  const filler = Array.from({ length: 6 }, (_ignore, index) => ({ type: "paragraph", content: [{ type: "text", text: `うめ ${index}` }] }));
+  const setDoc = (content) =>
+    page.evaluate((body) => document.querySelector("tiptap-editor").editor.commands.setContent({ type: "doc", content: body }), content);
+
+  await setDoc([
+    ...filler,
+    { type: "codeBlock", attrs: { language: "javascript" }, content: [{ type: "text", text: "const a = 1" }] },
+    { type: "mathBlock", attrs: { tex: "E = mc^2" } },
+    { type: "linkCard", attrs: { url: "https://example.com/parts" } },
+    { type: "embed", attrs: { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" } },
+    { type: "paragraph" },
+  ]);
+  await page.waitForTimeout(1200);
+
+  // 帯の余白（中の欄とボタンに当たらない点）を探す。
+  const gapOf = (selector) =>
+    page.evaluate((one) => {
+      const bar = document.querySelector(one);
+      if (!bar || bar.hidden) return null;
+      const box = bar.getBoundingClientRect();
+      if (box.height === 0) return null;
+      for (let x = box.left + 3; x < box.right - 3; x += 2) {
+        const y = box.top + box.height / 2;
+        if (document.elementFromPoint(x, y) === bar) return { x, y };
+      }
+      return null;
+    }, selector);
+  const pickNode = (type) =>
+    page.evaluate((name) => {
+      const editor = document.querySelector("tiptap-editor").editor;
+      let at = -1;
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === name && at < 0) at = pos;
+      });
+      if (at >= 0) editor.commands.setNodeSelection(at);
+    }, type);
+
+  // どの帯の余白を押しても、キャレットが出ず、打っても何も入らない。
+  for (const bar of [
+    { at: ".tt-code-bar", name: "コード", node: null },
+    { at: ".tt-mathblock .tt-block-bar", name: "数式", node: "mathBlock" },
+    { at: ".tt-link-card .tt-block-bar", name: "リンクカード", node: "linkCard" },
+  ]) {
+    if (bar.node) await pickNode(bar.node);
+    await page.waitForTimeout(400);
+    const gap = await gapOf(bar.at);
+    if (!gap) {
+      fail(`${bar.name} の帯の余白がある`, bar.at);
+      continue;
+    }
+    await page.mouse.click(gap.x, gap.y);
+    await page.waitForTimeout(200);
+    const caret = await page.evaluate((one) => {
+      const bar = document.querySelector(one);
+      const picked = window.getSelection();
+      return !!picked && picked.rangeCount > 0 && !!picked.anchorNode && bar.contains(picked.anchorNode);
+    }, bar.at);
+    check(!caret, `${bar.name} の帯の余白を押してもキャレットが出ない`, "出ました");
+    await page.keyboard.type("zzzz");
+    await page.waitForTimeout(300);
+    const inBar = (await page.textContent(bar.at)) ?? "";
+    check(!inBar.includes("zzzz"), `${bar.name} の帯に文字が入らない`, inBar.slice(0, 40));
+    check(!(await docOf()).includes("zzzz"), `${bar.name} の帯の余白を押して打っても doc に入らない`, "入りました");
+    await page.keyboard.press("Escape");
+  }
+
+  // 浮く面は、画面からも本文の枠からも出ない。
+  const popOf = (selector) =>
+    page.evaluate((one) => {
+      const el = document.querySelector(one);
+      if (!el || el.hidden) return null;
+      const box = el.getBoundingClientRect();
+      const body = document.querySelector("tiptap-editor .tt-body").getBoundingClientRect();
+      return {
+        height: Math.round(box.height),
+        inScreen: box.top >= 0 && box.bottom <= window.innerHeight && box.left >= 0 && box.right <= window.innerWidth,
+        inBody: box.bottom <= body.bottom + 1,
+      };
+    }, selector);
+
+  await page.locator(".tt-code-lang").first().click();
+  await page.waitForTimeout(400);
+  const langPop = await popOf(".tt-code-pop");
+  check(!!langPop && langPop.inScreen && langPop.inBody, "言語の候補が画面と本文の枠に収まる", JSON.stringify(langPop));
+
+  // 本文を送っても、面は基準の欄に付いたまま（画面座標で置いていたら離れる）。
+  const offsetOf = () =>
+    page.evaluate(() => {
+      const pop = document.querySelector(".tt-code-pop").getBoundingClientRect();
+      const box = document.querySelector(".tt-code-lang").getBoundingClientRect();
+      return Math.round(pop.top - box.bottom);
+    });
+  const offsetBefore = await offsetOf();
+  await page.mouse.wheel(0, 150);
+  await page.waitForTimeout(400);
+  const offsetAfter = await offsetOf();
+  check(Math.abs(offsetBefore - offsetAfter) <= 1, "本文を送っても言語の候補が欄に付いたまま", `${offsetBefore} → ${offsetAfter}`);
+  await page.keyboard.press("Escape");
+  await page.mouse.wheel(0, -300);
+  await page.waitForTimeout(300);
+
+  // 本文の一番下の段落で開く面（ブロックの一覧・埋め込みの URL）も枠から出ない。
+  await page.locator("tiptap-editor .tt-body > p").last().click();
+  await page.waitForTimeout(500);
+  await page.locator(".tt-plus").click();
+  await page.waitForTimeout(400);
+  const listPop = await popOf(".tt-blocks");
+  check(!!listPop && listPop.inScreen && listPop.inBody, "一番下の段落のブロックの一覧が画面と本文の枠に収まる", JSON.stringify(listPop));
+  await page.locator(".tt-blocks-item", { hasText: "埋め込み" }).click();
+  await page.waitForTimeout(400);
+  const urlPop = await popOf(".tt-blocks");
+  check(!!urlPop && urlPop.inScreen && urlPop.inBody, "一番下の段落の埋め込みの URL が画面と本文の枠に収まる", JSON.stringify(urlPop));
+  await page.keyboard.press("Escape");
+
+  // 4g. ブロックの中の全選択は、そのブロックの中だけに閉じる。
+  const selectAll = process.platform === "darwin" ? "Meta+a" : "Control+a";
+  await setDoc([
+    { type: "paragraph", content: [{ type: "text", text: "外の段落 その 1" }] },
+    { type: "codeBlock", attrs: { language: null }, content: [{ type: "text", text: "const a = 1\nconst b = 2" }] },
+    { type: "paragraph", content: [{ type: "text", text: "外の段落 その 2" }] },
+    { type: "mathBlock", attrs: { tex: "E = mc^2" } },
+    { type: "paragraph" },
+  ]);
+  await page.waitForTimeout(800);
+
+  await page.locator("tiptap-editor .tt-code pre code").click();
+  await page.keyboard.press(selectAll);
+  await page.waitForTimeout(300);
+  const picked = await page.evaluate(() => {
+    const editor = document.querySelector("tiptap-editor").editor;
+    const { from, to, $from } = editor.state.selection;
+    return { node: $from.parent.type.name, whole: from === $from.start() && to === $from.end(), text: editor.state.doc.textBetween(from, to, " ") };
+  });
+  check(picked.node === "codeBlock" && picked.whole && !picked.text.includes("外の段落"), "コードブロックの中の全選択はそのブロックだけ", JSON.stringify(picked));
+
+  await page.locator(".tt-mathblock-out").click();
+  await page.waitForTimeout(400);
+  const mathBefore = await page.evaluate(() => {
+    const { from, to } = document.querySelector("tiptap-editor").editor.state.selection;
+    return to - from;
+  });
+  await page.keyboard.press(selectAll);
+  await page.waitForTimeout(300);
+  const inMath = await page.evaluate(() => {
+    const box = document.querySelector(".tt-mathblock-src");
+    const { from, to } = document.querySelector("tiptap-editor").editor.state.selection;
+    return { picked: box.value.slice(box.selectionStart, box.selectionEnd), span: to - from };
+  });
+  check(inMath.picked === "E = mc^2" && inMath.span === mathBefore, "数式の TeX の欄の全選択は欄の中だけ", JSON.stringify(inMath));
+  await page.keyboard.press("Escape");
+
+  await page.locator(".tt-code-file").first().fill("main.ts");
+  await page.locator(".tt-code-file").first().click();
+  await page.keyboard.press(selectAll);
+  await page.waitForTimeout(300);
+  const inFile = await page.evaluate(() => {
+    const box = document.querySelector(".tt-code-file");
+    const { from, to } = document.querySelector("tiptap-editor").editor.state.selection;
+    return { picked: box.value.slice(box.selectionStart, box.selectionEnd), span: to - from };
+  });
+  check(inFile.picked === "main.ts" && inFile.span <= 1, "ファイル名の欄の全選択は欄の中だけ", JSON.stringify(inFile));
+
+  // macOS の Control+A は「行頭へ」（OS の Emacs 由来の操作を奪わない）。
+  if (process.platform === "darwin") {
+    await page.locator("tiptap-editor .tt-code pre code").click();
+    await page.evaluate(() => {
+      const editor = document.querySelector("tiptap-editor").editor;
+      editor.commands.setTextSelection(editor.state.selection.$from.start() + 20);
+    });
+    await page.waitForTimeout(200);
+    await page.keyboard.press("Control+a");
+    await page.waitForTimeout(300);
+    const ctrlA = await page.evaluate(() => {
+      const editor = document.querySelector("tiptap-editor").editor;
+      const { from, to, $from } = editor.state.selection;
+      return { empty: from === to, atHead: from === $from.start() + 12 };
+    });
+    check(ctrlA.empty && ctrlA.atHead, "macOS の Control+A は全選択ではなく行頭へ", JSON.stringify(ctrlA));
+  }
+
+  // 4h. ファイル名の拡張子から言語が入る。
+  const langOf = () => page.evaluate(() => document.querySelector(".tt-code-lang").value);
+  const freshCode = () => setDoc([{ type: "codeBlock", attrs: { language: null }, content: [{ type: "text", text: "x" }] }, { type: "paragraph" }]);
+
+  await freshCode();
+  await page.waitForTimeout(600);
+  await page.locator(".tt-code-file").first().fill("test.flix");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(600);
+  check((await langOf()) === "Flix", "`test.flix` と打つと言語に Flix が入る", await langOf());
+
+  await page.locator(".tt-code-file").first().fill("test.py");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(600);
+  check((await langOf()) === "Flix", "言語を選んだ後にファイル名を変えても言語が変わらない", await langOf());
+
+  await freshCode();
+  await page.waitForTimeout(600);
+  await page.locator(".tt-code-file").first().fill("test.zzzz");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(600);
+  check((await langOf()) === "", "知らない拡張子では何も起きない", await langOf());
+
+  // 4i. ツールバーが本文の枠の中で上に貼り付く（本文が長くても道具が押せる）。
+  await openNew(`rich-sticky ${marker}`);
+  await page.evaluate(() => {
+    const body = Array.from({ length: 40 }, (_ignore, index) => ({ type: "paragraph", content: [{ type: "text", text: `長い本文の ${index} 行目です。` }] }));
+    body.splice(20, 0, { type: "codeBlock", attrs: { language: null }, content: [{ type: "text", text: "const a = 1" }] });
+    document.querySelector("tiptap-editor").editor.commands.setContent({ type: "doc", content: [...body, { type: "paragraph" }] });
+  });
+  await page.waitForTimeout(800);
+  await page.mouse.wheel(0, 900);
+  await page.waitForTimeout(600);
+  const stuck = await page.evaluate(() => {
+    const box = document.querySelector("tiptap-editor .tt-bar").getBoundingClientRect();
+    const head = document.querySelector(".sticky.top-0")?.getBoundingClientRect();
+    return {
+      visible: box.top >= 0 && box.bottom <= window.innerHeight,
+      underHead: head ? box.top < head.bottom - 1 : false,
+      top: Math.round(box.top),
+    };
+  });
+  check(stuck.visible, "本文を長くして送ってもツールバーが見える", JSON.stringify(stuck));
+  check(!stuck.underHead, "ツールバーが上の帯（下書き保存 / 公開）の下に潜らない", JSON.stringify(stuck));
+
+  // 浮く面は貼り付いた帯の上に出る（`--z-dropdown` > `--z-sticky`）。
+  await page.locator("tiptap-editor .tt-code-lang").first().click();
+  await page.waitForTimeout(500);
+  const onTop = await page.evaluate(() => {
+    const pop = document.querySelector(".tt-code-pop");
+    if (!pop || pop.hidden) return null;
+    const box = pop.getBoundingClientRect();
+    const hit = document.elementFromPoint((box.left + box.right) / 2, box.top + 6);
+    return { inPop: !!hit && !!hit.closest(".tt-code-pop") };
+  });
+  check(!!onTop && onTop.inPop, "言語の候補が貼り付いたツールバーの下に隠れない", JSON.stringify(onTop));
+  await page.keyboard.press("Escape");
+
+  // 「広げて書く」でも道具は残る（送るのは本文の方）。
+  const bigger = page.locator('[title="広げて書く"], [aria-label="広げて書く"]').first();
+  if ((await bigger.count()) > 0) {
+    await bigger.click();
+    await page.waitForTimeout(800);
+    await page.evaluate(() => document.querySelector("tiptap-editor .tt-mount").scrollBy(0, 900));
+    await page.waitForTimeout(500);
+    const big = await page.evaluate(() => {
+      const box = document.querySelector("tiptap-editor .tt-bar").getBoundingClientRect();
+      const mount = document.querySelector("tiptap-editor .tt-mount").getBoundingClientRect();
+      return { visible: box.top >= 0 && box.bottom <= window.innerHeight, aboveBody: box.bottom <= mount.top + 1 };
+    });
+    check(big.visible && big.aboveBody, "広げて書くでも送ったあとツールバーが見える", JSON.stringify(big));
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(400);
+  }
+
+  // 4j. ツールバーは 9 個 +「…」（案 A）で、畳んだ物は「…」から出る
+  await openNew(`rich-toolbar ${marker}`);
+  const shape = await page.locator(".tt-bar").first().evaluate((el) => ({
+    tools: Array.from(el.querySelectorAll(".tt-tool")).map((tool) => tool.getAttribute("title")),
+    block: el.querySelectorAll(".tt-block").length,
+  }));
+  check(shape.block === 1, "ツールバーに段落の種類のドロップダウンが 1 つ", `${shape.block} 個`);
+  check(
+    shape.tools.join(" / ") ===
+      "太字 / 斜体 / 打ち消し / コード（文の中） / 数式（文の中） / リンク / 箇条書き / 番号付き / その他の書式 / 元に戻す（⌘Z） / やり直す（⇧⌘Z）",
+    "ツールバーは 9 個 +「…」+ 元に戻す / やり直す",
+    shape.tools.join(" / ")
+  );
+  await page.locator(".tt-more").click();
+  await page.waitForTimeout(300);
+  const folded = await page.locator(".tt-more-pop").evaluate((el) => ({
+    groups: Array.from(el.querySelectorAll(".tt-more-group")).map((head) => head.textContent),
+    items: Array.from(el.querySelectorAll(".tt-more-item")).map((item) => item.dataset.more),
+  }));
+  check(folded.groups.join(" / ") === "文字 / ブロック", "「…」は「文字」「ブロック」の 2 つに分かれる", folded.groups.join(" / "));
+  check(
+    folded.items.join(" / ") === "下線 / 蛍光ペン / 上付き / 下付き / チェックリスト / 引用",
+    "「…」に畳んだのは 6 つ",
+    folded.items.join(" / ")
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  check(await page.locator(".tt-more-pop").isHidden(), "「…」は Esc で閉じる", "開いたままです");
+
+  // 4k. `` `x` `` でコードにする時、前の 1 文字を巻き込まない
+  //（TipTap の markInputRule は捕まえた前の 1 文字ごと消す）
+  for (const [text, want] of [
+    ["a`b", "a`b"],
+    ["a`b`", "ab"],
+    ["a *b* c", "a b c"],
+    ["a **b** c", "a b c"],
+  ]) {
+    await openNew(`rich-tick ${text} ${marker}`);
+    await page.keyboard.type(text);
+    await page.waitForTimeout(400);
+    const doc = JSON.parse((await docOf()) || "{}");
+    const plain = (doc.content?.[0]?.content ?? []).map((node) => node.text ?? "").join("");
+    check(plain === want, `「${text}」と打つと本文が「${want}」になる`, `「${plain}」になりました`);
+  }
+  const oneTick = await (async () => {
+    await openNew(`rich-tick-one ${marker}`);
+    await page.keyboard.type("`code");
+    await page.waitForTimeout(400);
+    return JSON.parse((await docOf()) || "{}");
+  })();
+  check(!types(oneTick).has("mark:code"), "バッククォート 1 つではコードにならない", JSON.stringify(oneTick).slice(0, 200));
+
+  // 4l. 入力規則の一覧（記法 → 付くマーク）。
+  //
+  // 記号が重なる組（`~` と `~~`、`*` と `**`、`_` と `__`、`=` と `==`、`^` の重なり）で
+  // 片方が片方を食わない事を、全部の記法について 1 枚の表で見る。
+  // 打つのは行の頭から（TipTap の太字・斜体・打ち消しは前が行頭か空白の時だけ効く）。
+  const INPUT_RULES = [
+    { text: "~~取り消し~~", want: "取り消し", marks: "strike" },
+    { text: "H~2~O", want: "H2O", marks: "sub" },
+    { text: "x^2^", want: "x2", marks: "sup" },
+    { text: "==大事==", want: "大事", marks: "highlight" },
+    { text: "a`b`", want: "ab", marks: "code" },
+    { text: "**太字**", want: "太字", marks: "bold" },
+    { text: "__太字__", want: "太字", marks: "bold" },
+    { text: "*斜体*", want: "斜体", marks: "italic" },
+    { text: "_斜体_", want: "斜体", marks: "italic" },
+    { text: "~~a~~b~c~", want: "abc", marks: "strike,sub" },
+    // 記号 1 つ・記号 3 つ・行の途中の `~~` は何も起きない（打った通りに残る）。
+    { text: "~1つ", want: "~1つ", marks: "" },
+    { text: "^1つ", want: "^1つ", marks: "" },
+    { text: "=1つ", want: "=1つ", marks: "" },
+    { text: "^^x^^", want: "^^x^^", marks: "" },
+    { text: "~~~x~~~", want: "~~~x~~~", marks: "" },
+    { text: "前~~消~~後", want: "前~~消~~後", marks: "" },
+  ];
+  for (const rule of INPUT_RULES) {
+    await openNew(`rule ${rule.text} ${marker}`);
+    await page.keyboard.type(rule.text);
+    await page.waitForTimeout(400);
+    const nodes = JSON.parse((await docOf()) || "{}").content?.[0]?.content ?? [];
+    const plain = nodes.map((node) => node.text ?? "").join("");
+    const marks = [...new Set(nodes.flatMap((node) => (node.marks ?? []).map((mark) => mark.type)))].join(",");
+    check(
+      plain === rule.want && marks === rule.marks,
+      `「${rule.text}」→ 本文「${rule.want}」/ マーク「${rule.marks || "なし"}」`,
+      `本文「${plain}」/ マーク「${marks || "なし"}」`
+    );
   }
 
   // 5. ツールバーの幅

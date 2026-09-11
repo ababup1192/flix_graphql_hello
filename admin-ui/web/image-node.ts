@@ -1,5 +1,11 @@
 // 本文の画像と、画像の横並び（gallery）。
 //
+// 帯と列の決めは `docs/design/richtext-gallery-ui.md`（見た目は `richtext-gallery-mock.html`）。
+// **列は人に選ばせず枚数から決まる**。並べている間の帯は 1 枚ずつに戻す / 削除。
+//
+// WhyNot: 全体のキャプション（並べた画像の下に 1 つ）をまだ置かない。置き場は CMS の
+// `imageCaption` ノードで、doc の形が `image` の中に `imageItem` を並べる形に変わってから繋ぐ。
+//
 // CMS の `image` は `assetId` を持つ node で、`src` は持たない
 // （`src/cms/rules/RichText.flix`）。URL は asset の id から画面では引けないので、
 // **Elm が `assets` の属性で id → URL の対応を渡す**。
@@ -24,9 +30,13 @@ import { ICONS, svg } from "./icons";
 
 export type AssetInfo = { id: string; url: string; alt?: string };
 
-// gallery の列。CMS が受けるのは 2 〜 4（`minGalleryColumns` / `maxGalleryColumns`）。
-const COLUMNS = [2, 3, 4];
-const DEFAULT_COLUMNS = 2;
+// 並べた時の列。**人に選ばせず枚数から決める**（`docs/design/richtext-gallery-ui.md` 2）。
+// 4 枚以上は 3 列で折り返す。
+//
+// WhyNot: 横スクロールにしない。読み手が続きに気づかない。編集画面は折り返して全部見せ、
+// 横に送るかは公開側の CSS が決める。
+const MAX_COLUMNS = 3;
+const columnsFor = (count: number) => (count <= 1 ? 1 : Math.min(count, MAX_COLUMNS));
 
 /** id → URL の対応。Elm から属性で来て、変わったら描き直す。 */
 export class AssetStore {
@@ -316,6 +326,10 @@ export function imageNode(store: AssetStore) {
         };
 
         // tools: リンク / ALT / 縮小 / 配置 / 横に並べる / 削除。
+        // 並べている間は 1 枚ずつに戻す / 削除 だけ（縮小と配置は 1 枚の物）。
+        //
+        // WhyNot: 帯に「キャプション」を置かない。欄は画像の下に出ていて押せば入力できる。
+        // note の帯にも無い。
         const linkTool = tool(ICONS.link, "リンク", () => setMode("href", false));
         const altTool = tool(null, "代替テキスト", () => setMode("alt", false));
         const smallTool = tool(ICONS.shrink, "縮小", () => {
@@ -330,13 +344,23 @@ export function imageNode(store: AssetStore) {
           const found = current();
           if (found) foldIntoGallery(editor.view, found.pos);
         });
+        // 並べている間だけ出す。押すと gallery を解いて 1 枚ずつの画像に戻す。
+        const unfoldTool = tool(ICONS.image, "1 枚ずつに戻す", () => {
+          const pos = getPos();
+          if (pos === undefined) return;
+          unfoldGallery(editor.view, pos);
+        });
+        unfoldTool.classList.add("is-on");
+        unfoldTool.setAttribute("aria-pressed", "true");
         const trashTool = tool(ICONS.trash, "削除", () => {
           const found = current();
           if (!found) return;
           editor.view.dispatch(editor.view.state.tr.delete(found.pos, found.pos + found.node.nodeSize));
           editor.view.focus();
         });
-        const tools = [linkTool, altTool, smallTool, alignTool, rowTool, trashTool];
+        const toolsFor = (gallery: boolean, withRow: boolean) =>
+          gallery ? [unfoldTool, trashTool] : [linkTool, altTool, smallTool, alignTool, ...(withRow ? [rowTool] : []), trashTool];
+        const tools = [linkTool, altTool, smallTool, alignTool, rowTool, unfoldTool, trashTool];
 
         // align: 左 / 中央 / 右。押すと書いて tools に戻る。
         const alignButtons = ALIGNS.map(({ value, icon, title }) => {
@@ -400,13 +424,11 @@ export function imageNode(store: AssetStore) {
           bar.hidden = !(selected || mode !== "tools");
           bar.classList.toggle("is-input", mode === "alt" || mode === "href" || mode === "source");
           if (mode === "tools") {
-            bar.replaceChildren(...tools);
             const pos = getPos();
             if (pos === undefined) return;
             const gallery = inGallery();
-            smallTool.hidden = gallery;
-            alignTool.hidden = gallery;
-            rowTool.hidden = gallery || adjacentImages(editor.view.state.doc.resolve(pos)).length < 2;
+            bar.replaceChildren(...toolsFor(gallery, adjacentImages(editor.view.state.doc.resolve(pos)).length >= 2));
+            for (const button of tools) button.hidden = false;
             return;
           }
           if (mode === "align") {
@@ -571,8 +593,25 @@ function foldIntoGallery(view: any, pos: number) {
   const images = run.map((found) => found.node.type.create({ ...found.node.attrs, size: null, align: null }, found.node.content, found.node.marks));
   const from = run[0].pos;
   const to = run[run.length - 1].pos + run[run.length - 1].node.nodeSize;
-  const tr = state.tr.replaceWith(from, to, galleryType.create({ columns: DEFAULT_COLUMNS }, images));
+  const tr = state.tr.replaceWith(from, to, galleryType.create(null, images));
   tr.setSelection(NodeSelection.create(tr.doc, from + 1));
+  view.dispatch(tr);
+  view.focus();
+}
+
+// `pos` の指す image を包む gallery を解いて、中の画像を 1 枚ずつの image に戻す。
+// 解いた後は元の 1 枚を選んだままにする。
+function unfoldGallery(view: any, pos: number) {
+  const state = view.state;
+  const $pos = state.doc.resolve(pos);
+  if ($pos.depth === 0 || $pos.parent.type.name !== "gallery") return;
+  const gallery = $pos.parent;
+  const from = $pos.before($pos.depth);
+  const images: any[] = [];
+  gallery.forEach((child: any) => images.push(child));
+  const tr = state.tr.replaceWith(from, from + gallery.nodeSize, images);
+  const at = from + images.slice(0, $pos.index()).reduce((sum, child) => sum + child.nodeSize, 0);
+  tr.setSelection(NodeSelection.create(tr.doc, at));
   view.dispatch(tr);
   view.focus();
 }
@@ -598,59 +637,29 @@ export function galleryNode(store: AssetStore) {
     },
 
     addNodeView() {
-      return ({ node, getPos, editor }: ViewArgs) => {
+      return ({ node }: ViewArgs) => {
         const dom = document.createElement("div");
         dom.className = "tt-gallery";
 
-        // 列の数は**ブロックの上で選ぶ**（`web/code-block.ts` の言語と同じ置き方）。
-        const bar = document.createElement("div");
-        bar.className = "tt-gallery-bar";
-        const select = document.createElement("select");
-        select.className = "tt-gallery-cols";
-        select.setAttribute("aria-label", "列の数");
-        for (const count of COLUMNS) {
-          const option = document.createElement("option");
-          option.value = String(count);
-          option.textContent = `${count} 列`;
-          select.appendChild(option);
-        }
-        bar.appendChild(select);
-
         const grid = document.createElement("div");
         grid.className = "tt-gallery-grid";
-        dom.append(bar, grid);
+        dom.append(grid);
 
-        const paint = (attrs: Record<string, unknown>) => {
-          const columns = typeof attrs.columns === "number" ? attrs.columns : DEFAULT_COLUMNS;
-          select.value = String(columns);
+        // 列は枚数から決まるので、帯も select も無い（`docs/design/richtext-gallery-ui.md` 2）。
+        const paint = (count: number) => {
+          const columns = columnsFor(count);
+          dom.dataset.count = String(count);
           grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
         };
-        paint(node.attrs);
-
-        select.addEventListener("mousedown", (event) => event.stopPropagation());
-        select.addEventListener("change", () => {
-          const pos = getPos();
-          if (pos === undefined) return;
-          const state = editor.view.state;
-          const found = state.doc.nodeAt(pos);
-          if (!found) return;
-          editor.view.dispatch(state.tr.setNodeMarkup(pos, undefined, { ...found.attrs, columns: Number(select.value) }));
-        });
+        paint(node.childCount);
 
         return {
           dom,
           contentDOM: grid,
-          update(updated: { type: { name: string }; attrs: Record<string, unknown> }) {
+          update(updated: { type: { name: string }; childCount: number }) {
             if (updated.type.name !== "gallery") return false;
-            paint(updated.attrs);
+            paint(updated.childCount);
             return true;
-          },
-          // 上の帯はこちらが描く物なので、触っても doc は動かさない。
-          ignoreMutation(mutation: { target: globalThis.Node }) {
-            return bar.contains(mutation.target);
-          },
-          stopEvent(event: Event) {
-            return bar.contains(event.target as globalThis.Node);
           },
         };
       };
@@ -662,19 +671,27 @@ export function galleryNode(store: AssetStore) {
   });
 }
 
-// 中身が 0 になった gallery を node ごと落とす。
+// 中身が 0 になった gallery を node ごと落とし、1 枚だけになった gallery は解いて単独の画像に戻す。
+// 横に並べるのは 2 枚以上なので、減った時も同じ境目で戻す。
 function emptyGalleryPlugin() {
   return new Plugin({
     key: new PluginKey("galleryNotEmpty"),
     appendTransaction(transactions: readonly { docChanged: boolean }[], _old: any, next: any) {
       if (!transactions.some((transaction) => transaction.docChanged)) return null;
-      const empties: Array<{ pos: number; size: number }> = [];
+      const found: Array<{ pos: number; size: number; only: any }> = [];
       next.doc.descendants((node: any, pos: number) => {
-        if (node.type.name === "gallery" && node.childCount === 0) empties.push({ pos, size: node.nodeSize });
+        if (node.type.name !== "gallery") return;
+        if (node.childCount === 0) found.push({ pos, size: node.nodeSize, only: null });
+        else if (node.childCount === 1) found.push({ pos, size: node.nodeSize, only: node.child(0) });
       });
-      if (empties.length === 0) return null;
+      if (found.length === 0) return null;
       const tr = next.tr;
-      for (const found of empties.reverse()) tr.delete(tr.mapping.map(found.pos), tr.mapping.map(found.pos + found.size));
+      for (const one of found.reverse()) {
+        const from = tr.mapping.map(one.pos);
+        const to = tr.mapping.map(one.pos + one.size);
+        if (one.only) tr.replaceWith(from, to, one.only);
+        else tr.delete(from, to);
+      }
       return tr;
     },
   });
@@ -755,7 +772,8 @@ export function insertionOf(assetIds: string[]): Record<string, unknown> | null 
   const images = assetIds.filter((id) => id).map((id) => ({ type: "image", attrs: { assetId: id } }));
   if (images.length === 0) return null;
   if (images.length === 1) return images[0];
-  return { type: "gallery", attrs: { columns: DEFAULT_COLUMNS }, content: images };
+  // WhyNot: attrs.columns を書かない。列は枚数から決まるので、doc に持つと古い値が残る。
+  return { type: "gallery", content: images };
 }
 
 /**

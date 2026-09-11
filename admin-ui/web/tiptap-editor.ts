@@ -6,7 +6,7 @@
 // doc の形は CMS の RichText が正。**知らない node は消さずに素通しする**
 // （画面が対応していない node を含む記事を開いて保存しても壊さない）。
 
-import { Editor, posToDOMRect } from "@tiptap/core";
+import { Editor, InputRule, posToDOMRect } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import TaskList from "@tiptap/extension-task-list";
@@ -17,6 +17,7 @@ import TableRow from "@tiptap/extension-table-row";
 import TableCell from "@tiptap/extension-table-cell";
 import TableHeader from "@tiptap/extension-table-header";
 import { Node } from "@tiptap/core";
+import Code from "@tiptap/extension-code";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { codeBlockView, ensureUsed } from "./code-block";
 import { BlockEdges, hasPendingLine } from "./block-edges";
@@ -38,6 +39,7 @@ type Linked = {
 type LinkChoice = { seq: number; href: string; entryId: string; label: string; remove: boolean; cancel: boolean };
 import { dismissOn } from "./dismiss";
 import { placeUnder } from "./place";
+import { type Popover, popover, selectAllInBlock } from "./ui";
 import { isDraggingTable, tableHandles } from "./table-drag";
 import { Highlight, RaisedCaret, Subscript, Superscript } from "./text-marks";
 import { type Align, alignColumn, columnAlign, resizeTable, tableSize } from "./table-tools";
@@ -81,7 +83,7 @@ const Passthrough = Node.create({
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
 
 type Tool = {
-  kind: "button" | "divider" | "spacer" | "block";
+  kind: "button" | "divider" | "spacer" | "block" | "more";
   label?: string;
   icon?: string;
   title?: string;
@@ -290,7 +292,28 @@ class TiptapEditor extends HTMLElement {
       // codeBlock は色付きの物に差し替える。
       // gapcursor は切る。**置ける所と置けない所ができ、見た目も横一本の線で
       // 区切り線と紛れる。** ブロックの間は `BlockEdges` が疑似行で揃える。
-      StarterKit.configure({ heading: { levels: [1, 2, 3, 4] }, codeBlock: false, gapcursor: false, blockquote: false }),
+      StarterKit.configure({ heading: { levels: [1, 2, 3, 4] }, codeBlock: false, gapcursor: false, blockquote: false, code: false }),
+      // `` `x` `` でコードにする所を書き直した物。
+      //
+      // WhyNot: TipTap の `markInputRule` をそのまま使わない。`` ` `` の前の 1 文字まで
+      // 捕まえた範囲に入っていて、それごと消す。`a`b`c` と打つと `a` が落ちた（実際に落ちた）。
+      // 捕まえた前の 1 文字の分だけ消す所をずらす（`text-marks.ts` と同じ直し方）。
+      Code.extend({
+        addInputRules() {
+          return [
+            new InputRule({
+              find: /(^|[^`])`([^`]+)`$/,
+              handler: ({ range, match, chain }) => {
+                chain()
+                  .deleteRange({ from: range.from + match[1].length, to: range.to })
+                  .insertContent({ type: "text", text: match[2], marks: [{ type: "code" }] })
+                  .unsetMark("code")
+                  .run();
+              },
+            }),
+          ];
+        },
+      }),
       // blockquote は出典（cite / citeUrl）を持つ物に差し替える（`web/quote-node.ts`）。
       QuoteNode,
       CodeBlockLowlight.extend({
@@ -416,6 +439,8 @@ class TiptapEditor extends HTMLElement {
       host: this,
       mount,
       onImage: () => this.dispatchEvent(new CustomEvent("mediapick")),
+      // 表だけは入れる前に大きさを聞く（升目は本文の枠の中に出すので、この部品が持つ）。
+      onTable: () => this.tableMenu(),
     });
     this.buildBar(bar);
     this.watchTableHover(mount);
@@ -439,10 +464,11 @@ class TiptapEditor extends HTMLElement {
       editorProps: {
         attributes: { class: "tt-body" },
         // 「+」の一覧（`web/block-menu.ts`）。開いている間は上下と Enter を先に取り、`/` で開く。
-        handleKeyDown: (_view, event) => {
+        handleKeyDown: (view, event) => {
           if (this.blocks?.onKey(event)) return true;
           if (event.key === "/") return this.blocks?.onSlash() ?? false;
-          return false;
+          // 中を書き直す箱（コードブロック・画像のキャプション）の中の ⌘A は、その中だけを選ぶ。
+          return selectAllInBlock(view, event);
         },
         // 画像のキャプションの中では入力規則を効かせない。
         // WhyNot: schema に任せない。「# 」の見出しや「> 」の引用は画像の node ごと置き換えたり包んだりして、
@@ -475,42 +501,29 @@ class TiptapEditor extends HTMLElement {
   }
 
   // ツールバーの中身。**群に分けて区切り線で束ねる**（Contentful と同じ並び）:
-  // 種類のドロップダウン | 文字の飾り | リンク | かたまり | 元に戻す
+  // 種類のドロップダウン | 文字の飾り | リンク | 一覧 | 「…」 | 元に戻す
+  //
+  // 出す物は 9 個 +「…」だけ（`docs/design/toolbar-mock.html` の案 A）。
+  //
+  // WhyNot: 画像・コードブロック・区切り線・表をここに置かない。どれも「+」の一覧から入る物で、
+  // 2 か所に同じ口があると、押す前にどちらを使うか考える手間が増える。
   private tools(): Array<Tool> {
     const chain = () => this.editor!.chain().focus();
     const is = (name: string, attrs?: Record<string, unknown>) => () => this.editor!.isActive(name, attrs);
-    // 画像のキャプションの中では、かたまりを変える物は押せない（キャプションは 1 行の文字だけ）。
-    const outsideImage = () => !insideImage(this.editor!.state);
     return [
       { kind: "block" },
       { kind: "divider" },
       { kind: "button", label: "B", title: "太字", run: () => chain().toggleBold().run(), active: is("bold") },
       { kind: "button", label: "I", title: "斜体", run: () => chain().toggleItalic().run(), active: is("italic") },
-      { kind: "button", icon: ICONS.underline, title: "下線", run: () => chain().toggleUnderline().run(), active: is("underline") },
       { kind: "button", label: "S", title: "打ち消し", run: () => chain().toggleStrike().run(), active: is("strike") },
-      { kind: "button", icon: ICONS.highlight, title: "蛍光ペン", run: () => chain().toggleMark("highlight").run(), active: is("highlight") },
-      { kind: "button", icon: ICONS.sup, title: "上付き", run: () => chain().toggleMark("sup").run(), active: is("sup") },
-      { kind: "button", icon: ICONS.sub, title: "下付き", run: () => chain().toggleMark("sub").run(), active: is("sub") },
       { kind: "button", icon: ICONS.code, title: "コード（文の中）", run: () => chain().toggleCode().run(), active: is("code") },
+      { kind: "button", icon: ICONS.math, title: "数式（文の中）", run: () => this.inlineMath(), active: is("math") },
       { kind: "divider" },
       { kind: "button", icon: ICONS.link, title: "リンク", run: () => this.link(), active: is("link") },
-      // 選ぶ面は Elm が持つ（メディアの一覧は API から来る）。押した事だけ外に出す。
-      {
-        kind: "button",
-        icon: ICONS.image,
-        title: "画像",
-        run: () => this.dispatchEvent(new CustomEvent("mediapick")),
-        active: is("image"),
-        enabled: outsideImage,
-      },
       { kind: "divider" },
-      { kind: "button", icon: ICONS.bulletList, title: "箇条書き", run: () => chain().toggleBulletList().run(), active: is("bulletList"), enabled: outsideImage },
-      { kind: "button", icon: ICONS.orderedList, title: "番号付き", run: () => chain().toggleOrderedList().run(), active: is("orderedList"), enabled: outsideImage },
-      { kind: "button", icon: ICONS.taskList, title: "チェックリスト", run: () => chain().toggleTaskList().run(), active: is("taskList"), enabled: outsideImage },
-      { kind: "button", icon: ICONS.quote, title: "引用", run: () => chain().toggleBlockquote().run(), active: is("blockquote"), enabled: outsideImage },
-      { kind: "button", icon: ICONS.codeBlock, title: "コードブロック", run: () => chain().toggleCodeBlock().run(), active: is("codeBlock"), enabled: outsideImage },
-      { kind: "button", icon: ICONS.rule, title: "区切り線", run: () => chain().setHorizontalRule().run(), enabled: outsideImage },
-      { kind: "button", icon: ICONS.table, title: "表", run: () => this.tableMenu(), active: is("table"), enabled: outsideImage },
+      { kind: "button", icon: ICONS.bulletList, title: "箇条書き", run: () => chain().toggleBulletList().run(), active: is("bulletList"), enabled: this.outsideImage },
+      { kind: "button", icon: ICONS.orderedList, title: "番号付き", run: () => chain().toggleOrderedList().run(), active: is("orderedList"), enabled: this.outsideImage },
+      { kind: "more", icon: ICONS.more, title: "その他の書式" },
       { kind: "spacer" },
       {
         kind: "button",
@@ -525,6 +538,36 @@ class TiptapEditor extends HTMLElement {
         title: "やり直す（⇧⌘Z）",
         run: () => chain().redo().run(),
         enabled: () => Boolean(this.editor?.can().redo()),
+      },
+    ];
+  }
+
+  // 画像のキャプションの中では、かたまりを変える物は押せない（キャプションは 1 行の文字だけ）。
+  private outsideImage = () => Boolean(this.editor) && !insideImage(this.editor!.state);
+
+  // 「…」に畳む物。見出し付きの縦の一覧で出す（`docs/design/toolbar-mock.html` の案 A）。
+  //
+  // WhyNot: ツールバーと同じ横並びの帯にしない。畳んだ物は名前が無いと何か分からず、
+  // アイコンだけの横並びでは「出す物を減らした」意味が薄れる。
+  private moreTools(): Array<{ group: string; items: Array<Tool> }> {
+    const chain = () => this.editor!.chain().focus();
+    const is = (name: string) => () => this.editor!.isActive(name);
+    return [
+      {
+        group: "文字",
+        items: [
+          { kind: "button", icon: ICONS.underline, title: "下線", run: () => chain().toggleUnderline().run(), active: is("underline") },
+          { kind: "button", icon: ICONS.highlight, title: "蛍光ペン", run: () => chain().toggleMark("highlight").run(), active: is("highlight") },
+          { kind: "button", icon: ICONS.sup, title: "上付き", run: () => chain().toggleMark("sup").run(), active: is("sup") },
+          { kind: "button", icon: ICONS.sub, title: "下付き", run: () => chain().toggleMark("sub").run(), active: is("sub") },
+        ],
+      },
+      {
+        group: "ブロック",
+        items: [
+          { kind: "button", icon: ICONS.taskList, title: "チェックリスト", run: () => chain().toggleTaskList().run(), active: is("taskList"), enabled: this.outsideImage },
+          { kind: "button", icon: ICONS.quote, title: "引用", run: () => chain().toggleBlockquote().run(), active: is("blockquote"), enabled: this.outsideImage },
+        ],
       },
     ];
   }
@@ -713,8 +756,77 @@ class TiptapEditor extends HTMLElement {
       button.setAttribute("aria-label", tool.title ?? "");
       // mousedown で選択が外れないようにする。
       button.addEventListener("mousedown", (event) => event.preventDefault());
-      button.addEventListener("click", () => tool.run?.());
+      if (tool.kind === "more") {
+        button.classList.add("tt-more");
+        button.setAttribute("aria-expanded", "false");
+        this.buildMore(bar, button);
+        button.addEventListener("click", () => this.toggleMore());
+      } else {
+        button.addEventListener("click", () => tool.run?.());
+      }
       bar.appendChild(button);
+    }
+  }
+
+  private more: Popover | null = null;
+  private moreButton: HTMLButtonElement | null = null;
+
+  // 「…」の中身。ツールバーと同じ道具を、名前を添えて縦に並べる。
+  //
+  // WhyNot: 中のボタンに `tt-tool` を付けない。`paint` はツールバーの `.tt-tool` を**並び順で**
+  // 道具に当てているので、面の中の物が同じ class を持つと当たる相手が 1 つずつずれる。
+  private buildMore(bar: HTMLElement, button: HTMLButtonElement) {
+    this.moreButton = button;
+    const pop = popover({
+      anchor: bar,
+      place: { side: "below", align: "start" },
+      className: "tt-menu tt-more-pop",
+      keep: [button],
+      onClose: () => button.setAttribute("aria-expanded", "false"),
+    });
+    for (const { group, items } of this.moreTools()) {
+      const head = document.createElement("div");
+      head.className = "tt-more-group";
+      head.textContent = group;
+      pop.dom.appendChild(head);
+      for (const tool of items) {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "tt-more-item";
+        item.dataset.more = tool.title ?? "";
+        item.innerHTML = `${svg(tool.icon ?? "")}<span>${tool.title ?? ""}</span>`;
+        item.addEventListener("mousedown", (event) => event.preventDefault());
+        item.addEventListener("click", () => {
+          tool.run?.();
+          pop.close();
+        });
+        pop.dom.appendChild(item);
+      }
+    }
+    this.more = pop;
+  }
+
+  private toggleMore() {
+    if (!this.more || !this.moreButton) return;
+    if (this.more.isOpen) {
+      this.more.close();
+      return;
+    }
+    this.paintMore();
+    this.more.open(this.moreButton);
+    this.moreButton.setAttribute("aria-expanded", "true");
+  }
+
+  // 面の中の押した状態と押せるか。開く時と、開いている間の位置の変わり目に呼ぶ。
+  private paintMore() {
+    if (!this.more || !this.editor) return;
+    const items = this.moreTools().flatMap((group) => group.items);
+    for (const tool of items) {
+      const item = this.more.dom.querySelector<HTMLButtonElement>(`[data-more="${tool.title}"]`);
+      if (!item) continue;
+      item.classList.toggle("is-on", Boolean(tool.active?.()));
+      item.setAttribute("aria-pressed", String(Boolean(tool.active?.())));
+      if (tool.enabled) item.disabled = !tool.enabled();
     }
   }
 
@@ -742,13 +854,17 @@ class TiptapEditor extends HTMLElement {
   private paint() {
     if (!this.editor) return;
     const buttons = this.querySelectorAll<HTMLButtonElement>(".tt-tool");
-    const pressable = this.tools().filter((tool) => tool.kind === "button");
+    const pressable = this.tools().filter((tool) => tool.kind === "button" || tool.kind === "more");
     pressable.forEach((tool, index) => {
       const button = buttons[index];
       if (!button) return;
       button.classList.toggle("is-on", Boolean(tool.active?.()));
       if (tool.enabled) button.disabled = !tool.enabled();
     });
+    // 「…」の中に押されている物があれば、畳んだままでもそれが分かるようにする。
+    const folded = this.moreTools().flatMap((group) => group.items);
+    this.moreButton?.classList.toggle("is-on", folded.some((tool) => Boolean(tool.active?.())));
+    if (this.more?.isOpen) this.paintMore();
 
     // 画像のキャプションの中では本文の 7 つを出さず、3 つ（太字 / 打ち消し / リンク）に入れ替える。
     const inImage = insideImage(this.editor.state);
@@ -783,6 +899,27 @@ class TiptapEditor extends HTMLElement {
       select.value = level ? `h${level}` : "paragraph";
       select.disabled = inImage;
     }
+  }
+
+  // 文の中の数式。選んだ字をそのまま数式にし、選んでいなければ書き始める場所を作る。
+  //
+  // WhyNot: 選んでいない時に `setMark` だけで済ませない。math は text が無いと形にならず、
+  // 次に打った字にも mark が残らない（stored mark が選択の動きで落ちる）。1 文字入れて
+  // それを選んだ状態にし、打てばそのまま置き換わるようにする。
+  private inlineMath() {
+    const editor = this.editor;
+    if (!editor) return;
+    if (!editor.state.selection.empty) {
+      editor.chain().focus().toggleMark("math").run();
+      return;
+    }
+    const at = editor.state.selection.from;
+    editor
+      .chain()
+      .focus()
+      .insertContent({ type: "text", text: "x", marks: [{ type: "math" }] })
+      .setTextSelection({ from: at, to: at + 1 })
+      .run();
   }
 
   // リンクを張る面。**TS は「開きたい」だけを投げる。**
@@ -876,8 +1013,9 @@ class TiptapEditor extends HTMLElement {
 
     this.menu = dom;
     this.appendChild(dom);
-    this.placeUnder(dom, '.tt-tool[title="表"]', 220);
-    const button = this.querySelector<HTMLElement>('.tt-tool[title="表"]');
+    // 表は「+」の一覧から入るので、升目もその「+」の下に出す。
+    this.placeUnder(dom, ".tt-plus", 220);
+    const button = this.querySelector<HTMLElement>(".tt-plus");
     this.unmenu = dismissOn({ inside: button ? [dom, button] : [dom], onClose: () => this.closeMenu() });
   }
 

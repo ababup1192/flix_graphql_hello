@@ -15,6 +15,7 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import katex from "katex";
 import { dropPendingLine, leaveBlock } from "./block-edges";
 import { ICONS, svg } from "./icons";
+import { bar as barOf, iconButton, isSelectAll } from "./ui";
 
 // 帯のアイコンの大きさ（画像・リンクカードの帯と同じ）。
 const BAR_ICON = 22;
@@ -171,31 +172,28 @@ export const MathBlock = Node.create({
       const dom = document.createElement("div");
       dom.className = "tt-mathblock";
 
-      // 選んだ時だけ上に浮く、削除だけの帯（画像・リンクカードと同じ部品）。
-      const bar = document.createElement("div");
-      bar.className = "tt-image-bar";
-      bar.hidden = true;
-      const trash = document.createElement("button");
-      trash.type = "button";
-      trash.className = "tt-image-tool tt-image-icon";
-      trash.innerHTML = svg(ICONS.trash, BAR_ICON);
-      trash.title = "削除";
-      trash.setAttribute("aria-label", "削除");
-      // mousedown を止めないと ProseMirror が node の選択を外し、帯ごと消える。
-      trash.addEventListener("mousedown", (event) => event.preventDefault());
-      trash.addEventListener("click", () => {
+      const remove = () => {
         const pos = getPos();
         if (pos !== undefined) removeMathAt(editor, pos);
+      };
+
+      // 選んだ時だけ上に浮く、削除だけの帯（画像・リンクカードと同じ部品）。
+      const trash = iconButton({
+        className: "tt-image-tool tt-image-icon",
+        icon: svg(ICONS.trash, BAR_ICON),
+        title: "削除",
+        onClick: remove,
       });
-      bar.append(trash);
+      const bar = barOf({ className: "tt-image-bar", children: [trash] });
+      bar.hidden = true;
 
       // ホバーの間だけ右上に出る削除（案 B）。選ばなくても消せる。
-      const corner = document.createElement("button");
-      corner.type = "button";
-      corner.className = "tt-block-corner";
-      corner.innerHTML = svg(ICONS.trash, CORNER_ICON);
-      corner.title = "削除";
-      corner.setAttribute("aria-label", "削除");
+      const corner = iconButton({
+        className: "tt-block-corner",
+        icon: svg(ICONS.trash, CORNER_ICON),
+        title: "削除",
+        onClick: remove,
+      });
       corner.hidden = !editor.isEditable;
 
       const shown = document.createElement("div");
@@ -212,10 +210,21 @@ export const MathBlock = Node.create({
 
       // 掴んで伸ばす代わりに、中身の行数に合わせて自分で伸びる（枠からはみ出さない）。
       const fit = () => {
+        // WhyNot: 隠れている間に測らない。`display: none` の欄は高さが全部 0 で返るので、
+        // 最低の行数まで縮んだ欄が開く。
+        if (source.hidden) return;
         source.style.height = "auto";
-        const line = Number.parseFloat(window.getComputedStyle(source).lineHeight) || 19;
-        const pad = source.offsetHeight - source.clientHeight;
-        source.style.height = `${Math.max(source.scrollHeight, Math.round(line * MIN_ROWS)) + pad}px`;
+        const style = window.getComputedStyle(source);
+        const line = Number.parseFloat(style.lineHeight) || 19;
+        // 欄は border-box なので、付ける高さには上下の padding と枠線も入れる。
+        const pads = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
+        const border = source.offsetHeight - source.clientHeight;
+        const least = Math.round(line * MIN_ROWS) + pads;
+        source.style.height = `${Math.ceil(Math.max(source.scrollHeight, least)) + border}px`;
+        // WhyNot: `scrollHeight` を信じきらない。下の padding を数えない実装があり、
+        // 最後の行の下半分だけが切れる。付けた後に残っている溢れを足して閉じる。
+        const over = source.scrollHeight - source.clientHeight;
+        if (over > 0) source.style.height = `${source.offsetHeight + over}px`;
       };
 
       const paint = (tex: string) => {
@@ -257,14 +266,8 @@ export const MathBlock = Node.create({
 
       // ホバーしている間だけ右上に出る削除。押す口を「押す = 編集」に一本化した代わりに、
       // 選ばずに消せる口をここに置く（`docs/design/richtext-math-ui.md` の案 B）。
-      corner.addEventListener("mousedown", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      });
-      corner.addEventListener("click", () => {
-        const pos = getPos();
-        if (pos !== undefined) removeMathAt(editor, pos);
-      });
+      // 箱の mousedown（押す = TeX の欄を開く）まで上らせない。
+      corner.addEventListener("mousedown", (event) => event.stopPropagation());
       dom.addEventListener("pointerenter", () => {
         corner.hidden = !editor.isEditable;
       });
@@ -274,6 +277,11 @@ export const MathBlock = Node.create({
       });
 
       source.addEventListener("keydown", (event) => {
+        // 全選択は欄の中だけ（ブラウザの既定に任せ、本文へは伝えない）。
+        if (isSelectAll(event)) {
+          event.stopPropagation();
+          return;
+        }
         const pos = getPos();
         if (event.key === "Escape") {
           event.preventDefault();
@@ -328,6 +336,8 @@ export const MathBlock = Node.create({
           const tex = String(updated.attrs.tex ?? "");
           if (document.activeElement !== source) {
             source.value = tex;
+            // 外から入った TeX でも行数に高さを合わせる（合わせ直さないと最後の行が切れる）。
+            fit();
             paint(tex);
           }
           return true;

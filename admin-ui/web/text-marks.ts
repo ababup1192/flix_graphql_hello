@@ -28,12 +28,17 @@ const SPECS: Spec[] = [
 //
 // WhyNot: TipTap の `markInputRule` を使わない。**前の 1 文字を巻き込んで消す**ので、
 // `H~2~O` の `H` が落ちる（実際に落ちた）。下付き・上付きは語にくっ付けて書く物なので、
-// 前を空白に限る形も取れない。記号だけを消して、中の文字に印を付ける。
+// 前を空白に限る形（TipTap の太字・斜体・打ち消しの `(?:^|\s)`）も取れない。
+// 代わりに**記号でない 1 文字**だけを前に許し、その分だけ消す所をずらす。
+//
+// WhyNot: 前を見ずに書かない。`~~取り消し~~` の 1 つ目の `~` の直後から `~取り消し~` が
+// 読めてしまい、閉じの 2 つ目を打つ前に下付きが当たる（打ち消しは一生当たらない）。
+// `^` と `==` も同じ形にして、記号の重なりを一様に外す。
 //
 function ruleOf(sign: string) {
   const escaped = sign.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const inner = sign.length === 1 ? escaped : escaped[1];
-  return new RegExp(`${escaped}([^${inner}\\s][^${inner}]*)${escaped}$`);
+  return new RegExp(`(^|[^${inner}])${escaped}([^${inner}\\s][^${inner}]*)${escaped}$`);
 }
 
 function markOf(spec: Spec) {
@@ -56,8 +61,8 @@ function markOf(spec: Spec) {
           find: ruleOf(spec.sign),
           handler: ({ range, match, chain }) => {
             chain()
-              .deleteRange(range)
-              .insertContent({ type: "text", text: match[1], marks: [{ type: name }] })
+              .deleteRange({ from: range.from + match[1].length, to: range.to })
+              .insertContent({ type: "text", text: match[2], marks: [{ type: name }] })
               .unsetMark(name)
               .run();
           },

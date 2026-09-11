@@ -52,13 +52,3 @@ export function urlInput(
   input.addEventListener("blur", mark);
   return input;
 }
-
-/** 上下の矢印で欄を渡る。最初の欄の上と最後の欄の下でだけ外へ出る。 */
-export function walkInputs(inputs: HTMLInputElement[], index: number, dir: -1 | 1, leave: (dir: -1 | 1) => void) {
-  const next = index + dir;
-  if (next < 0 || next >= inputs.length) {
-    leave(dir);
-    return;
-  }
-  inputs[next].focus();
-}

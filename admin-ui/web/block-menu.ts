@@ -1,17 +1,19 @@
 // 空の段落の左に出る「+」と、そこから開くブロックの一覧。`/` でも同じ一覧が開く。
 //
 // **「+」は空の段落にカーソルがある間は常時出す**（ホバーではない。note が 2023 年に変えた点。
-// `docs/design/richtext-note-style.md` 6.1）。一覧は 画像 / 区切り線 / 引用 / コード / 表 / 埋め込み。
+// `docs/design/richtext-note-style.md` 6.1）。一覧は 画像 / 区切り線 / 引用 / コード / 表 / 数式 / 埋め込み。
+//
+// **ブロックを入れる口はここに集める。** ツールバーは文字に掛ける物とリンク・一覧だけにした
+// （`docs/design/toolbar-mock.html` の案 A）ので、画像・コード・区切り線・表はここからしか入らない。
 //
 // WhyNot: 「+」を ProseMirror の DOM の中に入れない。段落の node view を作ると、打っている間に
 // 作り直されて「知らない DOM」として戻される（表の掴みと同じ理由）。`.tt-mount` の層に置く。
 //
-// WhyNot: 表を升目で選ばせない。一覧は縦 1 列の速い道で、大きさは表の上の帯（大きさを変える）で
-// 後から直せる。
+// WhyNot: 表だけは一覧で終わらせない。行と列の数は入れる前に決めたい物なので、
+// 升目（`tiptap-editor.ts` の `tableMenu`）に渡す。
 
 import type { Editor } from "@tiptap/core";
-import { dismissOn } from "./dismiss";
-import { placeUnder } from "./place";
+import { field, iconButton, popover, type Popover } from "./ui";
 import { placeUrl, soleUrl } from "./url-cards";
 
 type Item = {
@@ -27,6 +29,7 @@ type Args = {
   host: HTMLElement;
   mount: HTMLElement;
   onImage: () => void;
+  onTable: () => void;
 };
 
 const ICONS: Record<string, string> = {
@@ -37,6 +40,7 @@ const ICONS: Record<string, string> = {
   table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M3 15h18"/><path d="M9 10v10"/>',
   embed: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+  math: '<path d="M17 5H7l6 7-6 7h10"/>',
 };
 
 function svg(paths: string): string {
@@ -59,21 +63,25 @@ function slashText(editor: Editor): string | null {
 
 export class BlockMenu {
   private editor: Editor;
-  private host: HTMLElement;
   private mount: HTMLElement;
   private plus: HTMLButtonElement;
-  private menu: HTMLElement | null = null;
-  private list: HTMLElement | null = null;
-  private unmenu: (() => void) | null = null;
+  // 一覧は開き直すたびに作らず、`.tt-mount` の中に 1 つ持って出し入れする
+  // （親を基準に置く面なので、本文を送っても付いたまま動く）。
+  private pop: Popover;
+  private list: HTMLElement;
   private at = 0;
   private shown: Item[] = [];
   // `/` から開いた時は true。選んだら打った文字を消してから入れる。
   private bySlash = false;
   private items: Item[];
+  // WhyNot: 「+」の位置を transaction の時だけ測らない。gallery のキャプションの開閉や
+  // 画像の読み込みは transaction を伴わずに本文の高さを変えるので、測った位置が取り残され、
+  // 本文の枠の外（下のフィールド）に出る。
+  private watch: ResizeObserver | null = null;
+  private alive = true;
 
   constructor(args: Args) {
     this.editor = args.editor;
-    this.host = args.host;
     this.mount = args.mount;
     const chain = () => this.editor.chain().focus();
     this.items = [
@@ -81,27 +89,48 @@ export class BlockMenu {
       { label: "区切り線", keys: ["くぎりせん", "hr", "rule", "divider"], icon: ICONS.rule, run: () => chain().setHorizontalRule().run() },
       { label: "引用", keys: ["いんよう", "quote"], icon: ICONS.quote, run: () => chain().toggleBlockquote().run() },
       { label: "コード", keys: ["こーど", "code"], icon: ICONS.code, run: () => chain().toggleCodeBlock().run() },
-      { label: "表", keys: ["ひょう", "table", "てーぶる"], icon: ICONS.table, run: () => chain().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run() },
+      { label: "表", keys: ["ひょう", "table", "てーぶる"], icon: ICONS.table, run: () => args.onTable() },
+      { label: "数式", keys: ["すうしき", "math", "tex", "katex", "formula"], icon: ICONS.math, run: () => this.insertMath() },
       { label: "埋め込み", keys: ["うめこみ", "embed", "url", "りんく", "link"], icon: ICONS.embed, run: () => this.askUrl() },
     ];
 
-    this.plus = document.createElement("button");
-    this.plus.type = "button";
-    this.plus.className = "tt-plus";
-    this.plus.title = "ブロックを追加";
-    this.plus.setAttribute("aria-label", "ブロックを追加");
-    this.plus.innerHTML = svg(ICONS.plus);
-    this.plus.hidden = true;
     // 押しても本文の選択を外さない（外れると「空の段落」の判定が消え、入れる所が無くなる）。
-    this.plus.addEventListener("mousedown", (event) => event.preventDefault());
-    this.plus.addEventListener("click", () => (this.menu ? this.close() : this.open(false)));
+    this.plus = iconButton({
+      className: "tt-plus",
+      icon: svg(ICONS.plus),
+      title: "ブロックを追加",
+      onClick: () => (this.pop.isOpen ? this.close() : this.open(false)),
+    });
+    this.plus.hidden = true;
     this.mount.appendChild(this.plus);
+
+    this.pop = popover({
+      anchor: this.mount,
+      place: { side: "below", align: "start" },
+      className: "tt-menu tt-blocks",
+      keep: [this.plus],
+      bounds: this.editor.view.dom,
+      onClose: () => this.afterClose(),
+    });
+    this.list = document.createElement("div");
+    this.list.className = "tt-blocks-list";
+    this.pop.dom.appendChild(this.list);
+
+    if (typeof ResizeObserver === "function") {
+      this.watch = new ResizeObserver(() => this.paintPlus());
+      this.watch.observe(this.editor.view.dom);
+      this.watch.observe(this.mount);
+    }
   }
 
   /** transaction ごとに呼ぶ。「+」の出し入れと、`/` の一覧の絞り込み。 */
   update() {
     this.paintPlus();
-    if (!this.bySlash || !this.menu) return;
+    // node view が class を付け替えて高さを変えるのは、この transaction が描き終わった後。
+    window.requestAnimationFrame(() => {
+      if (this.alive) this.paintPlus();
+    });
+    if (!this.bySlash || !this.pop.isOpen) return;
     const text = slashText(this.editor);
     if (text === null) {
       this.close();
@@ -112,7 +141,7 @@ export class BlockMenu {
 
   /** `/` が打たれた。空の段落なら一覧を開く（`/` そのものは段落に入る）。 */
   onSlash(): boolean {
-    if (!atEmptyParagraph(this.editor) || this.menu) return false;
+    if (!atEmptyParagraph(this.editor) || this.pop.isOpen) return false;
     // `/` が doc に入ってから開く（開いた直後の update が「/ で始まる段落」を見る）。
     window.setTimeout(() => this.open(true), 0);
     return false;
@@ -120,7 +149,7 @@ export class BlockMenu {
 
   /** 一覧が開いている間のキー。上下・Enter・Escape を食べる。 */
   onKey(event: KeyboardEvent): boolean {
-    if (!this.menu || this.urlBox) return false;
+    if (!this.pop.isOpen || this.urlBox) return false;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       const step = event.key === "ArrowDown" ? 1 : -1;
       this.at = (this.at + step + this.shown.length) % Math.max(this.shown.length, 1);
@@ -136,7 +165,13 @@ export class BlockMenu {
   }
 
   private paintPlus() {
-    const show = atEmptyParagraph(this.editor) && (this.editor.isFocused || this.menu !== null);
+    this.placePlus();
+    // 本文の高さが変わっても面が付いたままになるよう、「+」を置いた後に面も置き直す。
+    this.pop.place();
+  }
+
+  private placePlus() {
+    const show = atEmptyParagraph(this.editor) && (this.editor.isFocused || this.pop.isOpen);
     this.plus.hidden = !show;
     if (!show) return;
     const { $from } = this.editor.state.selection;
@@ -151,21 +186,13 @@ export class BlockMenu {
 
   private open(bySlash: boolean) {
     this.bySlash = bySlash;
-    const menu = document.createElement("div");
-    menu.className = "tt-menu tt-blocks";
-    const list = document.createElement("div");
-    list.className = "tt-blocks-list";
-    menu.appendChild(list);
-    this.menu = menu;
-    this.list = list;
     this.at = 0;
-    this.host.appendChild(menu);
-    this.filter("");
+    this.urlBox = null;
     // `/` で開いた時は「+」が消えている（段落が空でない）ので、段落そのものの下に置く。
     const { $from } = this.editor.state.selection;
     const paragraph = this.editor.view.nodeDOM($from.before()) as HTMLElement | null;
-    placeUnder(menu, bySlash && paragraph ? paragraph : this.plus, 200);
-    this.unmenu = dismissOn({ inside: [menu, this.plus], onClose: () => this.close() });
+    this.pop.open(bySlash && paragraph ? paragraph : this.plus);
+    this.filter("");
   }
 
   private filter(query: string) {
@@ -179,12 +206,12 @@ export class BlockMenu {
 
   private paintList() {
     const list = this.list;
-    if (!list) return;
     if (this.shown.length === 0) {
       const none = document.createElement("span");
       none.className = "tt-blocks-none";
       none.textContent = "見つかりません";
       list.replaceChildren(none);
+      this.pop.place();
       return;
     }
     list.replaceChildren(
@@ -208,6 +235,8 @@ export class BlockMenu {
         return button;
       }),
     );
+    // 絞り込みで行数が変わると高さが変わるので、置き直す（下に入らなければ上へ返る）。
+    this.pop.place();
   }
 
   private pick(item: Item) {
@@ -230,46 +259,71 @@ export class BlockMenu {
     item.run();
   }
 
+  // 段落の数式。入れた後、その箱の TeX の欄を開いて焦点を入れる。
+  //
+  // WhyNot: 入れた後のカーソルに任せない。mathBlock は atom で、TeX の欄は node view の中の
+  // textarea（`stopEvent` が鍵を食べる）なので、打った字が次の段落に流れる。箱を押した時と
+  // 同じ道（mousedown）を通して欄を開く。
+  private insertMath() {
+    const editor = this.editor;
+    const at = editor.state.selection.from;
+    editor.chain().focus().insertContent({ type: "mathBlock", attrs: { tex: "" } }).run();
+    window.setTimeout(() => {
+      let found = -1;
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name !== "mathBlock") return;
+        if (found < 0 || Math.abs(pos - at) < Math.abs(found - at)) found = pos;
+      });
+      if (found < 0) return;
+      const dom = editor.view.nodeDOM(found);
+      if (!(dom instanceof HTMLElement)) return;
+      dom.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    }, 0);
+  }
+
   private urlBox: HTMLInputElement | null = null;
 
   // 埋め込みは URL を 1 つ聞く。判定は貼った時と同じ（YouTube / Vimeo / X は embed、他は linkCard）。
   private askUrl() {
-    const list = this.list;
-    if (!list) return;
-    const input = document.createElement("input");
-    input.type = "url";
-    input.className = "tt-blocks-url";
-    input.placeholder = "URL を入力";
-    input.setAttribute("aria-label", "埋め込む URL");
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        const url = soleUrl(input.value);
+    const input = field({
+      className: "tt-blocks-url",
+      type: "url",
+      placeholder: "URL を入力",
+      label: "埋め込む URL",
+      onCommit: (value) => {
+        // WhyNot: 空で赤を出さない。面を閉じると欄が焦点を失って確定が通るので、
+        // 何も打たずに閉じただけで赤い枠が一瞬出る。
+        if (value.trim() === "") return;
+        const url = soleUrl(value);
         input.classList.toggle("is-bad", url === null);
         if (!url) return;
         this.close();
         placeUrl(this.editor, url);
-      }
+      },
     });
     this.urlBox = input;
-    list.replaceChildren(input);
+    this.list.replaceChildren(input);
+    this.pop.place();
     input.focus();
   }
 
   private close() {
-    this.unmenu?.();
-    this.unmenu = null;
-    this.menu?.remove();
-    this.menu = null;
-    this.list = null;
+    this.pop.close();
+  }
+
+  // 面が閉じた後の後始末（外を押した / Esc でも通る）。
+  private afterClose() {
     this.urlBox = null;
     this.bySlash = false;
     this.editor.commands.focus();
-    this.paintPlus();
+    this.placePlus();
   }
 
   destroy() {
-    this.close();
+    this.alive = false;
+    this.watch?.disconnect();
+    this.watch = null;
+    this.pop.destroy();
     this.plus.remove();
   }
 }
