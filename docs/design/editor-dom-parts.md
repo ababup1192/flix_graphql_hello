@@ -196,6 +196,17 @@ chromium なので**そのまま測れる**（`getBoundingClientRect` / `userEve
 | `measure` | `.getBoundingClientRect()` | `popover(...)`（親を基準に置く）/ `placeUnder(...)` |
 | `place` | `.style.position / top / left / right / bottom =` | 同上 |
 
+規則は **1 行に 1 件**で数える（同じ行に 2 つ書いても 1 件）。
+
+`measure` は `getBoundingClientRect`（`?.` 越しも）と `offsetWidth` / `offsetHeight` /
+`offsetTop` / `offsetLeft`。`place` は `style.position / top / left / right / bottom /
+width / height` と `style.setProperty` / `style.cssText`。
+
+**2026-09-12 に規則を広げた。** それまでは `getBoundingClientRect` と `style.top/left` しか
+見ておらず、測って書き戻す形が 7 か所すり抜けていた（`?.` 越しの rect、`offsetHeight` から
+`style.height`）。許可リストは 45 → 67 件に増えたが、これは手組みが増えたのではなく
+**隠れていた分が出てきた**もの。
+
 ### 許可リスト
 
 今ある分は `admin-ui/scripts/editor-check-allow.json` が**ファイルと規則ごとの件数**で押さえて

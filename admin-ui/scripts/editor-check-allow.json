@@ -2,8 +2,8 @@
   {
     "file": "web/block-edges.ts",
     "rule": "measure",
-    "count": 1,
-    "why": "面を置くためではなく、キャレットが本文の上端・下端に居るかを測っている"
+    "count": 2,
+    "why": "キャレットが本文の上端・下端に居るかを測っている。面の置き所ではない"
   },
   {
     "file": "web/block-menu.ts",
@@ -36,6 +36,30 @@
     "why": "node view の外枠そのものを打てなくしている（帯ではない）"
   },
   {
+    "file": "web/math.ts",
+    "rule": "measure",
+    "count": 2,
+    "why": "同上。枠線の分を offsetHeight と clientHeight の差で出している"
+  },
+  {
+    "file": "web/math.ts",
+    "rule": "place",
+    "count": 3,
+    "why": "TeX の欄の高さを中身に合わせる。面の置き所ではないが、測って書き戻す形は同じなので数える"
+  },
+  {
+    "file": "web/quote-node.ts",
+    "rule": "measure",
+    "count": 2,
+    "why": "同上"
+  },
+  {
+    "file": "web/quote-node.ts",
+    "rule": "place",
+    "count": 3,
+    "why": "出典の行の高さを中身に合わせる。ResizeObserver で追っている"
+  },
+  {
     "file": "web/table-drag.ts",
     "rule": "measure",
     "count": 4,
@@ -44,8 +68,8 @@
   {
     "file": "web/table-drag.ts",
     "rule": "place",
-    "count": 10,
-    "why": "掴んでいる間だけ出る影と線。押した場所に追う物で、popover には載らない"
+    "count": 16,
+    "why": "掴んでいる間だけ出る影と線。押した場所に追う物で、アンカーが無く popover には載らない"
   },
   {
     "file": "web/tiptap-editor.ts",
@@ -56,13 +80,13 @@
   {
     "file": "web/tiptap-editor.ts",
     "rule": "measure",
-    "count": 12,
+    "count": 14,
     "why": "表の枠線・選択の範囲・キャプションの位置。popover に寄せ切れていない分が残っている"
   },
   {
     "file": "web/tiptap-editor.ts",
     "rule": "place",
-    "count": 8,
+    "count": 11,
     "why": "同上。表の道具と URL の欄が本文の枠を基準に置かれている"
   }
 ]

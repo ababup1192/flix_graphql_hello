@@ -25,8 +25,8 @@ const rules = [
   ],
   [
     "measure",
-    /\.getBoundingClientRect\s*\(/,
-    "浮く面の位置を自分で測らない。ui.ts の popover()（親を基準に置く）か place.ts の placeUnder() を使う",
+    /\.getBoundingClientRect\s*\??\.?\s*\(|\.(offsetWidth|offsetHeight|offsetTop|offsetLeft)\b/,
+    "浮く面の位置を自分で測らない。ui.ts の popover()（親を基準に置く）か place.ts の placeUnder() を使う。offsetWidth / offsetHeight も測定（?. 越しの rect も当てる）",
   ],
   [
     "bar",
@@ -35,8 +35,8 @@ const rules = [
   ],
   [
     "place",
-    /\.style\.(position|top|left|right|bottom)\s*=/,
-    "面の置き所を直に書かない。ui.ts の popover() は親の中に置くので、本文を送っても取り残されない",
+    /\.style\.(position|top|left|right|bottom|width|height)\s*=|\.style\.setProperty\s*\(|\.style\.cssText\s*=/,
+    "面の置き所や大きさを直に書かない。ui.ts の popover() は親の中に置くので、本文を送っても取り残されない。setProperty / cssText / style.width / style.height も同じ",
   ],
 ];
 
