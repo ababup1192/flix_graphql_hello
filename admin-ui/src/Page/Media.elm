@@ -307,6 +307,7 @@ view model =
             Just asset ->
                 Ui.Confirm.view
                     { title = "「" ++ asset.fileName ++ "」を削除しますか"
+                    , details = []
                     , body = "このメディアを使っているコンテンツからは見えなくなります。元には戻せません。"
                     , confirm = "削除"
                     , reply = model.deleting

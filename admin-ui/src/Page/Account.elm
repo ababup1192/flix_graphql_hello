@@ -184,6 +184,7 @@ view model =
             Just row ->
                 Ui.Confirm.view
                     { title = "「" ++ row.name ++ "」を失効しますか"
+                    , details = []
                     , body = "このトークンを使っている CLI や MCP は、すぐに読み書きできなくなります。元には戻せません。"
                     , confirm = "失効"
                     , reply = model.revoking

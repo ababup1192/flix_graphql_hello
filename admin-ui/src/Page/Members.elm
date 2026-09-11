@@ -278,6 +278,7 @@ view args model =
             Just row ->
                 Ui.Confirm.view
                     { title = "「" ++ nameOf row ++ "」をこのプロジェクトから外しますか"
+                    , details = []
                     , body = "このプロジェクトのコンテンツを読み書きできなくなります。招待し直せば戻せます。"
                     , confirm = "外す"
                     , reply = model.removing
@@ -292,6 +293,7 @@ view args model =
             Just invite ->
                 Ui.Confirm.view
                     { title = "「" ++ invite.email ++ "」への招待を取り消しますか"
+                    , details = []
                     , body = "この人はログインしてもメンバーになりません。もう一度招待し直せます。"
                     , confirm = "取り消し"
                     , reply = model.cancelling

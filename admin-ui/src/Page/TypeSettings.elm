@@ -236,6 +236,7 @@ viewDanger model detail =
         , if model.confirmDelete then
             Ui.Confirm.view
                 { title = "「" ++ detail.name ++ "」を削除しますか"
+                , details = []
                 , body = String.fromInt (List.length detail.fields) ++ " 個のフィールドの定義も一緒に削除されます。元には戻せません。"
                 , confirm = "削除"
                 , reply = model.deleting

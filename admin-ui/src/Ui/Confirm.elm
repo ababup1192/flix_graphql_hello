@@ -20,6 +20,13 @@ import Ui.Reply as Reply exposing (Reply)
 
 view :
     { title : String
+
+    {- 件数や見本のような「読んでから決める」物。**本文の 1 文より先に置く。**
+
+       WhyNot: 本文の後ろに回さない。要約の 1 文を先に読ませると、その下の
+       件数と見本が補足に見え、読まずに押す形になる。
+    -}
+    , details : List (Html msg)
     , body : String
     , confirm : String
     , reply : Reply
@@ -37,18 +44,20 @@ view args =
             , A.attribute "aria-modal" "true"
             , E.stopPropagationOn "click" (D.succeed ( args.ignore, True ))
             ]
-            [ Ui.subheading args.title
-            , Html.p [ A.class "text-[13px] text-ink-soft" ] [ Html.text args.body ]
-            , Reply.view args.reply
-            , Html.div [ A.class "flex justify-end gap-2" ]
-                [ Ui.ghostButton [ E.onClick args.onCancel ] [ Html.text "キャンセル" ]
-                , Html.button
-                    [ A.type_ "button"
-                    , A.class "inline-flex h-8 items-center rounded-md bg-[color:var(--color-bad)] px-3 text-[13px] font-semibold text-white hover:opacity-90 disabled:opacity-40"
-                    , E.onClick args.onConfirm
-                    , A.disabled (Reply.isSending args.reply)
-                    ]
-                    [ Html.text args.confirm ]
-                ]
-            ]
+            (Ui.subheading args.title
+                :: args.details
+                ++ [ Html.p [ A.class "text-[13px] text-ink-soft" ] [ Html.text args.body ]
+                   , Reply.view args.reply
+                   , Html.div [ A.class "flex justify-end gap-2" ]
+                        [ Ui.ghostButton [ E.onClick args.onCancel ] [ Html.text "キャンセル" ]
+                        , Html.button
+                            [ A.type_ "button"
+                            , A.class "inline-flex h-8 items-center rounded-md bg-[color:var(--color-bad)] px-3 text-[13px] font-semibold text-white hover:opacity-90 disabled:opacity-40"
+                            , E.onClick args.onConfirm
+                            , A.disabled (Reply.isSending args.reply)
+                            ]
+                            [ Html.text args.confirm ]
+                        ]
+                   ]
+            )
         ]

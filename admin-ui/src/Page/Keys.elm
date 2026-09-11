@@ -382,6 +382,7 @@ view model =
             Just row ->
                 Ui.Confirm.view
                     { title = "「" ++ row.name ++ "」を失効しますか"
+                    , details = []
                     , body = "この API キーを使っているサイトやツールは、すぐに読み書きできなくなります。元には戻せません。"
                     , confirm = "失効"
                     , reply = model.revoking
@@ -396,6 +397,7 @@ view model =
             Just hook ->
                 Ui.Confirm.view
                     { title = "「" ++ hook.name ++ "」を削除しますか"
+                    , details = []
                     , body = "この URL への通知が止まります。元には戻せません。"
                     , confirm = "削除"
                     , reply = model.deleting

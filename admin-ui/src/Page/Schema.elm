@@ -12,7 +12,7 @@ import Api
 import Api.Admin.Enum.FieldKind as FieldKind exposing (FieldKind)
 import EntryLabel
 import Html exposing (Html, div, span, text)
-import Html.Attributes exposing (class, disabled, placeholder, value)
+import Html.Attributes exposing (class, placeholder, value)
 import Html.Events exposing (onClick, onInput)
 import Json.Decode as D
 import Loaded exposing (Loaded(..))
@@ -20,6 +20,7 @@ import Model exposing (ContentTypeDetail, FieldDef, Slug)
 import Queries
 import Route
 import Ui
+import Ui.Confirm
 import Ui.Icon as Icon
 import Ui.Reply as Reply exposing (Reply)
 
@@ -194,6 +195,7 @@ type Msg
     | PanelClosed
     | BannerClosed
     | EscapePressed
+    | Ignored
     | NameTyped String
     | ApiIdTyped String
     | KindChosen String
@@ -307,6 +309,10 @@ update ctx msg model =
 
         BannerClosed ->
             ( { model | banner = Nothing }, [] )
+
+        Ignored ->
+            -- 確認のモーダルの中を押した時。外側の「押したら閉じる」を止めるためだけに要る。
+            ( model, [] )
 
         EscapePressed ->
             -- 開いている物を 1 段閉じる。確認が出ていれば確認だけ、でなければ右の面。
@@ -1225,18 +1231,19 @@ viewRemove model form =
     case model.confirmRemove of
         Just asked ->
             if asked.id == form.id then
-                Ui.callout Ui.toneWarn
-                    [ class "gap-2 p-3" ]
-                    (Ui.subheading ("「" ++ form.name ++ "」を削除しますか")
-                        :: viewImpact model model.removeImpact
-                        ++ [ div [ class "flex gap-2" ]
-                                [ Ui.button
-                                    [ onClick RemoveConfirmed, disabled (Loaded.toMaybe model.removeImpact == Nothing) ]
-                                    [ text (busyText model "削除") ]
-                                , Ui.ghostButton [ onClick RemoveCancelled ] [ text "キャンセル" ]
-                                ]
-                           ]
-                    )
+                -- **モーダルで聞く。** WhyNot: パネルの末尾に足さない。フィールドの設定が
+                -- 長い API では確認がウィンドウの外に出て、押しても反応が無いように見える
+                -- （1400x1000 で上端 y=974 だった）。
+                Ui.Confirm.view
+                    { title = "「" ++ form.name ++ "」を削除しますか"
+                    , details = viewImpact model model.removeImpact
+                    , body = "削除後も復元できます。"
+                    , confirm = "削除"
+                    , reply = model.reply
+                    , onConfirm = RemoveConfirmed
+                    , onCancel = RemoveCancelled
+                    , ignore = Ignored
+                    }
 
             else
                 text ""
@@ -1349,7 +1356,7 @@ effectText : String -> String
 effectText kind =
     case kind of
         "VALUES_HIDDEN" ->
-            "値が API から見えなくなります（DB には残ります）"
+            "値が API から見えなくなります"
 
         "REFERENCES_HIDDEN" ->
             "参照が API から見えなくなります"
@@ -1358,7 +1365,7 @@ effectText kind =
             "メディアの参照が API から見えなくなります"
 
         "VALUES_RESURRECTED" ->
-            "削除したはずの値が API に戻ります"
+            "削除した値が API に再表示されます"
 
         "PUBLISH_BLOCKED" ->
             "公開中のコンテンツが再公開できなくなります"
@@ -1367,7 +1374,7 @@ effectText kind =
             "下書きの保存が通らなくなります"
 
         "ENTRIES_REMOVED" ->
-            "API と一緒にコンテンツが消えます"
+            "API と一緒にコンテンツが削除されます"
 
         other ->
             other
