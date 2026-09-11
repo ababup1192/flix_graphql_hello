@@ -1458,7 +1458,7 @@ pageView workspace =
                 |> Html.map MembersMsg
 
         AuditPage page ->
-            Audit.view { canManage = Permission.has Permission.ManageMembers workspace.permissions } page
+            Audit.view { canManage = Permission.has Permission.ManageMembers workspace.permissions, types = workspace.types } page
                 |> Html.map AuditMsg
 
         EntriesPage page ->

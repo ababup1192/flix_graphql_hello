@@ -19,7 +19,7 @@ import Html.Events exposing (onClick, onInput)
 import Json.Decode as D
 import Json.Encode as E
 import Loaded exposing (Loaded)
-import Model exposing (AuditRow, Slug)
+import Model exposing (AuditRow, ContentTypeSummary, Slug)
 import Queries
 import Route
 import Set exposing (Set)
@@ -232,7 +232,7 @@ lastId model =
 -- 画面
 
 
-view : { canManage : Bool } -> Model -> Html Msg
+view : { canManage : Bool, types : List ContentTypeSummary } -> Model -> Html Msg
 view args model =
     Ui.page []
         [ Ui.pageHeader { title = "監査ログ", icon = Nothing, meta = [], actions = [] }
@@ -243,7 +243,7 @@ view args model =
                 [ viewFilters model
                 , Ui.errors model.errors
                 , viewMissing model
-                , viewRows model
+                , viewRows (List.map .apiId args.types) model
                 , viewMore model
                 ]
 
@@ -318,8 +318,10 @@ viewMissing model =
             text ""
 
 
-viewRows : Model -> Html Msg
-viewRows model =
+{-| 一覧。`existing` は今ある型の apiId で、消えた型・フィールド・entry にはリンクを付けない。
+-}
+viewRows : List String -> Model -> Html Msg
+viewRows existing model =
     Loaded.view
         { loading = Ui.loadingCard
         , missing = Ui.table [ Ui.empty "記録がありません" ]
@@ -332,7 +334,7 @@ viewRows model =
                 else
                     Ui.table
                         (Ui.headRowOf columns [ text "時刻", text "誰が", text "何を", text "対象", text "" ]
-                            :: List.concatMap (viewRow model) rows
+                            :: List.concatMap (viewRow existing model) rows
                         )
         }
         model.rows
@@ -343,8 +345,8 @@ columns =
     "grid-cols-[130px_minmax(0,1fr)_minmax(0,230px)_minmax(0,1fr)_32px]"
 
 
-viewRow : Model -> AuditRow -> List (Html Msg)
-viewRow model row =
+viewRow : List String -> Model -> AuditRow -> List (Html Msg)
+viewRow existing model row =
     let
         open : Bool
         open =
@@ -362,7 +364,7 @@ viewRow model row =
             , span [ class "truncate", title row.actor ] [ text row.actor ]
             ]
         , span [ class "min-w-0 truncate font-mono text-[12px]", title row.action ] [ text row.action ]
-        , viewTarget model row
+        , viewTarget existing model row
         , Html.button
             [ class "flex h-6 w-6 cursor-pointer items-center justify-center rounded text-ink-soft hover:bg-well hover:text-ink"
             , type_ "button"
@@ -407,31 +409,55 @@ kindTone kind =
             Ui.toneWarn
 
 
-{-| 対象。entry と型・フィールドはその画面へ飛べる。
+{-| 対象。entry と型・フィールドは、その型が今もあればその画面へ飛べる。
+
+WhyNot: 消した物にリンクを付けない。`type.deleted` の行から型の画面へ飛ぶと「この API はありません」で
+終わるだけで、監査ログは消した後にこそ読まれる。消した物は `before` を開いて読む。
+
 -}
-viewTarget : Model -> AuditRow -> Html Msg
-viewTarget model row =
+viewTarget : List String -> Model -> AuditRow -> Html Msg
+viewTarget existing model row =
     let
         label : String
         label =
             row.targetKind ++ " " ++ row.targetId
 
+        plain : String -> Html Msg
+        plain hint =
+            span [ class "truncate", title hint ] [ text label ]
+
         link : Route.Route -> Html Msg
         link route =
             Ui.titleLink [ href (Route.toString route), class "truncate", title label ] [ text label ]
+
+        linkIfTypeExists : String -> Route.Route -> Html Msg
+        linkIfTypeExists typeApiId route =
+            if List.member typeApiId existing then
+                link route
+
+            else
+                plain (label ++ "（型 " ++ typeApiId ++ " は消えています）")
+
+        typeOfField : String
+        typeOfField =
+            String.split "." row.targetId |> List.head |> Maybe.withDefault row.targetId
     in
     case ( row.targetKind, typeApiIdOf row ) of
         ( "entry", Just typeApiId ) ->
-            link (Route.Entry model.project typeApiId row.targetId)
+            if row.action == "entry.deleted" then
+                plain (label ++ "（消えています）")
+
+            else
+                linkIfTypeExists typeApiId (Route.Entry model.project typeApiId row.targetId)
 
         ( "type", _ ) ->
-            link (Route.TypeSchema model.project row.targetId)
+            linkIfTypeExists row.targetId (Route.TypeSchema model.project row.targetId)
 
         ( "field", _ ) ->
-            link (Route.TypeSchema model.project (String.split "." row.targetId |> List.head |> Maybe.withDefault row.targetId))
+            linkIfTypeExists typeOfField (Route.TypeSchema model.project typeOfField)
 
         _ ->
-            span [ class "truncate", title label ] [ text label ]
+            plain label
 
 
 {-| entry の行は detail に型の apiId を持つ。
