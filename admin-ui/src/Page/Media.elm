@@ -59,6 +59,7 @@ type Msg
     | UploadFinished { assetId : String, ok : Bool }
     | GotConfirmed (Result Api.Problem AssetRow)
     | Selected AssetRow
+    | PanelClosed
     | AltTyped String
     | AltSaved
     | GotAltSaved (Result Api.Problem AssetRow)
@@ -164,7 +165,15 @@ update ctx msg model =
             ( failed problem { model | uploading = Nothing }, [] )
 
         Selected asset ->
-            ( { model | selected = Just asset, alt = asset.alt, altReply = Reply.idle }, [] )
+            -- もう一度押したら外す（同じ物を選び直す操作が無いので、閉じる手になる）
+            if model.selected |> Maybe.map (\current -> current.id == asset.id) |> Maybe.withDefault False then
+                ( { model | selected = Nothing, altReply = Reply.idle }, [] )
+
+            else
+                ( { model | selected = Just asset, alt = asset.alt, altReply = Reply.idle }, [] )
+
+        PanelClosed ->
+            ( { model | selected = Nothing, altReply = Reply.idle }, [] )
 
         AltTyped alt ->
             ( { model | alt = alt, altReply = Reply.touched model.altReply }, [] )
@@ -205,8 +214,13 @@ update ctx msg model =
                 Nothing ->
                     ( model, [] )
 
+        -- 開いている物を 1 段ずつ閉じる。確認が先、次に右の面
         EscapePressed ->
-            ( { model | confirmDelete = Nothing }, [] )
+            if model.confirmDelete /= Nothing then
+                ( { model | confirmDelete = Nothing }, [] )
+
+            else
+                ( { model | selected = Nothing, altReply = Reply.idle }, [] )
 
         Ignored ->
             ( model, [] )
@@ -352,7 +366,7 @@ viewGrid model =
 
                 else
                     div [ class "flex flex-col gap-3" ]
-                        [ div [ class "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6" ] (List.map viewThumb page.nodes)
+                        [ div [ class "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6" ] (List.map (viewThumb model) page.nodes)
                         , viewMore model page
                         ]
         }
@@ -393,9 +407,19 @@ viewMore model page =
         ]
 
 
-viewThumb : AssetRow -> Html Msg
-viewThumb asset =
-    Ui.tile [ onClick (Selected asset) ]
+viewThumb : Model -> AssetRow -> Html Msg
+viewThumb model asset =
+    Ui.tile
+        [ onClick (Selected asset)
+        , class
+            -- 開いている物に印を付ける。どれを見ているか分からないと、閉じる物も分からない
+            (if model.selected |> Maybe.map (\current -> current.id == asset.id) |> Maybe.withDefault False then
+                "border-accent ring-1 ring-[color:var(--color-accent)]"
+
+             else
+                ""
+            )
+        ]
         [ Ui.thumb "aspect-[4/3]" { url = asset.url, mime = asset.mime }
         , div [ class "flex flex-col items-start gap-1 border-t border-edge p-2" ]
             [ span [ class "w-full truncate text-[11px] font-medium text-ink" ] [ text asset.fileName ]
@@ -426,7 +450,10 @@ sizeText bytes =
 viewPanel : Model -> AssetRow -> Html Msg
 viewPanel model asset =
     div [ class "flex shrink-0 flex-col gap-4 border-edge py-6 lg:sticky lg:top-0 lg:z-(--z-sticky) lg:max-h-screen lg:w-72 lg:overflow-auto lg:border-l lg:pl-5" ]
-        [ Ui.railTitle "選んだメディア"
+        [ div [ class "flex items-center gap-3" ]
+            [ Ui.railTitle "選んだメディア"
+            , div [ class "ml-auto" ] [ Ui.ghostButton [ onClick PanelClosed ] [ text "閉じる" ] ]
+            ]
         , if String.startsWith "image/" asset.mime then
             Html.img [ src asset.url, class "w-full rounded-md border border-edge bg-well object-contain" ] []
 
