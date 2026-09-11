@@ -61,6 +61,6 @@ test("「+」から他のサイトの URL は linkCard になる", async () => {
   toEnd(h);
   await settle();
   await openUrlBox(h, false);
-  await fillUrl(h, "https://example.com/rich-check");
+  await fillUrl(h, "https://example.com/link-card");
   await vi.waitFor(() => expect(kinds(h)).toContain("linkCard"));
 });

@@ -51,7 +51,7 @@ ProseMirror が DOM を所有しているという前提と、手で書いた DO
 1. `web/ui.ts` を作り、まず**帯と浮く面**を移す（今日のバグの 2 大要因）
 2. 既存の帯を 1 つずつ差し替え、差し替えるたびに「文字が打てない」「スクロールでずれない」を確かめる
 3. 入力とアイコンのボタンを移す
-4. `scripts/rich-check.mjs` に「すべての帯で文字が打てない」「すべての浮く面がスクロールでずれない」を横断の確認として足す
+4. `admin-ui/dev/checks/bars-and-pops.test.ts` に「すべての帯で文字が打てない」「すべての浮く面がスクロールでずれない」を横断の確認として足す
 
 ## 効果の見込み
 
@@ -129,17 +129,36 @@ Playwright での確認を**止める**。時間とトークンがかかりす�
 
 **検査を層に分ける。**
 
-- **速い層**（ミリ秒）: `admin-ui/dev/checks/*.test.ts`。**doc と選択だけで決まる物**。
-  Vitest のブラウザモード（chromium を裸で立てる）で、`dev/harness.ts` が
-  `tiptap-editor` を 1 つ立て、`dev/fixtures.ts` の名前を付けた初期状態から**実際に打鍵する**。
-  117 件が 4 秒弱で回り、`npm run check` の一部
-- **遅い層**（秒）: `admin-ui/scripts/rich-check.mjs`。**位置・はみ出し・重なり・スクロール・
-  ホバー・掴んで動かす・実際のメディア**と、**CMS 往復**（下書き保存して読み直す / CMS が断る）。
-  CMS と vite を上げてから人が回す
+- **画面の側**: `admin-ui/dev/checks/*.test.ts`。Vitest のブラウザモード（chromium を裸で立てる）で、
+  `dev/harness.ts` が `tiptap-editor` を 1 つ立て、`dev/fixtures.ts` の名前を付けた初期状態から
+  **実際に打鍵する**。174 件が 5 秒弱で回り、`npm run check` の一部
+- **CMS の側**: `test/` の Flix のテスト（`make test`）。**入れ子を断る・飾りが残る**のような
+  「CMS が何を受けて何を返すか」はここ。画面を通さずに `RichText.validate` と
+  `RichText.toHtml` / `toMarkdown` を直に見る
 
-速い層に置く物の目安は「画面を描かなくても答えが出るか」。入力規則、マークの抜け方、
-ブロックを入れた後の doc と焦点、帯と一覧の**中身**（並び・名前・押した印）はここ。
-帯と一覧の**置き所**は遅い層。
+Playwright の通し実行（旧 `admin-ui/scripts/rich-check.mjs`）は **2026-09-12 に無くした**。
+位置・はみ出し・重なり・ホバー・掴んで動かす・窓の幅は、Vitest のブラウザモードが本物の
+chromium なので**そのまま測れる**（`getBoundingClientRect` / `userEvent.hover` /
+`page.viewport(w, h)`）。CMS 往復は Flix のテストが同じ事を見ていた。
+
+速い層に置く物の目安は「サーバもログインも要らずに答えが出るか」。**画面の事はほぼ全部ここ**で、
+入力規則・マークの抜け方・doc と焦点・帯と一覧の中身に加えて、**置き所と大きさもここで測る**。
+
+| 題目 | ファイル |
+|---|---|
+| 表の帯と掴みの位置、掴んで入れ替える、幅ごとのはみ出し | `dev/checks/table-layout.test.ts` |
+| コードの帯の位置、強調の帯と行番号の揃い、色、打てない余白 | `dev/checks/code-layout.test.ts` |
+| 数式の箱の当たり判定、ホバーで出る削除 | `dev/checks/math-layout.test.ts` |
+| 引用の出典の行の置き所と、次のブロックとの重なり | `dev/checks/quote-layout.test.ts` |
+| 並べた画像の枠と列、その下の「+」 | `dev/checks/gallery-layout.test.ts` |
+| すべての帯の余白とすべての浮く面（横断） | `dev/checks/bars-and-pops.test.ts` |
+| 貼り付くツールバーと、その上に出る面 | `dev/checks/sticky-bar.test.ts` |
+| リストの項目の 2 行目の揃い | `dev/checks/list-wrap.test.ts` |
+| 窓の幅ごとのツールバーの溢れ | `dev/checks/toolbar-width.test.ts` |
+| キャプションから矢印で外の行へ出る | `dev/checks/caption-exit.test.ts` |
+
+**人が実機で見るのはここだけ。** エディタの画面の上の帯（下書き保存 / 公開）や「広げて書く」の
+ボタンは Elm の画面が持つ物で、検査はエディタの部品を 1 つだけ立てるので重なりを見られない。
 
 ### 速い層の書き方
 
@@ -148,6 +167,11 @@ Playwright での確認を**止める**。時間とトークンがかかりす�
   **欄の中身**は打鍵に頼らない。矢印は前のキーの反映を追い越し、欄は 1 打鍵ごとの
   往復に追い越されるため、`selectBack` / `collapseRight` と `fill` を使う
 - 一覧の項目・行番号・帯の道具は **mousedown** で動く（`press()`）。`.tt-plus` だけは click
+- 置き所は `getBoundingClientRect()` で測る。ホバーは `userEvent.hover`（CSS の `:hover` が効く
+  本物のマウス）。窓の幅は `page.viewport(w, h)`（`@vitest/browser/context`）。掴んで動かすのは
+  掴みへの `mousedown` と `document` への `mousemove` / `mouseup`
+- **要素の真ん中ではない所を押す時は `userEvent.click(el, { position })`。** 帯の余白のように
+  「中の欄に当たらない点」を押す検査は、要素を渡しただけでは真ん中＝欄に当たる
 - 浮く帯は tippy が `document.body` に付けるので、`document` から引く。出るまで `vi.waitFor`
 
 ### 残り

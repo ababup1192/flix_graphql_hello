@@ -35,6 +35,9 @@ jobs:
             echo "生成物が SDL とずれています。直し方: make ui-gen && git add admin-ui/generated"
             exit 1
           }
+      # `npm run check` の最後に Vitest のブラウザモード（dev/checks の検査）が入る。
+      # 走らせる chromium は npm ci では降りてこない。
+      - run: npx playwright install --with-deps chromium
       - run: npm run check
       - run: npm run build
       - name: 本番のビルドに dev のヘッダが無い事

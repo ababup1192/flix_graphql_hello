@@ -1,7 +1,7 @@
 // 引用の出典（`web/quote-node.ts`）。
 //
 // 出典は引用の最後の子（quoteCite）で、キャプションと同じ 1 行の文字。
-// 出典の行の置き所と、次のブロックに重ならない事は遅い層。
+// 出典の行の置き所と、次のブロックに重ならない事は `quote-layout.test.ts`。
 import { expect, test, afterEach, vi } from "vitest";
 import { userEvent } from "@vitest/browser/context";
 import { mount, toEnd, settle, press, type Harness } from "../harness";

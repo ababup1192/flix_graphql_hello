@@ -1,6 +1,6 @@
 // 表を入れる所と、升の中に入れられる物。
 //
-// 帯と掴みの位置・幅・掴んだ入れ替えは遅い層（`scripts/rich-check.mjs`）。
+// 帯と掴みの位置・幅・掴んだ入れ替えは `table-layout.test.ts`。
 import { expect, test, afterEach, vi } from "vitest";
 import { userEvent } from "@vitest/browser/context";
 import { mount, toEnd, settle, press, type Harness } from "../harness";

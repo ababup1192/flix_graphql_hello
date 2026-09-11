@@ -172,6 +172,74 @@ export const FIXTURES: Fixture[] = [
       ],
     },
   },
+  {
+    name: "image-between",
+    title: "前後に行のある画像",
+    doc: {
+      type: "doc",
+      content: [
+        paragraph("うえの行"),
+        { type: "image", content: [{ type: "imageItem", attrs: { assetId: "asset-1" } }] },
+        paragraph("したの行"),
+      ],
+    },
+  },
+  {
+    name: "table-wide",
+    title: "列の多い表",
+    doc: {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          content: [1, 2].map((row) => ({
+            type: "tableRow",
+            content: [1, 2, 3, 4, 5, 6, 7, 8].map((column) => ({
+              type: row === 1 ? "tableHeader" : "tableCell",
+              attrs: { colspan: 1, rowspan: 1, colwidth: null },
+              content: [paragraph(`${row}-${column}`)],
+            })),
+          })),
+        },
+        paragraph(""),
+      ],
+    },
+  },
+  {
+    name: "parts",
+    title: "帯と浮く面のある塊",
+    doc: {
+      type: "doc",
+      content: [
+        ...Array.from({ length: 6 }, (_ignore, index) => paragraph(`うめ ${index}`)),
+        {
+          type: "codeBlock",
+          attrs: { language: "javascript", fileName: null, highlightLines: null },
+          content: [{ type: "text", text: "const a = 1" }],
+        },
+        { type: "mathBlock", attrs: { tex: "E = mc^2" } },
+        { type: "linkCard", attrs: { url: "https://example.com/parts" } },
+        paragraph(""),
+      ],
+    },
+  },
+  {
+    name: "long",
+    title: "長い本文",
+    doc: {
+      type: "doc",
+      content: [
+        ...Array.from({ length: 20 }, (_ignore, index) => paragraph(`長い本文の ${index} 行目です。`)),
+        {
+          type: "codeBlock",
+          attrs: { language: null, fileName: null, highlightLines: null },
+          content: [{ type: "text", text: "const a = 1" }],
+        },
+        ...Array.from({ length: 20 }, (_ignore, index) => paragraph(`長い本文の ${index + 20} 行目です。`)),
+        paragraph(""),
+      ],
+    },
+  },
 ];
 
 export const fixtureOf = (name: string): Fixture => FIXTURES.find((found) => found.name === name) ?? FIXTURES[0];

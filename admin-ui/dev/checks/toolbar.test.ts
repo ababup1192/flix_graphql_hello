@@ -1,7 +1,7 @@
 // 道具の置き場（`docs/design/toolbar-split-mock.html` の案 D）。
 //
 // ヘッダは押すだけで入る物、浮く帯は文字に掛ける物 6 個 +「…」、ブロックを入れる口は
-// 「+」の一覧。**どこに何があるか**だけを見る（位置と溢れは遅い層）。
+// 「+」の一覧。**どこに何があるか**だけを見る（位置と溢れは `toolbar-width.test.ts`）。
 import { expect, test, afterEach, vi } from "vitest";
 import { userEvent } from "@vitest/browser/context";
 import { mount, toEnd, settle, type Harness } from "../harness";

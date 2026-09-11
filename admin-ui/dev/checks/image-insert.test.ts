@@ -33,6 +33,14 @@ test("キャプションにカーソルがある時に入れても 1 枚目が�
   expect(assetIds(h)).toEqual(["asset-1", "asset-2"]);
 });
 
+test("続けて入れた 2 枚は image 2 つに分かれる（1 つに畳まれない）", async () => {
+  const h = (harness = await mount("image"));
+  h.caretInCaption();
+  await insert(h, 1, ["asset-2"]);
+  const images = ((h.doc() as any).content ?? []).filter((node: any) => node.type === "image");
+  expect(images.map((node: any) => node.content.length)).toEqual([1, 1]);
+});
+
 test("本文の空段落から入れた時は、その段落を置き換えて空行を残さない", async () => {
   const h = (harness = await mount("empty"));
   await insert(h, 1, ["asset-1"]);

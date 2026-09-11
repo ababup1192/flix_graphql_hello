@@ -246,6 +246,7 @@ class TiptapEditor extends HTMLElement {
   private menu: HTMLElement | null = null;
   private unmenu: (() => void) | null = null;
   private unwatchScroll: (() => void) | null = null;
+  private unwatchResize: (() => void) | null = null;
   // 本文が指しているコンテンツ。**面とツールチップで「今どこを指しているか」を出す。**
   // 候補（探した結果）とは別で、id から引く。
   private linked = new Map<string, Linked>();
@@ -451,6 +452,7 @@ class TiptapEditor extends HTMLElement {
     });
     this.buildBar(bar);
     this.watchTableHover(mount);
+    this.watchWindowResize();
     this.watchLinkHover(mount);
     this.paint();
     this.syncAssets();
@@ -1093,6 +1095,16 @@ class TiptapEditor extends HTMLElement {
     this.unwatchScroll = () => wrap.removeEventListener("scroll", again);
   }
 
+  // 窓の幅が変わった時に置き直す。
+  //
+  // WhyNot: 敷き直しを省かない。帯も掴みも表の画面座標から置く絶対位置なので、
+  // 置いたまま窓を狭めると本文の枠の外に残り、ページが横に送れるようになる。
+  private watchWindowResize() {
+    const again = () => this.paintTableTools();
+    window.addEventListener("resize", again);
+    this.unwatchResize = () => window.removeEventListener("resize", again);
+  }
+
   // 表にマウスが乗った時にも掴みを出す。
   private watchTableHover(mount: HTMLElement) {
     mount.addEventListener("mouseover", (event) => {
@@ -1381,6 +1393,10 @@ class TiptapEditor extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this.unwatchResize?.();
+    this.unwatchResize = null;
+    this.unwatchScroll?.();
+    this.unwatchScroll = null;
     this.blocks?.destroy();
     this.blocks = null;
     this.editor?.destroy();

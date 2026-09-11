@@ -1,6 +1,6 @@
 // コードブロックの帯（ファイル名 / 言語）と、左の行番号（強調行）。
 //
-// 見るのは **doc に何が入るか**と一覧の中身だけ。帯の位置と行の揃いは遅い層。
+// 見るのは **doc に何が入るか**と一覧の中身だけ。帯の位置と行の揃いは `code-layout.test.ts`。
 import { expect, test, afterEach, vi } from "vitest";
 import { userEvent } from "@vitest/browser/context";
 import { mount, settle, press, type Harness } from "../harness";
