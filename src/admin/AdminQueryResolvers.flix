@@ -168,6 +168,15 @@ mod AdminQueryResolvers {
     def listSchedules(entryId: Option[Id], first: Option[Int32], after: Option[Id]): List[Schedule] \ DbRead + CmsErr + Tenant + Session =
         Schedules.list(Session.grant(), entryId |> Option.map(AdminMapping.entryId("entryId")), EntryPage.clamp(50, first, None) |> fst, after |> Option.map(AdminMapping.publicIdOf))
 
+    /// Query.linkCards
+    pub def linkCards(): GeneratedAdmin.QueryLinkCardsResolver[AdminEff] =
+        (_context, urls) -> Ok(findLinkCards(urls))
+
+    /// 読めるのは下書きを読める人（編集画面）。表にある物だけで、取りには行かない。
+    def findLinkCards(urls: List[String]): List[LinkCard] \ DbRead + CmsErr + Tenant + Session =
+        let _reader: Granted[ReadDraft] = Session.grant();
+        LinkCards.findMany(urls)
+
     /// Query.apiKeys
     pub def apiKeys(): GeneratedAdmin.QueryApiKeysResolver[AdminEff] =
         _context -> Ok(listApiKeys())
@@ -177,6 +186,6 @@ mod AdminQueryResolvers {
     /// type Query のリゾルバ一式
     pub def resolvers(): GeneratedAdmin.QueryResolvers[AdminEff] =
         { contentTypes = contentTypes(), contentType = contentType(), entries = entries(), entry = entry(), assets = assets(), asset = asset(),
-          publishCheck = publishCheck(), impact = impact(), fieldImpact = fieldImpact(), publishPlan = publishPlan(), viewer = viewer(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries(), schedules = schedules(), auditEvents = auditEvents(), auditEventsCount = auditEventsCount() }
+          publishCheck = publishCheck(), impact = impact(), fieldImpact = fieldImpact(), publishPlan = publishPlan(), viewer = viewer(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries(), schedules = schedules(), auditEvents = auditEvents(), auditEventsCount = auditEventsCount(), linkCards = linkCards() }
 
 }

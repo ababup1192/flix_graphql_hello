@@ -12,13 +12,16 @@ class H(BaseHTTPRequestHandler):
         secret = open(SECRET_FILE).read().strip()
         ts = self.headers.get("X-Cms-Timestamp", "")
         expected = "sha256=" + hmac.new(secret.encode(), f"{ts}.{body}".encode(), hashlib.sha256).hexdigest()
+        body_json = json.loads(body)
         record = {
             "path": self.path,
             "event": self.headers.get("X-Cms-Event"),
             "delivery": self.headers.get("X-Cms-Delivery"),
             "contentType": self.headers.get("Content-Type"),
             "signatureOk": hmac.compare_digest(expected, self.headers.get("X-Cms-Signature", "")),
-            "body": json.loads(body),
+            # entry.slug は SLUG のフィールドを持つ型だけに付く。slug でページを引くサイトはここから捨てる URL を決める
+            "entrySlug": body_json.get("entry", {}).get("slug"),
+            "body": body_json,
         }
         with open(LOG, "a") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")

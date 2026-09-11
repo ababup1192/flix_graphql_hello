@@ -24,7 +24,7 @@ mod PgTestSupport {
     /// Tx が開いたままだと DROP がロック待ちで止まり、どのテストが漏らしたか分からないまま何十分も待つため。数秒で FAIL にする。
     def resetSchema(): Unit \ DbWrite + RawSql + IO =
         discard Sql.execute("SET lock_timeout = '5s'", Nil);
-        discard Sql.execute("DROP TABLE IF EXISTS audit_events, cdn_purges, scheduled_actions, webhook_deliveries, webhooks, personal_access_tokens, api_keys, invitations, memberships, org_members, users, organizations, assets, entry_links, entry_versions, entry_unique_values, entry_contents, entries, content_fields, content_types, projects, sqlfx_migrations CASCADE", Nil);
+        discard Sql.execute("DROP TABLE IF EXISTS link_cards, audit_events, cdn_purges, scheduled_actions, webhook_deliveries, webhooks, personal_access_tokens, api_keys, invitations, memberships, org_members, users, organizations, assets, entry_links, entry_versions, entry_unique_values, entry_contents, entries, content_fields, content_types, projects, sqlfx_migrations CASCADE", Nil);
         discard Sql.execute("RESET lock_timeout", Nil);
         let applied = run {
             Migrate.runWithResult(() -> Migrate.apply(Migrate.defaultConfig(config()), "migrations"))

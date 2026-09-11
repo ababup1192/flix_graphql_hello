@@ -1,17 +1,20 @@
 ///
 /// 公開側に見える変化（公開・取り下げ・削除・型の変更）の出来事。ユースケースは 1 つ作って `Publishing.notify` に渡す。
 ///
+/// entry の出来事が載せる slug。型に SLUG のフィールドが無いか、未入力なら None。
+///
+/// WhyNot: 出来事の payload にレコードを置かない（Eq を derive できなくなる）。id・型・slug を並べる。
 pub enum PublishingEvent with Eq, Order {
     /// entry を公開した（再公開も）
-    case EntryPublished(EntryId, ApiId)
+    case EntryPublished(EntryId, ApiId, Option[String])
     /// 公開を取り下げた（公開中だった時だけ）
-    case EntryUnpublished(EntryId, ApiId)
+    case EntryUnpublished(EntryId, ApiId, Option[String])
     /// entry をゴミ箱へ入れた
-    case EntryDeleted(EntryId, ApiId)
+    case EntryDeleted(EntryId, ApiId, Option[String])
     /// content type かフィールドが変わった
     case SchemaChanged(ApiId)
     /// 下書きを保存した。公開側は変わらない
-    case DraftSaved(EntryId, ApiId)
+    case DraftSaved(EntryId, ApiId, Option[String])
 }
 
 ///
@@ -43,11 +46,11 @@ mod Publishing {
     /// 進めると下書きの保存のたびに CDN のキャッシュが全部外れる。
     ///
     pub def effectsOf(event: PublishingEvent): List[PublishingEffect] = match event {
-        case PublishingEvent.EntryPublished(_, _)   => List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.EntryPublished) }
-        case PublishingEvent.EntryUnpublished(_, _) => List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.EntryUnpublished) }
-        case PublishingEvent.EntryDeleted(_, _)     => List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.EntryDeleted) }
-        case PublishingEvent.SchemaChanged(_)       => List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.SchemaChanged) }
-        case PublishingEvent.DraftSaved(_, _)       => Nil
+        case PublishingEvent.EntryPublished(_, _, _)   => List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.EntryPublished) }
+        case PublishingEvent.EntryUnpublished(_, _, _) => List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.EntryUnpublished) }
+        case PublishingEvent.EntryDeleted(_, _, _)     => List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.EntryDeleted) }
+        case PublishingEvent.SchemaChanged(_)          => List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.SchemaChanged) }
+        case PublishingEvent.DraftSaved(_, _, _)       => Nil
     }
 
     ///
@@ -64,11 +67,11 @@ mod Publishing {
 
     /// Webhook の配信を積む。entry の出来事は entry の payload、型の出来事は型の payload。
     def emit(webhookEvent: WebhookEvent, event: PublishingEvent): Unit \ Db + IdGen + Tenant = match event {
-        case PublishingEvent.EntryPublished(id, apiId)   => Webhooks.emitEntry(webhookEvent, id, apiId)
-        case PublishingEvent.EntryUnpublished(id, apiId) => Webhooks.emitEntry(webhookEvent, id, apiId)
-        case PublishingEvent.EntryDeleted(id, apiId)     => Webhooks.emitEntry(webhookEvent, id, apiId)
-        case PublishingEvent.DraftSaved(id, apiId)       => Webhooks.emitEntry(webhookEvent, id, apiId)
-        case PublishingEvent.SchemaChanged(apiId)        => Webhooks.emitSchema(apiId)
+        case PublishingEvent.EntryPublished(id, apiId, slug)   => Webhooks.emitEntry(webhookEvent, id, apiId, slug)
+        case PublishingEvent.EntryUnpublished(id, apiId, slug) => Webhooks.emitEntry(webhookEvent, id, apiId, slug)
+        case PublishingEvent.EntryDeleted(id, apiId, slug)     => Webhooks.emitEntry(webhookEvent, id, apiId, slug)
+        case PublishingEvent.DraftSaved(id, apiId, slug)       => Webhooks.emitEntry(webhookEvent, id, apiId, slug)
+        case PublishingEvent.SchemaChanged(apiId)              => Webhooks.emitSchema(apiId)
     }
 
 }

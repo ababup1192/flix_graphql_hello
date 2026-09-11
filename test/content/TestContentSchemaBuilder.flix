@@ -29,7 +29,8 @@ mod TestContentSchemaBuilder {
             case Err(message) => bug!("sdl: ${message}")
         };
         Assert.assertEq(expected = (true, true, true, true, true, true, true, false, true),
-            (String.contains(substr = "blog(id: ID!, stage: Stage = PUBLISHED): Blog", sdl),
+            // 意図した変更: id は slug と選べるように ID! から ID へ。slug の無い型に slug の引数は出ない
+            (String.contains(substr = "blog(id: ID, stage: Stage = PUBLISHED): Blog", sdl),
              String.contains(substr = "blogs(where: BlogWhere, orderBy: [BlogOrderBy!], first: Int = 20, skip: Int = 0, after: String, stage: Stage = PUBLISHED): BlogConnection!", sdl),
              String.contains(substr = "siteSetting(stage: Stage = PUBLISHED): SiteSetting", sdl),
              String.contains(substr = "title_contains: String", sdl) and String.contains(substr = "views_gte: Float", sdl) and String.contains(substr = "tags_isNull: Boolean", sdl),
@@ -81,6 +82,34 @@ mod TestContentSchemaBuilder {
                 String.contains(substr = "gallery_contains: ID", text),
                 String.contains(substr = "cover_ASC", text),
                 String.contains(substr = "body_ASC", text))))
+
+    /// RichText には markdown（方言のまま）と assets（本文の asset）が生える。
+    @Test
+    def testContentSchemaBuilderRichTextMarkdownAndAssets(): Unit \ Assert =
+        let fields = CmsTestKit.fieldDef("body", FieldKind.RichText) :: Nil;
+        let sdl = Schema.toSdl(ContentSchemaBuilder.build(CmsTestKit.contentType(1i64, "blogs", TypeKind.Collection, "記事", fields) :: Nil, dryRunner()));
+        Assert.assertEq(
+            expected = Ok((true, true)),
+            sdl |> Result.map(text -> (
+                String.contains(substr = "markdown: String!", text),
+                String.contains(substr = "assets: [Asset!]!", text))))
+
+    ///
+    /// slug の引数は、unique な SLUG のフィールドを 1 つだけ持つ型にだけ生える。
+    ///
+    ///   unique 1 つ  → blog(id: ID, slug: String, stage: ...)
+    ///   unique でない → 引数ごと出ない
+    ///   2 つある      → どちらで引くか決まらないので出ない
+    ///
+    @Test
+    def testContentSchemaBuilderSlugArg(): Unit \ Assert =
+        let slugField = api -> { unique = true | CmsTestKit.fieldDef(api, FieldKind.Slug) };
+        let sdlOf = fields -> Schema.toSdl(ContentSchemaBuilder.build(CmsTestKit.contentType(1i64, "blogs", TypeKind.Collection, "記事", fields) :: Nil, dryRunner()));
+        Assert.assertEq(
+            expected = (Ok(true), Ok(false), Ok(false)),
+            (sdlOf(slugField("slug") :: Nil) |> Result.map(String.contains(substr = "blog(id: ID, slug: String, stage: Stage = PUBLISHED): Blog")),
+             sdlOf(CmsTestKit.fieldDef("slug", FieldKind.Slug) :: Nil) |> Result.map(String.contains(substr = "slug: String,")),
+             sdlOf(slugField("slug") :: slugField("altSlug") :: Nil) |> Result.map(String.contains(substr = "slug: String,"))))
 
     /// 型が 1 つも無くても Query は組める（_types だけ）。
     @Test

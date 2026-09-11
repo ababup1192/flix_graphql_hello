@@ -24,10 +24,11 @@ mod TestQueryBudgetPg {
         let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
         discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
         discard ContentTypes.addField(Session.grant(), blogs#id, { target = Some(profiles#id) | CmsTestKit.fieldDraft("profile", FieldKind.Reference, FieldConfig.empty()) });
+        discard ContentTypes.addField(Session.grant(), blogs#id, { unique = true | CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = Some(CmsTestKit.apiId("title")) | FieldConfig.empty() }) });
         List.range(0, authorCount()) |> List.forEach(a -> {
             let author = ContentEntries.create(Session.grant(), profiles#id, None, CmsTestKit.entryData(List#{("name", Json.JString("a${a}"))}));
             List.range(0, entryCount() / authorCount()) |> List.forEach(n ->
-                discard ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("t${a}-${n}")), ("profile", Json.JString(EntryId.text(author#id)))})))
+                discard ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("t${a}-${n}")), ("slug", Json.JString("t${a}-${n}")), ("profile", Json.JString(EntryId.text(author#id)))})))
         })
 
     /// 管理 API: entries 50 件 × 10 フィールド。
@@ -86,13 +87,15 @@ mod TestQueryBudgetPg {
         (name, count("db.statements"), count("db.transactions"), message)
 
     ///
-    /// 6 つの query の SQL の数と Tx の数が上限の中に収まり、エラーは無い。読むだけの文書は 1 リクエスト 1 Tx なので、Tx は認証 1 + リクエスト 1。
+    /// 8 つの query の SQL の数と Tx の数が上限の中に収まり、エラーは無い。読むだけの文書は 1 リクエスト 1 Tx なので、Tx は認証 1 + リクエスト 1。
     ///   (a) JWT で entries 50 件 × 10 フィールド            実測 12 / 2（認証 7 + 一覧 2 + 版 1 + 型 2。1 リクエスト 1 Tx の前は 504）
     ///   (b) JWT で contentTypes { name }                     実測 9 / 2（認証 7 本 + 印 + 一覧 1 本。前は 4）
     ///   (c) API キー（EDITOR の WRITE）で (a) の一覧          実測 7 / 2（前は 504）
     ///   (d) API キーでコンテンツ API の blogs 50 件と参照先   実測 5 / 2（認証 2 + 一覧 2 + 参照先 1。参照先は Linked から。前は 254）
     ///   (e) 匿名のコンテンツ API の GET が 304 で終わる道      認証（印 + 公開範囲 1）+ 版 1 の Tx 1 つ。GraphQL は実行しない
     ///   (f) 匿名のコンテンツ API の GET が 200（blogs 50 件）  (e) + 一覧と参照先の Tx 1 つ（前は 254）
+    ///   (g) API キーで slug 直引き                           実測 5 / 2（認証 2 + 一覧 2 + 参照先 1）
+    ///   (h) API キーで where: { slug_eq } の 1 件            実測 5 / 2（(g) と同じ本数）
     ///
     @Test
     def testPgQueryBudget(): Unit \ {IO, Assert} =
@@ -108,6 +111,9 @@ mod TestQueryBudgetPg {
             let jwtTypes = measure(api#pool, Engine.Admin, admin, owner, "{ contentTypes { name } }");
             let keyEntries = measure(api#pool, Engine.Admin, admin, key, listQuery(typeId));
             let keyContent = measure(api#pool, Engine.Content, content, key, contentListQuery());
+            // slug 直引きと、同じ物を where で引く道。どちらも認証 2 + 一覧 2 + 参照先 1
+            let keySlug = measure(api#pool, Engine.Content, content, key, "{ blog(slug: \"t0-0\", stage: DRAFT) { id title profile { id name } } }");
+            let keyWhere = measure(api#pool, Engine.Content, content, key, "{ blogs(stage: DRAFT, where: { slug_eq: \"t0-0\" }, first: 1) { nodes { id title profile { id name } } } }");
             // 匿名のコンテンツ API は公開中しか読めないので、ここで 50 件を公開してから測る（参照先の profile も一緒に）
             publishAll(ask, typeId);
             let (notModified, executed) = measureAnonymous(api#pool, content, publishedListQuery());
@@ -116,6 +122,8 @@ mod TestQueryBudgetPg {
                 (budget("jwt contentTypes name", jwtTypes), (12, 2)),
                 (budget("api-key entries 50x10", keyEntries), (12, 2)),
                 (budget("api-key content blogs 50 + profile", keyContent), (8, 2)),
+                (budget("api-key content blog by slug", keySlug), (8, 2)),
+                (budget("api-key content blog by where slug_eq", keyWhere), (8, 2)),
                 (budget("anonymous content GET 304", notModified), (4, 1)),
                 (budget("anonymous content GET 200 blogs 50 + profile", executed), (8, 2))
             }

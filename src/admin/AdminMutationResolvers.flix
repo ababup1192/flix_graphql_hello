@@ -237,6 +237,13 @@ mod AdminMutationResolvers {
     pub def cancelSchedule(): GeneratedAdmin.MutationCancelScheduleResolver[AdminEff] =
         (_context, id) -> Ok(cancelScheduleOf(id))
 
+    /// Mutation.fetchLinkCard
+    pub def fetchLinkCard(): GeneratedAdmin.MutationFetchLinkCardResolver[AdminEff] =
+        (_context, url) -> Ok(fetchLinkCardOf(url))
+
+    def fetchLinkCardOf(url: String): LinkCard \ Db + CmsErr + Tenant + Session + Net.Http.Http + Time.Clock.Clock =
+        LinkCards.fetch(Session.grant(), url)
+
     def cancelScheduleOf(id: Id): Schedule \ Db + CmsErr + Tenant + Session =
         Schedules.cancel(Session.grant(), AdminMapping.publicIdOf(id))
 
@@ -314,7 +321,8 @@ mod AdminMutationResolvers {
             updateWebhook           = updateWebhook(),
             deleteWebhook           = deleteWebhook(),
             redeliverWebhook        = redeliverWebhook(),
-            recordAuditExport       = recordAuditExport()
+            recordAuditExport       = recordAuditExport(),
+            fetchLinkCard           = fetchLinkCard()
         }
 
 }

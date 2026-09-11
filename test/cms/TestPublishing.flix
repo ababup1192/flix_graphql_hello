@@ -15,11 +15,11 @@ mod TestPublishing {
         let entry = CmsTestKit.entryId("e1");
         let blogs = CmsTestKit.apiId("blogs");
         let table = List#{
-            (PublishingEvent.EntryPublished(entry, blogs),   List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.EntryPublished) }),
-            (PublishingEvent.EntryUnpublished(entry, blogs), List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.EntryUnpublished) }),
-            (PublishingEvent.EntryDeleted(entry, blogs),     List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.EntryDeleted) }),
-            (PublishingEvent.SchemaChanged(blogs),           List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.SchemaChanged) }),
-            (PublishingEvent.DraftSaved(entry, blogs),       Nil)
+            (PublishingEvent.EntryPublished(entry, blogs, Some("hello")),   List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.EntryPublished) }),
+            (PublishingEvent.EntryUnpublished(entry, blogs, Some("hello")), List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.EntryUnpublished) }),
+            (PublishingEvent.EntryDeleted(entry, blogs, None),              List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.EntryDeleted) }),
+            (PublishingEvent.SchemaChanged(blogs),                          List#{ PublishingEffect.BumpContentVersion, PublishingEffect.EmitWebhook(WebhookEvent.SchemaChanged) }),
+            (PublishingEvent.DraftSaved(entry, blogs, None),                Nil)
         };
         Assert.assertEq(expected = table |> List.map(snd), table |> List.map(fst) |> List.map(Publishing.effectsOf))
 

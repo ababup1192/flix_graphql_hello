@@ -144,9 +144,11 @@ X-Cms-Delivery: 01J...                  # 配信の id（再送でも同じ）�
 X-Cms-Timestamp: 1725700000             # UNIX 秒
 X-Cms-Signature: sha256=<hex>           # HMAC-SHA256(secret, "<timestamp>.<body>")
 
-{"event":"entry.published","project":"default","entry":{"id":"e1","type":"blogs"}}
+{"event":"entry.published","project":"default","entry":{"id":"e1","type":"blogs","slug":"hello-world"}}
 ```
 
+`entry.slug` は型が SLUG のフィールドを持ち、値が入っている時だけ付く（無い型では付かない）。slug でページを引くサイトは、これで捨てる URL を言い当てられる。
+取り下げ・削除でも、消える前の下書きの slug が載る。
 受け手は同じ計算で署名を照合し、timestamp が古すぎれば捨てる。照合の見本は `scripts/webhook-receiver.py`（`python3 scripts/webhook-receiver.py secret.txt received.log` で 127.0.0.1:9999 に立つ）。中身は入っていないので、必要ならコンテンツ API で読む。
 2xx 以外なら 1 分 → 5 分 → 30 分 → 2 時間の後に送り直し、5 回目で失敗になる（管理 API の `webhookDeliveries` で見え、`redeliverWebhook` で送り直せる）。
 本文の `at` は積んだ時刻（ISO 8601）。同じ Webhook 宛の配信は積んだ順に 1 件ずつ送る（前の物が再試行待ちなら次も待つ）ので、受け手には順に届く。届いた順を信じない受け手は `at` か `X-Cms-Delivery`（ULID。時刻順）で並べ直せる。

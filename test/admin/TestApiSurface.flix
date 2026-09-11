@@ -59,9 +59,10 @@ mod TestApiSurface {
                 "Invitation: id email role createdAt" ::
                 "IssuedApiKey: id name scope role expiresAt key" ::
                 "IssuedWebhook: webhook secret" ::
+                "LinkCard: url title description imageUrl siteName fetchedAt error" ::
                 "Me: id email name roles permissions organizations projects" ::
                 "Member: userId email name role" ::
-                "Mutation: createContentType updateContentType deleteContentType addField updateField removeField reorderFields createEntry updateEntry deleteEntry publishEntry publishMany unpublishEntry saveVersion restoreVersion createUploadUrl confirmAsset updateAsset deleteAsset createPreviewToken schedulePublish scheduleUnpublish cancelSchedule updateProjectVisibility inviteMember cancelInvitation changeMemberRole removeMember createApiKey revokeApiKey createWebhook updateWebhook deleteWebhook redeliverWebhook recordAuditExport" ::
+                "Mutation: createContentType updateContentType deleteContentType addField updateField removeField reorderFields createEntry updateEntry deleteEntry publishEntry publishMany unpublishEntry saveVersion restoreVersion createUploadUrl confirmAsset updateAsset deleteAsset createPreviewToken schedulePublish scheduleUnpublish cancelSchedule updateProjectVisibility inviteMember cancelInvitation changeMemberRole removeMember createApiKey revokeApiKey createWebhook updateWebhook deleteWebhook redeliverWebhook recordAuditExport fetchLinkCard" ::
                 "Organization: id name" ::
                 "OrganizationMembership: organization role" ::
                 "PageInfo: hasNextPage endCursor" ::
@@ -71,7 +72,7 @@ mod TestApiSurface {
                 "PublishPlan: ok steps violations" ::
                 "PublishPlanStep: entry reason report" ::
                 "PublishReport: ok violations unpublishedDependencies" ::
-                "Query: contentTypes contentType entries entry assets asset publishCheck impact publishPlan viewer me members invitations apiKeys webhooks webhookDeliveries schedules auditEvents auditEventsCount fieldImpact" ::
+                "Query: contentTypes contentType entries entry assets asset publishCheck impact publishPlan viewer me members invitations apiKeys webhooks webhookDeliveries schedules auditEvents auditEventsCount fieldImpact linkCards" ::
                 "Referrer: entry via stage" ::
                 "Schedule: id entryId action runAt withDependencies status requestedBy lastError overdue createdAt doneAt" ::
                 "SchemaEffect: kind field draft published entries" ::

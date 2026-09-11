@@ -95,4 +95,73 @@ mod TestContentApiPg {
                         (Value.Null, true), (Value.Obj(Map#{ "tags" => Value.Obj(Map#{ "totalCount" => Value.Int(0) }) }), false), Ok(Ok(())), (Value.Null, true)),
             outcome)
 
+    // ---- slug 直引き ----
+
+    ///
+    /// unique な slug を持つ blogs（b1 = one、b2 = two）と、slug を持たない notes。
+    /// b3 は b1 と同じ slug の下書き（照合は公開時だけなので下書きでは並ぶ）。
+    ///
+    def slugSeed(): Unit \ Db + CmsErr + IdGen + Tenant + Session =
+        let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+        discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+        discard ContentTypes.addField(Session.grant(), blogs#id, { unique = true | CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = Some(CmsTestKit.apiId("title")) | FieldConfig.empty() }) });
+        let notes = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("notes", "メモ"));
+        discard ContentTypes.addField(Session.grant(), notes#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString("一")), ("slug", Json.JString("one"))}));
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b2")), CmsTestKit.entryData(List#{("title", Json.JString("二")), ("slug", Json.JString("two"))}));
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b3")), CmsTestKit.entryData(List#{("title", Json.JString("一の別案")), ("slug", Json.JString("one"))}))
+
+    ///
+    /// slug で 1 件引ける。無い slug は null。同じ slug が下書きで 2 件あれば invalid（隠さない）。
+    /// id と slug の両方指定・両方 null も invalid。slug を持たない型には引数自体が生えない（validation error）。
+    ///
+    ///   blog(slug: "two")  ──▶ b2
+    ///   blog(slug: "one")  ──▶ b1 と b3 ──▶ invalid
+    ///   note(slug: ...)    ──▶ 引数が無い
+    @Test
+    def testPgContentApiBySlug(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withContentApi(slugSeed, ask -> {
+            let asked = queryText -> ask(queryText) |> (found -> (fst(found), snd(found) |> Option.nonEmpty));
+            List#{
+                PgTestSupport.named("slug", asked("{ blog(slug: \"two\", stage: DRAFT) { id } }")),
+                PgTestSupport.named("missing", asked("{ blog(slug: \"nope\", stage: DRAFT) { id } }")),
+                PgTestSupport.named("duplicate", asked("{ blog(slug: \"one\", stage: DRAFT) { id } }")),
+                PgTestSupport.named("both", asked("{ blog(id: \"b1\", slug: \"one\", stage: DRAFT) { id } }")),
+                PgTestSupport.named("neither", asked("{ blog(stage: DRAFT) { id } }")),
+                PgTestSupport.named("noSlugField", asked("{ note(slug: \"one\", stage: DRAFT) { id } }"))
+            }
+        });
+        Assert.assertEq(
+            expected = List#{
+                PgTestSupport.named("slug", (Value.Obj(Map#{ "blog" => Value.Obj(Map#{ "id" => Value.Str("b2") }) }), false)),
+                PgTestSupport.named("missing", (Value.Obj(Map#{ "blog" => Value.Null }), false)),
+                PgTestSupport.named("duplicate", (Value.Obj(Map#{ "blog" => Value.Null }), true)),
+                PgTestSupport.named("both", (Value.Obj(Map#{ "blog" => Value.Null }), true)),
+                PgTestSupport.named("neither", (Value.Obj(Map#{ "blog" => Value.Null }), true)),
+                PgTestSupport.named("noSlugField", (Value.Null, true))
+            },
+            outcome)
+
+    // ---- 本文の markdown と assets ----
+
+    ///
+    /// body（RICH_TEXT）に段落 1 つの doc を入れた blogs。asset は置かないので assets は空。
+    ///
+    def bodySeed(): Unit \ Db + CmsErr + IdGen + Tenant + Session =
+        let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+        discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("body", FieldKind.RichText, FieldConfig.empty()));
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b1")),
+            CmsTestKit.entryData(List#{("body", Markdown.fromMarkdown("## 見出し\n\n本文"))}))
+
+    /// markdown は方言のまま返り、assets は本文が指している asset（ここでは無いので空）。
+    @Test
+    def testPgContentApiBodyMarkdownAndAssets(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withContentApi(bodySeed, ask ->
+            ask("{ blog(id: \"b1\", stage: DRAFT) { body { markdown assets { id url } } } }"));
+        Assert.assertEq(
+            expected = (Value.Obj(Map#{ "blog" => Value.Obj(Map#{ "body" => Value.Obj(Map#{
+                "markdown" => Value.Str("## 見出し\n\n本文"),
+                "assets" => Value.List(Nil) }) }) }), None),
+            outcome)
+
 }

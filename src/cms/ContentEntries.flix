@@ -157,9 +157,9 @@ mod ContentEntries {
         if (existing#stage == Stage.Published) discard unpublish(unpublishing |> CmsErr.orForbidden(Permission.PublishEntries), id) else ();
         discard EntriesQueries.deleteLinks({ fromEntryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft), projectId = Tenant.currentId() });
         discard EntriesQueries.softDeleteEntry({ id = EntryId.text(id), projectId = Tenant.currentId() });
-        let apiId = apiIdOf(Session.readDraftOfWriter(proof), existing#typeId);
-        Publishing.notify(PublishingEvent.EntryDeleted(id, apiId));
-        Audit.record(AuditChange.EntryDeleted(id, apiId, existing#version))
+        let owner = ContentTypes.get(Session.readDraftOfWriter(proof), existing#typeId);
+        Publishing.notify(PublishingEvent.EntryDeleted(id, owner#apiId, EntryValue.slugOf(owner, existing#data)));
+        Audit.record(AuditChange.EntryDeleted(id, owner#apiId, existing#version))
 
     /// 出来事に載せる型の apiId。
     def apiIdOf(reader: Granted[ReadDraft], typeId: TypeId): ApiId \ DbRead + CmsErr + Tenant =
@@ -199,7 +199,7 @@ mod ContentEntries {
         publishDependencies(proof, visited, id, author, withDependencies, pending);
         // published の行を書き、版を積み、entry を公開中にする
         commitPublished(owner, existing, data, author);
-        Publishing.notify(PublishingEvent.EntryPublished(id, apiIdOf(Session.readDraftOfPublisher(proof), existing#typeId)));
+        Publishing.notify(PublishingEvent.EntryPublished(id, owner#apiId, EntryValue.slugOf(owner, data)));
         load(id)
 
     ///
@@ -340,9 +340,9 @@ mod ContentEntries {
         deletePublished(id);
         // 公開中だった時だけ出来事（Webhook と監査）になる
         if (existing#stage == Stage.Published) {
-            let apiId = apiIdOf(Session.readDraftOfPublisher(proof), existing#typeId);
-            Publishing.notify(PublishingEvent.EntryUnpublished(id, apiId));
-            Audit.record(AuditChange.EntryUnpublished(id, apiId, existing#version))
+            let owner = ContentTypes.get(Session.readDraftOfPublisher(proof), existing#typeId);
+            Publishing.notify(PublishingEvent.EntryUnpublished(id, owner#apiId, EntryValue.slugOf(owner, existing#data)));
+            Audit.record(AuditChange.EntryUnpublished(id, owner#apiId, existing#version))
         } else ();
         load(id)
 

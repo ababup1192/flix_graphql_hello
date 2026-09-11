@@ -49,6 +49,8 @@ type Query {
   """スキーマを変える前の影響。書き込まない。safe なら確認なしで押せる。
   押す時は effects から組んだ expected を渡す（渡さずに押すと、影響がある操作は止まる）"""
   fieldImpact(input: SchemaChangeInput!): SchemaImpact!
+  """richText の linkCard の OGP を表から引く（取りに行かない）。編集画面が開き直した時に。表に無い url は落ちる"""
+  linkCards(urls: [String!]!): [LinkCard!]!
 }
 
 """入力の 1 つの誤り。path は GraphQL の入力に対応（"fields.title" など）"""
@@ -268,6 +270,27 @@ type Mutation {
   """監査の記録を書き出した事を監査に積む（owner だけ）。GET /admin/audit.csv / audit.jsonl が書き出しの最後に呼ぶ。
   action は audit.exported、detail に format と絞り込み（auditEvents と同じ引数）と件数"""
   recordAuditExport(input: AuditExportInput!): Boolean!
+
+  """richText の linkCard の OGP を取る（writeEntries を持つ人）。編集画面が URL を貼った瞬間に呼ぶ。
+  表に 7 日以内の物があれば取りに行かずそれを返す。取れなければ error に理由（bot 拒否 / 404 / OGP なし / タイムアウト）が入り、
+  title 以下は null。http(s) 以外とプライベートアドレスは取りに行かず error だけ返す（表にも残らない）"""
+  fetchLinkCard(url: String!): LinkCard!
+}
+
+"""richText の linkCard の OGP 1 つ。公開の HTML の `<a data-link-card>` の中身はこれで組む"""
+type LinkCard {
+  url: String!
+  """og:title、無ければ <title>。取れなかった時は null"""
+  title: String
+  """og:description を 200 字で切った物"""
+  description: String
+  """og:image（相手の URL のまま）"""
+  imageUrl: String
+  siteName: String
+  """取りに行った時刻（ISO 8601）。成功も失敗も更新する"""
+  fetchedAt: String!
+  """取れなかった理由。取れていれば null"""
+  error: String
 }
 
 enum ScheduleAction {

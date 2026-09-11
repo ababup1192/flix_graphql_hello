@@ -63,8 +63,8 @@
 | `origin` | string | 403 のリクエストの行（MCP） | 断った `Origin` の scheme + host（パスやクエリは無い） |
 | `entity` | string | 業務エラーの行 | `extensions.entity` と同じ |
 | `id` | string | 業務エラーの行、予約公開の行、MCP のリクエストの行、プレビューの span | entry の id など。連番は出さない。MCP は引数の id、無ければ結果の id（create_entry で作った物） |
-| `job.kind` | string | ワーカーの行 | `schedule` / `webhook` / `cdn_purge` |
-| `job.id` | string | ワーカーの行 | 予約の id、配信の ULID（`X-Cms-Delivery` と同じ。受け手のログと突き合わせる相関 id） |
+| `job.kind` | string | ワーカーの行 | `schedule` / `webhook` / `cdn_purge` / `link_card`（linkCard の OGP の取り直し） |
+| `job.id` | string | ワーカーの行 | 予約の id、配信の ULID（`X-Cms-Delivery` と同じ。受け手のログと突き合わせる相関 id）、取り直した linkCard の url |
 | `job.outcome` | string | ワーカーの行 | `done` / `failed` / `retry` / `delivered` |
 | `job.attempts` | int | ワーカーの行（webhook / cdn_purge） | 何回目の試行か。予約公開（schedule）は再試行しないので付かない |
 | `job.retry_delay_seconds` | int | ワーカーの行（webhook / cdn_purge の retry） | 次に試すまでの秒数。次の時刻は行の時刻 + この秒数（時刻そのものは SQL 側が決めるので、この行を出す時点ではまだ書いていない）。諦めた（failed）行には付かない |

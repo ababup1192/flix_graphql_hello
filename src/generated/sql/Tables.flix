@@ -685,6 +685,56 @@ mod InvitationsTable {
 }
 
 ///
+/// link_cards テーブル。enum は断片 DSL の型に付ける印、関数は列。
+///
+mod LinkCardsTable {
+
+    use SqlValue.SqlValue
+
+    pub enum LinkCardsTable {
+        case LinkCardsTable
+    }
+
+    pub def projectId(): Fragment.Col[LinkCardsTable, Int64, Fragment.NotNull] = Fragment.Col.Col("project_id", SqlValue.Int64)
+    pub def url(): Fragment.Col[LinkCardsTable, String, Fragment.NotNull] = Fragment.Col.Col("url", SqlValue.Str)
+    pub def title(): Fragment.Col[LinkCardsTable, String, Fragment.Nullable] = Fragment.Col.Col("title", SqlValue.Str)
+    pub def description(): Fragment.Col[LinkCardsTable, String, Fragment.Nullable] = Fragment.Col.Col("description", SqlValue.Str)
+    pub def imageUrl(): Fragment.Col[LinkCardsTable, String, Fragment.Nullable] = Fragment.Col.Col("image_url", SqlValue.Str)
+    pub def siteName(): Fragment.Col[LinkCardsTable, String, Fragment.Nullable] = Fragment.Col.Col("site_name", SqlValue.Str)
+    pub def error(): Fragment.Col[LinkCardsTable, String, Fragment.Nullable] = Fragment.Col.Col("error", SqlValue.Str)
+    pub def fetchedAt(): Fragment.Col[LinkCardsTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("fetched_at", SqlValue.ofTimestamp)
+
+    ///
+    /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
+    ///
+    pub enum Constraint with Eq, Order, ToString {
+        /// link_cards_project_id_fkey (foreign key)
+        case ProjectIdFkey
+    }
+
+    ///
+    /// このテーブルへの書き込みを、制約違反を `translate` で翻訳しながら実行する。
+    /// translate は thunk と同じ型の値を返すか、業務エラーのエフェクトを投げる。翻訳しない case は `raiseConstraint`。
+    /// enum に無い名前の違反と、制約違反以外の DbErr はそのまま上へ。Tx の外で呼ぶ（違反で abort した Tx に COMMIT を出さない）。
+    ///
+    pub def onConstraint(translate: Constraint -> a \ ef1, thunk: Unit -> a \ ef2): a \ ef1 + ef2 + {TransientDbErr, DbErr} =
+        DbError.onConstraintWith(constraintOf, translate, thunk)
+
+    ///
+    /// 翻訳しない制約を元の DbErr に戻す。`onConstraint` に渡す関数の中で使う。
+    ///
+    pub def raiseConstraint(constraint: Constraint): a \ DbErr = match constraint {
+        case Constraint.ProjectIdFkey => DbErr.foreignKeyViolation("link_cards_project_id_fkey")
+    }
+
+    def constraintOf(name: String): Option[Constraint] = match name {
+        case "link_cards_project_id_fkey" => Some(Constraint.ProjectIdFkey)
+        case _ => None
+    }
+
+}
+
+///
 /// memberships テーブル。enum は断片 DSL の型に付ける印、関数は列。
 ///
 mod MembershipsTable {

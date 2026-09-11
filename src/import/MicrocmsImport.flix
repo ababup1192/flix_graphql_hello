@@ -32,7 +32,39 @@ mod MicrocmsImport {
         let singular = Naming.deriveSingular(api#apiId);
         let singularQuery = String.toLowerCase(String.takeLeft(1, TypeName.text(singular))) + String.dropLeft(1, TypeName.text(singular));
         let plural = if (singularQuery == ApiId.text(api#apiId)) ApiId.parse("${ApiId.text(api#apiId)}List") else None;
-        { apiId = api#apiId, kind = TypeKind.Collection, name = api#endpoint, singular = Some(singular), plural = plural, previewUrl = None, linkPath = None, icon = None }
+        { apiId = api#apiId, kind = TypeKind.Collection, name = api#endpoint, singular = Some(singular), plural = plural, previewUrl = None, linkPath = linkPathOf(api), icon = None }
+
+    ///
+    /// slug を持つ API のパスの形。`/<apiId>/{slug}` にして、外向きの URL に entry id を出さない。
+    ///
+    /// WhyNot: slug が無い API に `/<apiId>/{id}` を置かない。id は外から引ける物ではなく、
+    /// 置くとサイトが「id で引ける」前提で書かれてしまう。
+    ///
+    def linkPathOf(api: Api): Option[String] =
+        slugSourceOf(api) |> Option.map(_source -> "/${ApiId.text(api#apiId)}/{slug}")
+
+    ///
+    /// SLUG に写す microCMS のフィールド。fieldId が "slug" のテキストだけ。
+    ///
+    /// WhyNot: isUnique の付いたテキストを全部 SLUG にしない。microCMS の isUnique は
+    /// 社員番号のような URL に出ない値にも付く。
+    ///
+    def isSlugField(field: Field): Bool = match field#kind {
+        case Kind.Text => field#fieldId == "slug"
+        case _         => false
+    }
+
+    ///
+    /// SLUG の元にするフィールド。slug より前にある最初のテキスト（普通は name / title）。
+    /// slug が無いか、元にできるテキストが無ければ None（この時は SLUG に写さない）。
+    ///
+    def slugSourceOf(api: Api): Option[ApiId] =
+        let before = api#fields |> List.takeWhile(field -> not isSlugField(field));
+        if (List.length(before) == List.length(api#fields))
+            None
+        else
+            before |> List.find(field -> match field#kind { case Kind.Text => true case _ => false })
+                |> Option.map(field -> apiIdOf(field#fieldId))
 
     def addFields(types: Types, api: Api): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let typeId = Map.get(api#endpoint, types) |> Option.getWithDefault(TypeId.TypeId(0i64));
@@ -44,17 +76,19 @@ mod MicrocmsImport {
                     case Some(custom) =>
                         let variant = ContentTypes.addField(Session.grant(), typeId, { apiId = apiIdOf(custom#fieldId), name = custom#name, kind = FieldKind.Object, many = false, required = false, unique = false, localized = false, target = None, parent = Some(blocks#id), config = FieldConfig.empty() });
                         // microCMS は custom field と同名の子（serviceValuePoint の中の serviceValuePoint）を許すが、この CMS の apiId は型の中で一意なので、子に Value を付けて逃がす
-                        List.forEach(child -> discard ContentTypes.addField(Session.grant(), typeId, leafDraft(types, childRenamed(custom#fieldId, child), Some(variant#id))), custom#fields)
+                        List.forEach(child -> discard ContentTypes.addField(Session.grant(), typeId, leafDraft(api, types, childRenamed(custom#fieldId, child), Some(variant#id))), custom#fields)
                 }, variants)
-            case _ => discard ContentTypes.addField(Session.grant(), typeId, leafDraft(types, field, None))
+            case _ => discard ContentTypes.addField(Session.grant(), typeId, leafDraft(api, types, field, None))
         }, api#fields)
 
     /// variant と同名の子は `<名前>Value` に改名する。値を作る時も同じ名前にする。
     def childRenamed(variantId: String, child: Field): Field =
         if (child#fieldId == variantId) { fieldId = "${child#fieldId}Value" | child } else child
 
-    /// 子を持たないフィールドの draft。
-    def leafDraft(types: Types, field: Field, parent: Option[FieldId]): FieldDraft = match field#kind {
+    /// 子を持たないフィールドの draft。最上位の slug だけ SLUG（一意）にして、元にするフィールドを config に入れる。
+    def leafDraft(api: Api, types: Types, field: Field, parent: Option[FieldId]): FieldDraft = match field#kind {
+        case Kind.Text if isSlugField(field) and Option.isEmpty(parent) and Option.nonEmpty(slugSourceOf(api)) =>
+            { unique = true, config = { sourceField = slugSourceOf(api) | FieldConfig.empty() } | draftOf(field, FieldKind.Slug, false, None, parent) }
         case Kind.Text              => draftOf(field, FieldKind.Text, false, None, parent)
         case Kind.TextArea          => draftOf(field, FieldKind.TextArea, false, None, parent)
         case Kind.RichEditor        => draftOf(field, FieldKind.RichText, false, None, parent)
@@ -105,6 +139,8 @@ mod MicrocmsImport {
             |> List.toMap
 
     def valueOf(api: Api, asset: AssetId, created: Map[String, List[EntryId]], n: Int32, withReferences: Bool, field: Field): Option[Json] = match field#kind {
+        // slug は URL に出るので、名前（"名前 1"）ではなく apiId と番号から作る
+        case Kind.Text if isSlugField(field) => Some(Json.JString("${ApiId.text(api#apiId)}-${n}"))
         case Kind.Text       => Some(Json.JString("${field#name} ${n}"))
         case Kind.TextArea   => Some(Json.JString("${field#name} ${n} の 1 行目\n2 行目"))
         case Kind.RichEditor => Some(richTextDoc(field#name, n, asset))

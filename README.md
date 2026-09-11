@@ -93,7 +93,13 @@ entry の編集と手での公開を入れないのは `entry_versions` が版�
 curl -s -X POST localhost:8080/graphql -H 'Content-Type: application/json' \
   -d '{"query": "{ blogs(where: { title_contains: \"flix\", OR: [{ views_gte: 10 }] }, orderBy: [views_DESC], first: 10) { totalCount nodes { id title views } pageInfo { hasNextPage endCursor } } }"}'
 curl -s -X POST localhost:8080/graphql -d '{"query": "{ blog(id: \"b1\", stage: DRAFT) { title updatedAt } }"}'
+curl -s -X POST localhost:8080/graphql -d '{"query": "{ blog(slug: \"hello-flix\") { id title } }"}'
 ```
+
+**1 件のクエリは `id` か `slug` のどちらか 1 つで引く。** `slug` の引数が生えるのは、**unique な SLUG のフィールドを 1 つだけ持つ型**だけ
+（下書きでは同じ slug が並びうるので、1 件に決まる型に限る）。どちらも渡さない・両方渡す・同じ slug の entry が 2 件以上見つかった、は
+`INVALID`（下書きの重複を null で隠さない）。`id` は `slug` と選べるように `ID!` から `ID` になった。ワイヤ互換だが、
+introspection から型を作るクライアント（graphql-codegen）では `id` が optional に緩むので、生成した型を作り直すこと。
 
 `where` はフィールドの kind ごとに `_eq` / `_in` / `_contains` / `_startsWith`（文字列）、`_eq` / `_gt` / `_gte` / `_lt` / `_lte`（数値と DATE）、
 `_eq`（真偽値）、`_eq` / `_in`（select）、`_id_eq` / `_id_in`（reference）、配列には `_contains`、全部に `_isNull` が生え、`OR` / `AND` は 1 段。
@@ -102,13 +108,19 @@ curl -s -X POST localhost:8080/graphql -d '{"query": "{ blog(id: \"b1\", stage: 
 `REFERENCE` は参照先の型として展開され、同じ stage の物を返す（一覧は 1 本の SELECT で先読み）。`SELECT` は型ごとの enum（`BlogCategory`）で、
 `many: true` なら複数選択。`DATE` は ISO 8601 の文字列。
 
-`RICH_TEXT` は `RichText { json html text headings links excerpt(length) wordCount readingTimeMinutes }` で返る。
+`RICH_TEXT` は `RichText { json html markdown text assets headings links excerpt(length) wordCount readingTimeMinutes }` で返る。
 `json` は ProseMirror の doc、`html` はその描画（見出しに id、表・callout・gallery・数式・Mermaid は class ではなく `data-*`）、`headings` は目次用。
 
 ```bash
 curl -s -X POST localhost:8080/graphql \
   -d '{"query": "{ blogs { body { html links { id apiId path } headings { level text id } } } }"}'
+curl -s -X POST localhost:8080/graphql \
+  -d '{"query": "{ blogs { body { markdown assets { id url width height alt } } } }"}'
 ```
+
+**`markdown` は CMS の方言を含む。** 画像は `![alt](asset:ID)`、コンテンツへのリンクは `entry:ID` のまま出る（URL に焼き込まない。
+焼き込むと Markdown から doc に戻せず往復が壊れる）。**画像は `assets`、entry のリンクは `links` で解く**（どちらも本文 1 つにつき 1 本の SELECT で、
+`markdown` と同じ 1 往復で取れる）。解決済みの物が要るなら `html` を読む。
 
 **本文のコンテンツへのリンクは、CMS が path まで作る。** 型に**パスの形**（`ContentType.linkPath`。`/blog/{slug}` のような型紙で、
 使える印は `{id}` と `{slug}` の 2 つ。`{slug}` は値が無ければ id に落ちる）を入れておくと、`html` の `<a href>` がそのまま踏める path になり、

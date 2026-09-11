@@ -11,6 +11,7 @@ mod JobLog {
         case Schedule
         case Webhook
         case CdnPurge
+        case LinkCard
     }
 
     /// 結果。job.outcome の値は Loki の集計が見るので固定。
@@ -25,6 +26,7 @@ mod JobLog {
         case JobKind.Schedule => "schedule"
         case JobKind.Webhook  => "webhook"
         case JobKind.CdnPurge => "cdn_purge"
+        case JobKind.LinkCard => "link_card"
     }
 
     def outcomeText(outcome: JobOutcome): String = match outcome {

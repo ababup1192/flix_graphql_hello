@@ -235,7 +235,7 @@ mod BackgroundJobs {
         else { Thread.sleep(100i64); drain(state, deadline) }
 
     ///
-    /// 回復 → 予約公開 → Webhook → CDN の purge の順に 1 tickする。失敗した所の説明を返す（空なら全部通った）。停止中なら何もしない。
+    /// 回復 → 予約公開 → Webhook → CDN の purge → linkCard の取り直しの順に 1 tickする。失敗した所の説明を返す（空なら全部通った）。停止中なら何もしない。
     /// purge は送り先がある時だけ: 版が進んだプロジェクトの分を積んでから送る（予約公開が進めた版も同じ tick で拾う）。
     ///
     pub def tick(pool: Pool, state: State): List[String] \ {IO, Log} =
@@ -256,6 +256,8 @@ mod BackgroundJobs {
             let scheduled = guardedPart("予約公開", () -> Scheduler.tickWith(state#scheduler, pool));
             let delivered = OutboundHttp.runWith(state#http, () -> guardedPart("Webhook", () -> WebhookDispatcher.tick(pool)));
             let purged = purgeTick(pool, state);
+            // linkCard の OGP の取り直し（古い行と失敗した行。1 tick に最大 20 件）
+            let refreshed = OutboundHttp.runWith(state#http, () -> guardedPart("リンクカード", () -> LinkCardRefresh.tick(pool)));
             // 部分ごとの最終成功時刻と lastTick（heartbeat）を更新し、inTick フラグを下ろす
             let at = System.currentTimeMillis();
             markPart(state#lastSchedule, at, scheduled);
@@ -264,7 +266,7 @@ mod BackgroundJobs {
             Ref.put(Some(at), state#lastTick);
             Ref.put(false, state#inTick);
             // 失敗した部分の説明だけを集める
-            List#{ recovered |> Result.map(_ -> ()), scheduled |> Result.map(_ -> ()), delivered |> Result.map(_ -> ()), purged |> Result.map(_ -> ()) }
+            List#{ recovered |> Result.map(_ -> ()), scheduled |> Result.map(_ -> ()), delivered |> Result.map(_ -> ()), purged |> Result.map(_ -> ()), refreshed |> Result.map(_ -> ()) }
                 |> List.filterMap(outcome -> match outcome { case Ok(()) => None case Err(message) => Some(message) })
         }
 

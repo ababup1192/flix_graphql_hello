@@ -13,8 +13,9 @@ mod TestTenantGuardPg {
     /// **顧客の中身そのものを持つ表はここに入れない。** 入れて良いのは、印の無い Tx が
     /// 読む仕事の表だけ（queries/*.q に `// unscoped:` を持つ物）。
     ///
+    /// link_cards は外のページの OGP の写し（url が鍵）。取り直しの仕事（LinkCardRefresh.tick）が跨いで拾う。
     def crossProjectTables(): List[String] =
-        List#{"cdn_purges", "scheduled_actions", "webhook_deliveries"}
+        List#{"cdn_purges", "link_cards", "scheduled_actions", "webhook_deliveries"}
 
     def scan(sql: String): List[String] \ DbRead + RawSql + DbErr =
         Sql.fetchAs(Decoder.str("relname"), sql, Nil) |> List.sort

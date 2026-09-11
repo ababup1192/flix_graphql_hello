@@ -60,12 +60,16 @@ mod TestMarkdown {
 
     def hardBreak(): Json = CmsTestKit.richLeaf("hardBreak", Nil)
 
+    /// caption は content の text 1 つ（無ければ content 自体を付けない）。
     def image(assetId: String, alt: Option[String], caption: Option[String], size: Option[(Int32, Int32)]): Json =
-        CmsTestKit.richLeaf("image",
+        let attrs =
             (("assetId", Json.JString(assetId)) :: Nil)
                 ::: (alt |> Option.map(found -> ("alt", Json.JString(found))) |> Option.toList)
-                ::: (caption |> Option.map(found -> ("caption", Json.JString(found))) |> Option.toList)
-                ::: (size |> Option.map(match (width, height) -> List#{ ("width", CmsTestKit.intJson(width)), ("height", CmsTestKit.intJson(height)) }) |> Option.getWithDefault(Nil)))
+                ::: (size |> Option.map(match (width, height) -> List#{ ("width", CmsTestKit.intJson(width)), ("height", CmsTestKit.intJson(height)) }) |> Option.getWithDefault(Nil));
+        match caption {
+            case Some(found) => CmsTestKit.richNode("image", attrs, List#{ plain(found) })
+            case None        => CmsTestKit.richLeaf("image", attrs)
+        }
 
     def embed(url: String): Json = CmsTestKit.richLeaf("embed", List#{ ("url", Json.JString(url)) })
 
@@ -137,18 +141,18 @@ mod TestMarkdown {
         (doc(List#{ simpleParagraph("上"), horizontalRule(), simpleParagraph("下") }), "上\n\n---\n\n下"),
         // hardBreak: 行末の \
         (doc(List#{ paragraph(List#{ plain("行 1"), hardBreak(), plain("行 2") }) }), "行 1\\\n行 2"),
-        // image: `![alt](asset:ID "caption")`。[] が alt、title が caption。alt と caption の 4 通り。width / height があれば直後に
+        // image: `![alt](asset:ID)`。[] が alt、caption は直後の行に `*…*`。alt と caption の 4 通り。width / height があれば直後に
         (doc(List#{ image("asset001", None, None, None) }), "![](asset:asset001)"),
         (doc(List#{ image("asset001", Some("説明"), None, None) }), "![説明](asset:asset001)"),
-        (doc(List#{ image("asset001", None, Some("写真"), None) }), "![](asset:asset001 \"写真\")"),
-        (doc(List#{ image("asset001", Some("説明"), Some("写真"), None) }), "![説明](asset:asset001 \"写真\")"),
-        (doc(List#{ image("asset001", Some("説明"), Some("写真"), Some((640, 480))) }), "![説明](asset:asset001 \"写真\"){width=640 height=480}"),
-        (doc(List#{ image("asset001", None, Some("引用 \"符\""), None) }), "![](asset:asset001 \"引用 \\\"符\\\"\")"),
-        // gallery: 1 行に画像を 2 つ以上、空白区切り。columns は枚数（4 で丸める）。枚数と違う時だけ行末に {columns=N}
-        (doc(List#{ gallery(2, List#{ image("asset001", None, None, None), image("asset002", None, Some("図 2"), None) }) }), "![](asset:asset001) ![](asset:asset002 \"図 2\")"),
+        (doc(List#{ image("asset001", None, Some("写真"), None) }), "![](asset:asset001)\n*写真*"),
+        (doc(List#{ image("asset001", Some("説明"), Some("写真"), None) }), "![説明](asset:asset001)\n*写真*"),
+        (doc(List#{ image("asset001", Some("説明"), Some("写真"), Some((640, 480))) }), "![説明](asset:asset001){width=640 height=480}\n*写真*"),
+        (doc(List#{ image("asset001", None, Some("引用 \"符\""), None) }), "![](asset:asset001)\n*引用 \"符\"*"),
+        // gallery: 1 行に画像を 2 つ以上、空白区切り。columns は枚数（4 で丸める）。枚数と違う時だけ行末に {columns=N}。caption は次の行に枚数だけ `*…*`（無い画像は `**`）
+        (doc(List#{ gallery(2, List#{ image("asset001", None, None, None), image("asset002", None, Some("図 2"), None) }) }), "![](asset:asset001) ![](asset:asset002)\n** *図 2*"),
         (doc(List#{ gallery(3, List#{ image("asset001", None, None, None), image("asset002", None, None, Some((640, 480))), image("asset003", Some("c"), None, None) }) }), "![](asset:asset001) ![](asset:asset002){width=640 height=480} ![c](asset:asset003)"),
         // gallery の alt は image と同じく [] に入る（caption の位置に移らない）
-        (doc(List#{ gallery(2, List#{ image("asset001", Some("a"), None, None), image("asset002", Some("b"), Some("図"), None) }) }), "![a](asset:asset001) ![b](asset:asset002 \"図\")"),
+        (doc(List#{ gallery(2, List#{ image("asset001", Some("a"), None, None), image("asset002", Some("b"), Some("図"), None) }) }), "![a](asset:asset001) ![b](asset:asset002)\n** *図*"),
         (doc(List#{ gallery(4, List#{ image("asset001", None, None, None), image("asset002", None, None, None), image("asset003", None, None, None), image("asset004", None, None, None), image("asset005", None, None, None) }) }), "![](asset:asset001) ![](asset:asset002) ![](asset:asset003) ![](asset:asset004) ![](asset:asset005)"),
         (doc(List#{ gallery(3, List#{ image("asset001", None, None, None), image("asset002", None, None, None) }) }), "![](asset:asset001) ![](asset:asset002) {columns=3}"),
         // embed: URL だけの段落
@@ -213,9 +217,11 @@ mod TestMarkdown {
         ("*斜体*", doc(List#{ paragraph(List#{ marked("italic", "斜体") }) })),
         // 行末 2 空白の hardBreak
         ("行 1  \n行 2", doc(List#{ paragraph(List#{ plain("行 1"), hardBreak(), plain("行 2") }) })),
-        // 空の title は caption 無し
+        // 古い形: title の caption は読む時だけ受ける（content に写す）。空の title は caption 無し
+        ("![写真](asset:asset001 \"図\")", doc(List#{ image("asset001", Some("写真"), Some("図"), None) })),
         ("![写真](asset:asset001 \"\")", doc(List#{ image("asset001", Some("写真"), None, None) })),
         ("![写真](asset:asset001 \"\"){width=640 height=480}", doc(List#{ image("asset001", Some("写真"), None, Some((640, 480))) })),
+        ("![](asset:asset001 \"a\") ![](asset:asset002 \"b\")", doc(List#{ gallery(2, List#{ image("asset001", None, Some("a"), None), image("asset002", None, Some("b"), None) }) })),
         // asset 管理外の画像（`![alt](URL)`）は image にならず、alt を URL へのリンクにした文字になる
         ("![外部](https://example.com/a.png)", doc(List#{ paragraph(List#{ linked("https://example.com/a.png", "外部") }) })),
         ("前 ![外部](https://example.com/a.png) 後", doc(List#{ paragraph(List#{ plain("前 "), linked("https://example.com/a.png", "外部"), plain(" 後") }) })),
@@ -335,9 +341,9 @@ mod TestMarkdown {
         ++ "| 見出し | 値 |\n| --- | --- |\n| **太字** | a\\|b |\n\n"
         ++ "> [!TIP]\n> ヒント\n\n"
         ++ "---\n\n"
-        ++ "![説明](asset:asset001 \"キャプション\"){width=640 height=480}\n\n"
+        ++ "![説明](asset:asset001){width=640 height=480}\n*キャプション*\n\n"
         ++ "https://www.youtube.com/watch?v=dQw4w9WgXcQ\n\n"
-        ++ "![](asset:asset002) ![](asset:asset003 \"図 2\") ![d](asset:asset004)\n\n"
+        ++ "![](asset:asset002) ![](asset:asset003) ![d](asset:asset004)\n** *図 2* **\n\n"
         ++ "https://example.com/card\n\n"
         ++ "```ts:src/a.ts {1,3-5}\nconst y = 2;\n```\n\n"
         ++ "<details><summary>補足</summary>\n\n畳んだ中身\n\n![](asset:asset005) ![](asset:asset006)\n\n</details>\n\n"

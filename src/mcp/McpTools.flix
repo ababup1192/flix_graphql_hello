@@ -252,7 +252,7 @@ mod McpTools {
         ++ "折りたたみは `<details><summary>要約</summary>` から `</details>` の行まで。"
         ++ "数式は `$…$`（行内）と `$$` の行で囲む（ブロック）。TeX のまま。"
         ++ "コードは ```` ```lang:path/file {1,3-5} ````（`:` の後がファイル名、`{}` が強調する行。どちらも省ける。lang が mermaid なら図）。"
-        ++ "画像は `![alt](asset:ID \"caption\")`、動画は `@[video](asset:ID)`。1 行に画像を空白区切りで 2 つ以上並べると gallery。"
+        ++ "画像は `![alt](asset:ID)` で、キャプションは直後の行に `*キャプション*`（中はリンクや太字も可）。動画は `@[video](asset:ID)`。1 行に画像を空白区切りで 2 つ以上並べると gallery（キャプションは枚数だけ `*…*` を空白区切りで、無い画像は `**`）。"
         ++ "画像に使えるのは asset の id だけで、外部 URL の画像（`![alt](https://…)`）は image にならず alt を URL へのリンクにした文字になる。"
         ++ "他の entry へのリンクは `[text](entry:ID)`。"
         ++ "タスクは `- [ ]` / `- [x]`。"
@@ -891,7 +891,7 @@ mod McpTools {
     pub def readConverter(format: Format): Value -> Value = match format {
         case Format.Markdown => docTo(doc -> Markdown.toMarkdown(doc))
         case Format.Text     => docTo(doc -> RichText.toText(doc))
-        case Format.Html     => docTo(doc -> RichText.toHtml(Map.empty(), Map.empty(), doc))
+        case Format.Html     => docTo(doc -> RichText.toHtml(Map.empty(), Map.empty(), Map.empty(), doc))
         case Format.Doc      => identity
     }
 

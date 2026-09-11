@@ -12,8 +12,9 @@ mod TestCdnCachePg {
     def seed(): Unit \ Db + CmsErr + IdGen + Tenant + Session =
         let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
         discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString("one"))}));
-        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b2")), CmsTestKit.entryData(List#{("title", Json.JString("two"))}));
+        discard ContentTypes.addField(Session.grant(), blogs#id, { unique = true | CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = Some(CmsTestKit.apiId("title")) | FieldConfig.empty() }) });
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b1")), CmsTestKit.entryData(List#{("title", Json.JString("one")), ("slug", Json.JString("one"))}));
+        discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("b2")), CmsTestKit.entryData(List#{("title", Json.JString("two")), ("slug", Json.JString("two"))}));
         discard ContentEntries.publish(Session.grant(), CmsTestKit.entryId("b1"), "tester", false)
 
     /// GET /graphql?query={ blogs { nodes { id } } }（パーセント符号化済み）。
@@ -100,5 +101,32 @@ mod TestCdnCachePg {
             (first#status, idsOf(first#body), Option.nonEmpty(firstEtag), secondStatus, secondIds, Option.nonEmpty(secondEtag) and secondEtag != firstEtag)
         });
         Assert.assertEq(expected = (200, List#{"b1"}, true, 200, (Nil: List[String]), true), outcome)
+
+    /// GET /graphql?query={ blog(id: "b1") { id } }（パーセント符号化済み）。
+    def getById(): HttpRequest =
+        getPath("/graphql?query=%7B%20blog(id%3A%20%22b1%22)%20%7B%20id%20%7D%20%7D", Nil)
+
+    /// GET /graphql?query={ blog(slug: "one") { id } }（パーセント符号化済み）。
+    def getBySlug(): HttpRequest =
+        getPath("/graphql?query=%7B%20blog(slug%3A%20%22one%22)%20%7B%20id%20%7D%20%7D", Nil)
+
+    /// 本文の data.blog.id。無ければ None。
+    def blogIdOf(body: String): Option[String] =
+        JsonValue.parse(body) |> Result.toOption |> Option.flatMap(parsed -> Value.path(List#{"data", "blog", "id"}, parsed) |> Value.asStr)
+
+    ///
+    /// id 直引きと slug 直引きは同じ b1 を返すが、query 文が違うので ETag は別になる（CDN のキャッシュが混ざらない）。
+    ///
+    @Test
+    def testPgCdnEtagVariesBySlugArg(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withPool(pool -> {
+            PgTestSupport.seed(seed);
+            let engine = PgTestSupport.contentEngine(pool);
+            let byId = handleFull(pool, engine, getById());
+            let bySlug = handleFull(pool, engine, getBySlug());
+            (byId#status, blogIdOf(byId#body), bySlug#status, blogIdOf(bySlug#body),
+             Option.nonEmpty(Http.findHeader("ETag", bySlug#headers)) and Http.findHeader("ETag", byId#headers) != Http.findHeader("ETag", bySlug#headers))
+        });
+        Assert.assertEq(expected = (200, Some("b1"), 200, Some("b1"), true), outcome)
 
 }

@@ -1,7 +1,8 @@
 ///
-/// 管理 API のリゾルバが使う効果の和。DB の読み書き、CMS の業務エラー、id の採番、今のプロジェクト、認証済みユーザー、asset の保存先、先読みの写し。
+/// 管理 API のリゾルバが使う効果の和。DB の読み書き、CMS の業務エラー、id の採番、今のプロジェクト、認証済みユーザー、asset の保存先、
+/// 外へ出す HTTP（linkCard の OGP の取得。handler は AppEnv の OutboundHttp）、先読みの写し。
 ///
-pub type alias AdminEff = Db + CmsErr + IdGen + Tenant + Session + ObjectStore + Time.Clock.Clock + Log + Preloaded
+pub type alias AdminEff = Db + CmsErr + IdGen + Tenant + Session + ObjectStore + Net.Http.Http + Time.Clock.Clock + Log + Preloaded
 
 ///
 /// 管理 API の Runner。リゾルバ 1 つの実行を「最初の SQL で借りる接続 1 本・Tx 1 つ」に包み、失敗を GraphQL のエラーに写す。
@@ -28,7 +29,7 @@ mod AdminRunner {
     ///
     /// リクエストの Tx（読むだけの文書）があればそれで、無ければフィールドごとの Tx で f を走らせ、失敗を GraphQL のエラーに写す。
     ///
-    def transactField(pool: Pool, projectId: ProjectId, context: Context, f: Unit -> Result[FieldError, JavaValue.Boxed] \ AdminEff + IO): Result[FieldError, JavaValue.Boxed] \ {IO, Log, IdGen, Tenant, ObjectStore, Time.Clock.Clock, Preloaded} =
+    def transactField(pool: Pool, projectId: ProjectId, context: Context, f: Unit -> Result[FieldError, JavaValue.Boxed] \ AdminEff + IO): Result[FieldError, JavaValue.Boxed] \ {IO, Log, IdGen, Tenant, ObjectStore, Net.Http.Http, Time.Clock.Clock, Preloaded} =
         match context#tx {
             case Some(handle) => DbRunner.transactShared(handle, context#observe, context#actor, f) |> DbRunner.toSharedFieldResult(LogFields.requestIdOf(context#log))
             case None         => DbRunner.transactObserved(pool, Some(projectId), context#observe, context#actor, f) |> DbRunner.toFieldResult(LogFields.requestIdOf(context#log))

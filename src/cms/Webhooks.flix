@@ -74,8 +74,8 @@ mod Webhooks {
     /// WhyNot: 証明を取らないのは、outbox に積むのは操作の結果で、誰ができるかは公開などの入口（publishEntries / writeEntries の証明）が決めているため。
     /// ここで別の証明を要求すると、同じ操作に 2 つの権限が要る事になる。
     ///
-    pub def emitEntry(event: WebhookEvent, entryId: EntryId, typeApiId: ApiId): Unit \ Db + IdGen + Tenant =
-        emit(event, entryPayload(event, entryId, typeApiId))
+    pub def emitEntry(event: WebhookEvent, entryId: EntryId, typeApiId: ApiId, slug: Option[String]): Unit \ Db + IdGen + Tenant =
+        emit(event, entryPayload(event, entryId, typeApiId, slug))
 
     ///
     /// 型の変更を配信に積む。呼ぶのは `Publishing.notify` だけ（型を触るユースケースと同じ Tx）。
@@ -94,14 +94,21 @@ mod Webhooks {
                 id = IdGen.freshUlid(), projectId = Tenant.currentId(), webhookId = row#id, event = WebhookEvent.text(event), payload = payload }))
 
     ///
-    /// entry の出来事の payload。中身は持たず、id と型だけ（受け手はコンテンツ API で読む）。
+    /// entry の出来事の payload。中身は持たず、id と型と slug だけ（受け手はコンテンツ API で読む）。
     ///
-    def entryPayload(event: WebhookEvent, entryId: EntryId, typeApiId: ApiId): Json \ DbRead + Tenant =
+    /// WhyNot: slug が無い時にキーを null で置かない。受け手が「slug で引く型か」を entry.slug の有無で見分けられる。
+    ///
+    def entryPayload(event: WebhookEvent, entryId: EntryId, typeApiId: ApiId, slug: Option[String]): Json \ DbRead + Tenant =
         Json.JObject(Map#{
             "event"   => Json.JString(WebhookEvent.text(event)),
             "project" => Json.JString(projectSlug()),
-            "entry"   => Json.JObject(Map#{ "id" => Json.JString(EntryId.text(entryId)), "type" => Json.JString(ApiId.text(typeApiId)) })
+            "entry"   => entryObject(entryId, typeApiId, slug)
         })
+
+    /// payload の entry。slug は型が SLUG のフィールドを持ち、値が入っている時だけ足す。
+    def entryObject(entryId: EntryId, typeApiId: ApiId, slug: Option[String]): Json =
+        let base = Map#{ "id" => Json.JString(EntryId.text(entryId)), "type" => Json.JString(ApiId.text(typeApiId)) };
+        Json.JObject(slug |> Option.map(text -> Map.insert("slug", Json.JString(text), base)) |> Option.getWithDefault(base))
 
     ///
     /// 型の変更の payload。

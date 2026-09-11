@@ -62,9 +62,10 @@ Tx の入口は 3 つ:
 
 仕事の表（webhook_deliveries / scheduled_actions）は outbox: 業務の Tx で積み、tick が `FOR UPDATE SKIP LOCKED` で拾う（複数台でも二重にならない）。実行中に落ちた行は claimed_at で回復する。
 
-- **BackgroundJobs** — プロセス内のバックグラウンドワーカー。2 秒ごとに回復・掃除 → Scheduler.tick → WebhookDispatcher.tick → CdnPurge（State の `purge` がある時だけ。enqueue → tick）。heartbeat は lastTick / lastWatch（/health が古さを見る）。外部トリガー POST /jobs/tick も同じ tick。JVM の例外の catch は 3 つ: tick 全体の `guarded`（Log の sink を try の内側に入れる）、予約公開と Webhook の部分ごとの `guardedPart`（handler の入れ子に依らない）、watch の `guardedWatch`。置き方の規則は [../flix-conventions.md](../flix-conventions.md)
+- **BackgroundJobs** — プロセス内のバックグラウンドワーカー。2 秒ごとに回復・掃除 → Scheduler.tick → WebhookDispatcher.tick → CdnPurge（State の `purge` がある時だけ。enqueue → tick）→ LinkCardRefresh.tick。heartbeat は lastTick / lastWatch（/health が古さを見る）。外部トリガー POST /jobs/tick も同じ tick。JVM の例外の catch は 3 つ: tick 全体の `guarded`（Log の sink を try の内側に入れる）、予約公開と Webhook の部分ごとの `guardedPart`（handler の入れ子に依らない）、watch の `guardedWatch`。置き方の規則は [../flix-conventions.md](../flix-conventions.md)
 - **Scheduler** — 予約公開の実行。1 回の tick はチャンク（既定 100 件）の claim と実行を予算（既定 10 秒）に達するまで繰り返し、満杯でない claim で終わる。判断は純粋な `canClaimMore`。CMS_SCHEDULER_CHUNK_SIZE / CMS_SCHEDULER_TICK_BUDGET_SECONDS
 - **WebhookDispatcher** — 配信行を拾って POST
+- **LinkCardRefresh** — richText の linkCard の OGP の取り直し。`link_cards` の古い行（fetched_at が 7 日より前）と失敗した行（1 時間より前）を 1 tick に最大 20 件拾い、`LinkCards.fetchOver`（HTTP は Tx の外）→ `LinkCards.store`（そのプロジェクトの Tx）。初回の取得は管理 API の `fetchLinkCard`。`link_cards` は仕事が跨いで拾うので RLS 無し（TestTenantGuardPg の一覧）
 - **JobLog** — 仕事 1 件の Log の行。job.kind / job.id / job.outcome
 
 ## 停止と自己回復

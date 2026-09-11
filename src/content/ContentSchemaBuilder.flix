@@ -43,13 +43,71 @@ mod ContentSchemaBuilder {
     }
 
     ///
-    /// `<singular>(id: ID!, stage: Stage = PUBLISHED): <Singular>`
+    /// `<singular>(id: ID, slug: String, stage: Stage = PUBLISHED): <Singular>`。
+    /// `slug` は unique な SLUG のフィールドを 1 つだけ持つ型にだけ生える。
+    ///
+    /// WhyNot: id を `ID!` のままにできないのは、id と slug のどちらか 1 つを受けるため。
+    /// WhyNot: field2 でなく fieldRaw なのは、引数 3 つの field3 が無く、足すと manyField と 2 通りの書き方に割れるため。
     ///
     def oneField(all: List[ContentType], owner: ContentType): Field[Unit, ContentEff] =
-        Schema.field2(queryName(owner), Schema.arg("id", GqlCodec.id()), stageArg(), Out.option(Out.obj(entryType(all, owner))), (_context, _root, id, stage) -> {
-            let Id.Id(text) = id;
-            Ok(EntryId.parse(text) |> Option.flatMap(entryId -> findOne(owner, entryId, stageOrDefault(stage))) |> Option.filter(entry -> entry#typeId == owner#id))
-        }) |> Field.withDescription("${TypeName.text(owner#singular)} を id で 1 つ。無ければ null")
+        // 引数の定義。slug は出せる型でだけ SDL に出す（出さない型には引数ごと生えない）
+        let idArg = Schema.arg("id", GqlCodec.option(GqlCodec.id()));
+        let slugArg = Schema.arg("slug", GqlCodec.option(GqlCodec.string()));
+        let lookupSlug = slugLookupOf(owner);
+        let slugInfos = match lookupSlug { case Some(_) => Arg.info(slugArg) :: Nil case None => Nil };
+        let stage = stageArg();
+        let infos = Arg.info(idArg) :: (slugInfos ::: Arg.info(stage) :: Nil);
+        Schema.fieldRaw(queryName(owner), infos, Out.option(Out.obj(entryType(all, owner))), (_context, _root, args) ->
+            // 引数を復号し、id か slug のどちらか 1 つで 1 件引く
+            forM (
+                id      <- Arg.decode(idArg, args);
+                slug    <- Arg.decode(slugArg, args);
+                atStage <- Arg.decode(stage, args)
+            ) yield lookupOne(owner, lookupSlug, id, slug, stageOrDefault(atStage)))
+            |> Field.withDescription(oneDescription(owner, lookupSlug))
+
+    def oneDescription(owner: ContentType, lookupSlug: Option[ApiId]): String =
+        let byId = "${TypeName.text(owner#singular)} を id で 1 つ。無ければ null";
+        match lookupSlug {
+            case None        => byId
+            case Some(apiId) => "${byId}。slug（${ApiId.text(apiId)}）でも引ける（id と slug はどちらか 1 つ）"
+        }
+
+    ///
+    /// slug で引ける型の SLUG のフィールド。SLUG のフィールドが 1 つだけ、かつ unique で配列でない型に限る。
+    ///
+    /// WhyNot: unique でない SLUG や 2 つ以上ある SLUG で引数を出さないのは、値が 1 件に決まらず、
+    /// 下書き（照合は公開時だけ）では同じ値の entry が普通に並ぶため。SDL に出ている＝1 件に決まる、を守る。
+    ///
+    def slugLookupOf(owner: ContentType): Option[ApiId] =
+        match owner#fields |> List.filter(field -> field#kind == FieldKind.Slug) {
+            case field :: Nil => if (field#unique and not field#many) Some(field#apiId) else None
+            case _            => None
+        }
+
+    ///
+    /// 1 件の引き方。id だけなら id で、slug だけなら slug で。両方 null も両方指定も invalid。
+    ///
+    def lookupOne(owner: ContentType, lookupSlug: Option[ApiId], id: Option[Id], slug: Option[String], stage: Stage): Option[Entry] \ DbRead + CmsErr + Tenant + Session =
+        match (id, slug) {
+            case (Some(Id.Id(text)), None) => EntryId.parse(text) |> Option.flatMap(entryId -> findOne(owner, entryId, stage)) |> Option.filter(entry -> entry#typeId == owner#id)
+            case (None, Some(value))       => findOneBySlug(owner, lookupSlug, value, stage)
+            case _                         => CmsErr.invalid(Violation.Violation("id", "id か slug のどちらか 1 つを指定してください") :: Nil)
+        }
+
+    ///
+    /// slug で 1 件。2 件以上あれば invalid（下書きで重複している事を隠さない）。
+    ///
+    def findOneBySlug(owner: ContentType, lookupSlug: Option[ApiId], value: String, stage: Stage): Option[Entry] \ DbRead + CmsErr + Tenant + Session =
+        let apiId = lookupSlug |> CmsErr.orInvalid("slug", "この型は slug で引けません");
+        // 2 件取って重複を見る。並びは id で決め打ちして結果を決定的にする
+        let found = ContentEntries.listByStage(owner, accessTo(None, stage),
+            { filter = Condition.TextEq(apiId, value) :: Nil, orderBy = (SortKey.ById, Direction.Asc) :: Nil, first = 2, start = PageStart.Offset(0) });
+        match found#entries {
+            case Nil          => None
+            case entry :: Nil => Some(entry)
+            case _            => CmsErr.invalid(Violation.Violation("slug", "slug '${value}' の ${TypeName.text(owner#singular)} が複数あります。id で指定してください") :: Nil)
+        }
 
     /// stage の行を 1 つ。下書きはその entry を対象にした readDraft の証明（プレビュートークンはその entry だけ通る）。
     def findOne(owner: ContentType, entryId: EntryId, stage: Stage): Option[Entry] \ DbRead + CmsErr + Tenant + Session =
@@ -195,14 +253,16 @@ mod ContentSchemaBuilder {
     def richTextType(all: List[ContentType]): ObjectType[(Util.Json.Json, Entry), ContentEff] =
         Schema.objectType("RichText", () ->
             Schema.field0("json", Out.json(), (_context, src) -> Ok(JsonValue.fromJson(fst(src)))) ::
-            Schema.field0("html", Out.string(), (_context, src) -> Ok(RichText.toHtml(imageRefs(fst(src)), linkPaths(all, src), fst(src)))) ::
+            Schema.field0("html", Out.string(), (_context, src) -> Ok(RichText.toHtml(imageRefs(fst(src)), linkPaths(all, src), cardRefs(fst(src)), fst(src)))) ::
+            Schema.field0("markdown", Out.string(), (_context, src) -> Ok(Markdown.toMarkdown(fst(src)))) ::
             Schema.field0("text", Out.string(), (_context, src) -> Ok(RichText.toText(fst(src)))) ::
+            Schema.field0("assets", Out.list(Out.obj(assetType())), (_context, src) -> Ok(docAssets(fst(src)))) ::
             Schema.field0("headings", Out.list(Out.obj(headingType())), (_context, src) -> Ok(RichText.headings(fst(src)))) ::
             Schema.field0("links", Out.list(Out.obj(richTextLinkType())), (_context, src) -> Ok(richTextLinks(all, src))) ::
             Schema.field1("excerpt", excerptLengthArg(), Out.string(), (_context, src, length) -> Ok(RichText.excerpt(length |> Option.getWithDefault(120), fst(src)))) ::
             Schema.field0("wordCount", Out.int32(), (_context, src) -> Ok(RichText.wordCount(fst(src)))) ::
             Schema.field0("readingTimeMinutes", Out.int32(), (_context, src) -> Ok(RichText.readingTimeMinutes(fst(src)))) :: Nil)
-            |> ObjectType.withDescription("構造化した本文。json は ProseMirror の doc、html はその描画（見出しに id 付き）、text は平文、headings は目次用、links は本文が指しているコンテンツ、excerpt / wordCount / readingTimeMinutes は一覧向けの派生値")
+            |> ObjectType.withDescription("構造化した本文。json は ProseMirror の doc、html はその描画（見出しに id 付き）、markdown は CMS の方言を含む Markdown（画像は asset:ID、コンテンツへのリンクは entry:ID。assets と links で解く）、text は平文、assets は本文が指している asset、headings は目次用、links は本文が指しているコンテンツ、excerpt / wordCount / readingTimeMinutes は一覧向けの派生値")
 
     ///
     /// 本文が指しているコンテンツ 1 つ。`json` を自分で描くサイトが、entryId から href を作るのに使う。
@@ -245,9 +305,20 @@ mod ContentSchemaBuilder {
             Schema.field0("id", Out.string(), (_context, heading) -> Ok(heading#id)) :: Nil)
             |> ObjectType.withDescription("本文の見出し。id は html の見出しに付いた物と同じ")
 
+    /// linkCard の OGP（表にある物だけ。取りには行かない）。無い url・失敗した url は URL だけの a になる。
+    def cardRefs(doc: Util.Json.Json): Map[String, RichText.CardRef] \ DbRead + Tenant =
+        LinkCards.cardsOf(RichText.linkCardUrls(doc))
+
+    ///
+    /// 本文が指している asset（ready の物だけ）。`markdown` の `asset:ID` を解くのに使う。
+    ///
+    /// WhyNot: 画像 1 つずつ引かないのは、doc の asset の id をまとめて 1 本の SELECT にするため（html と同じ引き方）。
+    ///
+    def docAssets(doc: Util.Json.Json): List[Asset] \ ContentEff =
+        Assets.findMany(RichText.assetIds(doc)) |> List.filter(asset -> asset#status == AssetStatus.Ready)
+
     def imageRefs(doc: Util.Json.Json): Map[AssetId, RichText.ImageRef] \ ContentEff =
-        Assets.findMany(RichText.assetIds(doc))
-            |> List.filter(asset -> asset#status == AssetStatus.Ready)
+        docAssets(doc)
             |> List.map(asset -> (asset#id, { url = ObjectStore.publicUrl(asset#key), width = asset#width, height = asset#height }))
             |> List.toMap
 

@@ -20,7 +20,7 @@ EntryRows / ContentTypeRows / AssetRows / AuthRows / WebhookRows / ScheduleRows 
 
 ## src/cms/ — ユースケース
 
-ContentTypes / ContentEntries / Projects / Assets / Accounts / Members / ApiKeys / PersonalTokens / Webhooks / PreviewTokens / Schedules。
+ContentTypes / ContentEntries / Projects / Assets / Accounts / Members / ApiKeys / PersonalTokens / Webhooks / PreviewTokens / Schedules / LinkCards（richText の linkCard の OGP。`fetch` は編集画面が貼った瞬間に管理 API から呼ばれ、`Ogp`（純粋な規則: meta の読み取り、プライベートアドレスの断り、取り直しの判定）で読んで `link_cards` に upsert。監査は積まない）。
 
 Publishing は公開・取り下げ・削除・型の変更の副作用の Facade: ユースケースは `PublishingEvent` を 1 つ作って `Publishing.notify(event)` を同じ Tx で 1 回呼び、中が純粋な表 `Publishing.effectsOf(event)` の順に Webhooks.emit（配信行を積む outbox）と Projects.bumpContentVersion（プロジェクトの版 `content_version`。下書きの保存では進めない）を呼ぶ。ユースケースから emit / bump を直に呼ばない。監査ログは Publishing を通さず、ユースケースが `Audit.record` を業務と同じ Tx で直に呼ぶ（消費者が 1 つで Tx の中で終わるので events の 1 表 + consumer にはしない。`Audit.flix` の WhyNot、[../design/audit-log.md](../design/audit-log.md)）。検索索引が来たら作り直しを考える（[../design/cdn.md](../design/cdn.md)）。
 型を変える操作は `SchemaChange`（純粋な規則。操作 → 既存のデータに起きる影響の種類）と `SchemaGuard.withImpact`（Tx の中で件数を数え直し、`fieldImpact` で見た `expected` と食い違えば CmsErr）を通す。参照の索引 `entry_links` は `field_api_id` で持ち（`content_fields` への FK を持たない。フィールドを消しても索引が消えず、同じ apiId で足し直すと戻る）、「今もあるフィールドか」は読み取り時に突き合わせる。`Projects.contentVersion()` がコンテンツ API の GET の ETag に入る。PersonalTokens は本人に付く PAT で Tenant を取らない。

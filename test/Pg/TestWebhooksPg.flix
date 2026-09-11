@@ -25,10 +25,10 @@ mod TestWebhooksPg {
         HttpRequest.headers(req) |> Map.get(name) |> Option.flatMap(List.head) |> Option.getWithDefault("")
 
     ///
-    /// 型を作る（schema.changed）→ フィールド（schema.changed）→ entry を公開（entry.published）→ 取り下げ（entry.unpublished）で 4 件積まれ、新しい順に並ぶ。
+    /// 型を作る（schema.changed）→ フィールド 2 つ（schema.changed ×2）→ entry を公開（entry.published）→ 取り下げ（entry.unpublished）で 5 件積まれ、新しい順に並ぶ。
     /// 同じ Webhook 宛は古い順に 1 件ずつなので、相手が 500 なら最古の 1 件だけ attempts 1 で pending に戻り、残りは待つ。次の tick では 0 件。
-    /// 最古を redeliver して 200 なら、同じ tick で 4 件が順に送られ delivered。最後に送られたのは最新の entry.unpublished。
-    /// 送ったリクエストには出来事・配信 id・署名が付き、署名は secret から同じ計算で照合できる。
+    /// 最古を redeliver して 200 なら、同じ tick で 5 件が順に送られ delivered。最後に送られたのは最新の entry.unpublished。
+    /// 送ったリクエストには出来事・配信 id・署名が付き、署名は secret から同じ計算で照合できる。payload の entry には id・型・slug が載る。
     ///
     @Test
     def testPgWebhookOutboxAndDispatch(): Unit \ {IO, Assert} =
@@ -37,7 +37,8 @@ mod TestWebhooksPg {
                 let issued = Webhooks.create(Session.grant(), draft(List#{WebhookEvent.EntryPublished, WebhookEvent.EntryUnpublished, WebhookEvent.SchemaChanged}));
                 let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
                 discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
-                let entry = ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi"))}));
+                discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("slug", FieldKind.Slug, { sourceField = Some(CmsTestKit.apiId("title")) | FieldConfig.empty() }));
+                let entry = ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("hi")), ("slug", Json.JString("hi-there"))}));
                 discard ContentEntries.publish(Session.grant(), entry#id, "tester", false);
                 discard ContentEntries.unpublish(Session.grant(), entry#id);
                 issued
@@ -58,6 +59,8 @@ mod TestWebhooksPg {
                 header("X-Cms-Signature", req) == WebhookDispatcher.signature(issued#secret, { timestamp = header("X-Cms-Timestamp", req), body = HttpRequest.body(req) |> Option.getWithDefault("") }));
             let lastEvent = lastRequest |> Option.map(req -> (header("X-Cms-Event", req), header("X-Cms-Delivery", req) == oldest, HttpRequest.url(req)));
             let bodyMentionsProject = lastRequest |> Option.flatMap(HttpRequest.body) |> Option.map(body -> String.contains(substr = "\"project\":\"default\"", body) and String.contains(substr = "\"type\":\"blogs\"", body));
+            // entry の slug も載る（サイトが URL を言い当てられる）
+            let bodyMentionsSlug = lastRequest |> Option.flatMap(HttpRequest.body) |> Option.map(body -> String.contains(substr = "\"slug\":\"hi-there\"", body));
             List#{
                 PgTestSupport.named("queued", queued),
                 PgTestSupport.named("firstTick", firstTick),
@@ -68,6 +71,7 @@ mod TestWebhooksPg {
                 PgTestSupport.named("signatureMatches", signatureMatches),
                 PgTestSupport.named("lastEvent", lastEvent),
                 PgTestSupport.named("bodyMentionsProject", bodyMentionsProject),
+                PgTestSupport.named("bodyMentionsSlug", bodyMentionsSlug),
                 PgTestSupport.named("requestCount", List.length(Ref.get(received)))
             }
         });
@@ -75,16 +79,18 @@ mod TestWebhooksPg {
         Assert.assertEq(
             expected = List#{
                 PgTestSupport.named("queued", List#{ (WebhookEvent.EntryUnpublished, DeliveryStatus.Pending, 0), (WebhookEvent.EntryPublished, DeliveryStatus.Pending, 0),
-                                                     (WebhookEvent.SchemaChanged, DeliveryStatus.Pending, 0), (WebhookEvent.SchemaChanged, DeliveryStatus.Pending, 0) }),
+                                                     (WebhookEvent.SchemaChanged, DeliveryStatus.Pending, 0), (WebhookEvent.SchemaChanged, DeliveryStatus.Pending, 0),
+                                                     (WebhookEvent.SchemaChanged, DeliveryStatus.Pending, 0) }),
                 PgTestSupport.named("firstTick", tick(1)),
-                PgTestSupport.named("afterFailure", List#{ (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 1, 500) }),
+                PgTestSupport.named("afterFailure", List#{ (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 0, 0), (DeliveryStatus.Pending, 1, 500) }),
                 PgTestSupport.named("secondTick", tick(0)),
-                PgTestSupport.named("thirdTick", tick(4)),
+                PgTestSupport.named("thirdTick", tick(5)),
                 PgTestSupport.named("redelivered", Some((DeliveryStatus.Delivered, 2, 200, true))),
                 PgTestSupport.named("signatureMatches", Some(true)),
                 PgTestSupport.named("lastEvent", Some(("entry.unpublished", false, "https://example.com/hook"))),
                 PgTestSupport.named("bodyMentionsProject", Some(true)),
-                PgTestSupport.named("requestCount", 5)
+                PgTestSupport.named("bodyMentionsSlug", Some(true)),
+                PgTestSupport.named("requestCount", 6)
             },
             outcome)
 

@@ -14,14 +14,21 @@
 mod OutboundHttp {
 
     import java.net.http.HttpClient
+    import java.net.http.{HttpClient$Redirect => Redirect}
+    import java.net.http.{HttpClient$Version => Version}
 
     use Net.Http.Http
 
     ///
-    /// プロセスで 1 つ持つ HttpClient。標準ライブラリの既定と同じ設定（redirect は NORMAL、connect timeout 無し）。
+    /// プロセスで 1 つ持つ HttpClient。redirect は NORMAL、connect timeout 無し、プロトコルは HTTP/1.1。
+    ///
+    /// WhyNot: 既定の HTTP_2 のままにしないのは、`http://` の相手へ `Connection: Upgrade, HTTP2-Settings` と `Upgrade: h2c` を付けて送るため。
+    /// Node の受け手（Next.js / Vercel 系）はこのヘッダを見ると 1 バイトも返さずに接続を切り、
+    /// Webhook が「送れませんでした（Other）: HTTP/1.1 header parser received no bytes」で再試行を繰り返す。
+    /// 相手を選べない外向きの通信（Webhook の POST、OGP の取得、JWKS、CDN の purge）では HTTP/1.1 が安全。
     ///
     pub def newClient(): HttpClient \ IO =
-        Net.HttpLayer.newDefaultClient()
+        HttpClient.newBuilder().followRedirects(Redirect.NORMAL).version(Version.HTTP_1_1).build()
 
     ///
     /// client で `Net.Http.Http` を捌く。標準ライブラリの `Net.Http.handle` と同じ op の形で、client だけ外から受ける。
