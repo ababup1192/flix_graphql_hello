@@ -6,6 +6,7 @@
 // 言語は 70 以上あるので、**打って絞る**。セレクトボックスに 70 行並べても読めない。
 
 import type { Editor } from "@tiptap/core";
+import type { EditorView } from "@tiptap/pm/view";
 import { dropPendingLine, leaveBlock } from "./block-edges";
 import { ensure, extensionOf, labelOf, markOf, search, type Option } from "./code-languages";
 import { bar as barOf, field, owns, popover } from "./ui";
@@ -32,6 +33,7 @@ type Lowlight = Parameters<typeof ensure>[0];
 type ViewArgs = {
   node: { type: { name: string }; attrs: Record<string, unknown>; nodeSize: number };
   editor: Editor;
+  view: EditorView;
   getPos: () => number | undefined;
 };
 
@@ -69,7 +71,7 @@ function writeRanges(lines: Set<number>): string | null {
 }
 
 export function codeBlockView(lowlight: Lowlight) {
-  return ({ node, editor, getPos }: ViewArgs) => {
+  return ({ node, editor, view, getPos }: ViewArgs) => {
     const dom = document.createElement("div");
     dom.className = "tt-code";
 
@@ -80,7 +82,7 @@ export function codeBlockView(lowlight: Lowlight) {
       placeholder: "ファイル名",
       onCommit: () => writeFileName(),
       onLeave: (dir) => leaveCode(dir),
-      onDown: () => dropPendingLine(editor.view),
+      onDown: () => dropPendingLine(view),
     });
 
     // 言語。**決めた後の表示と、打って絞る入力を同じ欄が兼ねる**（note と同じ）。
@@ -91,7 +93,7 @@ export function codeBlockView(lowlight: Lowlight) {
     const langBox = field({
       className: "tt-code-lang",
       placeholder: "コーディング言語",
-      onDown: () => dropPendingLine(editor.view),
+      onDown: () => dropPendingLine(view),
     });
 
     // ブロックの**下**の帯。左からファイル名・強調行・言語。
@@ -103,7 +105,7 @@ export function codeBlockView(lowlight: Lowlight) {
       place: { side: "below", align: "end" },
       className: "tt-code-pop",
       keep: [langBox],
-      bounds: editor.view.dom,
+      bounds: view.dom,
     });
 
     const list = document.createElement("div");
@@ -182,10 +184,10 @@ export function codeBlockView(lowlight: Lowlight) {
     // 焦点がこのブロックから離れている間は、帯だけを残して placeholder を消す（note と同じ）。
     const paintIdle = () => {
       const pos = getPos();
-      const found = pos === undefined ? null : editor.view.state.doc.nodeAt(pos);
-      const cursor = editor.view.state.selection.from;
+      const found = pos === undefined ? null : view.state.doc.nodeAt(pos);
+      const cursor = view.state.selection.from;
       const inCode =
-        editor.view.hasFocus() && found !== null && pos !== undefined && cursor > pos && cursor < pos + found.nodeSize;
+        view.hasFocus() && found !== null && pos !== undefined && cursor > pos && cursor < pos + found.nodeSize;
       const inside = dom.contains(document.activeElement) || inCode;
       dom.classList.toggle("is-idle", !inside);
     };
@@ -209,12 +211,12 @@ export function codeBlockView(lowlight: Lowlight) {
     const writeLines = () => {
       const pos = getPos();
       if (pos === undefined) return;
-      const found = editor.view.state.doc.nodeAt(pos);
+      const found = view.state.doc.nodeAt(pos);
       if (!found) return;
       const value = writeRanges(marked);
       if (value === (found.attrs.highlightLines ?? null)) return;
-      editor.view.dispatch(
-        editor.view.state.tr.setNodeMarkup(pos, undefined, { ...found.attrs, highlightLines: value })
+      view.dispatch(
+        view.state.tr.setNodeMarkup(pos, undefined, { ...found.attrs, highlightLines: value })
       );
     };
 
@@ -321,10 +323,10 @@ export function codeBlockView(lowlight: Lowlight) {
       await ensure(lowlight, id);
       const pos = getPos();
       if (pos === undefined) return;
-      const found = editor.view.state.doc.nodeAt(pos);
+      const found = view.state.doc.nodeAt(pos);
       if (!found) return;
-      editor.view.dispatch(
-        editor.view.state.tr.setNodeMarkup(pos, undefined, { ...found.attrs, language: id || null })
+      view.dispatch(
+        view.state.tr.setNodeMarkup(pos, undefined, { ...found.attrs, language: id || null })
       );
       current = id;
       langBox.value = labelOf(id);
@@ -335,14 +337,14 @@ export function codeBlockView(lowlight: Lowlight) {
     const writeFileName = () => {
       const pos = getPos();
       if (pos === undefined) return;
-      const found = editor.view.state.doc.nodeAt(pos);
+      const found = view.state.doc.nodeAt(pos);
       if (!found) return;
       const typed = fileName.value.trim();
       // CMS が受けるのは `RichText.isFileName` の形。受けない物は入れない。
       const value = typed !== "" && /^[\p{L}\p{N}_./-]{1,200}$/u.test(typed) ? typed : null;
       fileName.classList.toggle("is-bad", typed !== "" && value === null);
       if (value === (found.attrs.fileName ?? null)) return;
-      editor.view.dispatch(editor.view.state.tr.setNodeMarkup(pos, undefined, { ...found.attrs, fileName: value }));
+      view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, { ...found.attrs, fileName: value }));
       if (value !== null) guessLanguage(value);
     };
 
@@ -361,9 +363,9 @@ export function codeBlockView(lowlight: Lowlight) {
     const leaveCode = (dir: -1 | 1) => {
       const pos = getPos();
       if (pos === undefined) return;
-      const found = editor.view.state.doc.nodeAt(pos);
+      const found = view.state.doc.nodeAt(pos);
       if (!found) return;
-      leaveBlock(editor.view, pos, found.nodeSize, dir);
+      leaveBlock(view, pos, found.nodeSize, dir);
     };
 
     // 言語の欄。入ると整った名前を外して素の名前で絞れるようにし、離れると整った名前へ戻す。

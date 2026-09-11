@@ -3,3 +3,4 @@ elm-stuff/
 dist/
 .devbox/
 dev/checks/__screenshots__/
+.vitest/

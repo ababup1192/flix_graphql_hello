@@ -9,7 +9,7 @@ import { mount, toEnd, settle, type Harness } from "../harness";
 let harness: Harness | null = null;
 afterEach(() => harness?.destroy());
 
-// 浮く帯は tippy が `document.body` に付けるので、エディタの要素の外も見る。
+// 浮く帯は Floating UI がエディタの親に付けるので、エディタの要素の外も見る。
 const titles = (h: Harness, selector: string) =>
   [...document.querySelectorAll<HTMLElement>(selector)]
     .filter((one) => !one.hidden)

@@ -1206,6 +1206,9 @@ body.tt-dragging-row, body.tt-dragging-row * { cursor: ns-resize !important; }
   background: #24292f;
   color: #ffffff;
   box-shadow: 0 6px 18px rgb(0 0 0 / 22%);
+  /* WhyNot: 層を書かずに置かない。tippy は箱を body の直下に自前の高い層で置いていたが、
+     Floating UI は帯をそのまま本文の親に置くので、書かないと本文の中の物に沈む。 */
+  z-index: var(--z-dropdown);
 }
 :root[data-theme="dark"] .tt-bubble:not(.is-caption) { background: var(--color-panel); color: var(--color-ink); }
 @media (prefers-color-scheme: dark) {
@@ -1290,5 +1293,5 @@ body.tt-dragging-row, body.tt-dragging-row * { cursor: ns-resize !important; }
 .tt-blocks-url.is-bad { border-color: var(--color-bad); }
 /* ブロックの中の入力欄（キャプション・出典・ファイル名）に焦点がある間は帯を出さない。
    WhyNot: BubbleMenu の blur では消えない。入力欄はエディタの DOM の中なので「中への移動」と見なされる。 */
-/* tippy の箱は body 直下に付くので、根から見る（tippy を使うのは帯だけ）。 */
-:root:has(.tt-body input:focus, .tt-body textarea:focus, .tt-body select:focus) [data-tippy-root] { display: none; }
+/* 帯は Floating UI が本文の親に付けるが、焦点のある欄とは親子の関係が無いので根から見る。 */
+:root:has(.tt-body input:focus, .tt-body textarea:focus, .tt-body select:focus) .tt-bubble { display: none; }

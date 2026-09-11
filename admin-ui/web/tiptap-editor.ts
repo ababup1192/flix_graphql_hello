@@ -9,13 +9,9 @@
 import { Editor, InputRule, posToDOMRect } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
-import TaskList from "@tiptap/extension-task-list";
-import TaskItem from "@tiptap/extension-task-item";
+import { TaskList, TaskItem } from "@tiptap/extension-list";
 import Underline from "@tiptap/extension-underline";
-import Table from "@tiptap/extension-table";
-import TableRow from "@tiptap/extension-table-row";
-import TableCell from "@tiptap/extension-table-cell";
-import TableHeader from "@tiptap/extension-table-header";
+import { Table, TableRow, TableCell, TableHeader } from "@tiptap/extension-table";
 import { Node } from "@tiptap/core";
 import Code from "@tiptap/extension-code";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
@@ -293,7 +289,21 @@ class TiptapEditor extends HTMLElement {
       // codeBlock は色付きの物に差し替える。
       // gapcursor は切る。**置ける所と置けない所ができ、見た目も横一本の線で
       // 区切り線と紛れる。** ブロックの間は `BlockEdges` が疑似行で揃える。
-      StarterKit.configure({ heading: { levels: [1, 2, 3, 4] }, codeBlock: false, gapcursor: false, blockquote: false, code: false }),
+      // WhyNot: v3 の StarterKit が新しく持つ link / underline は入れない。どちらも下で
+      // 自前に広げた物を登録していて、二重に入ると schema が名前でぶつかる。
+      //
+      // WhyNot: trailingNode は入れない。末尾に段落を足すのは doc の形を変える事で、
+      // ブロックの間の疑似行は `BlockEdges` が持っている。
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3, 4] },
+        codeBlock: false,
+        gapcursor: false,
+        blockquote: false,
+        code: false,
+        link: false,
+        underline: false,
+        trailingNode: false,
+      }),
       // `` `x` `` でコードにする所を書き直した物。
       //
       // WhyNot: TipTap の `markInputRule` をそのまま使わない。`` ` `` の前の 1 文字まで
@@ -394,19 +404,27 @@ class TiptapEditor extends HTMLElement {
       BubbleMenu.configure({
         element: this.buildBubble(),
         updateDelay: 80,
-        tippyOptions: {
+        options: {
           placement: "bottom",
-          duration: 80,
-          offset: [0, 6],
-          // WhyNot: キャプションでは placement を top にしない。placement は configure で固定なので、
-          // 基準の矩形をキャプションの上に持ち上げて、bottom のまま「キャプションの真上」に置く。
-          //
-          // WhyNot: 引用の出典では持ち上げない。出典は箱の下 18px に居るので、帯 1 つ分（約 52px）
-          // 持ち上げると帯が引用の箱に重なり、選んだ文字から離れて見える。出典は選んだ文字の
-          // 真下（placement の既定）に出す。
-          getReferenceClientRect: () => {
-            const view = this.editor!.view;
-            const { from, to } = this.editor!.state.selection;
+          offset: 6,
+        },
+        // WhyNot: キャプションでは placement を top にしない。placement は configure で固定なので、
+        // 基準の矩形をキャプションの上に持ち上げて、bottom のまま「キャプションの真上」に置く。
+        //
+        // WhyNot: 引用の出典では持ち上げない。出典は箱の下 18px に居るので、帯 1 つ分（約 52px）
+        // 持ち上げると帯が引用の箱に重なり、選んだ文字から離れて見える。出典は選んだ文字の
+        // 真下（placement の既定）に出す。
+        // WhyNot: `this.editor` を `!` で素通ししない。Floating UI の帯は view が組み上がる
+        // 途中で 1 回位置を測りに来るので、その時はまだ `this.editor` が入っていない。
+        // null を返すと帯は既定（選択の矩形）で置かれる。
+        getReferencedVirtualElement: () => {
+          if (!this.editor) return null;
+          const view = this.editor.view;
+          const { from, to } = this.editor.state.selection;
+          // WhyNot: view が生きているかを毎回見る。Floating UI は位置を**非同期**に測るので、
+          // エディタを畳んだ後に測りに来る事があり、畳んだ view の座標を引くと落ちる。
+          const rect = () => {
+            if (view.isDestroyed) return new DOMRect(0, 0, 0, 0);
             if (!this.inSmallText()) return posToDOMRect(view, from, to);
             // 文字の端では domAtPos が figcaption そのものを返す（text node ではない）。
             const at = view.domAtPos(from).node as globalThis.Node;
@@ -416,7 +434,8 @@ class TiptapEditor extends HTMLElement {
             const height = this.bubble?.offsetHeight ?? 52;
             const top = cap.top - 12 - height;
             return new DOMRect(cap.left, top, cap.width, 0);
-          },
+          };
+          return { getBoundingClientRect: rect, getClientRects: () => [rect()] as unknown as DOMRectList };
         },
         shouldShow: ({ state, from, to }) => {
           if (state.selection instanceof NodeSelection) return false;
@@ -1437,7 +1456,7 @@ class TiptapEditor extends HTMLElement {
     const incoming = this.getAttribute("doc") ?? "";
     if (incoming === this.lastSent) return;
     if (incoming === JSON.stringify(unfold(this.editor.getJSON()))) return;
-    this.cards.batch(() => this.editor!.commands.setContent(this.docFromAttribute(this.editor!.extensionManager.extensions), false));
+    this.cards.batch(() => this.editor!.commands.setContent(this.docFromAttribute(this.editor!.extensionManager.extensions), { emitUpdate: false }));
     this.askLinked();
   }
 

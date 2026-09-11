@@ -100,3 +100,4 @@ MCP サーバ（`POST /mcp`）の繋ぎ方、本番とセルフホスト（docke
 - **外向きの id に連番を出さない**（乱数の public_id、時刻順に読む物は ULID）
 - **監査（`Audit.record`）は業務の書き込みと同じ Tx で呼ぶ。** `audit_events` は SELECT と INSERT の policy しか無く、後から書き換えられない
 - **ドメイン（src/cms）は GeneratedAdmin を知らない。** 写しは `AdminMapping` / `AccountMapping`
+- **ライブラリを新しく入れる時は最新版を入れる**（`npm install -D foo@latest` のように明示し、入れた後に `npm outdated` で確かめる）。記憶で版を書かない。実際に `vitest@^3` と書いて入れた日に最新は 5 で、provider の渡し方が変わっていた

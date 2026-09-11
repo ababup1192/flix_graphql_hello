@@ -67,6 +67,7 @@ type ViewArgs = {
   node: any;
   getPos: () => number | undefined;
   editor: any;
+  view: any;
 };
 
 // CMS が受ける値（`RichText.checkImage`）。size は "small" だけ。
@@ -248,7 +249,7 @@ export function imageItemNode(store: AssetStore) {
     },
 
     addNodeView() {
-      return ({ node, getPos, editor }: ViewArgs) => {
+      return ({ node, getPos, editor, view }: ViewArgs) => {
         const dom = document.createElement("figure");
         dom.className = "tt-image";
 
@@ -280,7 +281,7 @@ export function imageItemNode(store: AssetStore) {
         const current = () => {
           const pos = getPos();
           if (pos === undefined) return null;
-          const found = editor.view.state.doc.nodeAt(pos);
+          const found = view.state.doc.nodeAt(pos);
           return found ? { pos, node: found } : null;
         };
         const writeAll = (changes: Record<string, string | null>) => {
@@ -295,11 +296,11 @@ export function imageItemNode(store: AssetStore) {
             changed = true;
           }
           if (!changed) return;
-          const state = editor.view.state;
+          const state = view.state;
           const tr = state.tr.setNodeMarkup(found.pos, undefined, next);
           // node ごと選んだまま attrs を変えても、帯が消えないように選び直す（NodeSelection は写像で外れる事がある）。
           if (state.selection instanceof NodeSelection && state.selection.from === found.pos) tr.setSelection(NodeSelection.create(tr.doc, found.pos));
-          editor.view.dispatch(tr);
+          view.dispatch(tr);
         };
 
         // WhyNot: 帯を文字にしない。note と同じくアイコンで、語は title / aria-label に持つ
@@ -323,7 +324,7 @@ export function imageItemNode(store: AssetStore) {
         const setMode = (next: BarMode, refocus: boolean) => {
           mode = next;
           render();
-          if (mode === "tools" && refocus) editor.view.focus();
+          if (mode === "tools" && refocus) view.focus();
         };
 
         // tools: リンク / ALT / 縮小 / 配置 / 横に並べる / 削除。
@@ -338,19 +339,19 @@ export function imageItemNode(store: AssetStore) {
           const found = current();
           if (!found) return;
           writeAll({ size: found.node.attrs.size === SMALL ? null : SMALL });
-          editor.view.focus();
+          view.focus();
         });
         const alignTool = tool(ICONS.alignCenter, "配置", () => setMode("align", false));
         // 1 枚だけの image が隣り合っている時だけ出す。押すと続きの image を 1 つに畳む。
         const rowTool = tool(ICONS.columns, "横に並べる", () => {
           const pos = getPos();
-          if (pos !== undefined) foldImages(editor.view, imagePosOf(editor.view.state.doc, pos));
+          if (pos !== undefined) foldImages(view, imagePosOf(view.state.doc, pos));
         });
         const trashTool = tool(ICONS.trash, "削除", () => {
           const found = current();
           if (!found) return;
-          editor.view.dispatch(editor.view.state.tr.delete(found.pos, found.pos + found.node.nodeSize));
-          editor.view.focus();
+          view.dispatch(view.state.tr.delete(found.pos, found.pos + found.node.nodeSize));
+          view.focus();
         });
         const toolsFor = (many: boolean, withRow: boolean) =>
           many ? [linkTool, altTool, trashTool] : [linkTool, altTool, smallTool, alignTool, ...(withRow ? [rowTool] : []), trashTool];
@@ -411,7 +412,7 @@ export function imageItemNode(store: AssetStore) {
         // 並べている（親の image に 2 枚以上ある）間か。
         const withOthers = () => {
           const pos = getPos();
-          return pos !== undefined && editor.view.state.doc.resolve(pos).parent.childCount >= 2;
+          return pos !== undefined && view.state.doc.resolve(pos).parent.childCount >= 2;
         };
         // 帯は node ごと選んでいる間か、tools 以外に入れ替わっている間（出典は選んでいなくても押せる）。
         const render = () => {
@@ -422,7 +423,7 @@ export function imageItemNode(store: AssetStore) {
             const pos = getPos();
             if (pos === undefined) return;
             const many = withOthers();
-            const doc = editor.view.state.doc;
+            const doc = view.state.doc;
             const row = many ? 0 : adjacentImages(doc.resolve(imagePosOf(doc, pos))).length;
             bar.replaceChildren(...toolsFor(many, row >= 2));
             for (const button of tools) button.hidden = false;
@@ -644,7 +645,7 @@ export function imageNode(_store: AssetStore) {
     },
 
     addNodeView() {
-      return ({ node, getPos, editor }: ViewArgs) => {
+      return ({ node, getPos, editor, view }: ViewArgs) => {
         const dom = document.createElement("div");
 
         // 並べた物ぜんたいの帯。1 枚ずつに戻す / 削除 の 2 つだけ
@@ -659,14 +660,14 @@ export function imageNode(_store: AssetStore) {
         bar.append(
           tool(ICONS.image, "1 枚ずつに戻す", () => {
             const pos = getPos();
-            if (pos !== undefined) splitImages(editor.view, pos);
+            if (pos !== undefined) splitImages(view, pos);
           }),
           tool(ICONS.trash, "削除", () => {
             const pos = getPos();
-            const found = pos === undefined ? null : editor.view.state.doc.nodeAt(pos);
+            const found = pos === undefined ? null : view.state.doc.nodeAt(pos);
             if (pos === undefined || !found) return;
-            editor.view.dispatch(editor.view.state.tr.delete(pos, pos + found.nodeSize));
-            editor.view.focus();
+            view.dispatch(view.state.tr.delete(pos, pos + found.nodeSize));
+            view.focus();
           })
         );
         dom.append(bar);
@@ -697,7 +698,7 @@ export function imageNode(_store: AssetStore) {
           selectNode() {
             dom.classList.add("ProseMirror-selectednode");
             // 1 枚だけの時はぜんたいの帯を出さない（「1 枚ずつに戻す」が意味を持たない）。
-            bar.hidden = (editor.view.state.doc.nodeAt(getPos() ?? -1)?.childCount ?? 0) < 2;
+            bar.hidden = (view.state.doc.nodeAt(getPos() ?? -1)?.childCount ?? 0) < 2;
           },
           deselectNode() {
             dom.classList.remove("ProseMirror-selectednode");
