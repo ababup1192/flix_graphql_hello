@@ -127,11 +127,14 @@ results project types model =
         needle =
             String.toLower (String.trim model.query)
 
-        matches : String -> Bool
-        matches label =
-            String.isEmpty needle || String.contains needle (String.toLower label)
+        {- 画面を探す時は別名も当てる。「PAT」で Personal Access Token に行けるように。 -}
+        matches : { label : String, hint : String, route : Route, also : List String } -> Bool
+        matches place =
+            String.isEmpty needle
+                || List.any (\word -> String.contains needle (String.toLower word)) (place.label :: place.also)
 
-        places : List Item
+        {- 画面。`also` は探す時だけに使う別名（略語・英語・和名）で、一覧には出さない。 -}
+        places : List { label : String, hint : String, route : Route, also : List String }
         places =
             (types
                 |> List.map
@@ -139,15 +142,17 @@ results project types model =
                         { label = summary.name
                         , hint = "API"
                         , route = Route.Entries project summary.apiId []
+                        , also = [ summary.apiId ]
                         }
                     )
             )
-                ++ [ { label = "メディア", hint = "画面", route = Route.Media project }
-                   , { label = "メンバー", hint = "設定", route = Route.Settings project Route.Members }
-                   , { label = "API キーと Webhook", hint = "設定", route = Route.Settings project Route.ApiKeys }
-                   , { label = "監査ログ", hint = "設定", route = Route.Settings project (Route.Audit []) }
-                   , { label = "プロジェクトと MCP", hint = "設定", route = Route.Settings project Route.ProjectSettings }
-                   , { label = "自分", hint = "画面", route = Route.Account }
+                ++ [ { label = "メディア", hint = "画面", route = Route.Media project, also = [ "media", "asset", "画像", "ファイル" ] }
+                   , { label = "メンバー", hint = "設定", route = Route.Settings project Route.Members, also = [ "member", "招待", "権限" ] }
+                   , { label = "API キーと Webhook", hint = "設定", route = Route.Settings project Route.ApiKeys, also = [ "api key", "apikey", "webhook", "鍵" ] }
+                   , { label = "監査ログ", hint = "設定", route = Route.Settings project (Route.Audit []), also = [ "audit", "log", "履歴" ] }
+                   , { label = "プロジェクトと MCP", hint = "設定", route = Route.Settings project Route.ProjectSettings, also = [ "mcp", "project", "公開範囲" ] }
+                   , { label = "アカウント", hint = "画面", route = Route.Account, also = [ "account", "自分", "プロフィール" ] }
+                   , { label = "Personal Access Token", hint = "画面", route = Route.AccountTokens, also = [ "pat", "token", "トークン", "cli" ] }
                    ]
 
         entries : List Item
@@ -157,7 +162,7 @@ results project types model =
                 |> List.concat
                 |> List.map (\item -> { item | route = withProject project item.route })
     in
-    List.filter (.label >> matches) places ++ entries
+    (places |> List.filter matches |> List.map (\place -> { label = place.label, hint = place.hint, route = place.route })) ++ entries
 
 
 {-| 今出ている候補（上限つき）。

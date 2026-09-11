@@ -489,11 +489,12 @@ page attrs =
 -}
 pageHeader : { title : String, icon : Maybe ( List (Svg.Svg msg), msg ), meta : List (Html msg), actions : List (Html msg) } -> Html msg
 pageHeader args =
-    Html.div [ A.class "flex min-h-8 items-center gap-3" ]
+    -- 狭い画面では折り返す。題と操作を 1 行に押し込むと、どちらも 1 文字ずつ縦に割れる
+    Html.div [ A.class "flex min-h-8 flex-wrap items-center gap-x-3 gap-y-2" ]
         (viewHeaderIcon args.icon
             :: heading args.title
             :: args.meta
-            ++ [ Html.div [ A.class "ml-auto flex items-center gap-2" ] args.actions ]
+            ++ [ Html.div [ A.class "ml-auto flex shrink-0 items-center gap-2" ] args.actions ]
         )
 
 
@@ -697,12 +698,16 @@ tile attrs =
 
 
 {-| メディアの見え姿。画像でない物は mime を出す（読めない四角を並べない）。
+
+`size` は高さか縦横比のクラス（`h-24` / `aspect-[4/3]`）。一覧のように幅が変わる所は
+縦横比で渡す。高さを固定すると、狭い画面で細長く切り取られる。
+
 -}
 thumb : String -> { url : String, mime : String } -> Html msg
-thumb height asset =
-    Html.div [ A.class ("flex items-center justify-center bg-well " ++ height) ]
+thumb size asset =
+    Html.div [ A.class ("flex w-full items-center justify-center bg-well " ++ size) ]
         [ if String.startsWith "image/" asset.mime then
-            Html.img [ A.src asset.url, A.class ("w-full object-cover " ++ height) ] []
+            Html.img [ A.src asset.url, A.class ("h-full w-full object-cover " ++ size) ] []
 
           else
             Html.span [ A.class "px-2 text-center text-[10px] text-ink-faint" ] [ Html.text asset.mime ]

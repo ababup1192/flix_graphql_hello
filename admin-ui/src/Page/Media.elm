@@ -269,7 +269,8 @@ takeUpload model =
 
 view : Model -> Html Msg
 view model =
-    div [ class "flex gap-6" ]
+    -- 狭い画面では右の面を下に回す。横に並べたままだと一覧の幅が 1 枚分も残らない
+    div [ class "flex flex-col gap-6 lg:flex-row" ]
         [ Ui.page [ class "min-w-0 flex-1" ]
             [ Ui.pageHeader { title = "メディア", icon = Nothing, meta = [], actions = [ viewPicker ] }
             , Ui.errors model.errors
@@ -351,7 +352,7 @@ viewGrid model =
 
                 else
                     div [ class "flex flex-col gap-3" ]
-                        [ div [ class "grid grid-cols-6 gap-3" ] (List.map viewThumb page.nodes)
+                        [ div [ class "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6" ] (List.map viewThumb page.nodes)
                         , viewMore model page
                         ]
         }
@@ -395,7 +396,7 @@ viewMore model page =
 viewThumb : AssetRow -> Html Msg
 viewThumb asset =
     Ui.tile [ onClick (Selected asset) ]
-        [ Ui.thumb "h-24" { url = asset.url, mime = asset.mime }
+        [ Ui.thumb "aspect-[4/3]" { url = asset.url, mime = asset.mime }
         , div [ class "flex flex-col items-start gap-1 border-t border-edge p-2" ]
             [ span [ class "w-full truncate text-[11px] font-medium text-ink" ] [ text asset.fileName ]
             , if asset.status == "PENDING" then
@@ -424,7 +425,7 @@ sizeText bytes =
 -}
 viewPanel : Model -> AssetRow -> Html Msg
 viewPanel model asset =
-    div [ class "sticky top-0 z-(--z-sticky) flex max-h-screen w-72 shrink-0 flex-col gap-4 overflow-auto border-l border-edge py-6 pl-5" ]
+    div [ class "flex shrink-0 flex-col gap-4 border-edge py-6 lg:sticky lg:top-0 lg:z-(--z-sticky) lg:max-h-screen lg:w-72 lg:overflow-auto lg:border-l lg:pl-5" ]
         [ Ui.railTitle "選んだメディア"
         , if String.startsWith "image/" asset.mime then
             Html.img [ src asset.url, class "w-full rounded-md border border-edge bg-well object-contain" ] []
