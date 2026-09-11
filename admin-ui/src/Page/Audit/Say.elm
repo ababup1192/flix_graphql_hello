@@ -82,7 +82,7 @@ sentence zone row =
             Strong row.targetId
                 :: (case string [ "role" ] detail of
                         Just role ->
-                            [ Text " を ", Strong (roleText role), Text " で招待した" ]
+                            [ Text " を招待した（権限: ", Strong (roleText role), Text "）" ]
 
                         Nothing ->
                             [ Text " を招待した" ]
@@ -92,10 +92,10 @@ sentence zone row =
             Strong row.targetId
                 :: (case string [ "role" ] detail of
                         Just role ->
-                            [ Text " の役割を ", Strong (roleText role), Text " にした" ]
+                            [ Text " の権限を ", Strong (roleText role), Text " にした" ]
 
                         Nothing ->
-                            [ Text " の役割を変えた" ]
+                            [ Text " の権限を変更した" ]
                    )
 
         "member.removed" ->
@@ -111,10 +111,10 @@ sentence zone row =
             [ Text "API キー ", Strong row.targetId, Text " を失効した" ]
 
         "type.created" ->
-            [ Text "API ", TargetLink row.targetId, Text " を作った" ]
+            [ Text "API ", TargetLink row.targetId, Text " を作成した" ]
 
         "type.updated" ->
-            [ Text "API ", TargetLink row.targetId, Text " を直した" ]
+            [ Text "API ", TargetLink row.targetId, Text " を変更した" ]
 
         "type.deleted" ->
             [ Text "API ", TargetLink row.targetId ]
@@ -132,16 +132,16 @@ sentence zone row =
                    )
 
         "field.added" ->
-            [ TargetLink typeOfField, Text " に ", Strong fieldName, Text " を足した" ]
+            [ TargetLink typeOfField, Text " に ", Strong fieldName, Text " を追加した" ]
 
         "field.updated" ->
-            [ TargetLink typeOfField, Text " の ", Strong fieldName, Text " を直した" ]
+            [ TargetLink typeOfField, Text " の ", Strong fieldName, Text " を変更した" ]
 
         "field.removed" ->
             [ TargetLink typeOfField, Text " の ", Strong fieldName, Text " を削除した" ]
 
         "fields.reordered" ->
-            [ Text "API ", TargetLink row.targetId, Text " のフィールドを並び替えた" ]
+            [ Text "API ", TargetLink row.targetId, Text " のフィールドを並べ替えた" ]
 
         "project.visibility_changed" ->
             case ( string [ "before" ] detail, string [ "after" ] detail ) of
@@ -149,13 +149,13 @@ sentence zone row =
                     [ Text "公開範囲を ", Strong (visibilityText before), Text " → ", Strong (visibilityText after), Text " にした" ]
 
                 _ ->
-                    [ Text "公開範囲を変えた" ]
+                    [ Text "公開範囲を変更した" ]
 
         "webhook.created" ->
-            webhook [] row "を作った"
+            webhook [] row "を作成した"
 
         "webhook.updated" ->
-            webhook [ "before" ] row "を直した"
+            webhook [ "before" ] row "を変更した"
 
         "webhook.deleted" ->
             webhook [ "before" ] row "を削除した"
@@ -253,7 +253,7 @@ entry row =
 
 version : D.Value -> Maybe String
 version detail =
-    int [ "version" ] detail |> Maybe.map (\n -> "版 " ++ String.fromInt n)
+    int [ "version" ] detail |> Maybe.map (\n -> "v" ++ String.fromInt n)
 
 
 {-| 全角の括弧で包む。中身が無ければ何も出さない。
@@ -543,7 +543,7 @@ entryFacts : D.Value -> Sheet
 entryFacts detail =
     facts
         [ ( "API", string [ "typeApiId" ] detail )
-        , ( "版", int [ "version" ] detail |> Maybe.map String.fromInt )
+        , ( "バージョン", int [ "version" ] detail |> Maybe.map (\n -> "v" ++ String.fromInt n) )
         , ( "予約", string [ "scheduledFor" ] detail )
         ]
 

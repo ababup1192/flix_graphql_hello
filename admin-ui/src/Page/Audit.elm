@@ -13,6 +13,7 @@ module Page.Audit exposing (Model, Msg(..), init, update, urlOf, view)
 
 import Api
 import Api.Admin.Enum.ActorKind as ActorKind
+import Dict
 import Html exposing (Html, div, span, text)
 import Html.Attributes exposing (class, href, title, type_, value)
 import Html.Events exposing (onClick, onInput)
@@ -506,16 +507,36 @@ viewDetail model zone row =
         , viewSheet zone (Say.sheet row)
         , if row.action == "type.deleted" then
             div []
-                [ Ui.ghostButton [ Html.Attributes.disabled True, class "border-dashed text-ink-faint", title "型の apply が入ってから" ] [ text "この姿に戻す" ] ]
+                [ Ui.ghostButton [ Html.Attributes.disabled True, class "border-dashed text-ink-faint", title "API の定義を書き戻す口が入ってから" ] [ text "この姿に戻す" ] ]
 
           else
             text ""
-        , Html.details [ class "text-ink-soft" ]
-            [ Html.summary [ class "cursor-pointer select-none hover:text-ink" ] [ text "JSON を見る" ]
-            , Html.pre [ class "mt-2 overflow-x-auto rounded-md border border-edge bg-panel px-3 py-2 font-mono text-[11px] leading-5 whitespace-pre text-ink" ]
-                [ text (E.encode 2 row.detail) ]
-            ]
+        , if hasNested row.detail then
+            Html.details [ class "text-ink-soft" ]
+                [ Html.summary [ class "cursor-pointer select-none hover:text-ink" ] [ text "JSON を見る" ]
+                , Html.pre [ class "mt-2 overflow-x-auto rounded-md border border-edge bg-panel px-3 py-2 font-mono text-[11px] leading-5 whitespace-pre text-ink" ]
+                    [ text (E.encode 2 row.detail) ]
+                ]
+
+          else
+            text ""
         ]
+
+
+{-| detail に入れ子（オブジェクトか配列）があるか。無ければ型紙が全部を出しているので、JSON の畳みを出さない
+（`{"role": "writer"}` を「権限 投稿者」の下にもう 1 度出しても、増える情報が無い）。
+-}
+hasNested : D.Value -> Bool
+hasNested value =
+    D.decodeValue (D.dict D.value) value
+        |> Result.map (Dict.values >> List.any isNested)
+        |> Result.withDefault False
+
+
+isNested : D.Value -> Bool
+isNested value =
+    D.decodeValue (D.oneOf [ D.dict D.value |> D.map (always True), D.list D.value |> D.map (always True) ]) value
+        |> Result.withDefault False
 
 
 viewSheet : Time.Zone -> Say.Sheet -> Html Msg

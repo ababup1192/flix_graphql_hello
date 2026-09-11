@@ -1618,7 +1618,7 @@ viewRestoreDialog model version =
             [ Ui.subheading ("v" ++ String.fromInt version.version ++ " の内容に戻しますか")
             , span [ class "text-[13px] text-ink-soft" ]
                 [ text (byText version ++ "（" ++ Ui.DateTime.formatLocal model.zone version.createdAt ++ "）") ]
-            , Ui.note [ text "今の下書きも版として残るので、戻した後でここから元に戻せます。公開中の内容は変わりません。" ]
+            , Ui.note [ text "今の下書きもバージョンとして残るので、戻した後でここから元に戻せます。公開中の内容は変わりません。" ]
             , viewActionError model
             , div [ class "flex gap-2" ]
                 [ Ui.button [ onClick RestoreWanted, Html.Attributes.disabled model.publishing ]
@@ -2199,7 +2199,7 @@ viewConflict : EntryRow -> Html Msg
 viewConflict theirs =
     Ui.card [ class "flex flex-col gap-3 border-[color:var(--color-warn)] bg-[color:var(--color-warn-bg)] p-4" ]
         [ Ui.subheading "他の人が先に保存しました"
-        , Ui.note [ text ("相手の版は v" ++ String.fromInt theirs.version ++ " です。自分の入力を上に乗せるか、相手の内容に切り替えるかを選んでください。") ]
+        , Ui.note [ text ("相手のバージョンは v" ++ String.fromInt theirs.version ++ " です。自分の入力を上に乗せるか、相手の内容に切り替えるかを選んでください。") ]
         , div [ class "flex gap-2" ]
             [ Ui.button [ onClick KeepMine ] [ text "自分の入力を上に乗せる" ]
             , Ui.ghostButton [ onClick TakeTheirs ] [ text "相手の内容にする" ]

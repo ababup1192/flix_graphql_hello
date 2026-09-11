@@ -101,7 +101,7 @@ view model =
                 ]
             ]
         , Ui.sectionTitle "Personal Access Token"
-        , Ui.note [ text "CLI と MCP から自分の権限で叩くための鍵です。値は発行した時に 1 回だけ表示されます。" ]
+        , Ui.note [ text "CLI と MCP から自分の権限で接続するための鍵です。値は発行した時に 1 回だけ表示されます。" ]
         , Ui.errors model.errors
         , case model.issued of
             Just issued ->

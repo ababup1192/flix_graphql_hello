@@ -362,7 +362,7 @@ view model =
 viewPanel : Model -> ContentTypeDetail -> Html Msg
 viewPanel model detail =
     div [ class "flex flex-col gap-4" ]
-        [ Ui.note [ text "この API に query を投げると何が返るかを、実物で見せます。query は書き換えられます。" ]
+        [ Ui.note [ text "この API で query を実行すると何が返るかを、実物で見せます。query は書き換えられます。" ]
         , viewControls model detail
         , viewRequest model detail
         , viewAnswer model
@@ -427,7 +427,7 @@ viewRequest : Model -> ContentTypeDetail -> Html Msg
 viewRequest model detail =
     Ui.card [ class "flex flex-col gap-3 p-4" ]
         [ div [ class "flex items-center gap-2" ]
-            [ Ui.subheading "投げる query"
+            [ Ui.subheading "実行する query"
             , div [ class "ml-auto flex items-center gap-2" ]
                 [ if model.edited then
                     Ui.ghostButton [ onClick ResetWanted ] [ text "型から作り直す" ]
@@ -510,7 +510,7 @@ statusTone status =
 viewCurl : Model -> Html Msg
 viewCurl model =
     Ui.card [ class "flex flex-col gap-2 p-4" ]
-        [ Ui.subheading "手元から叩く"
+        [ Ui.subheading "手元から実行"
         , Ui.codeBlock []
             ("curl -X POST https://<あなたのドメイン>/p/"
                 ++ model.project

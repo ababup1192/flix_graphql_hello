@@ -749,7 +749,7 @@ viewNewType model =
         Nothing ->
             Ui.page [ class "max-w-xl" ]
                 [ Ui.pageHeader { title = "API を作る", icon = Nothing, meta = [], actions = [] }
-                , Ui.note [ text "API はコンテンツの型です。作った後にフィールドを足します。エンドポイントは後から変えられません。" ]
+                , Ui.note [ text "API はコンテンツの型です。作成した後にフィールドを追加します。エンドポイントは後から変更できません。" ]
                 , Ui.errors model.errors
                 , Ui.card [ class "flex flex-col gap-4 p-4" ]
                     [ Ui.field { label = "表示名", hint = Nothing, errors = [] }
@@ -941,7 +941,7 @@ viewAddPanel args model form =
             [ Ui.input [ value form.name, onInput NameTyped, placeholder "タイトル" ] ]
         , Ui.field
             { label = "フィールド ID"
-            , hint = Just "API に出る名前。作った後は変えられません"
+            , hint = Just "API に出る名前。作成した後は変更できません"
             , errors = apiIdError form.apiId |> Maybe.map List.singleton |> Maybe.withDefault []
             }
             [ Ui.input [ value form.apiId, onInput ApiIdTyped, class "font-mono", placeholder "title" ] ]
@@ -1021,7 +1021,7 @@ viewEditPanel model detail form =
             [ Ui.input [ value form.name, onInput (\typed -> EditChanged (\f -> { f | name = typed })) ] ]
         , Ui.field { label = "フィールド ID", hint = Just "API に出る名前。変えられません（変えると今の API が壊れます）", errors = [] }
             [ Ui.input [ value form.apiId, Html.Attributes.disabled True, class "font-mono" ] ]
-        , Ui.field { label = "種類", hint = Just "変えられません。変えたい時は新しく作って値を移します", errors = [] }
+        , Ui.field { label = "種類", hint = Just "変更できません。変更したいときは新しく作成して値を移します", errors = [] }
             [ div [ class "flex items-center gap-2 text-[13px] text-ink" ]
                 [ text (kindText form.kind)
                 , if form.many then
@@ -1292,7 +1292,7 @@ effectText kind =
             "メディアの参照が API から見えなくなります"
 
         "VALUES_RESURRECTED" ->
-            "消したはずの値が API に戻ります"
+            "削除したはずの値が API に戻ります"
 
         "PUBLISH_BLOCKED" ->
             "公開中のコンテンツが再公開できなくなります"
@@ -1301,7 +1301,7 @@ effectText kind =
             "下書きの保存が通らなくなります"
 
         "ENTRIES_REMOVED" ->
-            "型と一緒にコンテンツが消えます"
+            "API と一緒にコンテンツが消えます"
 
         other ->
             other

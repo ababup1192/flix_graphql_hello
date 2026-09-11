@@ -7,7 +7,7 @@
     "build": "vite build",
     "gen": "elm-graphql --schema-file ../admin.graphql --base Api.Admin --output generated --scalar-codecs ScalarCodecs && elm-graphql --schema-file ../account.graphql --base Api.Account --output generated --scalar-codecs AccountCodecs",
     "test": "elm-test",
-    "check": "elm-format --validate src tests && elm-review && elm-test && elm make src/Main.elm --output=/dev/null && tsc --noEmit",
+    "check": "node scripts/wording-check.mjs && elm-format --validate src tests && elm-review && elm-test && elm make src/Main.elm --output=/dev/null && tsc --noEmit",
     "review": "elm-review",
     "contract": "node scripts/contract.mjs",
     "smoke": "node scripts/smoke.mjs",
