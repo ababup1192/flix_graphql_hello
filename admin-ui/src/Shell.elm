@@ -58,7 +58,7 @@ view config content palette =
         , div [ class "flex min-h-0 flex-1" ]
             [ sidebar config
             , div [ class "mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col overflow-auto px-8" ]
-                [ viewBreadcrumb config, viewTypeTabs config, content ]
+                [ viewBreadcrumb config, viewTypeTabs config, viewSettingsTabs config, content ]
             ]
         , palette
         , case config.toast of
@@ -129,6 +129,61 @@ viewTypeTabs config =
 
         Nothing ->
             text ""
+
+
+{-| プロジェクト設定のタブ。メンバー / API キーと Webhook / プロジェクトと MCP を並べる。
+
+型の画面のタブと同じ部品。ここが無いと、API キーの画面には ⌘K か URL の直打ちでしか着けない
+（Contentful の Settings メニュー、GitHub の設定の左の一覧に当たる物）。
+
+-}
+viewSettingsTabs : Config msg -> Html msg
+viewSettingsTabs config =
+    case config.route of
+        Route.Settings _ current ->
+            let
+                slug : String
+                slug =
+                    slugOf config
+
+                tab : String -> Route.SettingsTab -> { label : String, url : String, on : Bool }
+                tab label target =
+                    { label = label
+                    , url = Route.toString (Route.Settings slug target)
+                    , on = sameSettings current target
+                    }
+            in
+            div [ class "pt-3" ]
+                [ Ui.tabs
+                    (List.concat
+                        [ if Permission.has Permission.ManageMembers config.permissions then
+                            [ tab "メンバー" Route.Members ]
+
+                          else
+                            []
+                        , if Permission.has Permission.ManageApiKeys config.permissions then
+                            [ tab "API キーと Webhook" Route.ApiKeys ]
+
+                          else
+                            []
+                        , if Permission.has Permission.ManageProject config.permissions then
+                            [ tab "プロジェクトと MCP" Route.ProjectSettings ]
+
+                          else
+                            []
+                        ]
+                    )
+                ]
+
+        _ ->
+            text ""
+
+
+{-| API キーと Webhook は同じ画面。
+-}
+sameSettings : Route.SettingsTab -> Route.SettingsTab -> Bool
+sameSettings current target =
+    current == target || (current == Route.Webhooks && target == Route.ApiKeys)
 
 
 {-| 型の画面か。エディタと新規作成では出さない（そこは 1 件の話なので）。
