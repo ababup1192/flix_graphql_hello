@@ -173,6 +173,19 @@ mod AdminMapping {
     pub def timestampOf(argument: String, text: String): Timestamp.Timestamp \ CmsErr =
         Timestamp.fromIso8601(text) |> CmsErr.orInvalid(argument, "'${text}' は ISO 8601 の時刻ではありません（例: 2026-09-08T09:00:00Z）")
 
+    ///
+    /// 監査の絞り込み（auditEvents / auditEventsCount / AuditExportInput に共通の引数）→ ドメインの絞り込み。since / until は ISO 8601（形が違えば invalid）。
+    ///
+    pub def auditFilterOf(actorKind: Option[GeneratedAdmin.ActorKind], action: Option[String], since: Option[String], until: Option[String]): AuditFilter \ CmsErr =
+        { actorKind = actorKind |> Option.map(actorKindOf), actionPrefix = action,
+          since = since |> Option.map(text -> timestampOf("since", text)),
+          until = until |> Option.map(text -> timestampOf("until", text)) }
+
+    pub def auditExportFormatOf(format: GeneratedAdmin.AuditExportFormat): AuditExportFormat = match format {
+        case GeneratedAdmin.AuditExportFormat.Csv  => AuditExportFormat.Csv
+        case GeneratedAdmin.AuditExportFormat.Json => AuditExportFormat.Json
+    }
+
     pub def actorKindOf(kind: GeneratedAdmin.ActorKind): ActorKind = match kind {
         case GeneratedAdmin.ActorKind.User   => ActorKind.User
         case GeneratedAdmin.ActorKind.ApiKey => ActorKind.ApiKey

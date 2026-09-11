@@ -18,3 +18,14 @@ query listAuditEvents(projectId: Int64, afterId: Option[String], actorKind: Opti
       AND (:untilId IS NULL OR id < :untilId)
     ORDER BY id DESC LIMIT :max
 }
+
+// listAuditEvents と同じ絞り込みでの件数（ページの引数 afterId / max は無い）。一覧の下の件数と、書き出しの上限の確認に
+query countAuditEvents(projectId: Int64, actorKind: Option[String], actionPrefix: Option[String], sinceId: Option[String], untilId: Option[String]) -> one {
+    SELECT count(*)::bigint AS total
+    FROM audit_events
+    WHERE project_id = :projectId
+      AND (:actorKind IS NULL OR actor_kind = :actorKind)
+      AND (:actionPrefix IS NULL OR action LIKE :actionPrefix || '%')
+      AND (:sinceId IS NULL OR id >= :sinceId)
+      AND (:untilId IS NULL OR id < :untilId)
+}

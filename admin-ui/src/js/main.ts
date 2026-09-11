@@ -76,6 +76,12 @@ app.ports.copyText_Clipboard_JS.subscribe((value: string) => {
 });
 applyTheme(localStorage.getItem("theme") ?? "system");
 
+// ダウンロードは同じタブで URL を開く。CMS が Content-Disposition: attachment で返すので画面は残る。
+// WhyNot: window.open にしない。ポップアップの抑止に当たると何も起きず、返事だけが出る。
+app.ports.openUrl_Download_JS.subscribe((url: string) => {
+  window.location.assign(url);
+});
+
 // 未保存の入力があるまま閉じようとしたら止める。保存は人が押す物なので、
 // これが無いと書きかけが黙って消える。Elm からは beforeunload を触れない。
 let unsaved = false;

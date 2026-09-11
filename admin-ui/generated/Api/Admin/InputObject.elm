@@ -4,6 +4,8 @@
 
 module Api.Admin.InputObject exposing (..)
 
+import Api.Admin.Enum.ActorKind
+import Api.Admin.Enum.AuditExportFormat
 import Api.Admin.Enum.ContentStage
 import Api.Admin.Enum.FieldConditionOp
 import Api.Admin.Enum.FieldKind
@@ -84,6 +86,53 @@ encodeAssetPatch : AssetPatch -> Value
 encodeAssetPatch input____ =
     Encode.maybeObject
         [ ( "alt", Encode.string input____.alt |> Just ) ]
+
+
+buildAuditExportInput :
+    AuditExportInputRequiredFields
+    -> (AuditExportInputOptionalFields -> AuditExportInputOptionalFields)
+    -> AuditExportInput
+buildAuditExportInput required____ fillOptionals____ =
+    let
+        optionals____ =
+            fillOptionals____
+                { actorKind = Absent, action = Absent, since = Absent, until = Absent }
+    in
+    { format = required____.format, actorKind = optionals____.actorKind, action = optionals____.action, since = optionals____.since, until = optionals____.until, count = required____.count }
+
+
+type alias AuditExportInputRequiredFields =
+    { format : Api.Admin.Enum.AuditExportFormat.AuditExportFormat
+    , count : Int
+    }
+
+
+type alias AuditExportInputOptionalFields =
+    { actorKind : OptionalArgument Api.Admin.Enum.ActorKind.ActorKind
+    , action : OptionalArgument String
+    , since : OptionalArgument String
+    , until : OptionalArgument String
+    }
+
+
+{-| Type for the AuditExportInput input object.
+-}
+type alias AuditExportInput =
+    { format : Api.Admin.Enum.AuditExportFormat.AuditExportFormat
+    , actorKind : OptionalArgument Api.Admin.Enum.ActorKind.ActorKind
+    , action : OptionalArgument String
+    , since : OptionalArgument String
+    , until : OptionalArgument String
+    , count : Int
+    }
+
+
+{-| Encode a AuditExportInput into a value that can be used as an argument.
+-}
+encodeAuditExportInput : AuditExportInput -> Value
+encodeAuditExportInput input____ =
+    Encode.maybeObject
+        [ ( "format", Encode.enum Api.Admin.Enum.AuditExportFormat.toString input____.format |> Just ), ( "actorKind", Encode.enum Api.Admin.Enum.ActorKind.toString |> Encode.optional input____.actorKind ), ( "action", Encode.string |> Encode.optional input____.action ), ( "since", Encode.string |> Encode.optional input____.since ), ( "until", Encode.string |> Encode.optional input____.until ), ( "count", Encode.int input____.count |> Just ) ]
 
 
 buildContentTypeInput :

@@ -73,3 +73,58 @@ pub type alias AuditEvent = { id = String, actorKind = ActorKind, actorId = Stri
 /// - since / until: 時刻の範囲（since 以上 until 未満）。id が ULID なので id の範囲で引く
 ///
 pub type alias AuditQuery = { max = Int64, after = Option[String], actorKind = Option[ActorKind], actionPrefix = Option[String], since = Option[Timestamp.Timestamp], until = Option[Timestamp.Timestamp] }
+
+///
+/// 監査の絞り込みだけ（`AuditQuery` からページの引数を除いた物）。件数を数える時と、書き出した事を記録する時の形。
+///
+/// - actorKind / actionPrefix / since / until: `AuditQuery` と同じ意味
+///
+pub type alias AuditFilter = { actorKind = Option[ActorKind], actionPrefix = Option[String], since = Option[Timestamp.Timestamp], until = Option[Timestamp.Timestamp] }
+
+mod AuditFilter {
+
+    use Util.Json.Json
+
+    /// 絞り込み無し。
+    pub def all(): AuditFilter = { actorKind = None, actionPrefix = None, since = None, until = None }
+
+    /// ページの引数を足して `AuditQuery` に。
+    pub def toQuery(max: Int64, after: Option[String], filter: AuditFilter): AuditQuery =
+        { max = max, after = after, actorKind = filter#actorKind, actionPrefix = filter#actionPrefix, since = filter#since, until = filter#until }
+
+    ///
+    /// 監査の detail に残す形。キーは管理 API の引数と同じ（actorKind / action / since / until）で、渡していない物はキーごと無い。
+    /// actorKind は列の綴り（user / api_key …）、時刻は ISO 8601。
+    ///
+    pub def toJson(filter: AuditFilter): Json =
+        List#{
+            ("actorKind", filter#actorKind |> Option.map(kind -> Json.JString(ActorKind.text(kind)))),
+            ("action", filter#actionPrefix |> Option.map(Json.JString)),
+            ("since", filter#since |> Option.map(at -> Json.JString(Timestamp.toIso8601(at)))),
+            ("until", filter#until |> Option.map(at -> Json.JString(Timestamp.toIso8601(at))))
+        }
+            |> List.filterMap(match (key, value) -> value |> Option.map(found -> (key, found)))
+            |> List.toMap
+            |> Json.JObject
+
+}
+
+///
+/// 監査の書き出しの形式。管理 API の `AuditExportFormat` と 1 対 1。
+///
+pub enum AuditExportFormat with Eq, Order, ToString {
+    /// UTF-8 with BOM の CSV。detail は JSON の文字列を 1 セルに
+    case Csv
+    /// JSON Lines。detail は入れ子のまま
+    case Json
+}
+
+mod AuditExportFormat {
+
+    /// 監査の targetId に使う綴り。
+    pub def text(format: AuditExportFormat): String = match format {
+        case AuditExportFormat.Csv  => "csv"
+        case AuditExportFormat.Json => "json"
+    }
+
+}

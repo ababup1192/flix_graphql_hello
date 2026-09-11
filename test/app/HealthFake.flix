@@ -29,7 +29,7 @@ mod HealthFake {
     ///
     pub def ok(): Health[{}] =
         { checkDb = _ -> Ok(()), jobsSummary = _ -> idle(), runJobs = _ -> Nil, connections = _ -> busy(), poolStats = _ -> pool(),
-          liveness = _ -> live(), heal = _ -> () }
+          liveness = _ -> live(), heal = _ -> (), now = _ -> live()#now }
 
     ///
     /// checkDb が常に message の Err を返す。jobsSummary は checkDb の結果をそのまま受けた印に、届いていなければ件数を -1 にする（本物と同じ形）。

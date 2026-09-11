@@ -30,6 +30,8 @@ import Ui
 import Ui.DateRange
 import Ui.DateTime as DateTime
 import Ui.Icon as Icon
+import Ui.Reply as Reply exposing (Reply)
+import Url.Builder
 
 
 type alias Model =
@@ -50,6 +52,18 @@ type alias Model =
     , wanted : Maybe String
     , rows : Loaded (List AuditRow)
     , opened : Set String
+
+    {- 「この行のリンクをコピー」を押した行。返事を出し、親が数秒で下ろす。 -}
+    , copied : Maybe String
+
+    {- 今の絞り込みに当たる件数。一覧と同時に引く。 -}
+    , count : Maybe Int
+
+    {- 「エクスポート ▾」の面。 -}
+    , exportMenu : Bool
+
+    {- エクスポートの返事。ダウンロードはブラウザ任せなので、開始した旨を出し親が数秒で下ろす。 -}
+    , exportReply : Reply
     , more : Bool
     , busy : Bool
     , errors : List String
@@ -60,11 +74,18 @@ type Msg
     = ZoneKnown Time.Zone Int Int Int
     | GotRows (Result Api.Problem (List AuditRow))
     | GotMore (Result Api.Problem (List AuditRow))
+    | GotCount (Result Api.Problem Int)
     | KindChosen String
     | ActionChosen String
     | RangeMsg Ui.DateRange.Msg
     | EscapePressed
     | Toggled String
+    | CopyRequested { id : String, url : String }
+    | CopyShown
+    | ExportMenuToggled
+    | ExportMenuClosed
+    | ExportRequested { url : String }
+    | ExportShown
     | MoreRequested
 
 
@@ -73,6 +94,13 @@ type Msg
 pageSize : Int
 pageSize =
     50
+
+
+{-| エクスポートの上限。サーバの 413 と同じ数。超える時は項目を押せなくする。
+-}
+exportLimit : Int
+exportLimit =
+    100000
 
 
 init : Slug -> List ( String, String ) -> Model
@@ -101,6 +129,10 @@ init project params =
     , wanted = wanted
     , rows = Loaded.Loading
     , opened = wanted |> Maybe.map Set.singleton |> Maybe.withDefault Set.empty
+    , copied = Nothing
+    , count = Nothing
+    , exportMenu = False
+    , exportReply = Reply.idle
     , more = False
     , busy = False
     , errors = []
@@ -111,7 +143,9 @@ init project params =
 -}
 load : Model -> List (Api.Call Msg)
 load model =
-    [ Api.call (\id -> Queries.auditEvents id model.project (queryOf model Nothing)) GotRows ]
+    [ Api.call (\id -> Queries.auditEvents id model.project (queryOf model Nothing)) GotRows
+    , Api.call (\id -> Queries.auditEventsCount id model.project (queryOf model Nothing)) GotCount
+    ]
 
 
 queryOf : Model -> Maybe String -> Queries.AuditQuery
@@ -192,15 +226,23 @@ update msg model =
         GotMore (Err problem) ->
             ( { model | busy = False, errors = [ (Api.problemToText problem).message ] }, [] )
 
+        -- 件数が引けなくても一覧は出す。件数の文を出さないだけ
+        GotCount result ->
+            ( { model | count = Result.toMaybe result }, [] )
+
         KindChosen kind ->
             refilter { model | kind = kind }
 
         ActionChosen action ->
             refilter { model | action = action }
 
-        -- 開いている暦を 1 段閉じる
+        -- 開いている物（エクスポートの面か暦）を 1 段閉じる
         EscapePressed ->
-            ( { model | range = Ui.DateRange.close model.range }, [] )
+            if model.exportMenu then
+                ( { model | exportMenu = False }, [] )
+
+            else
+                ( { model | range = Ui.DateRange.close model.range }, [] )
 
         -- 暦を触るたびに引き直さない。期間が決まった（または外した）時だけ
         RangeMsg rangeMsg ->
@@ -231,6 +273,26 @@ update msg model =
             , []
             )
 
+        -- クリップボードへ書くのは親（port の先）。ここは返事を出すだけ
+        CopyRequested { id } ->
+            ( { model | copied = Just id }, [] )
+
+        CopyShown ->
+            ( { model | copied = Nothing }, [] )
+
+        ExportMenuToggled ->
+            ( { model | exportMenu = not model.exportMenu, exportReply = Reply.idle }, [] )
+
+        ExportMenuClosed ->
+            ( { model | exportMenu = False }, [] )
+
+        -- URL を開くのは親（port の先）。ここは面を閉じて返事を出すだけ
+        ExportRequested _ ->
+            ( { model | exportMenu = False, exportReply = Reply.done "エクスポートを開始しました" }, [] )
+
+        ExportShown ->
+            ( { model | exportReply = Reply.idle }, [] )
+
         MoreRequested ->
             case lastId model of
                 Just id ->
@@ -249,7 +311,7 @@ refilter model =
     let
         next : Model
         next =
-            { model | wanted = Nothing, rows = Loaded.Loading, opened = Set.empty, more = False, errors = [] }
+            { model | wanted = Nothing, rows = Loaded.Loading, count = Nothing, opened = Set.empty, more = False, errors = [] }
     in
     ( next, load next )
 
@@ -259,11 +321,69 @@ lastId model =
     Loaded.toMaybe model.rows |> Maybe.andThen (List.reverse >> List.head) |> Maybe.map .id
 
 
+{-| エクスポートの URL。絞り込みは `auditEvents` に渡す物と同じ値。`format` は `csv` / `jsonl`。
+-}
+exportUrl : Model -> String -> String
+exportUrl model format =
+    let
+        query : Queries.AuditQuery
+        query =
+            queryOf model Nothing
+
+        param : String -> Maybe String -> Maybe Url.Builder.QueryParameter
+        param key value =
+            Maybe.map (Url.Builder.string key) value
+    in
+    Url.Builder.absolute [ "p", model.project, "admin", "audit." ++ format ]
+        (List.filterMap identity
+            [ param "actorKind" (Maybe.map ActorKind.toString query.actorKind)
+            , param "action" query.action
+            , param "since" query.since
+            , param "until" query.until
+            ]
+        )
+
+
+hasFilter : Model -> Bool
+hasFilter model =
+    not (List.all String.isEmpty [ model.kind, model.action, model.since, model.until ])
+
+
+overLimit : Model -> Bool
+overLimit model =
+    Maybe.map (\count -> count > exportLimit) model.count |> Maybe.withDefault False
+
+
+{-| 3 桁ごとにカンマ。
+-}
+withCommas : Int -> String
+withCommas n =
+    let
+        digits : List Char
+        digits =
+            String.fromInt n |> String.toList |> List.reverse
+
+        grouped : List Char -> List Char
+        grouped chars =
+            case chars of
+                a :: b :: c :: rest ->
+                    if List.isEmpty rest then
+                        [ a, b, c ]
+
+                    else
+                        a :: b :: c :: ',' :: grouped rest
+
+                short ->
+                    short
+    in
+    grouped digits |> List.reverse |> String.fromList
+
+
 
 -- 画面
 
 
-view : { canManage : Bool, types : List ContentTypeSummary } -> Model -> Html Msg
+view : { canManage : Bool, types : List ContentTypeSummary, origin : String } -> Model -> Html Msg
 view args model =
     Ui.page []
         [ Ui.pageHeader { title = "監査ログ", icon = Nothing, meta = [], actions = [] }
@@ -272,9 +392,10 @@ view args model =
         , if args.canManage then
             div [ class "flex flex-col gap-3" ]
                 [ viewFilters model
+                , viewCount model
                 , Ui.errors model.errors
                 , viewMissing model
-                , viewRows (List.map .apiId args.types) model
+                , viewRows { existing = List.map .apiId args.types, origin = args.origin } model
                 , viewMore model
                 ]
 
@@ -314,7 +435,80 @@ viewFilters model =
             [ Ui.select [ onInput ActionChosen ] (actionOptions ++ customAction model) model.action ]
         , Ui.field { label = "期間", hint = Nothing, errors = [] }
             [ Ui.DateRange.view RangeMsg model.range ]
+        , div [ class "ml-auto flex items-center gap-3" ]
+            [ Reply.view model.exportReply
+            , viewExport model
+            ]
         ]
+
+
+{-| 「エクスポート ▾」。押すと CSV / JSON の 2 項目。上限を超える時は項目を押せない。
+-}
+viewExport : Model -> Html Msg
+viewExport model =
+    div [ class "relative" ]
+        [ Ui.ghostButton [ onClick ExportMenuToggled, type_ "button" ] [ text "エクスポート ▾" ]
+        , if model.exportMenu then
+            div [ class "absolute top-9 right-0 z-(--z-dropdown) flex w-56 flex-col rounded-lg border border-edge bg-panel py-1 shadow-lg" ]
+                [ viewExportItem model "CSV でエクスポート" "csv"
+                , viewExportItem model "JSON でエクスポート" "jsonl"
+                ]
+
+          else
+            text ""
+        , if model.exportMenu then
+            Ui.dismissLayer ExportMenuClosed
+
+          else
+            text ""
+        ]
+
+
+viewExportItem : Model -> String -> String -> Html Msg
+viewExportItem model label format =
+    Html.button
+        ([ class "flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-[13px] text-ink hover:bg-well disabled:cursor-default disabled:opacity-40"
+         , type_ "button"
+         , onClick (ExportRequested { url = exportUrl model format })
+         ]
+            ++ (if overLimit model then
+                    [ Html.Attributes.disabled True, title (withCommas exportLimit ++ " 件まで。期間を分けてください") ]
+
+                else
+                    []
+               )
+        )
+        [ text label ]
+
+
+{-| 今の絞り込みに当たる件数。上限を超える時はその旨を薄く添える。
+-}
+viewCount : Model -> Html Msg
+viewCount model =
+    case model.count of
+        Just count ->
+            div [ class "flex flex-wrap items-center gap-2 px-1 text-[12px] text-ink-soft" ]
+                [ span []
+                    [ text
+                        ((if hasFilter model then
+                            "この条件に当たる "
+
+                          else
+                            ""
+                         )
+                            ++ withCommas count
+                            ++ " 件"
+                        )
+                    ]
+                , if overLimit model then
+                    span [ class "text-ink-faint" ] [ text ("（" ++ withCommas exportLimit ++ " 件まで。超える時は期間を分けてください）") ]
+
+                  else
+                    text ""
+                ]
+
+        Nothing ->
+            text ""
 
 
 {-| URL で来た前方一致が選択肢に無ければ、その値を選択肢に足す（選び直せるまで消えない）。
@@ -344,10 +538,15 @@ viewMissing model =
             text ""
 
 
-{-| 一覧。`existing` は今ある型の apiId で、消えた型・フィールド・entry にはリンクを付けない。
+{-| 一覧に要る周りの値。`existing` は今ある型の apiId で、消えた型・フィールド・entry にはリンクを付けない。
+`origin` は行の固定 URL をクリップボードに書く時の頭。
 -}
-viewRows : List String -> Model -> Html Msg
-viewRows existing model =
+type alias Surround =
+    { existing : List String, origin : String }
+
+
+viewRows : Surround -> Model -> Html Msg
+viewRows surround model =
     Loaded.view
         { loading = Ui.loadingCard
         , missing = Ui.table [ Ui.empty "記録がありません" ]
@@ -360,7 +559,7 @@ viewRows existing model =
                 else
                     Ui.table
                         (Ui.headRowOf columns [ text "時刻", text "誰が", text "何を", text "" ]
-                            :: List.concatMap (viewRow existing model) rows
+                            :: List.concatMap (viewRow surround model) rows
                         )
         }
         model.rows
@@ -371,8 +570,8 @@ columns =
     "grid-cols-[130px_minmax(0,220px)_minmax(0,1fr)_32px]"
 
 
-viewRow : List String -> Model -> AuditRow -> List (Html Msg)
-viewRow existing model row =
+viewRow : Surround -> Model -> AuditRow -> List (Html Msg)
+viewRow surround model row =
     let
         open : Bool
         open =
@@ -389,7 +588,7 @@ viewRow existing model row =
             [ Ui.chip (kindTone row.actorKind) row.actorKind
             , span [ class "truncate", title row.actor ] [ text row.actor ]
             ]
-        , viewWhat existing model zone row
+        , viewWhat surround.existing model zone row
         , Html.button
             [ class "flex h-7 w-7 cursor-pointer items-center justify-center rounded text-ink-soft hover:bg-well hover:text-ink"
             , type_ "button"
@@ -415,7 +614,7 @@ viewRow existing model row =
             ]
         ]
         :: (if open then
-                [ viewDetail model zone row ]
+                [ viewDetail surround model zone row ]
 
             else
                 []
@@ -516,18 +715,16 @@ typeApiIdOf row =
     D.decodeValue (D.field "typeApiId" D.string) row.detail |> Result.toMaybe
 
 
-{-| 開いた行。meta の行、action ごとの型紙、畳んだ JSON。
+{-| 開いた行。action ごとの型紙に「操作した人」と「時刻」を続け、下に機械の行（リンクのコピーと id）。
+
+人が読む物（誰が・いつ・何を）を上の型紙にまとめ、機械の値（id）は薄く下に置く。
+actorId や ISO 8601 を人の行と同じ大きさで並べると、読む物が増えるだけで誰も見ない。
+
 -}
-viewDetail : Model -> Time.Zone -> AuditRow -> Html Msg
-viewDetail model zone row =
+viewDetail : Surround -> Model -> Time.Zone -> AuditRow -> Html Msg
+viewDetail surround model zone row =
     div [ class "flex flex-col gap-2 border-b border-edge bg-raised px-4 py-3 text-[12px] text-ink-soft last:border-b-0" ]
-        [ div [ class "flex flex-wrap items-center gap-x-4 gap-y-1 font-mono" ]
-            [ span [] [ text row.createdAt ]
-            , span [] [ text ("actorId " ++ blankAs "—" row.actorId) ]
-            , span [] [ text ("id " ++ row.id) ]
-            , Ui.quietLink [ href (Route.toString (Route.Settings model.project (Route.Audit [ ( "id", row.id ) ]))), title "この行の URL" ] [ text "#" ]
-            ]
-        , viewSheet zone (Say.sheet row)
+        [ viewSheet zone (Say.sheet row) (viewWho model row ++ [ ( "時刻", viewWhen zone row ) ])
         , if row.action == "type.deleted" then
             div []
                 [ Ui.ghostButton [ Html.Attributes.disabled True, class "border-dashed text-ink-faint", title "API の定義を書き戻す口が入ってから" ] [ text "この姿に戻す" ] ]
@@ -543,6 +740,67 @@ viewDetail model zone row =
 
           else
             text ""
+        , viewMachine surround model row
+        ]
+
+
+{-| 「操作した人」。人か PAT なら、括弧にメンバーの id を添えてメンバーの画面へ飛べる。
+API キーや SYSTEM の id はメンバーではないので文字のまま。id が無ければ括弧ごと出さない。
+-}
+viewWho : Model -> AuditRow -> List ( String, Html Msg )
+viewWho model row =
+    let
+        memberLike : Bool
+        memberLike =
+            row.actorKind == "USER" || row.actorKind == "PAT"
+
+        aside : List (Html Msg)
+        aside =
+            if String.isEmpty row.actorId then
+                []
+
+            else if memberLike then
+                [ span [ class "text-ink-soft" ]
+                    [ text "（メンバー "
+                    , Ui.link [ href (Route.toString (Route.Settings model.project Route.Members)), class "font-mono" ] [ text row.actorId ]
+                    , text "）"
+                    ]
+                ]
+
+            else
+                [ span [ class "text-ink-soft" ] [ text "（", span [ class "font-mono" ] [ text row.actorId ], text "）" ] ]
+    in
+    [ ( "操作した人", span [ class "break-all" ] (text row.actor :: aside) ) ]
+
+
+{-| 「時刻」。手元のタイムゾーンで秒まで、括弧に UTC。
+-}
+viewWhen : Time.Zone -> AuditRow -> Html Msg
+viewWhen zone row =
+    span []
+        [ text (DateTime.formatLocalSeconds zone row.createdAt ++ " " ++ DateTime.zoneAbbr zone row.createdAt)
+        , span [ class "text-ink-soft" ] [ text ("（" ++ DateTime.utcSeconds row.createdAt ++ "）") ]
+        ]
+
+
+{-| 機械の行。固定 URL のコピーと、行の id。
+-}
+viewMachine : Surround -> Model -> AuditRow -> Html Msg
+viewMachine surround model row =
+    let
+        url : String
+        url =
+            surround.origin ++ Route.toString (Route.Settings model.project (Route.Audit [ ( "id", row.id ) ]))
+    in
+    div [ class "flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]" ]
+        [ Ui.quietActionLink [ onClick (CopyRequested { id = row.id, url = url }), class "inline-flex items-center gap-1 text-[11px]" ]
+            [ Icon.view Icon.copy, text "この行のリンクをコピー" ]
+        , if model.copied == Just row.id then
+            span [ class "text-[color:var(--color-ok)]" ] [ text "コピーしました" ]
+
+          else
+            text ""
+        , span [ class "font-mono text-ink-faint" ] [ text ("id " ++ row.id) ]
         ]
 
 
@@ -562,11 +820,14 @@ isNested value =
         |> Result.withDefault False
 
 
-viewSheet : Time.Zone -> Say.Sheet -> Html Msg
-viewSheet zone sheet =
+{-| 型紙。`trailing` は型紙の kv の続きに置く行（操作した人・時刻）。
+kv でない型紙（フィールドの表）の時は、表の下に kv として置く。
+-}
+viewSheet : Time.Zone -> Say.Sheet -> List ( String, Html Msg ) -> Html Msg
+viewSheet zone sheet trailing =
     case sheet of
         Say.Changes changes ->
-            viewKv (List.map viewChange changes)
+            viewKv (List.map viewChange changes ++ trailing)
 
         Say.Order order ->
             viewKv
@@ -578,16 +839,17 @@ viewSheet zone sheet =
                             Nothing ->
                                 []
                        )
+                    ++ trailing
                 )
 
         Say.FieldTable rows ->
-            viewFieldTable rows
+            div [ class "flex flex-col gap-2" ] [ viewFieldTable rows, viewKv trailing ]
 
         Say.Facts facts ->
-            viewKv (List.map (\( key, value ) -> ( key, span [ title (factHint key) ] [ text (factText zone key value) ] )) facts)
+            viewKv (List.map (\( key, value ) -> ( key, span [ title (factHint key) ] [ text (factText zone key value) ] )) facts ++ trailing)
 
         Say.Nothing_ ->
-            text ""
+            viewKv trailing
 
 
 {-| 予約の時刻だけは手元のタイムゾーンで出す。
@@ -683,15 +945,6 @@ viewFieldTable rows =
                     rows
             )
         ]
-
-
-blankAs : String -> String -> String
-blankAs fallback text =
-    if String.isEmpty text then
-        fallback
-
-    else
-        text
 
 
 viewMore : Model -> Html Msg

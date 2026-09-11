@@ -560,6 +560,11 @@ try {
   await page.goto(base + "/p/default/settings/project", { waitUntil: "networkidle" });
   await waitForText("AI からつなぐ", "プロジェクトと MCP の画面が描ける");
 
+  // 16. 監査ログ（一覧と件数）
+  await page.goto(base + "/p/default/settings/audit", { waitUntil: "networkidle" });
+  await waitForText("監査ログ", "監査ログの画面が描ける");
+  await waitForText(" 件", "監査ログに件数の文が出る");
+
 } catch (error) {
   fail("途中で落ちた", String(error).slice(0, 300));
 } finally {

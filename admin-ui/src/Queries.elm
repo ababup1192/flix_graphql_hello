@@ -7,6 +7,7 @@ module Queries exposing
     , apiKeys
     , assets
     , auditEvents
+    , auditEventsCount
     , cancelInvitation
     , cancelSchedule
     , changeMemberRole
@@ -149,6 +150,7 @@ type Kind
     | EntriesQuery
     | OrgProjects
     | AuditEvents
+    | AuditEventsCount
 
 
 {-| 確認に投げる読むだけの物。書く物は投げない（実データが増える）。
@@ -164,6 +166,7 @@ all args =
     , ( EntriesQuery, entries "c7" args.project { typeId = "1", search = "", stage = "", conditions = [], ids = [], order = "", first = 5, skip = 0 } |> Tuple.first )
     , ( OrgProjects, organizationProjects "c8" "1" |> Tuple.first )
     , ( AuditEvents, auditEvents "c9" args.project { first = 5, after = Nothing, actorKind = Nothing, action = Nothing, since = Nothing, until = Nothing } |> Tuple.first )
+    , ( AuditEventsCount, auditEventsCount "c10" args.project { first = 5, after = Nothing, actorKind = Nothing, action = Nothing, since = Nothing, until = Nothing } |> Tuple.first )
     ]
 
 
@@ -361,6 +364,23 @@ auditEvents id project args =
                 }
             )
             auditRow
+        )
+
+
+{-| 絞り込みに当たる件数。引数は `auditEvents` と同じ（`first` / `after` は見ない）。
+-}
+auditEventsCount : String -> Slug -> AuditQuery -> ( Api.Request, D.Decoder Int )
+auditEventsCount id project args =
+    Api.query { id = id, kind = "auditEventsCount", project = project }
+        (Api.Admin.Query.auditEventsCount
+            (\optional ->
+                { optional
+                    | actorKind = presentOr args.actorKind
+                    , action = presentOr args.action
+                    , since = presentOr args.since
+                    , until = presentOr args.until
+                }
+            )
         )
 
 

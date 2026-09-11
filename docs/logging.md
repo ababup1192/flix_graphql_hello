@@ -74,6 +74,7 @@
 | `cache.status` | string | リクエストの行（コンテンツ API の `GET /graphql` で認証が通った物） | `hit`（If-None-Match が ETag に合って 304。GraphQL は実行しない）/ `miss`（匿名で 200）/ `bypass`（鍵やトークン付き。no-store） |
 | `mcp.tool` | string | リクエストの行（`POST /mcp` の tools/call） | ツール名。引数は残さない。MCP の行は別に出さない（1 リクエスト 1 行） |
 | `mcp.outcome` | string | リクエストの行（`POST /mcp` の tools/call） | `ok` / `error`（isError。理由は `error.code`） |
+| `audit.export.rows` | int | リクエストの行（`GET /admin/audit.csv` / `audit.jsonl` で書き出せた物） | 書き出した件数。絞り込みの値は残さない（断った物は `error.code` に理由） |
 | `server.address` | string | 起動の行 | bind したアドレス |
 | `server.port` | int | 起動の行 | |
 | `migration.version` | string | 起動の行 | `CMS_MIGRATE=apply` で当てた migration |

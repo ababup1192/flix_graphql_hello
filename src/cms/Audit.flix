@@ -8,8 +8,8 @@
 pub enum AuditChange with Eq {
     /// 招待した（既にログイン済みの人はその場でメンバーになる）
     case MemberInvited(String, Role)
-    /// メンバーの役割を変えた
-    case MemberRoleChanged(UserId, Role)
+    /// メンバーの役割を変えた（誰, 変更前, 変更後）
+    case MemberRoleChanged(UserId, Role, Role)
     /// メンバーを外した
     case MemberRemoved(UserId)
     /// 招待を取り消した
@@ -44,6 +44,8 @@ pub enum AuditChange with Eq {
     case EntryDeleted(EntryId, ApiId, Int32)
     /// 予約公開を実行した（id, 型の apiId, 公開した版, 予約の時刻）。手で公開した物は版が author を持つので積まない
     case EntryPublishedBySchedule(EntryId, ApiId, Int32, Timestamp.Timestamp)
+    /// 監査の記録を書き出した（形式, 絞り込み（AuditFilter.toJson）, 書き出した件数）。誰が持ち出したかが残る
+    case AuditExported(AuditExportFormat, Util.Json.Json, Int32)
 }
 
 ///
@@ -83,14 +85,15 @@ mod Audit {
     /// スキーマ・Webhook・asset の変更は detail に変更前の姿を持つ。消した型・フィールドはここからしか組み直せない
     /// （entry と違って版が無い）。作った・足した物は変更前を持たない（元に戻すのは消す事なので、要る物が無い）。
     ///
-    /// WhyNot: メンバーや API キーの変更前を入れない。役割は 3 通りしか無く action と targetId から読めて、
-    /// 鍵は値を二度と出せないため。
+    /// 役割の変更は変更後（role）と変更前（before）の両方を持つ。行を 1 つ読めば何から何に変えたかが分かる。
+    ///
+    /// WhyNot: API キーの変更前を入れない。鍵は値を二度と出せないため。
     ///
     /// WhyNot: entry の中身を入れない。版（`entry_versions`）が持っていて、行からは型と版の番号で辿れる。
     ///
     pub def rowOf(actor: ActorRef, change: AuditChange): AuditRow = match change {
         case AuditChange.MemberInvited(email, role)                       => row(actor, "member.invited", "member", email, roleDetail(role))
-        case AuditChange.MemberRoleChanged(userId, role)                  => row(actor, "member.role_changed", "member", "${userId}", roleDetail(role))
+        case AuditChange.MemberRoleChanged(userId, was, role)             => row(actor, "member.role_changed", "member", "${userId}", Json.JObject(Map#{ "role" => Json.JString(Role.text(role)), "before" => Json.JString(Role.text(was)) }))
         case AuditChange.MemberRemoved(userId)                            => row(actor, "member.removed", "member", "${userId}", empty())
         case AuditChange.InvitationCancelled(publicId)                    => row(actor, "invitation.cancelled", "invitation", publicId, empty())
         case AuditChange.ApiKeyCreated(publicId, name)                    => row(actor, "api_key.created", "api_key", publicId, Json.JObject(Map#{ "name" => Json.JString(name) }))
@@ -112,6 +115,7 @@ mod Audit {
         case AuditChange.EntryUnpublished(id, apiId, version)             => row(actor, "entry.unpublished", "entry", EntryId.text(id), entryDetail(apiId, version, Nil))
         case AuditChange.EntryDeleted(id, apiId, version)                 => row(actor, "entry.deleted", "entry", EntryId.text(id), entryDetail(apiId, version, Nil))
         case AuditChange.EntryPublishedBySchedule(id, apiId, version, at) => row(actor, "entry.published", "entry", EntryId.text(id), entryDetail(apiId, version, ("scheduledFor", Json.JString(Timestamp.toIso8601(at))) :: Nil))
+        case AuditChange.AuditExported(format, filter, count)             => row(actor, "audit.exported", "audit", AuditExportFormat.text(format), exportDetail(format, filter, count))
     }
 
     /// 行を組む。
@@ -124,6 +128,11 @@ mod Audit {
     /// entry の出来事の詳細。型と、その時点の版の番号（中身は版から辿る）に、出来事ごとの値を足した物。
     def entryDetail(apiId: ApiId, version: Int32, extra: List[(String, Json)]): Json =
         Json.JObject(List.toMap(("typeApiId", Json.JString(ApiId.text(apiId))) :: ("version", number(version)) :: extra))
+
+    /// 書き出しの詳細。絞り込み（渡した物だけ）に format と count を足す。
+    def exportDetail(format: AuditExportFormat, filter: Json, count: Int32): Json =
+        let fields = match filter { case Json.JObject(found) => found case _ => Map.empty() };
+        Json.JObject(fields |> Map.insert("format", Json.JString(AuditExportFormat.text(format))) |> Map.insert("count", number(count)))
 
     /// 変更前の姿を持つ出来事。キーを 1 つに決めておけば、後から読む側が種類ごとに探さずに済む。
     def before(was: Json): Json = Json.JObject(Map#{ "before" => was })
@@ -148,10 +157,31 @@ mod Audit {
             |> List.map(toEvent)
 
     ///
+    /// 絞り込みに当たる件数。`recent` と同じ条件（ページの引数は無い）。
+    ///
+    pub def count(_proof: Granted[ManageMembers], filter: AuditFilter): Int64 \ DbRead + Tenant =
+        AuditQueries.countAuditEvents({
+            projectId = Tenant.currentId(),
+            actorKind = filter#actorKind |> Option.map(ActorKind.text),
+            actionPrefix = filter#actionPrefix,
+            sinceId = filter#since |> Option.map(at -> Ulid.lowerBoundAt(Timestamp.toEpochMillis(at))),
+            untilId = filter#until |> Option.map(at -> Ulid.lowerBoundAt(Timestamp.toEpochMillis(at))) })
+            |> Rows.total
+
+    ///
+    /// 書き出した事を積む。読むのと同じ証明（`Granted[ManageMembers]`）を取る（書き出しだけ別の権限にしない）。
+    ///
+    /// WhyNot: 書き出し自体をここで行わないのは、書き出しは HTTP の応答（ヘッダ・ファイル名・行の形）で、
+    /// 管理 API のエンジンへの GraphQL クライアント（Server.flix の auditExportRoute）として動くため。ここに残るのは「持ち出した」という記録だけ。
+    ///
+    pub def recordExport(_proof: Granted[ManageMembers], format: AuditExportFormat, filter: AuditFilter, count: Int32): Unit \ Db + IdGen + Tenant + Session =
+        record(AuditChange.AuditExported(format, AuditFilter.toJson(filter), count))
+
+    ///
     /// 絞り込み無しで新しい順に max 件。
     ///
     pub def latest(proof: Granted[ManageMembers], max: Int64): List[AuditEvent] \ DbRead + Tenant =
-        recent(proof, { max = max, after = None, actorKind = None, actionPrefix = None, since = None, until = None })
+        recent(proof, AuditFilter.toQuery(max, None, AuditFilter.all()))
 
     /// 行を読む値に。
     ///

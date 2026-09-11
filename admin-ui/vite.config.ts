@@ -38,6 +38,7 @@ export default defineConfig({
     // 本番の Caddy も同じ分け方にする（docs/design/admin-ui-spec.md 13.2）。
     proxy: {
       "^/p/[^/]+/admin/graphql$": proxy,
+      "^/p/[^/]+/admin/audit\\.(csv|jsonl)$": proxy,
       "^/p/[^/]+/graphql$": proxy,
       "/account/graphql": proxy,
       "/health": proxy,
