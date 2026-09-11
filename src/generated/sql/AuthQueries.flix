@@ -7,7 +7,7 @@ mod AuthQueries {
     ///
     /// 生成元 auth.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 923188035
+    pub def sourceHash(): Int32 = 1130474062
 
     ///
     /// findUserByIdentity の 1 行。
@@ -503,11 +503,11 @@ mod AuthQueries {
         ) yield { id = id }
 
     ///
-    /// insertApiKey: INSERT INTO api_keys (public_id, project_id, name, key_hash, pepper_id, scope, role, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id
+    /// insertApiKey: INSERT INTO api_keys (public_id, project_id, name, key_hash, key_hint, pepper_id, scope, role, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id
     ///
-    pub def insertApiKey(args: { publicId = String, projectId = Int64, name = String, keyHash = String, pepperId = String, scope = String, role = Option[String], expiresAt = Option[Timestamp.Timestamp] }): Option[InsertApiKeyRow] \ DbWrite =
-        let sql = "INSERT INTO api_keys (public_id, project_id, name, key_hash, pepper_id, scope, role, expires_at)\n    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n    RETURNING id";
-        let params = List#{SqlValue.Str(args#publicId), SqlValue.Int64(args#projectId), SqlValue.Str(args#name), SqlValue.Str(args#keyHash), SqlValue.Str(args#pepperId), SqlValue.Str(args#scope), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#role), SqlValue.ofOption(SqlValue.NullType.Timestamp, SqlValue.ofTimestamp, args#expiresAt)};
+    pub def insertApiKey(args: { publicId = String, projectId = Int64, name = String, keyHash = String, keyHint = String, pepperId = String, scope = String, role = Option[String], expiresAt = Option[Timestamp.Timestamp] }): Option[InsertApiKeyRow] \ DbWrite =
+        let sql = "INSERT INTO api_keys (public_id, project_id, name, key_hash, key_hint, pepper_id, scope, role, expires_at)\n    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n    RETURNING id";
+        let params = List#{SqlValue.Str(args#publicId), SqlValue.Int64(args#projectId), SqlValue.Str(args#name), SqlValue.Str(args#keyHash), SqlValue.Str(args#keyHint), SqlValue.Str(args#pepperId), SqlValue.Str(args#scope), SqlValue.ofOption(SqlValue.NullType.Str, SqlValue.Str, args#role), SqlValue.ofOption(SqlValue.NullType.Timestamp, SqlValue.ofTimestamp, args#expiresAt)};
         RawSql.runWithAllow(() -> Sql.executeReturningOneAs(insertApiKeyDecoder(), sql, params))
 
     ///
@@ -537,26 +537,27 @@ mod AuthQueries {
     ///
     /// listApiKeys の 1 行。
     ///
-    pub type alias ListApiKeysRow = { id = Int64, publicId = String, name = String, scope = String, role = Option[String], createdAt = Timestamp.Timestamp, expiresAt = Option[Timestamp.Timestamp], lastUsedAt = Option[Timestamp.Timestamp], revokedAt = Option[Timestamp.Timestamp] }
+    pub type alias ListApiKeysRow = { id = Int64, publicId = String, name = String, keyHint = String, scope = String, role = Option[String], createdAt = Timestamp.Timestamp, expiresAt = Option[Timestamp.Timestamp], lastUsedAt = Option[Timestamp.Timestamp], revokedAt = Option[Timestamp.Timestamp] }
 
     def listApiKeysDecoder(): Decoder[ListApiKeysRow] =
         forA (
             id <- Decoder.int64("id");
             publicId <- Decoder.str("public_id");
             name <- Decoder.str("name");
+            keyHint <- Decoder.str("key_hint");
             scope <- Decoder.str("scope");
             role <- Decoder.opt(Decoder.str("role"));
             createdAt <- Decoder.timestamp("created_at");
             expiresAt <- Decoder.opt(Decoder.timestamp("expires_at"));
             lastUsedAt <- Decoder.opt(Decoder.timestamp("last_used_at"));
             revokedAt <- Decoder.opt(Decoder.timestamp("revoked_at"))
-        ) yield { id = id, publicId = publicId, name = name, scope = scope, role = role, createdAt = createdAt, expiresAt = expiresAt, lastUsedAt = lastUsedAt, revokedAt = revokedAt }
+        ) yield { id = id, publicId = publicId, name = name, keyHint = keyHint, scope = scope, role = role, createdAt = createdAt, expiresAt = expiresAt, lastUsedAt = lastUsedAt, revokedAt = revokedAt }
 
     ///
-    /// listApiKeys: SELECT id, public_id, name, scope, role, created_at, expires_at, last_used_at, revoked_at FROM api_keys WHERE project_id = $1 ORDER BY id
+    /// listApiKeys: SELECT id, public_id, name, key_hint, scope, role, created_at, expires_at, last_used_at, revoked_at FROM api_keys WHERE project_id = $1 ORDER BY id
     ///
     pub def listApiKeys(projectId: Int64): List[ListApiKeysRow] \ DbRead =
-        let sql = "SELECT id, public_id, name, scope, role, created_at, expires_at, last_used_at, revoked_at FROM api_keys WHERE project_id = $1 ORDER BY id";
+        let sql = "SELECT id, public_id, name, key_hint, scope, role, created_at, expires_at, last_used_at, revoked_at FROM api_keys WHERE project_id = $1 ORDER BY id";
         let params = List#{SqlValue.Int64(projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listApiKeysDecoder(), sql, params))
 

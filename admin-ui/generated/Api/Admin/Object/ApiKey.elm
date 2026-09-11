@@ -31,6 +31,13 @@ name =
     Object.selectionForField "String" "name" [] Decode.string
 
 
+{-| 鍵の末尾 4 文字。.env に入れた鍵と一覧の行を突き合わせるための目印。古い鍵は空
+-}
+keyHint : SelectionSet String Api.Admin.Object.ApiKey
+keyHint =
+    Object.selectionForField "String" "keyHint" [] Decode.string
+
+
 scope : SelectionSet Api.Admin.Enum.ApiKeyScope.ApiKeyScope Api.Admin.Object.ApiKey
 scope =
     Object.selectionForField "Enum.ApiKeyScope.ApiKeyScope" "scope" [] Api.Admin.Enum.ApiKeyScope.decoder

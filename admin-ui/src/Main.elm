@@ -73,6 +73,11 @@ port setTheme_Shell_JS : String -> Cmd msg
 port setUnsaved_Editor_JS : Bool -> Cmd msg
 
 
+{-| 値をクリップボードへ。発行した API キーや Webhook の秘密を控えさせる時に使う。
+-}
+port copyText_Clipboard_JS : String -> Cmd msg
+
+
 
 -- MODEL
 
@@ -195,6 +200,7 @@ caps key =
     , ignore = Ignored
     , toast = ToastShown
     , unsaved = setUnsaved_Editor_JS
+    , copy = copyText_Clipboard_JS
     }
 
 
@@ -431,7 +437,9 @@ update msg model =
                 paletteUpdate Palette.Opened model
 
             else if key == "Escape" then
+                -- 開いている物を 1 段閉じる。パレットとメニューの後、画面にも配る
                 paletteUpdate Palette.Closed { model | menu = Shell.NoMenu }
+                    |> andThenUpdate escapeToPage
 
             else
                 ( model, Effect.none )
@@ -482,6 +490,16 @@ update msg model =
                         _ ->
                             ( workspace, [] )
                 )
+                |> Tuple.mapSecond
+                    (\effect ->
+                        case pageMsg of
+                            -- 発行した値のコピー。クリップボードは port の先
+                            Keys.CopyRequested value ->
+                                Effect.batch [ effect, Effect.Copy value ]
+
+                            _ ->
+                                effect
+                    )
 
         PreviewMsg Preview.Closed ->
             ( { model | preview = Nothing }, Effect.none )
@@ -554,16 +572,20 @@ update msg model =
             editorUpdate pageMsg model
 
         TypeSettingsMsg pageMsg ->
-            withPage model
-                (\workspace ->
-                    case workspace.page of
-                        TypeSettingsPage page ->
-                            TypeSettings.update (context workspace) pageMsg page
-                                |> mapPage TypeSettingsPage TypeSettingsMsg workspace
+            let
+                ( next, effect ) =
+                    withPage model
+                        (\workspace ->
+                            case workspace.page of
+                                TypeSettingsPage page ->
+                                    TypeSettings.update (context workspace) pageMsg page
+                                        |> mapPage TypeSettingsPage TypeSettingsMsg workspace
 
-                        _ ->
-                            ( workspace, [] )
-                )
+                                _ ->
+                                    ( workspace, [] )
+                        )
+            in
+            ( next, Effect.batch [ effect, Effect.SetUnsaved (pageUnsaved next) ] )
 
         SchemaMsg pageMsg ->
             withPage model
@@ -736,6 +758,64 @@ editorToday =
 withEditorToday : ( ModelWith key, Effect Msg ) -> ( ModelWith key, Effect Msg )
 withEditorToday ( model, effect ) =
     ( model, Effect.batch [ effect, editorToday ] )
+
+
+{-| API キーの一覧は作成日・期限・最後に使った日を手元のタイムゾーンで出す。
+-}
+withKeysZone : ( ModelWith key, Effect Msg ) -> ( ModelWith key, Effect Msg )
+withKeysZone ( model, effect ) =
+    ( model, Effect.batch [ effect, Effect.Today (\zone _ _ _ -> KeysMsg (Keys.ZoneKnown zone)) ] )
+
+
+{-| 続けてもう 1 つ update を当てる。
+-}
+andThenUpdate : (ModelWith key -> ( ModelWith key, Effect Msg )) -> ( ModelWith key, Effect Msg ) -> ( ModelWith key, Effect Msg )
+andThenUpdate step ( model, effect ) =
+    let
+        ( next, more ) =
+            step model
+    in
+    ( next, Effect.batch [ effect, more ] )
+
+
+{-| Escape を今の画面に配る。画面ごとに「開いている物を 1 段閉じる」を持つ。
+-}
+escapeToPage : ModelWith key -> ( ModelWith key, Effect Msg )
+escapeToPage model =
+    case model.phase of
+        Ready workspace ->
+            case workspace.page of
+                TypeSettingsPage _ ->
+                    update (TypeSettingsMsg TypeSettings.EscapePressed) model
+
+                KeysPage _ ->
+                    update (KeysMsg Keys.EscapePressed) model
+
+                _ ->
+                    ( model, Effect.none )
+
+        _ ->
+            ( model, Effect.none )
+
+
+{-| 今の画面に未保存があるか。離れる前の確認（beforeunload）に使う。
+-}
+pageUnsaved : ModelWith key -> Bool
+pageUnsaved model =
+    case model.phase of
+        Ready workspace ->
+            case workspace.page of
+                TypeSettingsPage page ->
+                    TypeSettings.unsaved page
+
+                EditorPage page ->
+                    Editor.unsaved page
+
+                _ ->
+                    False
+
+        _ ->
+            False
 
 
 {-| ページが投げたい物を、親が id を振って送る形に直す。
@@ -1063,10 +1143,12 @@ enterPage route model =
                 Route.Settings _ Route.ApiKeys ->
                     { model | route = route, phase = Ready { workspace | page = KeysPage Keys.init } }
                         |> sendAll (List.map (Api.mapCall KeysMsg) (Keys.load slug))
+                        |> withKeysZone
 
                 Route.Settings _ Route.Webhooks ->
                     { model | route = route, phase = Ready { workspace | page = KeysPage Keys.init } }
                         |> sendAll (List.map (Api.mapCall KeysMsg) (Keys.load slug))
+                        |> withKeysZone
 
                 Route.Settings _ Route.Members ->
                     { model | route = route, phase = Ready { workspace | page = MembersPage Members.init } }

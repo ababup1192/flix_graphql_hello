@@ -1,4 +1,4 @@
-module Model exposing (ApiKeyRow, AssetList, AssetRow, ContentTypeDetail, ContentTypeSummary, EntryList, EntryRow, EntryVersion, FieldConfig, FieldDef, Invite, IssuedKey, IssuedPat, LinkCandidate, MemberRow, Org, PatRow, Person, Project, PublishReport, Referrer, ScheduleRow, SchemaEffect, SchemaImpact, Slug, Upload, ViewerInfo, Violation, WebhookRow)
+module Model exposing (ApiKeyRow, AssetList, AssetRow, ContentTypeDetail, ContentTypeSummary, EntryList, EntryRow, EntryVersion, FieldConfig, FieldDef, Invite, IssuedKey, IssuedPat, IssuedWebhook, LinkCandidate, MemberRow, Org, PatRow, Person, Project, PublishReport, Referrer, ScheduleRow, SchemaEffect, SchemaImpact, Slug, Upload, ViewerInfo, Violation, WebhookRow)
 
 {-| API から来る値の形。Html を作らない。
 
@@ -214,8 +214,12 @@ type alias EntryVersion =
 type alias ApiKeyRow =
     { id : String
     , name : String
+
+    {- 末尾 4 文字。.env に入れた鍵と一覧の行を突き合わせる目印。古い鍵は空。 -}
+    , keyHint : String
     , scope : String
     , role : Maybe String
+    , createdAt : String
     , expiresAt : Maybe String
     , lastUsedAt : Maybe String
     , revokedAt : Maybe String
@@ -237,6 +241,14 @@ type alias WebhookRow =
     , url : String
     , events : List String
     , active : Bool
+    }
+
+
+{-| 作った Webhook と、署名の鍵。鍵はこの時しか見えない。
+-}
+type alias IssuedWebhook =
+    { webhook : WebhookRow
+    , secret : String
     }
 
 

@@ -29,18 +29,18 @@ mod AuthRows {
     pub def toInvitation(row: { id = Int64, publicId = String, email = String, role = String, createdAt = Timestamp.Timestamp | r }): Invitation \ DbErr =
         { id = row#id, publicId = row#publicId, email = row#email, role = Role.parse(row#role) |> Rows.orRaise("invitations.role", row#role), createdAt = row#createdAt }
 
-    pub def toApiKey(row: { id = Int64, publicId = String, name = String, scope = String, role = Option[String], createdAt = Timestamp.Timestamp,
+    pub def toApiKey(row: { id = Int64, publicId = String, name = String, keyHint = String, scope = String, role = Option[String], createdAt = Timestamp.Timestamp,
                             expiresAt = Option[Timestamp.Timestamp], lastUsedAt = Option[Timestamp.Timestamp], revokedAt = Option[Timestamp.Timestamp] | r }): ApiKey \ DbErr =
-        { id = row#id, publicId = row#publicId, name = row#name,
+        { id = row#id, publicId = row#publicId, name = row#name, keyHint = row#keyHint,
           scope = toApiKeyScope(row),
           createdAt = row#createdAt, expiresAt = row#expiresAt, lastUsedAt = row#lastUsedAt, revokedAt = row#revokedAt }
 
     ///
     /// API キーの発行の入力を insertApiKey の行に。scope の enum を列の組（scope と role）に開く。
     ///
-    pub def toApiKeyInsert(draft: { publicId = String, projectId = Int64, name = String, keyHash = String, pepperId = String, scope = ApiKeyScope, expiresAt = Option[Timestamp.Timestamp] }):
-            { publicId = String, projectId = Int64, name = String, keyHash = String, pepperId = String, scope = String, role = Option[String], expiresAt = Option[Timestamp.Timestamp] } =
-        { publicId = draft#publicId, projectId = draft#projectId, name = draft#name, keyHash = draft#keyHash, pepperId = draft#pepperId,
+    pub def toApiKeyInsert(draft: { publicId = String, projectId = Int64, name = String, keyHash = String, keyHint = String, pepperId = String, scope = ApiKeyScope, expiresAt = Option[Timestamp.Timestamp] }):
+            { publicId = String, projectId = Int64, name = String, keyHash = String, keyHint = String, pepperId = String, scope = String, role = Option[String], expiresAt = Option[Timestamp.Timestamp] } =
+        { publicId = draft#publicId, projectId = draft#projectId, name = draft#name, keyHash = draft#keyHash, keyHint = draft#keyHint, pepperId = draft#pepperId,
           scope = ApiKeyScope.text(draft#scope),
           role = ApiKeyScope.roleOf(draft#scope) |> Option.map(Role.text),
           expiresAt = draft#expiresAt }

@@ -365,7 +365,7 @@ pub type alias Invitation = { id = Int64, publicId = String, email = String, rol
 ///
 /// API キーの 1 行。生の鍵は持たない。
 ///
-pub type alias ApiKey = { id = Int64, publicId = String, name = String, scope = ApiKeyScope, createdAt = Timestamp.Timestamp,
+pub type alias ApiKey = { id = Int64, publicId = String, name = String, keyHint = String, scope = ApiKeyScope, createdAt = Timestamp.Timestamp,
                           expiresAt = Option[Timestamp.Timestamp], lastUsedAt = Option[Timestamp.Timestamp], revokedAt = Option[Timestamp.Timestamp] }
 
 ///

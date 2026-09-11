@@ -23,6 +23,7 @@ mod ApiKeysTable {
     pub def role(): Fragment.Col[ApiKeysTable, String, Fragment.Nullable] = Fragment.Col.Col("role", SqlValue.Str)
     pub def expiresAt(): Fragment.Col[ApiKeysTable, Timestamp.Timestamp, Fragment.Nullable] = Fragment.Col.Col("expires_at", SqlValue.ofTimestamp)
     pub def lastUsedAt(): Fragment.Col[ApiKeysTable, Timestamp.Timestamp, Fragment.Nullable] = Fragment.Col.Col("last_used_at", SqlValue.ofTimestamp)
+    pub def keyHint(): Fragment.Col[ApiKeysTable, String, Fragment.NotNull] = Fragment.Col.Col("key_hint", SqlValue.Str)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。

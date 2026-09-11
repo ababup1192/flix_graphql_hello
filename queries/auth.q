@@ -151,9 +151,9 @@ query deleteInvitationByPublicId(publicId: String, projectId: Int64) -> exec {
 // ---- api_keys ----
 
 // role は write の鍵だけ。expiresAt が無ければ期限無し
-query insertApiKey(publicId: String, projectId: Int64, name: String, keyHash: String, pepperId: String, scope: String, role: Option[String], expiresAt: Option[Timestamp]) -> one {
-    INSERT INTO api_keys (public_id, project_id, name, key_hash, pepper_id, scope, role, expires_at)
-    VALUES (:publicId, :projectId, :name, :keyHash, :pepperId, :scope, :role, :expiresAt)
+query insertApiKey(publicId: String, projectId: Int64, name: String, keyHash: String, keyHint: String, pepperId: String, scope: String, role: Option[String], expiresAt: Option[Timestamp]) -> one {
+    INSERT INTO api_keys (public_id, project_id, name, key_hash, key_hint, pepper_id, scope, role, expires_at)
+    VALUES (:publicId, :projectId, :name, :keyHash, :keyHint, :pepperId, :scope, :role, :expiresAt)
     RETURNING id
 }
 
@@ -164,7 +164,7 @@ query findApiKeyByHash(keyHash: String) -> one {
 }
 
 query listApiKeys(projectId: Int64) -> many {
-    SELECT id, public_id, name, scope, role, created_at, expires_at, last_used_at, revoked_at FROM api_keys WHERE project_id = :projectId ORDER BY id
+    SELECT id, public_id, name, key_hint, scope, role, created_at, expires_at, last_used_at, revoked_at FROM api_keys WHERE project_id = :projectId ORDER BY id
 }
 
 query revokeApiKey(publicId: String, projectId: Int64) -> exec {

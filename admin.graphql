@@ -495,6 +495,8 @@ type AuditEvent {
 type ApiKey {
   id: ID!
   name: String!
+  """鍵の末尾 4 文字。.env に入れた鍵と一覧の行を突き合わせるための目印。古い鍵は空"""
+  keyHint: String!
   scope: ApiKeyScope!
   """WRITE の鍵の役割。それ以外は null"""
   role: Role

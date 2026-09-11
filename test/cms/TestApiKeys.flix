@@ -16,6 +16,13 @@ mod TestApiKeys {
              ApiKeyScope.parse("read", Some("writer")),
              ApiKeyScope.parse("write", Some("viewer"))))
 
+    /// 一覧に出す目印は末尾 4 文字。短い鍵はそのまま（空でも落ちない）。
+    @Test
+    def testApiKeyHintIsLastFour(): Unit \ Assert =
+        Assert.assertEq(
+            expected = List#{"Mspo", "abcd", "ab", ""},
+            List#{"cms_h3IklU6URsRIwvlDQtkZ9d82q3yLtZDcJq0P7uvMspo", "abcd", "ab", ""} |> List.map(ApiKeys.hint))
+
     /// 期限が無ければ切れず、期限より前なら生きていて、期限ちょうどと過ぎた物と失効した物は死んでいる。
     @Test
     def testIsAlive(): Unit \ Assert =

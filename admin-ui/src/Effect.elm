@@ -28,6 +28,7 @@ type Effect msg
     | Upload E.Value
     | SetTheme String
     | SetUnsaved Bool
+    | Copy String
     | Focus String {- 少し待ってから Msg を出す。**打つ度に問い合わせない**ために使う。 -}
     | After Float msg {- 今日は何日か。日付を選ぶ画面の初めの月を決めるのに要る。 -}
     | Today (Time.Zone -> Int -> Int -> Int -> msg)
@@ -46,6 +47,7 @@ type alias Caps msg =
     , upload : E.Value -> Cmd msg
     , theme : String -> Cmd msg
     , unsaved : Bool -> Cmd msg
+    , copy : String -> Cmd msg
     , ignore : msg
     , toast : String -> msg
     }
@@ -133,6 +135,9 @@ perform caps effect =
 
         SetUnsaved dirty ->
             caps.unsaved dirty
+
+        Copy value ->
+            caps.copy value
 
         After delay msg ->
             Task.perform (\_ -> msg) (Process.sleep delay)

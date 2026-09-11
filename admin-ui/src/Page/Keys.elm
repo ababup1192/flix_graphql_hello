@@ -1,9 +1,12 @@
-module Page.Keys exposing (Model, Msg, init, load, update, view)
+module Page.Keys exposing (Model, Msg(..), init, load, update, view)
 
 {-| プロジェクト設定 › API キーと Webhook。
 
 **生の値は発行の 1 回しか出ない。** 出したらその場でコピーさせ、閉じたら二度と出さない。
-公開サイトがコンテンツ API を読むのも、AI から MCP で繋ぐのも、ここで発行した鍵を使う。
+公開サイトがコンテンツ API を読むのも、AI から MCP で接続するのも、ここで発行した API キーを使う。
+
+一覧の列は GitHub（PAT）・Stripe・Vercel と揃えてある: 名前、鍵の末尾、権限、作成日、有効期限、最後に使った日。
+危ない操作（失効・削除）は確認を挟む。他社も挟んでいて、ここだけ 1 クリックにしない。
 
 -}
 
@@ -15,9 +18,13 @@ import Html exposing (Html, div, span, text)
 import Html.Attributes exposing (class, placeholder, value)
 import Html.Events exposing (onClick, onInput)
 import Loaded exposing (Loaded)
-import Model exposing (ApiKeyRow, IssuedKey, Slug, WebhookRow)
+import Model exposing (ApiKeyRow, IssuedKey, IssuedWebhook, Slug, WebhookRow)
 import Queries
+import Time
 import Ui
+import Ui.DateTime
+import Ui.Reply as Reply exposing (Reply)
+import Ui.Secret
 
 
 type alias Model =
@@ -25,11 +32,18 @@ type alias Model =
     , hooks : Loaded (List WebhookRow)
     , newKeyName : String
     , newKeyScope : ApiKeyScope
+    , keyReply : Reply
     , issued : Maybe IssuedKey
+    , copied : Bool
+    , confirmRevoke : Maybe ApiKeyRow
+    , revoking : Reply
     , newHookName : String
     , newHookUrl : String
-    , errors : List String
-    , busy : Bool
+    , hookReply : Reply
+    , issuedHook : Maybe IssuedWebhook
+    , confirmHookDelete : Maybe WebhookRow
+    , deleting : Reply
+    , zone : Time.Zone
     }
 
 
@@ -40,15 +54,22 @@ type Msg
     | KeyScopeChosen String
     | KeySubmitted
     | GotIssued (Result Api.Problem IssuedKey)
+    | CopyRequested String
     | IssuedClosed
-    | KeyRevoked String
+    | RevokeAsked ApiKeyRow
+    | RevokeCancelled
+    | RevokeConfirmed
     | GotRevoked (Result Api.Problem String)
     | HookNameTyped String
     | HookUrlTyped String
     | HookSubmitted
-    | GotHook (Result Api.Problem WebhookRow)
-    | HookDeleted String
+    | GotHook (Result Api.Problem IssuedWebhook)
+    | HookDeleteAsked WebhookRow
+    | HookDeleteCancelled
+    | HookDeleteConfirmed
     | GotHookDeleted (Result Api.Problem String)
+    | EscapePressed
+    | ZoneKnown Time.Zone
 
 
 init : Model
@@ -57,11 +78,18 @@ init =
     , hooks = Loaded.Loading
     , newKeyName = ""
     , newKeyScope = ApiKeyScope.Read
+    , keyReply = Reply.idle
     , issued = Nothing
+    , copied = False
+    , confirmRevoke = Nothing
+    , revoking = Reply.idle
     , newHookName = ""
     , newHookUrl = ""
-    , errors = []
-    , busy = False
+    , hookReply = Reply.idle
+    , issuedHook = Nothing
+    , confirmHookDelete = Nothing
+    , deleting = Reply.idle
+    , zone = Time.utc
     }
 
 
@@ -82,101 +110,123 @@ update ctx msg model =
             ( { model | hooks = Loaded.fromResult (Result.map Just result) }, [] )
 
         KeyNameTyped name ->
-            ( { model | newKeyName = name }, [] )
+            ( { model | newKeyName = name, keyReply = Reply.touched model.keyReply }, [] )
 
         KeyScopeChosen chosen ->
-            ( { model | newKeyScope = scopeOf chosen }, [] )
+            ( { model | newKeyScope = scopeOf chosen, keyReply = Reply.touched model.keyReply }, [] )
 
         KeySubmitted ->
-            if String.isEmpty (String.trim model.newKeyName) then
-                ( { model | errors = [ "キーの名前を入れてください" ] }, [] )
+            ( { model | keyReply = Reply.sending }
+            , [ Api.call
+                    (\id ->
+                        Queries.createApiKey id
+                            ctx.project
+                            { name = model.newKeyName
+                            , scope = model.newKeyScope
+                            , role =
+                                if model.newKeyScope == ApiKeyScope.Write then
+                                    Just Role.Editor
 
-            else
-                ( { model | busy = True, errors = [] }
-                , [ Api.call
-                        (\id ->
-                            Queries.createApiKey id
-                                ctx.project
-                                { name = model.newKeyName
-                                , scope = model.newKeyScope
-                                , role =
-                                    if model.newKeyScope == ApiKeyScope.Write then
-                                        Just Role.Editor
-
-                                    else
-                                        Nothing
-                                }
-                        )
-                        GotIssued
-                  ]
-                )
+                                else
+                                    Nothing
+                            }
+                    )
+                    GotIssued
+              ]
+            )
 
         GotIssued (Ok issued) ->
-            ( { model | busy = False, issued = Just issued, newKeyName = "" }, load ctx.project )
+            ( { model | keyReply = Reply.idle, issued = Just issued, copied = False, newKeyName = "" }, load ctx.project )
 
         GotIssued (Err problem) ->
-            ( failed problem model, [] )
+            ( { model | keyReply = Reply.failed problem }, [] )
+
+        -- 親が port に流す。ここでは「コピーしました」に切り替えるだけ
+        CopyRequested _ ->
+            ( { model | copied = True }, [] )
 
         IssuedClosed ->
-            ( { model | issued = Nothing }, [] )
+            ( { model | issued = Nothing, issuedHook = Nothing, copied = False }, [] )
 
-        KeyRevoked keyId ->
-            ( { model | busy = True }, [ Api.call (\id -> Queries.revokeApiKey id ctx.project keyId) GotRevoked ] )
+        RevokeAsked row ->
+            ( { model | confirmRevoke = Just row, revoking = Reply.idle }, [] )
+
+        RevokeCancelled ->
+            ( { model | confirmRevoke = Nothing }, [] )
+
+        RevokeConfirmed ->
+            case model.confirmRevoke of
+                Just row ->
+                    ( { model | revoking = Reply.sending }, [ Api.call (\id -> Queries.revokeApiKey id ctx.project row.id) GotRevoked ] )
+
+                Nothing ->
+                    ( model, [] )
 
         GotRevoked (Ok _) ->
-            ( { model | busy = False }, load ctx.project )
+            ( { model | revoking = Reply.idle, confirmRevoke = Nothing }, load ctx.project )
 
         GotRevoked (Err problem) ->
-            ( failed problem model, [] )
+            ( { model | revoking = Reply.failed problem }, [] )
 
         HookNameTyped name ->
-            ( { model | newHookName = name }, [] )
+            ( { model | newHookName = name, hookReply = Reply.touched model.hookReply }, [] )
 
         HookUrlTyped url ->
-            ( { model | newHookUrl = url }, [] )
+            ( { model | newHookUrl = url, hookReply = Reply.touched model.hookReply }, [] )
 
         HookSubmitted ->
-            if String.startsWith "http" model.newHookUrl then
-                ( { model | busy = True, errors = [] }
-                , [ Api.call
-                        (\id ->
-                            Queries.createWebhook id
-                                ctx.project
-                                { name = model.newHookName, url = model.newHookUrl, events = WebhookEvent.list }
-                        )
-                        GotHook
-                  ]
-                )
+            ( { model | hookReply = Reply.sending }
+            , [ Api.call
+                    (\id ->
+                        Queries.createWebhook id
+                            ctx.project
+                            { name = model.newHookName, url = model.newHookUrl, events = WebhookEvent.list }
+                    )
+                    GotHook
+              ]
+            )
 
-            else
-                ( { model | errors = [ "送り先の URL を http から入れてください" ] }, [] )
-
-        GotHook (Ok hook) ->
+        GotHook (Ok issued) ->
             ( { model
-                | busy = False
+                | hookReply = Reply.idle
+                , issuedHook = Just issued
+                , copied = False
                 , newHookName = ""
                 , newHookUrl = ""
-                , hooks = Loaded.map (\hooks -> hooks ++ [ hook ]) model.hooks
+                , hooks = Loaded.map (\hooks -> hooks ++ [ issued.webhook ]) model.hooks
               }
             , []
             )
 
         GotHook (Err problem) ->
-            ( failed problem model, [] )
+            ( { model | hookReply = Reply.failed problem }, [] )
 
-        HookDeleted hookId ->
-            ( { model | busy = True }, [ Api.call (\id -> Queries.deleteWebhook id ctx.project hookId) GotHookDeleted ] )
+        HookDeleteAsked hook ->
+            ( { model | confirmHookDelete = Just hook, deleting = Reply.idle }, [] )
+
+        HookDeleteCancelled ->
+            ( { model | confirmHookDelete = Nothing }, [] )
+
+        HookDeleteConfirmed ->
+            case model.confirmHookDelete of
+                Just hook ->
+                    ( { model | deleting = Reply.sending }, [ Api.call (\id -> Queries.deleteWebhook id ctx.project hook.id) GotHookDeleted ] )
+
+                Nothing ->
+                    ( model, [] )
 
         GotHookDeleted (Ok hookId) ->
-            ( { model | busy = False, hooks = Loaded.map (List.filter (\hook -> hook.id /= hookId)) model.hooks }, [] )
+            ( { model | deleting = Reply.idle, confirmHookDelete = Nothing, hooks = Loaded.map (List.filter (\hook -> hook.id /= hookId)) model.hooks }, [] )
 
         GotHookDeleted (Err problem) ->
-            ( failed problem model, [] )
+            ( { model | deleting = Reply.failed problem }, [] )
 
+        -- 開いている確認を 1 段閉じる
+        EscapePressed ->
+            ( { model | confirmRevoke = Nothing, confirmHookDelete = Nothing }, [] )
 
-failed : Api.Problem -> Model -> Model
-failed problem model =
-    { model | busy = False, errors = [ (Api.problemToText problem).message ] }
+        ZoneKnown zone ->
+            ( { model | zone = zone }, [] )
 
 
 scopeOptions : List ( String, String )
@@ -204,121 +254,192 @@ view : Model -> Html Msg
 view model =
     Ui.page []
         [ Ui.pageHeader { title = "API キー", icon = Nothing, meta = [], actions = [] }
-        , Ui.note [ text "キーの値は発行した時に 1 回だけ表示されます。公開サイトの読み取りと、AI から MCP で繋ぐのに使います。" ]
-        , Ui.errors model.errors
+        , Ui.note [ text "API キーの値は発行したときに 1 回だけ表示されます。公開サイトからの取得と、MCP での接続に使います。" ]
         , case model.issued of
             Just issued ->
-                viewIssued issued
+                Ui.Secret.view
+                    { title = "「" ++ issued.name ++ "」を発行しました"
+                    , value = issued.key
+                    , copied = model.copied
+                    , onCopy = CopyRequested issued.key
+                    , onClose = IssuedClosed
+                    }
 
             Nothing ->
                 viewKeyForm model
         , viewKeys model
         , Ui.sectionTitle "Webhook"
-        , Ui.note [ text "公開・公開終了・削除・スキーマの変更を、指定した URL に知らせます。" ]
-        , viewHookForm model
+        , Ui.note [ text "公開・公開終了・削除・スキーマの変更を、指定した URL に通知します。" ]
+        , case model.issuedHook of
+            Just issued ->
+                Ui.Secret.view
+                    { title = "「" ++ issued.webhook.name ++ "」を追加しました。署名の鍵です"
+                    , value = issued.secret
+                    , copied = model.copied
+                    , onCopy = CopyRequested issued.secret
+                    , onClose = IssuedClosed
+                    }
+
+            Nothing ->
+                viewHookForm model
         , viewHooks model
-        ]
-
-
-{-| 発行したキー。**閉じると二度と出ない**ので、そう伝える。
--}
-viewIssued : IssuedKey -> Html Msg
-viewIssued issued =
-    Ui.callout Ui.toneWarn
-        []
-        [ Ui.subheading ("「" ++ issued.name ++ "」を発行しました")
-        , Ui.note [ text "この値はこの画面を閉じると二度と出ません。今のうちに控えてください。" ]
-        , Ui.codeBlock [ class "bg-panel" ] issued.key
-        , div [] [ Ui.ghostButton [ onClick IssuedClosed ] [ text "控えました" ] ]
         ]
 
 
 viewKeyForm : Model -> Html Msg
 viewKeyForm model =
-    Ui.card [ class "flex items-end gap-4 p-4" ]
-        [ div [ class "flex-1" ]
-            [ Ui.field { label = "キーの名前", hint = Nothing, errors = [] }
-                [ Ui.input [ value model.newKeyName, onInput KeyNameTyped, placeholder "公開サイト" ] ]
+    Ui.card [ class "flex flex-col gap-3 p-4" ]
+        [ div [ class "flex items-end gap-4" ]
+            [ div [ class "flex-1" ]
+                [ Ui.field { label = "名前", hint = Nothing, errors = Reply.errorsFor "name" model.keyReply }
+                    [ Ui.input [ value model.newKeyName, onInput KeyNameTyped, placeholder "公開サイト" ] ]
+                ]
+            , div [ class "w-56" ]
+                [ Ui.field { label = "権限", hint = Nothing, errors = Reply.errorsFor "scope" model.keyReply ++ Reply.errorsFor "role" model.keyReply }
+                    [ Ui.select [ onInput KeyScopeChosen ] scopeOptions (ApiKeyScope.toString model.newKeyScope) ]
+                ]
+            , Reply.saveButton { label = "発行", dirty = not (String.isEmpty (String.trim model.newKeyName)), reply = model.keyReply, onSave = KeySubmitted }
             ]
-        , div [ class "w-56" ]
-            [ Ui.field { label = "用途", hint = Nothing, errors = [] }
-                [ Ui.select [ onInput KeyScopeChosen ] scopeOptions (ApiKeyScope.toString model.newKeyScope) ]
-            ]
-        , Ui.button [ onClick KeySubmitted ] [ text (busyText model "発行") ]
         ]
-
-
-busyText : Model -> String -> String
-busyText model label =
-    if model.busy then
-        "送っています…"
-
-    else
-        label
 
 
 viewKeys : Model -> Html Msg
 viewKeys model =
     Loaded.view
         { loading = Ui.loadingCard
-        , missing = Ui.table [ Ui.empty "キーがありません" ]
+        , missing = Ui.table [ Ui.empty "API キーがありません" ]
         , failed = Ui.failedCard
         , present =
             \rows ->
                 if List.isEmpty rows then
-                    Ui.table [ Ui.empty "キーがありません" ]
+                    Ui.table [ Ui.empty "API キーがありません" ]
 
                 else
-                    Ui.table (Ui.headRowOf keyColumns [ text "名前", text "用途", text "最後に使った日", text "" ] :: List.map viewKey rows)
+                    Ui.table
+                        (Ui.headRowOf keyColumns [ text "名前", text "キー", text "権限", text "作成日", text "有効期限", text "最後に使った日", text "" ]
+                            :: List.concatMap (viewKey model) rows
+                        )
         }
         model.keys
 
 
 keyColumns : String
 keyColumns =
-    "grid-cols-[1fr_200px_150px_80px]"
+    "grid-cols-[1fr_110px_190px_100px_100px_120px_60px]"
 
 
 hookColumns : String
 hookColumns =
-    "grid-cols-[1fr_110px_90px_80px]"
+    "grid-cols-[1fr_260px_80px_60px]"
 
 
-viewKey : ApiKeyRow -> Html Msg
-viewKey row =
-    Ui.rowOf keyColumns
+{-| 鍵の 1 行と、失効の確認。確認は行の直下に出す（何を失効するかが目に入ったまま押せる）。
+-}
+viewKey : Model -> ApiKeyRow -> List (Html Msg)
+viewKey model row =
+    let
+        revoked : Bool
+        revoked =
+            row.revokedAt /= Nothing
+
+        faint : String
+        faint =
+            if revoked then
+                " opacity-60"
+
+            else
+                ""
+    in
+    Ui.rowOf (keyColumns ++ faint)
         [ div [ class "flex flex-col" ]
             [ span [ class "font-medium" ] [ text row.name ]
-            , case row.revokedAt of
-                Just _ ->
-                    span [ class "text-[11px] text-ink-faint" ] [ text "失効済み" ]
+            , if revoked then
+                span [ class "text-[11px] text-ink-faint" ] [ text ("失効済み" ++ (row.revokedAt |> Maybe.map (\at -> " · " ++ dateOf model.zone at) |> Maybe.withDefault "")) ]
+
+              else
+                text ""
+            ]
+        , span [ class "font-mono text-[12px] text-ink-soft" ] [ text (hintOf row.keyHint) ]
+        , span [ class "text-ink-soft" ] [ text (scopeText row.scope) ]
+        , span [ class "font-mono text-[11px] text-ink-soft" ] [ text (dateOf model.zone row.createdAt) ]
+        , viewExpiry model.zone row
+        , span [ class "font-mono text-[11px] text-ink-soft" ] [ text (row.lastUsedAt |> Maybe.map (dateOf model.zone) |> Maybe.withDefault "未使用") ]
+        , if revoked then
+            text ""
+
+          else
+            div [ class "text-right" ] [ Ui.dangerLink (RevokeAsked row) "失効" ]
+        ]
+        :: (case model.confirmRevoke of
+                Just asked ->
+                    if asked.id == row.id then
+                        [ Ui.callout Ui.toneWarn
+                            [ class "gap-2 rounded-none border-x-0 p-3" ]
+                            [ Ui.subheading ("「" ++ row.name ++ "」を失効しますか")
+                            , Ui.note [ text "この API キーを使っているサイトやツールは、すぐに読み書きできなくなります。元には戻せません。" ]
+                            , div [ class "flex items-center gap-2" ]
+                                [ Ui.button [ onClick RevokeConfirmed, Html.Attributes.disabled (Reply.isSending model.revoking) ] [ text "失効" ]
+                                , Ui.ghostButton [ onClick RevokeCancelled ] [ text "キャンセル" ]
+                                , Reply.view model.revoking
+                                ]
+                            ]
+                        ]
+
+                    else
+                        []
 
                 Nothing ->
-                    text ""
-            ]
-        , span [ class "text-ink-soft" ] [ text (scopeText row.scope) ]
-        , span [ class "font-mono text-[11px] text-ink-soft" ] [ text (row.lastUsedAt |> Maybe.map (String.left 16) |> Maybe.withDefault "—") ]
-        , case row.revokedAt of
-            Just _ ->
-                text ""
+                    []
+           )
 
-            Nothing ->
-                div [ class "text-right" ] [ Ui.dangerLink (KeyRevoked row.id) "失効" ]
-        ]
+
+{-| 末尾 4 文字。古い鍵は持っていないので「…」だけ。
+-}
+hintOf : String -> String
+hintOf hint =
+    if String.isEmpty hint then
+        "…"
+
+    else
+        "…" ++ hint
+
+
+{-| 有効期限。無期限はそう書く。
+-}
+viewExpiry : Time.Zone -> ApiKeyRow -> Html Msg
+viewExpiry zone row =
+    case row.expiresAt of
+        Nothing ->
+            span [ class "text-[11px] text-ink-faint" ] [ text "無期限" ]
+
+        Just at ->
+            span [ class "font-mono text-[11px] text-ink-soft" ] [ text (dateOf zone at) ]
+
+
+{-| ISO 8601 の日時を手元のタイムゾーンの日付（YYYY-MM-DD）に。
+-}
+dateOf : Time.Zone -> String -> String
+dateOf zone iso =
+    String.left 10 (Ui.DateTime.formatLocal zone iso)
 
 
 viewHookForm : Model -> Html Msg
 viewHookForm model =
     Ui.card [ class "flex items-end gap-4 p-4" ]
         [ div [ class "w-48" ]
-            [ Ui.field { label = "名前", hint = Nothing, errors = [] }
+            [ Ui.field { label = "名前", hint = Nothing, errors = Reply.errorsFor "name" model.hookReply }
                 [ Ui.input [ value model.newHookName, onInput HookNameTyped, placeholder "サイトの再ビルド" ] ]
             ]
         , div [ class "flex-1" ]
-            [ Ui.field { label = "送り先の URL", hint = Nothing, errors = [] }
+            [ Ui.field { label = "URL", hint = Nothing, errors = Reply.errorsFor "url" model.hookReply }
                 [ Ui.input [ value model.newHookUrl, onInput HookUrlTyped, placeholder "https://example.com/hook" ] ]
             ]
-        , Ui.button [ onClick HookSubmitted ] [ text (busyText model "追加") ]
+        , Reply.saveButton
+            { label = "追加"
+            , dirty = not (String.isEmpty (String.trim model.newHookName)) && not (String.isEmpty (String.trim model.newHookUrl))
+            , reply = model.hookReply
+            , onSave = HookSubmitted
+            }
         ]
 
 
@@ -334,23 +455,65 @@ viewHooks model =
                     Ui.table [ Ui.empty "Webhook がありません" ]
 
                 else
-                    Ui.table (Ui.headRowOf hookColumns [ text "送り先", text "イベント", text "状態", text "" ] :: List.map viewHook rows)
+                    Ui.table (Ui.headRowOf hookColumns [ text "名前 / URL", text "イベント", text "状態", text "" ] :: List.concatMap (viewHook model) rows)
         }
         model.hooks
 
 
-viewHook : WebhookRow -> Html Msg
-viewHook hook =
+viewHook : Model -> WebhookRow -> List (Html Msg)
+viewHook model hook =
     Ui.rowOf hookColumns
         [ div [ class "flex min-w-0 flex-col" ]
             [ span [ class "font-medium" ] [ text hook.name ]
             , span [ class "truncate font-mono text-[11px] text-ink-faint" ] [ text hook.url ]
             ]
-        , span [ class "text-ink-soft" ] [ text (String.fromInt (List.length hook.events) ++ " 種類") ]
+        , span [ class "text-[12px] text-ink-soft" ] [ text (hook.events |> List.map eventText |> String.join "・") ]
         , if hook.active then
             Ui.chip Ui.toneOk "有効"
 
           else
-            Ui.chip Ui.toneNeutral "停止中"
-        , div [ class "text-right" ] [ Ui.dangerLink (HookDeleted hook.id) "削除" ]
+            Ui.chip Ui.toneNeutral "無効"
+        , div [ class "text-right" ] [ Ui.dangerLink (HookDeleteAsked hook) "削除" ]
         ]
+        :: (case model.confirmHookDelete of
+                Just asked ->
+                    if asked.id == hook.id then
+                        [ Ui.callout Ui.toneWarn
+                            [ class "gap-2 rounded-none border-x-0 p-3" ]
+                            [ Ui.subheading ("「" ++ hook.name ++ "」を削除しますか")
+                            , Ui.note [ text "この URL への通知が止まります。配信の記録も見られなくなります。" ]
+                            , div [ class "flex items-center gap-2" ]
+                                [ Ui.button [ onClick HookDeleteConfirmed, Html.Attributes.disabled (Reply.isSending model.deleting) ] [ text "削除" ]
+                                , Ui.ghostButton [ onClick HookDeleteCancelled ] [ text "キャンセル" ]
+                                , Reply.view model.deleting
+                                ]
+                            ]
+                        ]
+
+                    else
+                        []
+
+                Nothing ->
+                    []
+           )
+
+
+{-| イベントの言い方。GitHub は名前を並べる。「4 種類」では何が来るか分からない。
+-}
+eventText : String -> String
+eventText event =
+    case event of
+        "ENTRY_PUBLISHED" ->
+            "公開"
+
+        "ENTRY_UNPUBLISHED" ->
+            "公開終了"
+
+        "ENTRY_DELETED" ->
+            "削除"
+
+        "SCHEMA_CHANGED" ->
+            "スキーマの変更"
+
+        other ->
+            other

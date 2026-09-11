@@ -9,6 +9,7 @@ declare module "*.elm" {
           uploadFinished_Media_ELM: { send(value: unknown): void };
           setTheme_Shell_JS: { subscribe(handler: (value: string) => void): void };
           setUnsaved_Editor_JS: { subscribe(handler: (value: boolean) => void): void };
+          copyText_Clipboard_JS: { subscribe(handler: (value: string) => void): void };
         };
       };
     };

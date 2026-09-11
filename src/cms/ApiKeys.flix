@@ -13,6 +13,13 @@ mod ApiKeys {
     pub def prefix(): String = "cms_"
 
     ///
+    /// 一覧に出す目印。末尾 4 文字だけで、これだけでは鍵にならない（Stripe / AWS と同じ長さ）。
+    ///
+    pub def hint(key: String): String =
+        let n = String.length(key);
+        if (n <= 4) key else String.sliceRight(start = n - 4, key)
+
+    ///
     /// 発行する。今のプロジェクトに付く。manageApiKeys の証明と、ログインの JWT で来た本人の証明（`Granted[Interactive]`。PAT や鍵からは作れない）の 2 つを受ける。
     /// write の鍵は発行者が持つ役割より高い役割にはできず、期限は未来だけ。
     ///
@@ -23,7 +30,7 @@ mod ApiKeys {
         let key = prefix() ++ IdGen.freshSecret();
         let publicId = IdGen.freshPublicId();
         let id = AuthQueries.insertApiKey(AuthRows.toApiKeyInsert({
-            publicId = publicId, projectId = Tenant.currentId(), name = draft#name, keyHash = SecretHash.hash(pepper, key),
+            publicId = publicId, projectId = Tenant.currentId(), name = draft#name, keyHash = SecretHash.hash(pepper, key), keyHint = hint(key),
             pepperId = pepper#pepperId, scope = draft#scope, expiresAt = draft#expiresAt })) |> Rows.expectId;
         Audit.record(AuditChange.ApiKeyCreated(publicId, draft#name));
         { id = id, publicId = publicId, name = draft#name, scope = draft#scope, expiresAt = draft#expiresAt, key = key }

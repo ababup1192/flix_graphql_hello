@@ -50,6 +50,12 @@ function applyTheme(theme: string) {
 }
 
 app.ports.setTheme_Shell_JS.subscribe(applyTheme);
+
+// クリップボードは Elm から触れない。失敗（権限が無い・非 HTTPS）は黙って落とし、
+// 画面は「コピーしました」を出さないまま値を選べる状態に留まる。
+app.ports.copyText_Clipboard_JS.subscribe((value: string) => {
+  navigator.clipboard?.writeText(value).catch(() => {});
+});
 applyTheme(localStorage.getItem("theme") ?? "system");
 
 // 未保存の入力があるまま閉じようとしたら止める。保存は人が押す物なので、

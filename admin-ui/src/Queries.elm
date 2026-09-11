@@ -995,14 +995,16 @@ apiKeys : String -> Slug -> ( Api.Request, D.Decoder (List Model.ApiKeyRow) )
 apiKeys id project =
     Api.query { id = id, kind = "apiKeys", project = project }
         (Api.Admin.Query.apiKeys
-            (SS.map7 Model.ApiKeyRow
-                ApiKey.id
-                ApiKey.name
-                (ApiKey.scope |> SS.map ApiKeyScope.toString)
-                (ApiKey.role |> SS.map (Maybe.map AdminRole.toString))
-                ApiKey.expiresAt
-                ApiKey.lastUsedAt
-                ApiKey.revokedAt
+            (SS.succeed Model.ApiKeyRow
+                |> SS.with ApiKey.id
+                |> SS.with ApiKey.name
+                |> SS.with ApiKey.keyHint
+                |> SS.with (ApiKey.scope |> SS.map ApiKeyScope.toString)
+                |> SS.with (ApiKey.role |> SS.map (Maybe.map AdminRole.toString))
+                |> SS.with ApiKey.createdAt
+                |> SS.with ApiKey.expiresAt
+                |> SS.with ApiKey.lastUsedAt
+                |> SS.with ApiKey.revokedAt
             )
         )
 
@@ -1053,12 +1055,12 @@ webhookRow =
 
 {-| Webhook を作る。secret はこの応答にしか出ない。
 -}
-createWebhook : String -> Slug -> { name : String, url : String, events : List WebhookEvent } -> ( Api.Request, D.Decoder Model.WebhookRow )
+createWebhook : String -> Slug -> { name : String, url : String, events : List WebhookEvent } -> ( Api.Request, D.Decoder Model.IssuedWebhook )
 createWebhook id project args =
     Api.mutation { id = id, kind = "createWebhook", project = project }
         (AdminMutation.createWebhook
             { input = { name = args.name, url = args.url, events = args.events, active = Opt.Present True } }
-            (IssuedWebhook.webhook webhookRow)
+            (SS.map2 Model.IssuedWebhook (IssuedWebhook.webhook webhookRow) IssuedWebhook.secret)
         )
 
 

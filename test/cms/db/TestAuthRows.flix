@@ -83,13 +83,13 @@ mod TestAuthRows {
         let scopes = List#{ApiKeyScope.Read, ApiKeyScope.ReadDraft, ApiKeyScope.Write(Role.Writer), ApiKeyScope.Write(Role.Editor), ApiKeyScope.Write(Role.Owner)};
         Assert.assertEq(expected = List.map(Ok, scopes),
             scopes |> List.map(scope -> DbErr.runWithResult(() ->
-                AuthRows.toApiKeyScope(AuthRows.toApiKeyInsert({ publicId = publicId(), projectId = 1i64, name = "ci", keyHash = "h", pepperId = "p", scope = scope, expiresAt = None })))))
+                AuthRows.toApiKeyScope(AuthRows.toApiKeyInsert({ publicId = publicId(), projectId = 1i64, name = "ci", keyHash = "h", keyHint = "abcd", pepperId = "p", scope = scope, expiresAt = None })))))
 
     /// INSERT の引数は入力の列をそのまま持ち、write の鍵だけ role 列が Some。
     @Test
     def testApiKeyInsertColumns(): Unit \ Assert =
-        let insert = AuthRows.toApiKeyInsert({ publicId = publicId(), projectId = 6i64, name = "ci", keyHash = "hash", pepperId = "v1", scope = ApiKeyScope.Write(Role.Editor), expiresAt = Some(at(1725000000123i64)) });
-        let readOnly = AuthRows.toApiKeyInsert({ publicId = publicId(), projectId = 6i64, name = "ro", keyHash = "hash", pepperId = "v1", scope = ApiKeyScope.Read, expiresAt = None });
+        let insert = AuthRows.toApiKeyInsert({ publicId = publicId(), projectId = 6i64, name = "ci", keyHash = "hash", keyHint = "abcd", pepperId = "v1", scope = ApiKeyScope.Write(Role.Editor), expiresAt = Some(at(1725000000123i64)) });
+        let readOnly = AuthRows.toApiKeyInsert({ publicId = publicId(), projectId = 6i64, name = "ro", keyHash = "hash", keyHint = "abcd", pepperId = "v1", scope = ApiKeyScope.Read, expiresAt = None });
         Assert.assertEq(expected = ((publicId(), 6i64, "ci", "hash", "v1", "write", Some("editor"), Some(at(1725000000123i64))), ("read", None, None)),
             ((insert#publicId, insert#projectId, insert#name, insert#keyHash, insert#pepperId, insert#scope, insert#role, insert#expiresAt), (readOnly#scope, readOnly#role, readOnly#expiresAt)))
 
@@ -106,7 +106,7 @@ mod TestAuthRows {
         let table = List#{(None, None, None), (Some(at(1i64)), Some(at(2i64)), Some(at(1725000000123i64)))};
         Assert.assertEq(expected = table |> List.map(match (expiresAt, lastUsedAt, revokedAt) -> Ok((10i64, publicId(), "ci", ApiKeyScope.ReadDraft, at(0i64), expiresAt, lastUsedAt, revokedAt))),
             table |> List.map(match (expiresAt, lastUsedAt, revokedAt) -> DbErr.runWithResult(() -> {
-                let key = AuthRows.toApiKey({ id = 10i64, publicId = publicId(), name = "ci", scope = "readDraft", role = None, createdAt = at(0i64), expiresAt = expiresAt, lastUsedAt = lastUsedAt, revokedAt = revokedAt });
+                let key = AuthRows.toApiKey({ id = 10i64, publicId = publicId(), name = "ci", keyHint = "abcd", scope = "readDraft", role = None, createdAt = at(0i64), expiresAt = expiresAt, lastUsedAt = lastUsedAt, revokedAt = revokedAt });
                 (key#id, key#publicId, key#name, key#scope, key#createdAt, key#expiresAt, key#lastUsedAt, key#revokedAt)
             })))
 

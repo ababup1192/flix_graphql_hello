@@ -41,7 +41,7 @@ mod TestApiSurface {
     def testAdminSchemaSurface(): Unit \ {IO, Assert} =
         Assert.assertEq(
             expected =
-                "ApiKey: id name scope role createdAt expiresAt lastUsedAt revokedAt" ::
+                "ApiKey: id name keyHint scope role createdAt expiresAt lastUsedAt revokedAt" ::
                 "Asset: id url fileName mime size width height alt status createdAt usedBy" ::
                 "AssetEdge: cursor node" ::
                 "AssetPage: nodes edges pageInfo totalCount" ::
