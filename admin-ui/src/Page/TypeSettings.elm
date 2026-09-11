@@ -232,7 +232,7 @@ viewDanger model detail =
         [ Ui.subheading "この API を削除"
         , Ui.note
             [ text (String.fromInt (List.length detail.fields) ++ " 個のフィールドの定義も一緒に削除されます。コンテンツが 1 件でも残っている場合は削除できません。先にコンテンツを削除してください。") ]
-        , div [] [ Ui.dangerLink DeleteAsked "この API を削除…" ]
+        , div [] [ Ui.dangerLink DeleteAsked "この API を削除" ]
         , if model.confirmDelete then
             Ui.Confirm.view
                 { title = "「" ++ detail.name ++ "」を削除しますか"

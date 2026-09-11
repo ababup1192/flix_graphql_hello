@@ -1364,7 +1364,7 @@ viewRemove model form =
 
         Nothing ->
             div [ class "border-t border-edge pt-3" ]
-                [ Ui.dangerLink (RemoveAsked (removable form)) "このフィールドを削除…" ]
+                [ Ui.dangerLink (RemoveAsked (removable form)) "このフィールドを削除" ]
 
 
 {-| 押すと何が起きるか。**サーバが数えた件数をそのまま出す。**
