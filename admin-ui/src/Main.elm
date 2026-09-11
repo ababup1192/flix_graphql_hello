@@ -852,6 +852,9 @@ escapeToPage model =
                 MembersPage _ ->
                     update (MembersMsg Members.EscapePressed) model
 
+                AuditPage _ ->
+                    update (AuditMsg Audit.EscapePressed) model
+
                 _ ->
                     ( model, Effect.none )
 
@@ -1226,7 +1229,7 @@ enterPage route model =
                 Route.Settings _ (Route.Audit params) ->
                     -- 引くのはタイムゾーンが分かってから（ページの ZoneKnown が引く）。
                     ( { model | route = route, phase = Ready { workspace | page = AuditPage (Audit.init slug params) } }
-                    , Effect.Today (\zone _ _ _ -> AuditMsg (Audit.ZoneKnown zone))
+                    , Effect.Today (\zone year month day -> AuditMsg (Audit.ZoneKnown zone year month day))
                     )
 
                 _ ->

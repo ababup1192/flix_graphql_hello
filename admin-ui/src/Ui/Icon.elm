@@ -1,5 +1,6 @@
 module Ui.Icon exposing
     ( byName
+    , calendar
     , caret
     , check
     , choices

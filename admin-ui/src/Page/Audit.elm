@@ -15,7 +15,7 @@ import Api
 import Api.Admin.Enum.ActorKind as ActorKind
 import Dict
 import Html exposing (Html, div, span, text)
-import Html.Attributes exposing (class, href, title, type_, value)
+import Html.Attributes exposing (class, href, title, type_)
 import Html.Events exposing (onClick, onInput)
 import Json.Decode as D
 import Json.Encode as E
@@ -27,6 +27,7 @@ import Route
 import Set exposing (Set)
 import Time
 import Ui
+import Ui.DateRange
 import Ui.DateTime as DateTime
 import Ui.Icon as Icon
 
@@ -34,10 +35,16 @@ import Ui.Icon as Icon
 type alias Model =
     { project : Slug
     , zone : Maybe Time.Zone
+
+    {- 今日。「過去 7 日間」の基準と、暦の初めの月に使う。 -}
+    , today : Maybe { year : Int, month : Int, day : Int }
     , kind : String
     , action : String
     , since : String
     , until : String
+
+    {- 期間を選ぶ暦。since / until はここから写す。 -}
+    , range : Ui.DateRange.Model
 
     {- URL の `?id=` で指された行。一覧に無ければその旨を出す。 -}
     , wanted : Maybe String
@@ -50,13 +57,13 @@ type alias Model =
 
 
 type Msg
-    = ZoneKnown Time.Zone
+    = ZoneKnown Time.Zone Int Int Int
     | GotRows (Result Api.Problem (List AuditRow))
     | GotMore (Result Api.Problem (List AuditRow))
     | KindChosen String
     | ActionChosen String
-    | SinceTyped String
-    | UntilTyped String
+    | RangeMsg Ui.DateRange.Msg
+    | EscapePressed
     | Toggled String
     | MoreRequested
 
@@ -85,10 +92,12 @@ init project params =
     in
     { project = project
     , zone = Nothing
+    , today = Nothing
     , kind = param "kind"
     , action = param "action"
     , since = param "since"
     , until = param "until"
+    , range = Ui.DateRange.init { since = param "since", until = param "until" }
     , wanted = wanted
     , rows = Loaded.Loading
     , opened = wanted |> Maybe.map Set.singleton |> Maybe.withDefault Set.empty
@@ -151,11 +160,15 @@ paramsOf model =
 update : Msg -> Model -> ( Model, List (Api.Call Msg) )
 update msg model =
     case msg of
-        ZoneKnown zone ->
+        ZoneKnown zone year month day ->
             let
                 next : Model
                 next =
-                    { model | zone = Just zone }
+                    { model
+                        | zone = Just zone
+                        , today = Just { year = year, month = month, day = day }
+                        , range = Ui.DateRange.withToday { year = year, month = month, day = day } model.range
+                    }
             in
             ( next, load next )
 
@@ -185,11 +198,26 @@ update msg model =
         ActionChosen action ->
             refilter { model | action = action }
 
-        SinceTyped date ->
-            refilter { model | since = date }
+        -- 開いている暦を 1 段閉じる
+        EscapePressed ->
+            ( { model | range = Ui.DateRange.close model.range }, [] )
 
-        UntilTyped date ->
-            refilter { model | until = date }
+        -- 暦を触るたびに引き直さない。期間が決まった（または外した）時だけ
+        RangeMsg rangeMsg ->
+            let
+                range : Ui.DateRange.Model
+                range =
+                    Ui.DateRange.update rangeMsg model.range
+
+                picked : { since : String, until : String }
+                picked =
+                    Ui.DateRange.dates range
+            in
+            if picked.since == model.since && picked.until == model.until then
+                ( { model | range = range }, [] )
+
+            else
+                refilter { model | range = range, since = picked.since, until = picked.until }
 
         Toggled id ->
             ( { model
@@ -285,12 +313,7 @@ viewFilters model =
         , Ui.field { label = "何を", hint = Nothing, errors = [] }
             [ Ui.select [ onInput ActionChosen ] (actionOptions ++ customAction model) model.action ]
         , Ui.field { label = "期間", hint = Nothing, errors = [] }
-            [ div [ class "flex items-center gap-2" ]
-                [ Ui.input [ type_ "date", value model.since, onInput SinceTyped ]
-                , span [ class "text-ink-faint" ] [ text "〜" ]
-                , Ui.input [ type_ "date", value model.until, onInput UntilTyped ]
-                ]
-            ]
+            [ Ui.DateRange.view RangeMsg model.range ]
         ]
 
 
