@@ -66,6 +66,9 @@ type alias Column =
     , hint : String
     , tone : String
 
+    {- 列の状態を表す形。**色だけで分けない。** -}
+    , mark : List Icon.Shape
+
     {- ここへ落とせるか。
 
        WhyNot: 3 列とも落とせる、にしない。「公開中 · 下書きあり」は公開済みの物の
@@ -79,9 +82,9 @@ type alias Column =
 
 columns : List Column
 columns =
-    [ { stage = "DRAFT", name = "下書き", hint = "まだ公開していません", tone = "text-ink-faint", droppable = True }
-    , { stage = "CHANGED", name = "公開中 · 下書きあり", hint = "公開中の内容と差があります。下書きを保存すると入ります", tone = "text-[color:var(--color-warn)]", droppable = False }
-    , { stage = "PUBLISHED", name = "公開中", hint = "公開サイトから見えます", tone = "text-[color:var(--color-ok)]", droppable = True }
+    [ { stage = "DRAFT", name = "下書き", hint = "まだ公開していません", tone = "text-ink-faint", mark = Icon.stageDraft, droppable = True }
+    , { stage = "CHANGED", name = "公開中 · 下書きあり", hint = "公開中の内容と差があります。下書きを保存すると入ります", tone = "text-[color:var(--color-warn)]", mark = Icon.stageChanged, droppable = False }
+    , { stage = "PUBLISHED", name = "公開中", hint = "公開サイトから見えます", tone = "text-[color:var(--color-ok)]", mark = Icon.stagePublished, droppable = True }
     ]
 
 
@@ -483,7 +486,7 @@ viewColumn model detail column =
                )
         )
         [ div [ class "flex items-center gap-2" ]
-            [ span [ class column.tone ] [ Icon.view Icon.stage ]
+            [ span [ class column.tone ] [ Icon.view column.mark ]
             , span [ class "text-sm font-semibold text-ink" ] [ text column.name ]
             , span [ class "rounded-full bg-well px-2 py-0.5 text-[11px] font-medium text-ink-soft" ] [ text count ]
             ]

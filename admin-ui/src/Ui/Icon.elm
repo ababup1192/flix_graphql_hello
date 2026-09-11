@@ -16,7 +16,9 @@ module Ui.Icon exposing
     , panel
     , project
     , search
-    , stage
+    , stageChanged
+    , stageDraft
+    , stagePublished
     , view
     )
 
@@ -295,11 +297,25 @@ panel =
     [ rect "3" "3" "18" "18" "2", path "M9 3v18", path "M16 15l-3-3 3-3" ]
 
 
-{-| 列の状態を表す丸（GitHub の Projects と同じ形）。
+{-| ボードの列の状態（GitHub の Projects と同じ形）。
+
+WhyNot: 3 列とも同じ丸にして色だけで分けない。色覚の差で「公開中」と
+「公開中 · 下書きあり」が同じに見える。**形でも分ける。**
+
 -}
-stage : List Shape
-stage =
+stageDraft : List Shape
+stageDraft =
     [ circle "12" "12" "8" ]
+
+
+stageChanged : List Shape
+stageChanged =
+    [ circle "12" "12" "8", circle "12" "12" "2.5" ]
+
+
+stagePublished : List Shape
+stagePublished =
+    [ circle "12" "12" "8", path "M8.5 12.2l2.5 2.5 4.5-4.7" ]
 
 
 {-| コンテンツ 1 件。カードの左肩に置く。
