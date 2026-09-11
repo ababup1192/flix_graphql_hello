@@ -1064,7 +1064,7 @@ apiKeys id project =
 
 {-| キーを発行する。**生の値はこの応答にしか出ない。**
 -}
-createApiKey : String -> Slug -> { name : String, scope : ApiKeyScope, role : Maybe AdminRole.Role } -> ( Api.Request, D.Decoder Model.IssuedKey )
+createApiKey : String -> Slug -> { name : String, scope : ApiKeyScope, role : Maybe AdminRole.Role, expiresAt : Maybe String } -> ( Api.Request, D.Decoder Model.IssuedKey )
 createApiKey id project args =
     Api.mutation { id = id, kind = "createApiKey", project = project }
         (AdminMutation.createApiKey
@@ -1077,6 +1077,7 @@ createApiKey id project args =
 
                             Nothing ->
                                 Opt.Absent
+                    , expiresAt = presentOr args.expiresAt
                 }
             )
             { name = args.name, scope = args.scope }
@@ -1251,11 +1252,11 @@ personalTokens id =
 
 {-| PAT を発行する。**生の値はこの応答にしか出ない。**
 -}
-createPersonalToken : String -> { name : String, write : Bool } -> ( Api.Request, D.Decoder Model.IssuedPat )
+createPersonalToken : String -> { name : String, write : Bool, ttlDays : Int } -> ( Api.Request, D.Decoder Model.IssuedPat )
 createPersonalToken id args =
     Api.accountMutation { id = id, kind = "createPersonalAccessToken" }
         (AccountMutation.createPersonalAccessToken
-            (\optional -> optional)
+            (\optional -> { optional | ttlDays = Opt.Present args.ttlDays })
             { name = args.name
             , scope =
                 if args.write then

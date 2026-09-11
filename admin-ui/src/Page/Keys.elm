@@ -32,7 +32,11 @@ type alias Model =
     { keys : Loaded (List ApiKeyRow)
     , hooks : Loaded (List WebhookRow)
     , newKeyName : String
-    , newKeyScope : ApiKeyScope
+
+    {- 権限は入れ子。書き込み ⊇ 下書きも読む ⊇ 読み取り。 -}
+    , newKeyDraft : Bool
+    , newKeyWrite : Bool
+    , newKeyTtl : String
     , keyReply : Reply
     , issued : Maybe IssuedKey
     , keyCopied : Bool
@@ -55,7 +59,9 @@ type Msg
     = GotKeys (Result Api.Problem (List ApiKeyRow))
     | GotHooks (Result Api.Problem (List WebhookRow))
     | KeyNameTyped String
-    | KeyScopeChosen String
+    | KeyDraftToggled
+    | KeyWriteToggled
+    | KeyTtlChosen String
     | KeySubmitted
     | GotIssued (Result Api.Problem IssuedKey)
     | KeyCopyRequested String
@@ -87,7 +93,9 @@ init =
     { keys = Loaded.Loading
     , hooks = Loaded.Loading
     , newKeyName = ""
-    , newKeyScope = ApiKeyScope.Read
+    , newKeyDraft = False
+    , newKeyWrite = False
+    , newKeyTtl = "0"
     , keyReply = Reply.idle
     , issued = Nothing
     , keyCopied = False
@@ -125,8 +133,14 @@ update ctx msg model =
         KeyNameTyped name ->
             ( { model | newKeyName = name, keyReply = Reply.touched model.keyReply }, [] )
 
-        KeyScopeChosen chosen ->
-            ( { model | newKeyScope = scopeOf chosen, keyReply = Reply.touched model.keyReply }, [] )
+        KeyDraftToggled ->
+            ( { model | newKeyDraft = not model.newKeyDraft, keyReply = Reply.touched model.keyReply }, [] )
+
+        KeyWriteToggled ->
+            ( { model | newKeyWrite = not model.newKeyWrite, keyReply = Reply.touched model.keyReply }, [] )
+
+        KeyTtlChosen chosen ->
+            ( { model | newKeyTtl = chosen, keyReply = Reply.touched model.keyReply }, [] )
 
         KeySubmitted ->
             ( { model | keyReply = Reply.sending }
@@ -135,13 +149,14 @@ update ctx msg model =
                         Queries.createApiKey id
                             ctx.project
                             { name = model.newKeyName
-                            , scope = model.newKeyScope
+                            , scope = scopeOf model
                             , role =
-                                if model.newKeyScope == ApiKeyScope.Write then
+                                if model.newKeyWrite then
                                     Just Role.Editor
 
                                 else
                                     Nothing
+                            , expiresAt = expiryOf model
                             }
                     )
                     GotIssued
@@ -260,25 +275,74 @@ update ctx msg model =
             ( model, [] )
 
 
-scopeOptions : List ( String, String )
-scopeOptions =
-    [ ( "READ", "読み取り（公開中のみ）" )
-    , ( "READ_DRAFT", "読み取り（下書きも）" )
-    , ( "WRITE", "書き込み（編集者の範囲）" )
-    ]
+{-| 選んだチェックから API の scope を出す。**入れ子**（書き込みは下書きも読めるし、
+下書きを読めれば公開中も読める）なので、上位が入っていればそちらを採る。
+-}
+scopeOf : Model -> ApiKeyScope
+scopeOf model =
+    if model.newKeyWrite then
+        ApiKeyScope.Write
+
+    else if model.newKeyDraft then
+        ApiKeyScope.ReadDraft
+
+    else
+        ApiKeyScope.Read
 
 
-scopeOf : String -> ApiKeyScope
-scopeOf value =
-    ApiKeyScope.list
-        |> List.filter (\scope -> ApiKeyScope.toString scope == value)
-        |> List.head
-        |> Maybe.withDefault ApiKeyScope.Read
+{-| 選んだ有効期限。「0」は無期限。
+-}
+expiryOf : Model -> Maybe String
+expiryOf model =
+    case ( model.today, String.toInt model.newKeyTtl ) of
+        ( Just today, Just days ) ->
+            if days <= 0 then
+                Nothing
+
+            else
+                Just (Ui.DateTime.plusDays today days ++ "T00:00:00Z")
+
+        _ ->
+            Nothing
 
 
+ttlOptions : List ( String, String )
+ttlOptions =
+    [ ( "0", "無期限" ), ( "30", "30 日" ), ( "90", "90 日" ), ( "365", "365 日" ) ]
+
+
+{-| 選んだ期限が何日に切れるか。数字だけでは日付が分からない。
+-}
+expiryHint : Model -> String
+expiryHint model =
+    case ( model.today, String.toInt model.newKeyTtl ) of
+        ( Just today, Just days ) ->
+            if days <= 0 then
+                "期限を決めずに発行します。使わなくなったら失効してください"
+
+            else
+                Ui.DateTime.plusDays today days ++ " に切れます"
+
+        _ ->
+            "期限を過ぎた API キーは使えなくなります"
+
+
+{-| 一覧に出す権限の言い方。scope の enum に 1 対 1 で当てる。
+-}
 scopeText : String -> String
 scopeText value =
-    scopeOptions |> List.filter (\( key, _ ) -> key == value) |> List.head |> Maybe.map Tuple.second |> Maybe.withDefault value
+    case value of
+        "READ" ->
+            "読み取り（公開中）"
+
+        "READ_DRAFT" ->
+            "読み取り（下書きも）"
+
+        "WRITE" ->
+            "書き込み（編集者の範囲）"
+
+        other ->
+            other
 
 
 view : Model -> Html Msg
@@ -345,20 +409,42 @@ view model =
         ]
 
 
+{-| 発行のフォーム。**縦に積む。** GitHub の Personal access token と同じで、名前 →
+有効期限 → 権限 → 発行の順。権限は説明を 1 行添え、上位を入れると下位は自動で入って外せない。
+-}
 viewKeyForm : Model -> Html Msg
 viewKeyForm model =
-    Ui.card [ class "flex flex-col gap-3 p-4" ]
-        [ div [ class "flex items-end gap-4" ]
-            [ div [ class "flex-1" ]
-                [ Ui.field { label = "名前", hint = Nothing, errors = Reply.errorsFor "name" model.keyReply }
-                    [ Ui.input [ value model.newKeyName, onInput KeyNameTyped, placeholder "公開サイト" ] ]
+    Ui.card [ class "flex max-w-xl flex-col gap-4 p-4" ]
+        [ Ui.field { label = "名前", hint = Just "何に使う API キーかが後から分かる名前", errors = Reply.errorsFor "name" model.keyReply }
+            [ Ui.input [ value model.newKeyName, onInput KeyNameTyped, placeholder "公開サイト" ] ]
+        , Ui.field { label = "有効期限", hint = Just (expiryHint model), errors = Reply.errorsFor "expiresAt" model.keyReply }
+            [ Ui.select [ onInput KeyTtlChosen ] ttlOptions model.newKeyTtl ]
+        , Ui.field { label = "権限", hint = Nothing, errors = Reply.errorsFor "scope" model.keyReply ++ Reply.errorsFor "role" model.keyReply }
+            [ div [ class "flex flex-col" ]
+                [ Ui.scopeBox
+                    { label = "読み取り（公開中）"
+                    , description = "公開サイトがコンテンツ API から読む"
+                    , checked = True
+                    , locked = True
+                    , onToggle = Ignored
+                    }
+                , Ui.scopeBox
+                    { label = "下書きも読む"
+                    , description = "公開前の内容も返す。プレビューや検証の環境で使う"
+                    , checked = model.newKeyDraft || model.newKeyWrite
+                    , locked = model.newKeyWrite
+                    , onToggle = KeyDraftToggled
+                    }
+                , Ui.scopeBox
+                    { label = "書き込み"
+                    , description = "コンテンツの作成・更新・削除。編集者の範囲に限る（メンバーと API キーの管理はできない）"
+                    , checked = model.newKeyWrite
+                    , locked = False
+                    , onToggle = KeyWriteToggled
+                    }
                 ]
-            , div [ class "w-56" ]
-                [ Ui.field { label = "権限", hint = Nothing, errors = Reply.errorsFor "scope" model.keyReply ++ Reply.errorsFor "role" model.keyReply }
-                    [ Ui.select [ onInput KeyScopeChosen ] scopeOptions (ApiKeyScope.toString model.newKeyScope) ]
-                ]
-            , Reply.addButton { label = "発行", ready = not (String.isEmpty (String.trim model.newKeyName)), reply = model.keyReply, onAdd = KeySubmitted }
             ]
+        , Reply.addButton { label = "発行", ready = not (String.isEmpty (String.trim model.newKeyName)), reply = model.keyReply, onAdd = KeySubmitted }
         ]
 
 

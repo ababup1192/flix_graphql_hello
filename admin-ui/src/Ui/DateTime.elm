@@ -11,6 +11,7 @@ module Ui.DateTime exposing
     , init
     , isDayChosen
     , localDate
+    , plusDays
     , toIso
     , toIsoDate
     , update
@@ -64,6 +65,54 @@ type alias Model =
 localDate : Time.Zone -> String -> String
 localDate zone iso =
     String.left 10 (formatLocal zone iso)
+
+
+{-| 今日から `days` 日後の `YYYY-MM-DD`。有効期限の選択肢に「いつ切れるか」を添えるのに使う。
+-}
+plusDays : { year : Int, month : Int, day : Int } -> Int -> String
+plusDays from days =
+    let
+        ( year, month, day ) =
+            dayAt (daysFromEpoch from.year from.month from.day + days)
+    in
+    pad 4 year ++ "-" ++ pad 2 month ++ "-" ++ pad 2 day
+
+
+{-| 1970-01-01 からの通算日を年月日に戻す。
+-}
+dayAt : Int -> ( Int, Int, Int )
+dayAt days =
+    let
+        year : Int
+        year =
+            yearAt 1970 days
+
+        left : Int
+        left =
+            days - daysFromEpoch year 1 1
+
+        ( month, dayOfMonth ) =
+            monthAt year 1 left
+    in
+    ( year, month, dayOfMonth )
+
+
+yearAt : Int -> Int -> Int
+yearAt year days =
+    if days < daysInYear year then
+        year
+
+    else
+        yearAt (year + 1) (days - daysInYear year)
+
+
+monthAt : Int -> Int -> Int -> ( Int, Int )
+monthAt year month left =
+    if left < daysInMonth year month || month == 12 then
+        ( month, left + 1 )
+
+    else
+        monthAt year (month + 1) (left - daysInMonth year month)
 
 
 {-| 今日から見た言い方（「今日」「昨日」「3 日前」「2 か月前」）。今日が分からなければ Nothing。

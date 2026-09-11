@@ -30,6 +30,7 @@ type alias Model =
     , tokens : Loaded (List PatRow)
     , newName : String
     , write : Bool
+    , ttlDays : Int
     , reply : Reply
     , issued : Maybe IssuedPat
     , copied : Bool
@@ -45,6 +46,7 @@ type Msg
     = GotTokens (Result Api.Problem (Maybe (List PatRow)))
     | NameTyped String
     | WriteToggled
+    | TtlChosen String
     | Submitted
     | GotIssued (Result Api.Problem IssuedPat)
     | CopyRequested String
@@ -66,6 +68,7 @@ init person =
     , tokens = Loaded.Loading
     , newName = ""
     , write = False
+    , ttlDays = 30
     , reply = Reply.idle
     , issued = Nothing
     , copied = False
@@ -94,9 +97,12 @@ update msg model =
         WriteToggled ->
             ( { model | write = not model.write, reply = Reply.touched model.reply }, [] )
 
+        TtlChosen chosen ->
+            ( { model | ttlDays = String.toInt chosen |> Maybe.withDefault 30, reply = Reply.touched model.reply }, [] )
+
         Submitted ->
             ( { model | reply = Reply.sending }
-            , [ Api.call (\id -> Queries.createPersonalToken id { name = model.newName, write = model.write }) GotIssued ]
+            , [ Api.call (\id -> Queries.createPersonalToken id { name = model.newName, write = model.write, ttlDays = model.ttlDays }) GotIssued ]
             )
 
         GotIssued (Ok issued) ->
@@ -191,14 +197,34 @@ view model =
         ]
 
 
+{-| 発行のフォーム。**縦に積む。** GitHub の Personal access token と同じで、名前 →
+有効期限 → 権限 → 発行の順に読ませる。横に並べると、権限のチェックが名前の欄の付属品に見える。
+-}
 viewForm : Model -> Html Msg
 viewForm model =
-    Ui.card [ class "flex items-end gap-4 p-4" ]
-        [ div [ class "flex-1" ]
-            [ Ui.field { label = "名前", hint = Nothing, errors = Reply.errorsFor "name" model.reply }
-                [ Ui.input [ value model.newName, onInput NameTyped, placeholder "手元の CLI" ] ]
+    Ui.card [ class "flex max-w-xl flex-col gap-4 p-4" ]
+        [ Ui.field { label = "名前", hint = Just "何に使うトークンかが後から分かる名前", errors = Reply.errorsFor "name" model.reply }
+            [ Ui.input [ value model.newName, onInput NameTyped, placeholder "手元の CLI" ] ]
+        , Ui.field { label = "有効期限", hint = Just (expiryHint model), errors = Reply.errorsFor "ttlDays" model.reply }
+            [ Ui.select [ onInput TtlChosen ] ttlOptions (String.fromInt model.ttlDays) ]
+        , Ui.field { label = "権限", hint = Nothing, errors = Reply.errorsFor "scope" model.reply }
+            [ div [ class "flex flex-col" ]
+                [ Ui.scopeBox
+                    { label = "読み取り"
+                    , description = "コンテンツとメディアを読む"
+                    , checked = True
+                    , locked = True
+                    , onToggle = Ignored
+                    }
+                , Ui.scopeBox
+                    { label = "書き込み"
+                    , description = "コンテンツの作成・更新・削除。自分の権限の範囲に限る"
+                    , checked = model.write
+                    , locked = False
+                    , onToggle = WriteToggled
+                    }
+                ]
             ]
-        , Ui.checkbox { label = "書き込みを許可", checked = model.write, onToggle = WriteToggled }
         , Reply.addButton
             { label = "発行"
             , ready = not (String.isEmpty (String.trim model.newName))
@@ -206,6 +232,23 @@ viewForm model =
             , onAdd = Submitted
             }
         ]
+
+
+ttlOptions : List ( String, String )
+ttlOptions =
+    [ ( "7", "7 日" ), ( "30", "30 日" ), ( "90", "90 日" ), ( "365", "365 日" ) ]
+
+
+{-| 選んだ期限が何日に切れるか。数字だけでは日付が分からない（GitHub も日付を添える）。
+-}
+expiryHint : Model -> String
+expiryHint model =
+    case model.today of
+        Just today ->
+            Ui.DateTime.plusDays today model.ttlDays ++ " に切れます"
+
+        Nothing ->
+            "期限を過ぎたトークンは使えなくなります"
 
 
 viewTokens : Model -> Html Msg

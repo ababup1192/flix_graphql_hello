@@ -36,6 +36,7 @@ module Ui exposing
     , railTitle
     , row
     , rowOf
+    , scopeBox
     , sectionTitle
     , select
     , spinner
@@ -628,6 +629,40 @@ checkbox args =
             ]
             []
         , Html.text args.label
+        ]
+
+
+{-| 権限の 1 つ。**説明を 1 行添える**（名前だけでは何ができるか分からない）。
+
+GitHub の Personal access token の "Select scopes" と同じ形。上位の権限を入れると下位は
+自動で入り、外せなくなる（`locked`）。
+
+-}
+scopeBox : { label : String, description : String, checked : Bool, locked : Bool, onToggle : msg } -> Html msg
+scopeBox args =
+    Html.label
+        [ A.class
+            ("flex items-start gap-2.5 rounded-md px-2 py-1.5 text-[13px] "
+                ++ (if args.locked then
+                        "cursor-default"
+
+                    else
+                        "cursor-pointer hover:bg-well"
+                   )
+            )
+        ]
+        [ Html.input
+            [ A.type_ "checkbox"
+            , A.class "mt-0.5 h-3.5 w-3.5 accent-[color:var(--color-accent)]"
+            , A.checked args.checked
+            , A.disabled args.locked
+            , E.onClick args.onToggle
+            ]
+            []
+        , Html.span [ A.class "flex flex-col gap-0.5" ]
+            [ Html.span [ A.class "font-medium text-ink" ] [ Html.text args.label ]
+            , Html.span [ A.class "text-[11px] text-ink-soft" ] [ Html.text args.description ]
+            ]
         ]
 
 
