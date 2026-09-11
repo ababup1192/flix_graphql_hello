@@ -169,6 +169,19 @@ sentence zone row =
         "asset.deleted" ->
             [ Text "メディア ", Strong row.targetId, Text " を削除した" ]
 
+        "audit.exported" ->
+            [ Text "監査ログを "
+            , Strong (String.toUpper row.targetId)
+            , Text " でエクスポートした"
+            ]
+                ++ (case int [ "count" ] detail of
+                        Just n ->
+                            [ Text ("（" ++ String.fromInt n ++ " 件）") ]
+
+                        Nothing ->
+                            []
+                   )
+
         "entry.unpublished" ->
             entry row ++ [ Text " の公開を終えた" ] ++ paren (version detail)
 
@@ -364,6 +377,15 @@ sheet row =
 
         "asset.deleted" ->
             assetFacts [ "before" ] detail
+
+        "audit.exported" ->
+            facts
+                [ ( "形式", string [ "format" ] detail |> Maybe.map String.toUpper )
+                , ( "件数", int [ "count" ] detail |> Maybe.map String.fromInt )
+                , ( "誰が", string [ "actorKind" ] detail |> Maybe.map String.toUpper )
+                , ( "何を", string [ "action" ] detail )
+                , ( "期間", Maybe.map2 (\a b -> a ++ " 〜 " ++ b) (string [ "since" ] detail) (string [ "until" ] detail) )
+                ]
 
         "entry.unpublished" ->
             entryFacts detail

@@ -1,4 +1,4 @@
-module Shell exposing (Menu(..), view)
+module Shell exposing (Menu(..), contentId, view)
 
 {-| 中に入った後の枠。上のバー・サイドバー・中身。
 
@@ -56,7 +56,7 @@ view config content palette =
         [ topBar config
         , div [ class "flex min-h-0 flex-1" ]
             [ sidebar config
-            , div [ class "mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col overflow-auto px-8" ]
+            , div [ Html.Attributes.id contentId, class "mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col overflow-auto px-8" ]
                 [ viewBreadcrumb config, viewTypeTabs config, viewSettingsTabs config, content ]
             ]
         , palette
@@ -578,3 +578,10 @@ WhyNot: 文言が固定の物（「メディア」のような言葉）には使
 truncated : String -> Html msg
 truncated label =
     span [ class "truncate", Html.Attributes.title label ] [ text label ]
+
+
+{-| 縦に送る中身の箱の id。画面は window ではなくこの箱の中で流れるので、行まで送る時はここを動かす。
+-}
+contentId : String
+contentId =
+    "content"

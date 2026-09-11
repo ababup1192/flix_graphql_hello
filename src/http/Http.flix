@@ -198,7 +198,9 @@ mod Http {
     ///
     pub def render(connection: Connection, response: HttpResponse): String =
         let connectionValue = match connection { case Connection.KeepAlive => "keep-alive" case Connection.Close => "close" };
-        let contentType = if (response#body == "") "" else "Content-Type: application/json; charset=utf-8\r\n";
+        // WhyNot: 行が Content-Type を持っていれば既定を付けない。2 つ並ぶとブラウザは先の方（既定の JSON）を採り、CSV のダウンロードが JSON 扱いになる
+        let hasContentType = response#headers |> List.exists(match (name, _) -> String.toLowerCase(name) == "content-type");
+        let contentType = if (response#body == "" or hasContentType) "" else "Content-Type: application/json; charset=utf-8\r\n";
         let contentLength = if (response#status == 204) "" else "Content-Length: ${utf8Length(response#body)}\r\n";
         // WhyNot: 値の CR / LF を落とすのは、Origin をそのまま返す CORS のヘッダで、行中の裸の CR がレスポンス分割になるのを防ぐため
         let extraHeaders = response#headers |> List.map(match (name, value) -> "${name}: ${headerValue(value)}\r\n") |> List.join("");

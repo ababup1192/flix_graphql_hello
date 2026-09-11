@@ -17,6 +17,7 @@ import Browser.Dom
 import Browser.Navigation as Nav
 import Json.Encode as E
 import Process
+import Shell
 import Task
 import Time
 
@@ -160,9 +161,12 @@ perform caps effect =
             Task.attempt (\_ -> caps.ignore) (Browser.Dom.focus elementId)
 
         ScrollTo elementId ->
-            -- 要素の位置を測ってから、その少し上（ヘッダの分）まで送る。無ければ何もしない。
-            Browser.Dom.getElement elementId
-                |> Task.andThen (\found -> Browser.Dom.setViewport 0 (found.element.y - 96))
+            -- 画面は window でなく Shell の中身の箱の中で流れる。要素と箱の位置を測り、箱の今の位置に差を足して送る。無ければ何もしない。
+            Task.map3 (\target box viewport -> viewport.viewport.y + target.element.y - box.element.y - 16)
+                (Browser.Dom.getElement elementId)
+                (Browser.Dom.getElement Shell.contentId)
+                (Browser.Dom.getViewportOf Shell.contentId)
+                |> Task.andThen (Browser.Dom.setViewportOf Shell.contentId 0)
                 |> Task.attempt (\_ -> caps.ignore)
 
         PushRoute url ->

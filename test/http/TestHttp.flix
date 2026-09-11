@@ -85,6 +85,13 @@ def testHttpRenderExtraHeaders(): Unit \ Assert =
         expected = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: 2\r\nConnection: close\r\nX-A: 1\r\nX-B: 2\r\n\r\n{}",
         Http.render(Http.Connection.Close, { status = 200, headers = ("X-A", "1") :: ("X-B", "2") :: Nil, body = "{}" }))
 
+/// 行が Content-Type を持っていれば既定の JSON は付けない（CSV のダウンロードが JSON 扱いにならない）。
+@Test
+def testHttpRenderKeepsRouteContentType(): Unit \ Assert =
+    Assert.assertEq(
+        expected = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\nContent-Type: text/csv; charset=utf-8\r\n\r\na,",
+        Http.render(Http.Connection.Close, { status = 200, headers = ("Content-Type", "text/csv; charset=utf-8") :: Nil, body = "a," }))
+
 /// ヘッダ値の CR / LF は落とす（Origin をそのまま返す CORS でレスポンス分割にならない）。
 @Test
 def testHttpRenderStripsLineBreaksInHeaderValue(): Unit \ Assert =
