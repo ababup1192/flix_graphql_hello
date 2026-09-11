@@ -20,6 +20,7 @@ import Json.Decode as D
 import Json.Encode as E
 import Loaded exposing (Loaded)
 import Model exposing (AuditRow, ContentTypeSummary, Slug)
+import Page.Audit.Say as Say
 import Queries
 import Route
 import Set exposing (Set)
@@ -334,7 +335,7 @@ viewRows existing model =
 
                 else
                     Ui.table
-                        (Ui.headRowOf columns [ text "時刻", text "誰が", text "何を", text "対象", text "" ]
+                        (Ui.headRowOf columns [ text "時刻", text "誰が", text "何を", text "" ]
                             :: List.concatMap (viewRow existing model) rows
                         )
         }
@@ -343,7 +344,7 @@ viewRows existing model =
 
 columns : String
 columns =
-    "grid-cols-[130px_minmax(0,1fr)_minmax(0,230px)_minmax(0,1fr)_32px]"
+    "grid-cols-[130px_minmax(0,220px)_minmax(0,1fr)_32px]"
 
 
 viewRow : List String -> Model -> AuditRow -> List (Html Msg)
@@ -364,8 +365,7 @@ viewRow existing model row =
             [ Ui.chip (kindTone row.actorKind) row.actorKind
             , span [ class "truncate", title row.actor ] [ text row.actor ]
             ]
-        , span [ class "min-w-0 truncate font-mono text-[12px]", title row.action ] [ text row.action ]
-        , viewTarget existing model row
+        , viewWhat existing model zone row
         , Html.button
             [ class "flex h-7 w-7 cursor-pointer items-center justify-center rounded text-ink-soft hover:bg-well hover:text-ink"
             , type_ "button"
@@ -391,11 +391,44 @@ viewRow existing model row =
             ]
         ]
         :: (if open then
-                [ viewDetail model row ]
+                [ viewDetail model zone row ]
 
             else
                 []
            )
+
+
+{-| 何を。上に小さく action、下に人の文。
+-}
+viewWhat : List String -> Model -> Time.Zone -> AuditRow -> Html Msg
+viewWhat existing model zone row =
+    let
+        pieces : Say.Sentence
+        pieces =
+            Say.sentence zone row
+    in
+    div [ class "flex min-w-0 flex-col leading-5" ]
+        [ span [ class "font-mono text-[11px] text-ink-faint" ] [ text row.action ]
+        , span [ class "text-ink", title (Say.toText pieces) ] (List.map (viewPiece existing model row) pieces)
+        ]
+
+
+viewPiece : List String -> Model -> AuditRow -> Say.Piece -> Html Msg
+viewPiece existing model row piece =
+    case piece of
+        Say.Text label ->
+            text label
+
+        Say.Strong label ->
+            Html.strong [ class "font-semibold" ] [ text label ]
+
+        Say.TargetLink label ->
+            case targetRoute existing model row of
+                Just route ->
+                    Ui.link [ href (Route.toString route), class "font-semibold" ] [ text label ]
+
+                Nothing ->
+                    Html.strong [ class "font-semibold", title "消えています" ] [ text label ]
 
 
 {-| 誰がの印の色。人は薄く、鍵と PAT と SYSTEM は目に付く色（人でない物が一目で分かる）。
@@ -413,34 +446,22 @@ kindTone kind =
             Ui.toneWarn
 
 
-{-| 対象。entry と型・フィールドは、その型が今もあればその画面へ飛べる。
+{-| 対象の画面。entry と型・フィールドは、その型が今もあればその画面へ飛べる。
 
 WhyNot: 消した物にリンクを付けない。`type.deleted` の行から型の画面へ飛ぶと「この API はありません」で
 終わるだけで、監査ログは消した後にこそ読まれる。消した物は `before` を開いて読む。
 
 -}
-viewTarget : List String -> Model -> AuditRow -> Html Msg
-viewTarget existing model row =
+targetRoute : List String -> Model -> AuditRow -> Maybe Route.Route
+targetRoute existing model row =
     let
-        label : String
-        label =
-            row.targetKind ++ " " ++ row.targetId
-
-        plain : String -> Html Msg
-        plain hint =
-            span [ class "truncate", title hint ] [ text label ]
-
-        link : Route.Route -> Html Msg
-        link route =
-            Ui.link [ href (Route.toString route), class "truncate", title label ] [ text label ]
-
-        linkIfTypeExists : String -> Route.Route -> Html Msg
-        linkIfTypeExists typeApiId route =
+        ifTypeExists : String -> Route.Route -> Maybe Route.Route
+        ifTypeExists typeApiId route =
             if List.member typeApiId existing then
-                link route
+                Just route
 
             else
-                plain (label ++ "（型 " ++ typeApiId ++ " は消えています）")
+                Nothing
 
         typeOfField : String
         typeOfField =
@@ -449,19 +470,19 @@ viewTarget existing model row =
     case ( row.targetKind, typeApiIdOf row ) of
         ( "entry", Just typeApiId ) ->
             if row.action == "entry.deleted" then
-                plain (label ++ "（消えています）")
+                Nothing
 
             else
-                linkIfTypeExists typeApiId (Route.Entry model.project typeApiId row.targetId)
+                ifTypeExists typeApiId (Route.Entry model.project typeApiId row.targetId)
 
         ( "type", _ ) ->
-            linkIfTypeExists row.targetId (Route.TypeSchema model.project row.targetId)
+            ifTypeExists row.targetId (Route.TypeSchema model.project row.targetId)
 
         ( "field", _ ) ->
-            linkIfTypeExists typeOfField (Route.TypeSchema model.project typeOfField)
+            ifTypeExists typeOfField (Route.TypeSchema model.project typeOfField)
 
         _ ->
-            plain label
+            Nothing
 
 
 {-| entry の行は detail に型の apiId を持つ。
@@ -471,8 +492,10 @@ typeApiIdOf row =
     D.decodeValue (D.field "typeApiId" D.string) row.detail |> Result.toMaybe
 
 
-viewDetail : Model -> AuditRow -> Html Msg
-viewDetail model row =
+{-| 開いた行。meta の行、action ごとの型紙、畳んだ JSON。
+-}
+viewDetail : Model -> Time.Zone -> AuditRow -> Html Msg
+viewDetail model zone row =
     div [ class "flex flex-col gap-2 border-b border-edge bg-raised px-4 py-3 text-[12px] text-ink-soft last:border-b-0" ]
         [ div [ class "flex flex-wrap items-center gap-x-4 gap-y-1 font-mono" ]
             [ span [] [ text row.createdAt ]
@@ -480,8 +503,141 @@ viewDetail model row =
             , span [] [ text ("id " ++ row.id) ]
             , Ui.quietLink [ href (Route.toString (Route.Settings model.project (Route.Audit [ ( "id", row.id ) ]))), title "この行の URL" ] [ text "#" ]
             ]
-        , Html.pre [ class "overflow-x-auto rounded-md border border-edge bg-panel px-3 py-2 font-mono text-[11px] leading-5 whitespace-pre text-ink" ]
-            [ text (E.encode 2 row.detail) ]
+        , viewSheet zone (Say.sheet row)
+        , if row.action == "type.deleted" then
+            div []
+                [ Ui.ghostButton [ Html.Attributes.disabled True, class "border-dashed text-ink-faint", title "型の apply が入ってから" ] [ text "この姿に戻す" ] ]
+
+          else
+            text ""
+        , Html.details [ class "text-ink-soft" ]
+            [ Html.summary [ class "cursor-pointer select-none hover:text-ink" ] [ text "JSON を見る" ]
+            , Html.pre [ class "mt-2 overflow-x-auto rounded-md border border-edge bg-panel px-3 py-2 font-mono text-[11px] leading-5 whitespace-pre text-ink" ]
+                [ text (E.encode 2 row.detail) ]
+            ]
+        ]
+
+
+viewSheet : Time.Zone -> Say.Sheet -> Html Msg
+viewSheet zone sheet =
+    case sheet of
+        Say.Changes changes ->
+            viewKv (List.map viewChange changes)
+
+        Say.Order order ->
+            viewKv
+                (( "変更前", viewChips order.moved order.before )
+                    :: (case order.after of
+                            Just after ->
+                                [ ( "今の並び", viewChips order.moved after ) ]
+
+                            Nothing ->
+                                []
+                       )
+                )
+
+        Say.FieldTable rows ->
+            viewFieldTable rows
+
+        Say.Facts facts ->
+            viewKv (List.map (\( key, value ) -> ( key, span [ title (factHint key) ] [ text (factText zone key value) ] )) facts)
+
+        Say.Nothing_ ->
+            text ""
+
+
+{-| 予約の時刻だけは手元のタイムゾーンで出す。
+-}
+factText : Time.Zone -> String -> String -> String
+factText zone key value =
+    if key == "予約" then
+        DateTime.formatLocal zone value ++ " " ++ DateTime.zoneAbbr zone value
+
+    else
+        value
+
+
+{-| 説明が要る見出しだけ hover で補う。
+-}
+factHint : String -> String
+factHint key =
+    if key == "URL の照合値" then
+        "URL の SHA-256 の先頭 12 桁。同じ URL を登録し直せば同じ値になります。URL そのものは残していません"
+
+    else
+        ""
+
+
+viewKv : List ( String, Html Msg ) -> Html Msg
+viewKv pairs =
+    div [ class "grid max-w-2xl grid-cols-[max-content_minmax(0,1fr)] gap-x-5 gap-y-1 text-[13px] text-ink" ]
+        (List.concatMap (\( key, value ) -> [ span [ class "text-ink-faint" ] [ text key ], div [ class "min-w-0" ] [ value ] ]) pairs)
+
+
+{-| 変更前と、あれば変更後。両方ある時だけ前を消し線に。
+-}
+viewChange : Say.Change -> ( String, Html Msg )
+viewChange change =
+    ( change.key
+    , case change.after of
+        Just after ->
+            span []
+                [ span [ class "rounded-sm bg-[color:var(--color-bad-bg)] px-1 line-through" ] [ text change.before ]
+                , span [ class "mx-1.5 text-ink-faint" ] [ text "→" ]
+                , span [ class "rounded-sm bg-[color:var(--color-ok-bg)] px-1" ] [ text after ]
+                ]
+
+        Nothing ->
+            span [ class "break-all" ] [ text change.before ]
+    )
+
+
+viewChips : List String -> List String -> Html Msg
+viewChips moved apiIds =
+    div [ class "flex flex-wrap items-center gap-1.5" ]
+        (List.map
+            (\apiId ->
+                Ui.chip
+                    (if List.member apiId moved then
+                        Ui.toneWarn
+
+                     else
+                        Ui.toneNeutral
+                    )
+                    apiId
+            )
+            apiIds
+        )
+
+
+fieldColumns : String
+fieldColumns =
+    "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_110px_40px_minmax(0,1fr)]"
+
+
+viewFieldTable : List Say.FieldRow -> Html Msg
+viewFieldTable rows =
+    div [ class "max-w-3xl" ]
+        [ Ui.table
+            (Ui.headRowOf fieldColumns [ text "フィールド ID", text "表示名", text "種類", text "必須", text "設定" ]
+                :: List.map
+                    (\row ->
+                        Ui.rowOf fieldColumns
+                            [ span [ class "font-mono text-[12px]" ] [ text row.apiId ]
+                            , span [ class "truncate", title row.name ] [ text row.name ]
+                            , span [ class "font-mono text-[11px] text-ink-soft" ] [ text row.kind ]
+                            , text
+                                (if row.required then
+                                    "○"
+
+                                 else
+                                    ""
+                                )
+                            , span [ class "text-ink-soft" ] [ text row.config ]
+                            ]
+                    )
+                    rows
+            )
         ]
 
 
