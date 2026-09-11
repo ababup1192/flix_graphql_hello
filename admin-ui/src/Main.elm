@@ -855,6 +855,9 @@ escapeToPage model =
                 AuditPage _ ->
                     update (AuditMsg Audit.EscapePressed) model
 
+                EntriesPage _ ->
+                    update (EntriesMsg Entries.DatePickClosed) model
+
                 _ ->
                     ( model, Effect.none )
 
@@ -1163,6 +1166,11 @@ enterPage route model =
                 Route.Entries _ apiId params ->
                     { model | route = route, phase = Ready { workspace | page = EntriesPage (Entries.init slug apiId params) } }
                         |> sendAll (List.map (Api.mapCall EntriesMsg) (Entries.load slug apiId))
+                        |> Tuple.mapSecond
+                            (\effect ->
+                                -- 絞り込みの暦を今日から開くのに要る
+                                Effect.batch [ effect, Effect.Today (\_ year month day -> EntriesMsg (Entries.TodayKnown year month day)) ]
+                            )
 
                 Route.Board _ apiId ->
                     { model | route = route, phase = Ready { workspace | page = BoardPage (Board.init slug apiId) } }

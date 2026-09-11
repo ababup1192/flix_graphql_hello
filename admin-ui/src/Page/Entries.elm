@@ -27,6 +27,7 @@ import Model exposing (ContentTypeDetail, EntryList, EntryRow, FieldDef, Slug)
 import Queries
 import Route
 import Ui
+import Ui.DateTime
 import Ui.Icon as Icon
 
 
@@ -39,6 +40,10 @@ type alias Model =
 
     {- 足そうとしている条件。開いている間だけ持つ。 -}
     , adding : Maybe Condition
+
+    {- 日付の値を選ぶ暦。開いている間だけ持つ。 -}
+    , datePick : Maybe Ui.DateTime.Model
+    , today : Maybe { year : Int, month : Int, day : Int }
 
     {- 参照の値を人に見せる文字（entry id → 見出し）。
        **必要な id だけ引く**（前は参照先を 100 件先読みしていて、101 件目が絞れなかった）。
@@ -86,6 +91,10 @@ type Msg
     | FilterFieldChosen String
     | FilterOpChosen String
     | FilterValueTyped String
+    | DatePickOpened
+    | DatePickMsg Ui.DateTime.Msg
+    | DatePickClosed
+    | TodayKnown Int Int Int
     | FilterAdded
     | FilterRemoved Int
     | FiltersCleared
@@ -103,6 +112,8 @@ init project apiId params =
     , entries = Loaded.Loading
     , query = queryOf params
     , adding = Nothing
+    , datePick = Nothing
+    , today = Nothing
     , labels = Dict.empty
     , candidates = []
     , candidateQuery = ""
@@ -256,6 +267,47 @@ update ctx msg model =
         FilterOpChosen op ->
             -- **演算子を変えると値の入れ方も変わる**ので、値は捨てる。
             ( { model | adding = model.adding |> Maybe.map (\draft -> { draft | op = op, value = "" }) }, [] )
+
+        DatePickOpened ->
+            ( { model
+                | datePick =
+                    Just
+                        (Ui.DateTime.atDate
+                            (Maybe.withDefault { year = 2026, month = 1, day = 1 } model.today)
+                            (model.adding |> Maybe.map .value |> Maybe.withDefault "")
+                        )
+              }
+            , []
+            )
+
+        -- 日を押したらその場で値にして閉じる（「この日付にする」をもう 1 回押させない）
+        DatePickMsg pickMsg ->
+            case model.datePick of
+                Just picked ->
+                    let
+                        next : Ui.DateTime.Model
+                        next =
+                            Ui.DateTime.update pickMsg picked
+                    in
+                    if Ui.DateTime.isDayChosen pickMsg then
+                        ( { model
+                            | datePick = Nothing
+                            , adding = model.adding |> Maybe.map (\draft -> { draft | value = Ui.DateTime.toIsoDate next })
+                          }
+                        , []
+                        )
+
+                    else
+                        ( { model | datePick = Just next }, [] )
+
+                Nothing ->
+                    ( model, [] )
+
+        DatePickClosed ->
+            ( { model | datePick = Nothing }, [] )
+
+        TodayKnown year month day ->
+            ( { model | today = Just { year = year, month = month, day = day } }, [] )
 
         FilterValueTyped typed ->
             ( { model | adding = model.adding |> Maybe.map (\draft -> { draft | value = typed }) }, [] )
@@ -688,9 +740,7 @@ viewValueInput model draft input =
             Ui.input [ value draft.value, onInput FilterValueTyped, ariaLabel "値", Html.Attributes.type_ "number", class "w-32" ]
 
         Filter.DateInput ->
-            -- **`datetime-local` は使わない。** 並びも曜日もブラウザの言語で決まる。
-            -- 日付だけで送っても CMS は ISO 8601 として読む。
-            Ui.input [ value draft.value, onInput FilterValueTyped, ariaLabel "値", Html.Attributes.type_ "date", class "w-44" ]
+            viewDatePick model draft
 
         Filter.BoolInput ->
             Ui.select [ onInput FilterValueTyped, ariaLabel "値" ] [ ( "", "選んでください" ), ( "true", "はい" ), ( "false", "いいえ" ) ] draft.value
@@ -705,6 +755,39 @@ viewValueInput model draft input =
 
         Filter.NoInput ->
             text ""
+
+
+{-| 日付の値。**押すと暦が開く。** `<input type="date">` は使わない（並びも暦もブラウザの
+言語で決まり、文字で打ちたい場面がほとんど無い）。日を押したらその場で値になる。
+-}
+viewDatePick : Model -> Condition -> Html Msg
+viewDatePick model draft =
+    div [ class "relative" ]
+        [ Ui.ghostButton [ onClick DatePickOpened, class "w-44 justify-between" ]
+            [ span []
+                [ text
+                    (if String.isEmpty draft.value then
+                        "日付を選ぶ"
+
+                     else
+                        draft.value
+                    )
+                ]
+            , Icon.view Icon.calendar
+            ]
+        , case model.datePick of
+            Just picked ->
+                div [ class "absolute top-9 left-0 z-(--z-dropdown)" ] [ Html.map DatePickMsg (Ui.DateTime.viewDate picked) ]
+
+            Nothing ->
+                text ""
+        , case model.datePick of
+            Just _ ->
+                Ui.dismissLayer DatePickClosed
+
+            Nothing ->
+                text ""
+        ]
 
 
 {-| 参照の候補。**打つたびに引き直す**ので、参照先がいくつあっても選べる。

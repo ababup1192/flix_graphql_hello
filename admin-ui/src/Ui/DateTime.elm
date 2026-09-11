@@ -1,12 +1,14 @@
 module Ui.DateTime exposing
     ( Model
     , Msg
+    , atDate
     , dayAfterToIso
     , dayToIso
     , daysFromToday
     , formatLocal
     , formatLocalShort
     , init
+    , isDayChosen
     , toIso
     , toIsoDate
     , update
@@ -47,6 +49,32 @@ type alias Model =
     , shownYear : Int
     , shownMonth : Int
     }
+
+
+{-| `YYYY-MM-DD` から始める。読めなければ今日から（絞り込みのように、すでに入っている
+値から開き直す所が使う）。
+-}
+atDate : { year : Int, month : Int, day : Int } -> String -> Model
+atDate today date =
+    case parseDate date of
+        Just ( year, month, day ) ->
+            { year = year, month = month, day = day, hour = 0, minute = 0, shownYear = year, shownMonth = month }
+
+        Nothing ->
+            { year = today.year, month = today.month, day = today.day, hour = 0, minute = 0, shownYear = today.year, shownMonth = today.month }
+
+
+{-| その Msg が「日を押した」か。押した時点で値を決めて閉じる画面が使う
+（絞り込みのように、選んでから「この日付にする」をもう 1 回押させる必要が無い所）。
+-}
+isDayChosen : Msg -> Bool
+isDayChosen msg =
+    case msg of
+        DayChosen _ _ _ ->
+            True
+
+        _ ->
+            False
 
 
 type Msg
