@@ -51,10 +51,28 @@ function applyTheme(theme: string) {
 
 app.ports.setTheme_Shell_JS.subscribe(applyTheme);
 
-// クリップボードは Elm から触れない。失敗（権限が無い・非 HTTPS）は黙って落とし、
-// 画面は「コピーしました」を出さないまま値を選べる状態に留まる。
+// クリップボードは Elm から触れない。navigator.clipboard は HTTPS（と localhost）でしか
+// 使えないので、無い時は選択して execCommand("copy") に落とす（HTTP の社内配信でも動く）。
 app.ports.copyText_Clipboard_JS.subscribe((value: string) => {
-  navigator.clipboard?.writeText(value).catch(() => {});
+  const fallback = () => {
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    try {
+      document.execCommand("copy");
+    } finally {
+      area.remove();
+    }
+  };
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(value).catch(fallback);
+  } else {
+    fallback();
+  }
 });
 applyTheme(localStorage.getItem("theme") ?? "system");
 

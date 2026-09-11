@@ -494,7 +494,10 @@ update msg model =
                     (\effect ->
                         case pageMsg of
                             -- 発行した値のコピー。クリップボードは port の先
-                            Keys.CopyRequested value ->
+                            Keys.KeyCopyRequested value ->
+                                Effect.batch [ effect, Effect.Copy value ]
+
+                            Keys.HookCopyRequested value ->
                                 Effect.batch [ effect, Effect.Copy value ]
 
                             _ ->
@@ -764,7 +767,7 @@ withEditorToday ( model, effect ) =
 -}
 withKeysZone : ( ModelWith key, Effect Msg ) -> ( ModelWith key, Effect Msg )
 withKeysZone ( model, effect ) =
-    ( model, Effect.batch [ effect, Effect.Today (\zone _ _ _ -> KeysMsg (Keys.ZoneKnown zone)) ] )
+    ( model, Effect.batch [ effect, Effect.Today (\zone year month day -> KeysMsg (Keys.TodayKnown zone year month day)) ] )
 
 
 {-| 続けてもう 1 つ update を当てる。

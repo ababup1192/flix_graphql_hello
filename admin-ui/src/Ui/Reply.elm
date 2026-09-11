@@ -3,6 +3,7 @@ module Ui.Reply exposing
     , done
     , errorsFor
     , failed
+    , general
     , idle
     , isSending
     , saveButton

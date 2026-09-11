@@ -121,8 +121,15 @@ update ctx msg model =
                 Nothing ->
                     ( model, [] )
 
-        GotSaved (Ok _) ->
-            ( { model | reply = Reply.done "保存しました", dirty = False }, load ctx.project model.apiId )
+        -- 読み直さない。応答までの間に打った文字が、読み直しで元に戻る
+        GotSaved (Ok summary) ->
+            ( { model
+                | reply = Reply.done "保存しました"
+                , dirty = False
+                , detail = Loaded.map (\detail -> { detail | name = summary.name }) model.detail
+              }
+            , []
+            )
 
         GotSaved (Err problem) ->
             ( { model | reply = Reply.failed problem }, [] )

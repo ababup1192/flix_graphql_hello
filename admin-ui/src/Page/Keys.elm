@@ -35,16 +35,18 @@ type alias Model =
     , newKeyScope : ApiKeyScope
     , keyReply : Reply
     , issued : Maybe IssuedKey
-    , copied : Bool
+    , keyCopied : Bool
     , confirmRevoke : Maybe ApiKeyRow
     , revoking : Reply
     , newHookName : String
     , newHookUrl : String
     , hookReply : Reply
     , issuedHook : Maybe IssuedWebhook
+    , hookCopied : Bool
     , confirmHookDelete : Maybe WebhookRow
     , deleting : Reply
     , zone : Time.Zone
+    , today : String
     }
 
 
@@ -55,8 +57,10 @@ type Msg
     | KeyScopeChosen String
     | KeySubmitted
     | GotIssued (Result Api.Problem IssuedKey)
-    | CopyRequested String
+    | KeyCopyRequested String
     | IssuedClosed
+    | HookCopyRequested String
+    | IssuedHookClosed
     | RevokeAsked ApiKeyRow
     | RevokeCancelled
     | RevokeConfirmed
@@ -70,7 +74,7 @@ type Msg
     | HookDeleteConfirmed
     | GotHookDeleted (Result Api.Problem String)
     | EscapePressed
-    | ZoneKnown Time.Zone
+    | TodayKnown Time.Zone Int Int Int
     | Ignored
 
 
@@ -82,16 +86,18 @@ init =
     , newKeyScope = ApiKeyScope.Read
     , keyReply = Reply.idle
     , issued = Nothing
-    , copied = False
+    , keyCopied = False
     , confirmRevoke = Nothing
     , revoking = Reply.idle
     , newHookName = ""
     , newHookUrl = ""
     , hookReply = Reply.idle
     , issuedHook = Nothing
+    , hookCopied = False
     , confirmHookDelete = Nothing
     , deleting = Reply.idle
     , zone = Time.utc
+    , today = ""
     }
 
 
@@ -138,17 +144,23 @@ update ctx msg model =
             )
 
         GotIssued (Ok issued) ->
-            ( { model | keyReply = Reply.idle, issued = Just issued, copied = False, newKeyName = "" }, load ctx.project )
+            ( { model | keyReply = Reply.idle, issued = Just issued, keyCopied = False, newKeyName = "" }, load ctx.project )
 
         GotIssued (Err problem) ->
             ( { model | keyReply = Reply.failed problem }, [] )
 
         -- 親が port に流す。ここでは「コピーしました」に切り替えるだけ
-        CopyRequested _ ->
-            ( { model | copied = True }, [] )
+        KeyCopyRequested _ ->
+            ( { model | keyCopied = True }, [] )
 
         IssuedClosed ->
-            ( { model | issued = Nothing, issuedHook = Nothing, copied = False }, [] )
+            ( { model | issued = Nothing, keyCopied = False }, [] )
+
+        HookCopyRequested _ ->
+            ( { model | hookCopied = True }, [] )
+
+        IssuedHookClosed ->
+            ( { model | issuedHook = Nothing, hookCopied = False }, [] )
 
         RevokeAsked row ->
             ( { model | confirmRevoke = Just row, revoking = Reply.idle }, [] )
@@ -192,7 +204,7 @@ update ctx msg model =
             ( { model
                 | hookReply = Reply.idle
                 , issuedHook = Just issued
-                , copied = False
+                , hookCopied = False
                 , newHookName = ""
                 , newHookUrl = ""
                 , hooks = Loaded.map (\hooks -> hooks ++ [ issued.webhook ]) model.hooks
@@ -227,8 +239,8 @@ update ctx msg model =
         EscapePressed ->
             ( { model | confirmRevoke = Nothing, confirmHookDelete = Nothing }, [] )
 
-        ZoneKnown zone ->
-            ( { model | zone = zone }, [] )
+        TodayKnown zone year month day ->
+            ( { model | zone = zone, today = pad 4 year ++ "-" ++ pad 2 month ++ "-" ++ pad 2 day }, [] )
 
         Ignored ->
             ( model, [] )
@@ -265,8 +277,8 @@ view model =
                 Ui.Secret.view
                     { title = "「" ++ issued.name ++ "」を発行しました"
                     , value = issued.key
-                    , copied = model.copied
-                    , onCopy = CopyRequested issued.key
+                    , copied = model.keyCopied
+                    , onCopy = KeyCopyRequested issued.key
                     , onClose = IssuedClosed
                     }
 
@@ -280,9 +292,9 @@ view model =
                 Ui.Secret.view
                     { title = "「" ++ issued.webhook.name ++ "」を追加しました。署名の鍵です"
                     , value = issued.secret
-                    , copied = model.copied
-                    , onCopy = CopyRequested issued.secret
-                    , onClose = IssuedClosed
+                    , copied = model.hookCopied
+                    , onCopy = HookCopyRequested issued.secret
+                    , onClose = IssuedHookClosed
                     }
 
             Nothing ->
@@ -350,7 +362,7 @@ viewKeys model =
                 else
                     Ui.table
                         (Ui.headRowOf keyColumns [ text "名前", text "キー", text "権限", text "作成日", text "有効期限", text "最後に使った日", text "" ]
-                            :: List.map (viewKey model) rows
+                            :: List.map (viewKey model) (activeFirst rows)
                         )
         }
         model.keys
@@ -358,7 +370,7 @@ viewKeys model =
 
 keyColumns : String
 keyColumns =
-    "grid-cols-[1fr_110px_190px_100px_100px_120px_60px]"
+    "grid-cols-[1fr_100px_180px_100px_150px_110px_60px]"
 
 
 hookColumns : String
@@ -395,7 +407,7 @@ viewKey model row =
         , span [ class "font-mono text-[12px] text-ink-soft" ] [ text (hintOf row.keyHint) ]
         , span [ class "text-ink-soft" ] [ text (scopeText row.scope) ]
         , span [ class "font-mono text-[11px] text-ink-soft" ] [ text (dateOf model.zone row.createdAt) ]
-        , viewExpiry model.zone row
+        , viewExpiry model row
         , span [ class "font-mono text-[11px] text-ink-soft" ] [ text (row.lastUsedAt |> Maybe.map (dateOf model.zone) |> Maybe.withDefault "未使用") ]
         , if revoked then
             text ""
@@ -403,6 +415,13 @@ viewKey model row =
           else
             div [ class "text-right" ] [ Ui.dangerLink (RevokeAsked row) "失効" ]
         ]
+
+
+{-| 使える鍵を上に、失効した鍵を下に。混ざっていると、どれが生きているか数えないと分からない。
+-}
+activeFirst : List ApiKeyRow -> List ApiKeyRow
+activeFirst rows =
+    List.filter (\row -> row.revokedAt == Nothing) rows ++ List.filter (\row -> row.revokedAt /= Nothing) rows
 
 
 {-| 末尾 4 文字。古い鍵は持っていないので「…」だけ。
@@ -416,16 +435,31 @@ hintOf hint =
         "…" ++ hint
 
 
-{-| 有効期限。無期限はそう書く。
+{-| 有効期限。無期限はそう書く。切れていれば赤で「期限切れ」（GitHub の "Expired" と同じ）。
+今日の日付が届く前は日付だけ出す。
 -}
-viewExpiry : Time.Zone -> ApiKeyRow -> Html Msg
-viewExpiry zone row =
+viewExpiry : Model -> ApiKeyRow -> Html Msg
+viewExpiry model row =
     case row.expiresAt of
         Nothing ->
             span [ class "text-[11px] text-ink-faint" ] [ text "無期限" ]
 
         Just at ->
-            span [ class "font-mono text-[11px] text-ink-soft" ] [ text (dateOf zone at) ]
+            let
+                day : String
+                day =
+                    dateOf model.zone at
+            in
+            if not (String.isEmpty model.today) && day < model.today then
+                span [ class "font-mono text-[11px] text-[color:var(--color-bad)]" ] [ text ("期限切れ " ++ day) ]
+
+            else
+                span [ class "font-mono text-[11px] text-ink-soft" ] [ text day ]
+
+
+pad : Int -> Int -> String
+pad width n =
+    String.padLeft width '0' (String.fromInt n)
 
 
 {-| ISO 8601 の日時を手元のタイムゾーンの日付（YYYY-MM-DD）に。
