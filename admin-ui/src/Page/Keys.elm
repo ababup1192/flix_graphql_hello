@@ -47,6 +47,7 @@ type alias Model =
     , deleting : Reply
     , zone : Time.Zone
     , today : String
+    , showRevoked : Bool
     }
 
 
@@ -77,6 +78,7 @@ type Msg
     | GotHookDeleted (Result Api.Problem String)
     | EscapePressed
     | TodayKnown Time.Zone Int Int Int
+    | RevokedToggled
     | Ignored
 
 
@@ -100,6 +102,7 @@ init =
     , deleting = Reply.idle
     , zone = Time.utc
     , today = ""
+    , showRevoked = False
     }
 
 
@@ -250,6 +253,9 @@ update ctx msg model =
         TodayKnown zone year month day ->
             ( { model | zone = zone, today = pad 4 year ++ "-" ++ pad 2 month ++ "-" ++ pad 2 day }, [] )
 
+        RevokedToggled ->
+            ( { model | showRevoked = not model.showRevoked }, [] )
+
         Ignored ->
             ( model, [] )
 
@@ -362,18 +368,63 @@ viewKeys model =
         { loading = Ui.loadingCard
         , missing = Ui.table [ Ui.empty "API キーがありません" ]
         , failed = Ui.failedCard
-        , present =
-            \rows ->
-                if List.isEmpty rows then
-                    Ui.table [ Ui.empty "API キーがありません" ]
-
-                else
-                    Ui.table
-                        (Ui.headRowOf keyColumns [ text "名前", text "キー", text "権限", text "作成日", text "有効期限", text "最後に使った日", text "" ]
-                            :: List.map (viewKey model) (activeFirst rows)
-                        )
+        , present = viewKeyTable model
         }
         model.keys
+
+
+{-| 生きている鍵の表。失効した鍵は畳んでおく。
+
+他社（GitHub / Stripe）は失効した鍵を一覧から消す。ここは行を残す（いつ誰が失効させたかを
+監査で追える）ので、消さない代わりに畳む。放っておくと失効済みが一覧の大半になる。
+
+-}
+viewKeyTable : Model -> List ApiKeyRow -> Html Msg
+viewKeyTable model rows =
+    let
+        active : List ApiKeyRow
+        active =
+            List.filter (\row -> row.revokedAt == Nothing) rows
+
+        revoked : List ApiKeyRow
+        revoked =
+            List.filter (\row -> row.revokedAt /= Nothing) rows
+
+        head : Html Msg
+        head =
+            Ui.headRowOf keyColumns [ text "名前", text "キー", text "権限", text "作成日", text "有効期限", text "最後に使った日", text "" ]
+
+        toggle : Html Msg
+        toggle =
+            if List.isEmpty revoked then
+                text ""
+
+            else
+                div [ class "border-t border-edge px-4 py-2" ]
+                    [ Ui.quietActionLink [ Html.Events.onClick RevokedToggled ]
+                        [ text
+                            (if model.showRevoked then
+                                "失効済み " ++ String.fromInt (List.length revoked) ++ " 件を隠す"
+
+                             else
+                                "失効済み " ++ String.fromInt (List.length revoked) ++ " 件を表示"
+                            )
+                        ]
+                    ]
+
+        shown : List ApiKeyRow
+        shown =
+            if model.showRevoked then
+                revoked
+
+            else
+                []
+    in
+    if List.isEmpty active then
+        Ui.table (Ui.empty "API キーがありません" :: toggle :: List.map (viewKey model) shown)
+
+    else
+        Ui.table (head :: List.map (viewKey model) active ++ toggle :: List.map (viewKey model) shown)
 
 
 keyColumns : String
@@ -423,13 +474,6 @@ viewKey model row =
           else
             div [ class "text-right" ] [ Ui.dangerLink (RevokeAsked row) "失効" ]
         ]
-
-
-{-| 使える鍵を上に、失効した鍵を下に。混ざっていると、どれが生きているか数えないと分からない。
--}
-activeFirst : List ApiKeyRow -> List ApiKeyRow
-activeFirst rows =
-    List.filter (\row -> row.revokedAt == Nothing) rows ++ List.filter (\row -> row.revokedAt /= Nothing) rows
 
 
 {-| 末尾 4 文字。古い鍵は持っていないので「…」だけ。
