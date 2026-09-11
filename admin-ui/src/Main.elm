@@ -493,12 +493,12 @@ update msg model =
                 |> Tuple.mapSecond
                     (\effect ->
                         case pageMsg of
-                            -- 発行した値のコピー。クリップボードは port の先
+                            -- 発行した値のコピー。クリップボードは port の先。チェックは 2 秒で戻す
                             Keys.KeyCopyRequested value ->
-                                Effect.batch [ effect, Effect.Copy value ]
+                                Effect.batch [ effect, Effect.Copy value, Effect.After copiedMillis (KeysMsg Keys.KeyCopyShown) ]
 
                             Keys.HookCopyRequested value ->
-                                Effect.batch [ effect, Effect.Copy value ]
+                                Effect.batch [ effect, Effect.Copy value, Effect.After copiedMillis (KeysMsg Keys.HookCopyShown) ]
 
                             _ ->
                                 effect
@@ -761,6 +761,13 @@ editorToday =
 withEditorToday : ( ModelWith key, Effect Msg ) -> ( ModelWith key, Effect Msg )
 withEditorToday ( model, effect ) =
     ( model, Effect.batch [ effect, editorToday ] )
+
+
+{-| 「コピーしました」を出しておく長さ。GitHub のクリップボードのボタンと同じくらい。
+-}
+copiedMillis : Float
+copiedMillis =
+    2000
 
 
 {-| API キーの一覧は作成日・期限・最後に使った日を手元のタイムゾーンで出す。

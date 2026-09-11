@@ -58,8 +58,10 @@ type Msg
     | KeySubmitted
     | GotIssued (Result Api.Problem IssuedKey)
     | KeyCopyRequested String
+    | KeyCopyShown
     | IssuedClosed
     | HookCopyRequested String
+    | HookCopyShown
     | IssuedHookClosed
     | RevokeAsked ApiKeyRow
     | RevokeCancelled
@@ -149,15 +151,21 @@ update ctx msg model =
         GotIssued (Err problem) ->
             ( { model | keyReply = Reply.failed problem }, [] )
 
-        -- 親が port に流す。ここでは「コピーしました」に切り替えるだけ
+        -- 親が port に流し、2 秒後に KeyCopyShown を返す。チェックはその間だけ（GitHub と同じ）
         KeyCopyRequested _ ->
             ( { model | keyCopied = True }, [] )
+
+        KeyCopyShown ->
+            ( { model | keyCopied = False }, [] )
 
         IssuedClosed ->
             ( { model | issued = Nothing, keyCopied = False }, [] )
 
         HookCopyRequested _ ->
             ( { model | hookCopied = True }, [] )
+
+        HookCopyShown ->
+            ( { model | hookCopied = False }, [] )
 
         IssuedHookClosed ->
             ( { model | issuedHook = Nothing, hookCopied = False }, [] )
