@@ -23,8 +23,34 @@ const proxy: ProxyOptions = {
   },
 };
 
+// 開発用の画面（`/dev/editor.html`）は**手元からしか開けない**。
+//
+// WhyNot: 「本番のビルドに入らない」だけで済ませない。ビルドの入口は index.html
+// だけなので dist には出ないが、dev サーバは同じ LAN の相手からも引ける事があり
+// （--host を付けた時、コンテナ越しの時）、偽の繋ぎ込みが付いた編集画面が外から
+// 開けるのは困る。繋いできた相手が loopback かどうかで断つ。
+function localOnly() {
+  const loopback = (address: string | undefined) =>
+    address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+  return {
+    name: "dev-page-local-only",
+    configureServer(server: { middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void } }) {
+      server.middlewares.use((req, res, next) => {
+        if (!(req.url ?? "").startsWith("/dev/") || loopback(req.socket?.remoteAddress)) return next();
+        res.statusCode = 403;
+        res.end("dev page is local only");
+      });
+    },
+    // 万一 dist に混ざったら気づけるようにする（入口に入れていないので普通は起きない）。
+    generateBundle(_options: unknown, bundle: Record<string, unknown>) {
+      const leaked = Object.keys(bundle).filter((name) => name.startsWith("dev/"));
+      if (leaked.length > 0) throw new Error(`開発用の画面がビルドに入っています: ${leaked.join(", ")}`);
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [elmPlugin({ debug: false }), tailwindcss()],
+  plugins: [elmPlugin({ debug: false }), tailwindcss(), localOnly()],
   server: {
     port: 5173,
     strictPort: true,

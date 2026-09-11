@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>エディタ（開発用）</title>
+    <script>
+      try {
+        var t = localStorage.getItem("theme");
+        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    </script>
+    <style>
+      body { margin: 0; font-family: system-ui, sans-serif; }
+
+      /* 本文の側を先に確保する。狭い窓で 2 列に割ると本文が潰れ、
+         ツールバーが折り返して本番と違う見た目になる（実際になった）。 */
+      .dev-shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; padding: 1rem; box-sizing: border-box; min-height: 100vh; }
+      @media (min-width: 68rem) {
+        .dev-shell { grid-template-columns: minmax(38rem, 1fr) minmax(16rem, 24rem); height: 100vh; }
+        .dev-side { position: sticky; top: 0; max-height: calc(100vh - 2rem); }
+      }
+      .dev-main { min-width: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+      .dev-main tiptap-editor { flex: 1; min-height: 24rem; }
+      .dev-side { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; overflow: auto; }
+      .dev-head { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+      #picker { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.25rem; }
+      #picker button { padding: 0; border: 1px solid currentColor; background: none; cursor: pointer; }
+      #picker img { display: block; width: 100%; height: auto; }
+      #json { flex: 1; margin: 0; padding: 0.5rem; font-size: 0.7rem; line-height: 1.4; overflow: auto; border: 1px solid currentColor; white-space: pre-wrap; word-break: break-all; }
+      #link-row { display: flex; gap: 0.25rem; }
+      #link-row input { flex: 1; min-width: 0; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div class="dev-shell">
+      <div class="dev-main">
+        <div class="dev-head">
+          <label for="state">初期状態</label>
+          <select id="state"></select>
+        </div>
+        <tiptap-editor></tiptap-editor>
+      </div>
+      <div class="dev-side">
+        <div id="picker" hidden></div>
+        <div id="link-row" hidden>
+          <input id="link-href" type="url" placeholder="https://example.com" />
+          <button id="link-ok" type="button">決定</button>
+          <button id="link-remove" type="button">外す</button>
+          <button id="link-cancel" type="button">取り消し</button>
+        </div>
+        <pre id="json"></pre>
+      </div>
+    </div>
+    <input id="upload" type="file" accept="image/*" hidden />
+    <script type="module" src="/dev/editor.ts"></script>
+  </body>
+</html>
