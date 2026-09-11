@@ -7,12 +7,18 @@
 /// HTML には class を付けない。サイト側が `.prose h2` のように親で当てる。種類の区別が要る所（callout / embed / gallery / linkCard / codeBlock の fileName と mermaid / 数式 / タスクの checked）は data 属性。
 ///
 /// ノードの一覧:
-/// - container: paragraph / heading(level, id) / bulletList / orderedList / listItem(checked) / blockquote(cite, citeUrl) / codeBlock(language, fileName, highlightLines) /
-///   table / tableRow / tableCell / tableHeader / callout(kind) / gallery(columns。中は image だけ) / details(summary)
-/// - leaf: text(marks) / hardBreak / horizontalRule / image(assetId, alt, width, height, source, sourceUrl, href, size, align) / embed(url) / linkCard(url) /
-///   mathBlock(tex) / video(assetId, caption, poster)
-/// - image だけは content を任意で持ち、それがキャプション（text with marks。マークは captionMarkNames の物だけ、hardBreak は無し）。
-///   古い doc の attrs.caption は読む側だけで受け付ける（content が無い時に text 1 つのキャプションと同じ扱い。両方あれば content が勝つ）
+/// - container: paragraph / heading(level, id) / bulletList / orderedList / listItem(checked) / blockquote / codeBlock(language, fileName, highlightLines) /
+///   table / tableRow / tableCell / tableHeader / callout(kind) / image（中は imageItem）/ imageItem /
+///   gallery（読む側だけの互換。中は古い形の image だけ）/ details(summary) / quoteCite（blockquote の最後の子だけ）
+/// - leaf: text(marks) / hardBreak / horizontalRule / embed(url) / linkCard(url) / mathBlock(tex) / video(assetId, caption, poster)
+/// - image は 1 枚でも複数枚でも同じノードで、content は `imageItem` の 1 つ以上の並び。
+///   imageItem が 1 枚ぶんで、attrs(assetId, alt, width, height, source, sourceUrl, href, size, align) と、content にその画像のキャプション。
+///   キャプションも縮小も配置も 1 枚ぶんの物なので imageItem が持ち、image 自体は attrs を持たない。列数は持たない（枚数から決まる）
+/// - キャプション（imageItem の content）は text with marks。マークは captionMarkNames の物だけ、hardBreak は無し
+/// - 古い doc は読む側だけで受け付ける: attrs.assetId を持つ image は 1 枚の image と同じ（content はその画像のキャプション）、
+///   attrs.caption は content が無い時のキャプション、gallery は中の image を並べた image と同じ（attrs.columns は捨てる）
+/// - 引用の出典も同じ形で、blockquote の content の最後に置く quoteCite の中身（text with marks。マークは captionMarkNames の物だけ）。
+///   古い doc の attrs.cite / citeUrl は読む側だけで受け付ける（quoteCite が無い時に text 1 つ、citeUrl があればその文字に link マークを掛けた物として扱う）
 /// - mark: bold / italic / strike / underline / code / link(href | entryId) / math（text が TeX。他のマークと混ぜない）/ sub / sup（重ねない）/ highlight
 ///
 /// 入れ子は許さない: 表のセルの中は段落だけ、引用の中に引用は入らない。リストの入れ子だけは Markdown で往復するので残す。
@@ -23,13 +29,15 @@ mod RichText {
 
     use Util.Json.Json
 
-    /// 子（content）を持てるノード。table > tableRow > tableCell / tableHeader > paragraph。callout と details の中は段落など。gallery の中は image だけ。
+    /// 子（content）を持てるノード。table > tableRow > tableCell / tableHeader > paragraph。callout と details の中は段落など。
+    /// image の中は imageItem で、imageItem の中は text。gallery（古い形）の中は image だけ。
+    /// quoteCite は blockquote の最後の子だけで、中は text。
     pub def containerNodes(): List[String] =
-        "paragraph" :: "heading" :: "bulletList" :: "orderedList" :: "listItem" :: "blockquote" :: "codeBlock" ::
-        "table" :: "tableRow" :: "tableCell" :: "tableHeader" :: "callout" :: "gallery" :: "details" :: Nil
+        "paragraph" :: "heading" :: "bulletList" :: "orderedList" :: "listItem" :: "blockquote" :: "quoteCite" :: "codeBlock" ::
+        "table" :: "tableRow" :: "tableCell" :: "tableHeader" :: "callout" :: "image" :: "imageItem" :: "gallery" :: "details" :: Nil
 
-    /// 子を持たないノード。image と video は attrs.assetId で asset を、embed は attrs.url で外部の動画や投稿を、linkCard は attrs.url で任意のページを指す。mathBlock は attrs.tex。
-    pub def leafNodes(): List[String] = "text" :: "hardBreak" :: "horizontalRule" :: "image" :: "embed" :: "linkCard" :: "mathBlock" :: "video" :: Nil
+    /// 子を持たないノード。video は attrs.assetId で asset を、embed は attrs.url で外部の動画や投稿を、linkCard は attrs.url で任意のページを指す。mathBlock は attrs.tex。
+    pub def leafNodes(): List[String] = "text" :: "hardBreak" :: "horizontalRule" :: "embed" :: "linkCard" :: "mathBlock" :: "video" :: Nil
 
     /// codeBlock の language のうち、図として描く物。HTML の pre に data-diagram が付く。
     pub def diagramLanguage(): String = "mermaid"
@@ -53,7 +61,7 @@ mod RichText {
         "bold" :: "italic" :: "strike" :: "underline" :: "code" :: "link" :: "math" :: "sub" :: "sup" :: "highlight" :: Nil
 
     ///
-    /// image のキャプション（content の text）に付けられるマーク。
+    /// image のキャプションと引用の出典（content の text）に付けられるマーク。
     ///
     /// WhyNot: underline / math / sub / sup / highlight を入れない。Markdown ではキャプションを `*…*` の 1 行に写すので、
     /// 行の中で閉じられる印だけに絞る。要る時に足すのは易しく、外すのは既存の entry が壊れる。
@@ -142,6 +150,7 @@ mod RichText {
             case Some("codeBlock") => checkCodeBlock(path, fields) ::: checkChildren(path, fields)
             case Some("callout") => checkCallout(path, fields) ::: checkChildren(path, fields)
             case Some("image") => checkImage(path, fields)
+            case Some("imageItem") => Violation.Violation(path, "imageItem は image の中にだけ置けます") :: Nil
             case Some("embed") => checkEmbed(path, fields)
             case Some("gallery") => checkGallery(path, fields)
             case Some("linkCard") => checkLinkCard(path, fields)
@@ -149,7 +158,8 @@ mod RichText {
             case Some("listItem") => checkListItem(path, fields) ::: checkChildren(path, fields)
             case Some("tableCell") => checkTableCell(path, fields) ::: checkCellChildren(path, fields) ::: checkChildren(path, fields)
             case Some("tableHeader") => checkTableCell(path, fields) ::: checkCellChildren(path, fields) ::: checkChildren(path, fields)
-            case Some("blockquote") => checkQuoteCite(path, fields) ::: checkQuoteChildren(path, fields) ::: checkChildren(path, fields)
+            case Some("blockquote") => checkQuoteCite(path, fields) ::: checkQuoteChildren(path, fields)
+            case Some("quoteCite") => Violation.Violation(path, "出典（quoteCite）は引用（blockquote）の最後の子にだけ置けます") :: Nil
             case Some("mathBlock") => checkMathBlock(path, fields)
             case Some("video") => checkVideo(path, fields)
             case Some(name) if List.memberOf(name, containerNodes()) => checkChildren(path, fields)
@@ -203,11 +213,20 @@ mod RichText {
         };
         levelCheck ::: idCheck
 
-    /// codeBlock。attrs.language / fileName / highlightLines はどれも任意で、あれば形を見る。
+    /// codeBlock。attrs.language / fileName / highlightLines / wrap はどれも任意で、あれば形を見る。
     def checkCodeBlock(path: String, fields: Map[String, Json]): List[Violation] =
         checkOptionalString(path, "language", isLanguage, "codeBlock の attrs.language は小文字英数字と + # - を 1 〜 32 文字にしてください", fields)
             ::: checkOptionalString(path, "fileName", isFileName, "codeBlock の attrs.fileName はパスの文字（英数字・日本語・/ . _ -）を 1 〜 200 文字にしてください", fields)
             ::: checkOptionalString(path, "highlightLines", isHighlightLines, "codeBlock の attrs.highlightLines は 1,3-5 の形にしてください", fields)
+            ::: checkOptionalBool(path, "wrap", "codeBlock の attrs.wrap は true / false にしてください", fields)
+
+    /// 任意の真偽値の attr。無ければ通り、あれば真偽値である事。
+    def checkOptionalBool(path: String, name: String, message: String, fields: Map[String, Json]): List[Violation] =
+        match Map.get(name, attrs(fields)) {
+            case None              => Nil
+            case Some(Json.JBool(_)) => Nil
+            case Some(_)           => Violation.Violation(path, message) :: Nil
+        }
 
     /// 任意の文字列の attr。無ければ通り、あれば文字列で規則に合う事。
     def checkOptionalString(path: String, name: String, isValid: String -> Bool, message: String, fields: Map[String, Json]): List[Violation] =
@@ -237,16 +256,28 @@ mod RichText {
             else Violation.Violation("${path}.content[${index}]", "表のセルの中は段落だけにしてください") :: Nil)
 
     ///
-    /// 引用の中に引用は入れない。
+    /// 引用の子。最後の 1 つだけ quoteCite（出典）になれて、中は text だけ。他は普通のブロックで、引用の中に引用は入れない。
     ///
     /// WhyNot: `>>` は Markdown で書けるが、深さに意味を持たせる書き方が定まらない。
     /// 引用の引用は元の出典が二重になるだけで、読む側には 1 段の引用と区別が付かない。
     ///
     def checkQuoteChildren(path: String, fields: Map[String, Json]): List[Violation] =
+        let lastIndex = List.length(children(fields)) - 1;
         children(fields) |> List.zipWithIndex |> List.flatMap(match (index, child) ->
-            if (nodeType(child) == Some("blockquote"))
-                Violation.Violation("${path}.content[${index}]", "引用の中に引用は入れられません") :: Nil
-            else Nil)
+            let childPath = "${path}.content[${index}]";
+            match nodeType(child) {
+                case Some("quoteCite") =>
+                    if (index == lastIndex) checkQuoteCiteChild(childPath, child)
+                    else Violation.Violation(childPath, "出典（quoteCite）は引用の最後に置いてください") :: Nil
+                case Some("blockquote") => Violation.Violation(childPath, "引用の中に引用は入れられません") :: Nil
+                case _                  => checkNode(childPath, child)
+            })
+
+    /// quoteCite の中身。image のキャプションと同じで、text だけ・マークは captionMarkNames の物だけ。
+    def checkQuoteCiteChild(path: String, child: Json): List[Violation] = match child {
+        case Json.JObject(fields) => checkInlineChildren("引用の出典", path, fields)
+        case _                    => Violation.Violation(path, "ノードはオブジェクトにしてください") :: Nil
+    }
 
     def checkTableCell(path: String, fields: Map[String, Json]): List[Violation] = match Map.get("align", attrs(fields)) {
         case None    => Nil
@@ -255,39 +286,63 @@ mod RichText {
             else Violation.Violation(path, "セルの attrs.align は ${List.join(" / ", cellAligns())} にしてください") :: Nil
     }
 
-    /// image ノード。attrs.assetId は asset の id。alt / caption / source は任意の文字列、sourceUrl / href は任意で http(s)、size / align は任意で決まった値。
-    /// content はキャプションで、text（captionMarkNames のマークだけ）の並び。
+    ///
+    /// image ノード。content は imageItem の 1 つ以上の並び。
+    /// attrs.assetId のある古い形は 1 枚の image として読む側だけで受ける。
+    ///
     def checkImage(path: String, fields: Map[String, Json]): List[Violation] =
+        if (Option.nonEmpty(attrString("assetId", fields))) checkPicture("image", path, fields)
+        else checkImageChildren(path, fields)
+
+    /// image の子。imageItem が 1 つ以上。
+    def checkImageChildren(path: String, fields: Map[String, Json]): List[Violation] =
+        let emptyCheck =
+            if (List.isEmpty(children(fields)))
+                Violation.Violation(path, "image には画像（imageItem）を 1 つ以上入れてください") :: Nil
+            else Nil;
+        emptyCheck ::: (children(fields) |> List.zipWithIndex |> List.flatMap(match (index, child) ->
+            let childPath = "${path}.content[${index}]";
+            match child {
+                case Json.JObject(item) if typeOf(item) == Some("imageItem") => checkPicture("imageItem", childPath, item)
+                case _ => Violation.Violation(childPath, "image の中は imageItem だけにしてください") :: Nil
+            }))
+
+    ///
+    /// 画像 1 枚ぶん（imageItem と、古い形の image と gallery の中の image）。
+    /// attrs.assetId は asset の id。alt / caption / source は任意の文字列、sourceUrl / href は任意で http(s)、size / align は任意で決まった値。
+    /// content はキャプションで、text（captionMarkNames のマークだけ）の並び。what は違反の文に出すノードの名前。
+    ///
+    def checkPicture(what: String, path: String, fields: Map[String, Json]): List[Violation] =
         let assetIdCheck = match attrString("assetId", fields) |> Option.flatMap(AssetId.parse) {
             case Some(_) => Nil
-            case None    => Violation.Violation(path, "image の attrs.assetId は asset の id にしてください") :: Nil
+            case None    => Violation.Violation(path, "${what} の attrs.assetId は asset の id にしてください") :: Nil
         };
         assetIdCheck
-            ::: checkCaptionChildren(path, fields)
-            ::: checkOptionalString(path, "alt", _ -> true, "image の attrs.alt は文字列にしてください", fields)
-            ::: checkOptionalString(path, "caption", _ -> true, "image の attrs.caption は文字列にしてください", fields)
-            ::: checkOptionalString(path, "source", _ -> true, "image の attrs.source は文字列にしてください", fields)
-            ::: checkOptionalString(path, "sourceUrl", isOptionalHttpUrl, "image の attrs.sourceUrl は http(s):// にしてください", fields)
-            ::: checkOptionalString(path, "href", isOptionalHttpUrl, "image の attrs.href は http(s):// にしてください", fields)
-            ::: checkOptionalString(path, "size", isOptionalOneOf(imageSizes()), "image の attrs.size は ${List.join(" / ", imageSizes())} にしてください", fields)
-            ::: checkOptionalString(path, "align", isOptionalOneOf(imageAligns()), "image の attrs.align は ${List.join(" / ", imageAligns())} にしてください", fields)
+            ::: checkInlineChildren("画像のキャプション", path, fields)
+            ::: checkOptionalString(path, "alt", _ -> true, "${what} の attrs.alt は文字列にしてください", fields)
+            ::: checkOptionalString(path, "caption", _ -> true, "${what} の attrs.caption は文字列にしてください", fields)
+            ::: checkOptionalString(path, "source", _ -> true, "${what} の attrs.source は文字列にしてください", fields)
+            ::: checkOptionalString(path, "sourceUrl", isOptionalHttpUrl, "${what} の attrs.sourceUrl は http(s):// にしてください", fields)
+            ::: checkOptionalString(path, "href", isOptionalHttpUrl, "${what} の attrs.href は http(s):// にしてください", fields)
+            ::: checkOptionalString(path, "size", isOptionalOneOf(imageSizes()), "${what} の attrs.size は ${List.join(" / ", imageSizes())} にしてください", fields)
+            ::: checkOptionalString(path, "align", isOptionalOneOf(imageAligns()), "${what} の attrs.align は ${List.join(" / ", imageAligns())} にしてください", fields)
 
-    /// image のキャプション。content の子は text だけで、マークは captionMarkNames の物だけ。
-    def checkCaptionChildren(path: String, fields: Map[String, Json]): List[Violation] =
-        children(fields) |> List.zipWithIndex |> List.flatMap(match (index, child) -> checkCaptionChild("${path}.content[${index}]", child))
+    /// image のキャプションと引用の出典。content の子は text だけで、マークは captionMarkNames の物だけ。what は違反の文に出す物の名前。
+    def checkInlineChildren(what: String, path: String, fields: Map[String, Json]): List[Violation] =
+        children(fields) |> List.zipWithIndex |> List.flatMap(match (index, child) -> checkInlineChild(what, "${path}.content[${index}]", child))
 
-    def checkCaptionChild(path: String, child: Json): List[Violation] = match child {
+    def checkInlineChild(what: String, path: String, child: Json): List[Violation] = match child {
         case Json.JObject(fields) if typeOf(fields) == Some("text") =>
             checkText(path, fields)
                 ::: (marksOf(fields) |> List.filterMap(typeOf) |> List.filter(name -> not List.memberOf(name, captionMarkNames()))
-                    |> List.map(name -> Violation.Violation(path, "キャプションに '${name}' は付けられません（${List.join(", ", captionMarkNames())}）")))
-        case _ => Violation.Violation(path, "image のキャプション（content）は text だけにしてください") :: Nil
+                    |> List.map(name -> Violation.Violation(path, "${what}に '${name}' は付けられません（${List.join(", ", captionMarkNames())}）")))
+        case _ => Violation.Violation(path, "${what}（content）は text だけにしてください") :: Nil
     }
 
     /// 空文字は「無い」と同じなので通す。
     def isOptionalOneOf(allowed: List[String], value: String): Bool = String.isEmpty(value) or List.memberOf(value, allowed)
 
-    /// blockquote の出典。attrs.cite は任意の文字列、citeUrl は任意で http(s)。
+    /// blockquote の旧い出典。attrs.cite は任意の文字列、citeUrl は任意で http(s)。書き出しは quoteCite だけで、これは読む側の互換。
     def checkQuoteCite(path: String, fields: Map[String, Json]): List[Violation] =
         checkOptionalString(path, "cite", _ -> true, "blockquote の attrs.cite は文字列にしてください", fields)
             ::: checkOptionalString(path, "citeUrl", isOptionalHttpUrl, "blockquote の attrs.citeUrl は http(s):// にしてください", fields)
@@ -295,7 +350,7 @@ mod RichText {
     /// 空文字は「無い」と同じなので通す。
     def isOptionalHttpUrl(url: String): Bool = String.isEmpty(url) or isHttpUrl(url)
 
-    /// gallery。attrs.columns は任意で 2 〜 4。中は 1 つ以上の image だけ。
+    /// gallery（読む側だけの互換）。attrs.columns は任意で 2 〜 4。中は 1 つ以上の image だけ。
     def checkGallery(path: String, fields: Map[String, Json]): List[Violation] =
         let columnsCheck = match Map.get("columns", attrs(fields)) {
             case None => Nil
@@ -306,7 +361,7 @@ mod RichText {
         columnsCheck ::: emptyCheck ::: (children(fields) |> List.zipWithIndex |> List.flatMap(match (index, child) -> checkGalleryChild("${path}.content[${index}]", child)))
 
     def checkGalleryChild(path: String, child: Json): List[Violation] = match child {
-        case Json.JObject(fields) if typeOf(fields) == Some("image") => checkImage(path, fields)
+        case Json.JObject(fields) if typeOf(fields) == Some("image") => checkPicture("image", path, fields)
         case _ => Violation.Violation(path, "gallery の中は image だけにしてください") :: Nil
     }
 
@@ -414,7 +469,8 @@ mod RichText {
 
     /// 1 ノードが指す asset の id の文字列。
     def nodeAssetIds(fields: Map[String, Json]): List[String] = match typeOf(fields) {
-        case Some("image") => attrString("assetId", fields) |> Option.toList
+        case Some("image")     => attrString("assetId", fields) |> Option.toList
+        case Some("imageItem") => attrString("assetId", fields) |> Option.toList
         case Some("video") => (attrString("assetId", fields) |> Option.toList) ::: (attrString("poster", fields) |> Option.toList)
         case _             => Nil
     }
@@ -468,9 +524,12 @@ mod RichText {
         case Json.JObject(fields) => match typeOf(fields) {
             case Some("text")      => Map.get("text", fields) |> Option.flatMap(EntryValue.asString) |> Option.getWithDefault("")
             case Some("hardBreak") => "\n"
-            case Some("image")     => ""
-            case Some("gallery")   => (children(fields) |> List.filterMap(captionOf) |> List.map(caption -> caption ++ "\n") |> List.join(""))
-            case Some("blockquote") => childrenText(fields) ++ (attrString("cite", fields) |> Option.filter(String.nonEmpty) |> Option.map(cite -> "— ${cite}\n") |> Option.getWithDefault("")) ++ "\n"
+            case Some("image")     => picturesText(fields)
+            case Some("gallery")   => picturesText(fields)
+            case Some("blockquote") =>
+                (quoteBody(fields) |> List.map(textOf) |> List.join(""))
+                    ++ (quoteCiteText(fields) |> Option.map(cite -> "— ${cite}\n") |> Option.getWithDefault(""))
+                    ++ "\n"
             case Some("linkCard")  => (attrString("url", fields) |> Option.getWithDefault("")) ++ "\n"
             case Some("details")   => (attrString("summary", fields) |> Option.getWithDefault("")) ++ "\n" ++ childrenText(fields)
             case Some("mathBlock") => (attrString("tex", fields) |> Option.getWithDefault("")) ++ "\n"
@@ -480,11 +539,73 @@ mod RichText {
         case _ => ""
     }
 
-    /// image の caption（平文）と source を空白 1 つで繋いだ物。どちらも無ければ None。
-    def captionOf(node: Json): Option[String] = match node {
-        case Json.JObject(fields) =>
-            joinNonEmpty(captionText(fields), nonEmptyAttr("source", fields))
-        case _ => None
+    ///
+    /// image（と古い gallery）の平文。2 枚以上の時だけ、画像ごとのキャプションを 1 行ずつ出す。
+    ///
+    /// WhyNot: 1 枚の時に出さない。単独の画像のキャプションは本文の続きではなく、抜粋に混ざると文が途切れて読める。
+    ///
+    def picturesText(fields: Map[String, Json]): String =
+        let items = pictureItems(fields);
+        if (List.length(items) <= 1) ""
+        else items |> List.filterMap(pictureText) |> List.map(caption -> caption ++ "\n") |> List.join("")
+
+    /// 画像 1 枚の caption（平文）と source を空白 1 つで繋いだ物。どちらも無ければ None。
+    def pictureText(fields: Map[String, Json]): Option[String] =
+        joinNonEmpty(captionText(fields), nonEmptyAttr("source", fields))
+
+    ///
+    /// image の画像の並び。imageItem の並びで、古い形（attrs.assetId のある image）はそれ自身が 1 枚、gallery は中の image。
+    ///
+    def pictureItems(fields: Map[String, Json]): List[Map[String, Json]] =
+        if (typeOf(fields) == Some("gallery")) childFields(fields) |> List.filter(child -> typeOf(child) == Some("image"))
+        else if (Option.nonEmpty(attrString("assetId", fields))) fields :: Nil
+        else childFields(fields) |> List.filter(child -> typeOf(child) == Some("imageItem"))
+
+    def childFields(fields: Map[String, Json]): List[Map[String, Json]] =
+        children(fields) |> List.filterMap(child -> match child {
+            case Json.JObject(found) => Some(found)
+            case _                   => None
+        })
+
+    ///
+    /// 引用の出典の inline。content の最後の quoteCite があればその子、無ければ旧 attrs.cite / citeUrl を text 1 つに写す
+    /// （citeUrl があればその文字に link マークを掛ける）。どちらも無ければ空。
+    ///
+    def quoteCiteInlines(fields: Map[String, Json]): List[Json] = match quoteCiteNode(fields) {
+        case Some(cite) => children(cite)
+        case None       => legacyCiteInlines(nonEmptyAttr("cite", fields), nonEmptyAttr("citeUrl", fields) |> Option.filter(isHttpUrl))
+    }
+
+    /// 旧 attrs の出典を text 1 つに。文字が無ければ URL を文字として出す。
+    def legacyCiteInlines(text: Option[String], url: Option[String]): List[Json] = match (text, url) {
+        case (Some(found), Some(href)) => linkedTextNode(href, found) :: Nil
+        case (None, Some(href))        => linkedTextNode(href, href) :: Nil
+        case (Some(found), None)       => Json.JObject(Map#{ "type" => Json.JString("text"), "text" => Json.JString(found) }) :: Nil
+        case (None, None)              => Nil
+    }
+
+    def linkedTextNode(href: String, text: String): Json =
+        Json.JObject(Map#{
+            "type" => Json.JString("text"),
+            "text" => Json.JString(text),
+            "marks" => Json.JArray(Vector#{ Json.JObject(Map#{ "type" => Json.JString("link"), "attrs" => Json.JObject(Map#{ "href" => Json.JString(href) }) }) })
+        })
+
+    /// content の最後に置かれた quoteCite。
+    def quoteCiteNode(fields: Map[String, Json]): Option[Map[String, Json]] =
+        children(fields) |> List.reverse |> List.head |> Option.flatMap(child -> match child {
+            case Json.JObject(found) if typeOf(found) == Some("quoteCite") => Some(found)
+            case _                                                         => None
+        })
+
+    /// 引用の本文。出典の quoteCite を除いた子。
+    def quoteBody(fields: Map[String, Json]): List[Json] =
+        children(fields) |> List.filter(child -> nodeType(child) != Some("quoteCite"))
+
+    /// 引用の出典の平文。quoteCite があればその text を繋ぎ、無ければ旧 attrs.cite。空なら None。URL は出さない。
+    def quoteCiteText(fields: Map[String, Json]): Option[String] = match quoteCiteNode(fields) {
+        case Some(cite) => Some(childrenText(cite)) |> Option.filter(String.nonEmpty)
+        case None       => nonEmptyAttr("cite", fields)
     }
 
     /// image のキャプションの平文。content があればその text を繋ぎ、無ければ attrs.caption。空なら None。
@@ -582,16 +703,19 @@ mod RichText {
                 case Some("listItem")       =>
                     let checked = Map.get("checked", attrs(fields)) |> Option.flatMap(EntryValue.asBool) |> Option.map(found -> " data-checked=\"${found}\"") |> Option.getWithDefault("");
                     "<li${checked}>${inner()}</li>"
-                case Some("blockquote")     => match citeHtml(nonEmptyAttr("cite", fields), nonEmptyAttr("citeUrl", fields) |> Option.filter(isHttpUrl)) {
-                    case Some(cite) => "<figure data-quote><blockquote>${inner()}</blockquote><figcaption>${cite}</figcaption></figure>"
-                    case None       => "<blockquote>${inner()}</blockquote>"
-                }
+                case Some("blockquote")     =>
+                    let body = quoteBody(fields) |> List.map(htmlOf(refs)) |> List.join("");
+                    match quoteCiteHtml(refs, fields) {
+                        case Some(cite) => "<figure data-quote><blockquote>${body}</blockquote><figcaption>${cite}</figcaption></figure>"
+                        case None       => "<blockquote>${body}</blockquote>"
+                    }
                 case Some("codeBlock")      =>
                     let language = attrString("language", fields) |> Option.filter(isLanguage) |> Option.map(found -> " class=\"language-${found}\"") |> Option.getWithDefault("");
                     let diagram = attrString("language", fields) |> Option.filter(found -> found == diagramLanguage()) |> Option.map(found -> " data-diagram=\"${found}\"") |> Option.getWithDefault("");
                     let fileName = attrString("fileName", fields) |> Option.filter(isFileName) |> Option.map(found -> " data-file-name=\"${escape(found)}\"") |> Option.getWithDefault("");
                     let highlightLines = attrString("highlightLines", fields) |> Option.filter(isHighlightLines) |> Option.map(found -> " data-highlight-lines=\"${found}\"") |> Option.getWithDefault("");
-                    "<pre${diagram}${fileName}${highlightLines}><code${language}>${inner()}</code></pre>"
+                    let wrap = Map.get("wrap", attrs(fields)) |> Option.flatMap(EntryValue.asBool) |> Option.filter(found -> found) |> Option.map(_ -> " data-wrap") |> Option.getWithDefault("");
+                    "<pre${diagram}${fileName}${highlightLines}${wrap}><code${language}>${inner()}</code></pre>"
                 case Some("table")          => tableHtml(refs, fields)
                 case Some("tableRow")       => "<tr>${inner()}</tr>"
                 case Some("tableCell")      => "<td${spanAttrs(fields)}${alignAttr(fields)}>${inner()}</td>"
@@ -599,9 +723,9 @@ mod RichText {
                 case Some("callout")        => "<aside data-kind=\"${escape(attrString("kind", fields) |> Option.getWithDefault("note"))}\">${inner()}</aside>"
                 case Some("horizontalRule") => "<hr>"
                 case Some("hardBreak")      => "<br>"
-                case Some("image")          => imageHtml(refs, fields)
+                case Some("image")          => picturesHtml(refs, fields)
                 case Some("embed")          => embedHtml(fields)
-                case Some("gallery")        => galleryHtml(refs, fields)
+                case Some("gallery")        => picturesHtml(refs, fields)
                 case Some("linkCard")       => linkCardHtml(refs#cards, fields)
                 case Some("details")        => "<details><summary>${escape(attrString("summary", fields) |> Option.getWithDefault(""))}</summary>${inner()}</details>"
                 case Some("mathBlock")      => "<div data-math=\"block\">${escape(attrString("tex", fields) |> Option.getWithDefault(""))}</div>"
@@ -612,19 +736,30 @@ mod RichText {
     }
 
     ///
-    /// image。caption か source があれば figure で包み、size / align は figure に付ける。
+    /// image（と古い gallery）。1 枚なら今までの image と同じ figure / img、2 枚以上なら `figure data-gallery="枚数"` で包む。
+    /// data-gallery は枚数で、並べ方（列数・折り返し・横スクロール）はサイト側の CSS が決める。
+    ///
+    /// WhyNot: 列数を出さない。列数を本文に埋めると、狭い画面と別のデザインで崩れる（文字色を持たないのと同じ理由）。
+    ///
+    def picturesHtml(refs: Refs, fields: Map[String, Json]): String =
+        let parts = pictureItems(fields) |> List.filterMap(imageParts(refs));
+        match parts {
+            case Nil           => ""
+            case single :: Nil => pictureHtml(single)
+            case _             => "<figure data-gallery=\"${List.length(parts)}\">${parts |> List.map(pictureHtml) |> List.join("")}</figure>"
+        }
+
+    ///
+    /// 画像 1 枚。caption か source があれば figure で包み、size / align は figure に付ける。
     /// figure が無い時は img に付ける（href だけなら `<a><img></a>`）。
     ///
     /// WhyNot: href だけの時に figure を作らない。中身が img 1 つの figure は意味が無く、
     /// サイト側の `figure` の CSS（余白・キャプションの下線）が空の figure にも当たる。
     ///
-    def imageHtml(refs: Refs, fields: Map[String, Json]): String =
-        match imageParts(refs, fields) {
-            case Some(parts) => match parts#caption {
-                case Some(caption) => "<figure${parts#layout}>${linkedImg("", parts)}<figcaption>${caption}</figcaption></figure>"
-                case None          => linkedImg(parts#layout, parts)
-            }
-            case None => ""
+    def pictureHtml(parts: ImageParts): String =
+        match parts#caption {
+            case Some(found) => "<figure${parts#layout}>${linkedImg("", parts)}<figcaption>${found}</figcaption></figure>"
+            case None        => linkedImg(parts#layout, parts)
         }
 
     ///
@@ -662,6 +797,12 @@ mod RichText {
         nonEmptyAttr(name, fields) |> Option.filter(value -> List.memberOf(value, allowed))
             |> Option.map(value -> " data-${name}=\"${value}\"") |> Option.getWithDefault("")
 
+    /// 引用の出典の `<cite>`。中身は content のマーク付きの inline（link は本文と同じ a）。空なら None。
+    def quoteCiteHtml(refs: Refs, fields: Map[String, Json]): Option[String] =
+        Some(quoteCiteInlines(fields) |> List.map(htmlOf(refs)) |> List.join(""))
+            |> Option.filter(found -> String.nonEmpty(String.trim(found)))
+            |> Option.map(found -> "<cite>${found}</cite>")
+
     /// 出典の `<cite>`。url があれば外部リンクと同じ a で巻き、文字が無ければ url を文字として出す。どちらも無ければ None。
     def citeHtml(text: Option[String], url: Option[String]): Option[String] = match (text, url) {
         case (Some(found), Some(href)) => Some("<cite><a href=\"${escape(href)}\" target=\"_blank\" rel=\"noopener noreferrer\">${escape(found)}</a></cite>")
@@ -680,15 +821,6 @@ mod RichText {
                 "<figure><video controls src=\"${escape(source#url)}\"${poster}></video>${caption}</figure>"
             case None => ""
         }
-
-    /// gallery。data-gallery に columns。中の image は並べる箱になるので caption が無くても figure。
-    def galleryHtml(refs: Refs, fields: Map[String, Json]): String =
-        let columns = attrInt("columns", fields) |> Option.filter(isGalleryColumns) |> Option.getWithDefault(minGalleryColumns());
-        let items = children(fields) |> List.filterMap(child -> match child {
-            case Json.JObject(image) if typeOf(image) == Some("image") => imageParts(refs, image)
-            case _ => None
-        }) |> List.map(parts -> "<figure${parts#layout}>${linkedImg("", parts)}${parts#caption |> Option.map(found -> "<figcaption>${found}</figcaption>") |> Option.getWithDefault("")}</figure>") |> List.join("");
-        "<div data-gallery=\"${columns}\">${items}</div>"
 
     ///
     /// linkCard。cards に OGP があれば title / description / site / thumbnail を span と img で出す（JavaScript も iframe も無し）。

@@ -62,7 +62,7 @@ mod TestRichText {
         Assert.assertEq(
             expected = List#{
                 ("fields.body", "richText は { type: \"doc\", content: [...] } の形にしてください"),
-                ("fields.body.content[0]", "知らないノード 'iframe' です（paragraph, heading, bulletList, orderedList, listItem, blockquote, codeBlock, table, tableRow, tableCell, tableHeader, callout, gallery, details, text, hardBreak, horizontalRule, image, embed, linkCard, mathBlock, video）"),
+                ("fields.body.content[0]", "知らないノード 'iframe' です（paragraph, heading, bulletList, orderedList, listItem, blockquote, quoteCite, codeBlock, table, tableRow, tableCell, tableHeader, callout, image, imageItem, gallery, details, text, hardBreak, horizontalRule, embed, linkCard, mathBlock, video）"),
                 ("fields.body.content[1].content[0].marks[0]", "link は attrs.href（http(s):// か mailto:）か attrs.entryId（entry の id）のどちらか 1 つにしてください"),
                 ("fields.body.content[2]", "heading の attrs.level は 1 〜 4 にしてください"),
                 ("fields.body.content[3]", "image の attrs.assetId は asset の id にしてください")
@@ -442,13 +442,26 @@ mod TestRichText {
         let cases = List#{ ("1,3-5", true), ("7", true), ("2-4", true), ("a", false), ("3-", false), ("1,", false), ("", false) };
         Assert.assertEq(expected = cases, cases |> List.map(match (lines, _) -> (lines, isValidDoc(codeBlockWith(List#{ ("highlightLines", Json.JString(lines)) }, "x")))))
 
+    /// codeBlock の attrs.wrap は true / false。文字列・数値は止まる。無ければ通る。
+    @Test
+    def testValidateCodeBlockWrap(): Unit \ Assert =
+        let cases = List#{
+            (Json.JBool(true),     true),
+            (Json.JBool(false),    true),
+            (Json.JString("true"), false),
+            (Json.JString(""),     false),
+            (CmsTestKit.intJson(1), false)
+        };
+        Assert.assertEq(expected = cases, cases |> List.map(match (wrap, _) -> (wrap, isValidDoc(codeBlockWith(List#{ ("wrap", wrap) }, "x")))))
+
     /// details の attrs.summary は空でない文字列。無い・空・数値は止まる。
     @Test
     def testValidateDetailsSummary(): Unit \ Assert =
         let cases = List#{ (Some(Json.JString("補足")), true), (Some(Json.JString("")), false), (Some(Json.JString("  ")), false), (Some(CmsTestKit.intJson(1)), false), (None, false) };
         Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (summary, _) -> isValidDoc(details(summary, List#{ node("paragraph", List#{ text("中身") }) }))))
 
-    /// gallery は data-gallery に columns（無ければ 2）。中の image は caption の有無に関わらず figure。無い asset の image は出ない。
+    /// 古い gallery も新しい image と同じ形で出る。data-gallery は出せた枚数（columns は見ない）。キャプションのある画像だけ figure。
+    /// 無い asset の image は出ない。1 枚だけになれば単独の image と同じ。
     @Test
     def testToHtmlGallery(): Unit \ Assert =
         let images = Map#{ AssetId.AssetId("asset001") => { url = "u1", width = Some(640), height = Some(480) }, AssetId.AssetId("asset002") => { url = "u2", width = None, height = None } };
@@ -457,8 +470,8 @@ mod TestRichText {
             gallery(None, List#{ imageWith(Nil) })
         });
         Assert.assertEq(
-            expected = "<div data-gallery=\"3\"><figure><img src=\"u1\" alt=\"a\" width=\"640\" height=\"480\"></figure><figure><img src=\"u2\" alt=\"\"><figcaption>図 1</figcaption></figure></div>"
-                ++ "<div data-gallery=\"2\"><figure><img src=\"u1\" alt=\"\" width=\"640\" height=\"480\"></figure></div>",
+            expected = "<figure data-gallery=\"2\"><img src=\"u1\" alt=\"a\" width=\"640\" height=\"480\"><figure><img src=\"u2\" alt=\"\"><figcaption>図 1</figcaption></figure></figure>"
+                ++ "<img src=\"u1\" alt=\"\" width=\"640\" height=\"480\">",
             RichText.toHtml(images, Map.empty(), Map.empty(), doc))
 
     /// linkCard は data-link-card 付きの a で、中身は url。文字はエスケープ。
@@ -501,6 +514,20 @@ mod TestRichText {
             expected = "<pre data-file-name=\"src/a.ts\" data-highlight-lines=\"1,3-5\"><code class=\"language-ts\">let x = 1</code></pre>"
                 ++ "<pre data-file-name=\"Makefile\"><code>check:</code></pre>"
                 ++ "<pre data-highlight-lines=\"2\"><code>y</code></pre>",
+            RichText.toHtml(Map.empty(), Map.empty(), Map.empty(), doc))
+
+    /// codeBlock の attrs.wrap が真なら pre に data-wrap（値は無し）。偽と無しでは出ない。
+    @Test
+    def testToHtmlCodeBlockWrap(): Unit \ Assert =
+        let doc = node("doc", List#{
+            codeBlockWith(List#{ ("language", Json.JString("ts")), ("wrap", Json.JBool(true)) }, "let x = 1"),
+            codeBlockWith(List#{ ("wrap", Json.JBool(false)) }, "y"),
+            codeBlockWith(Nil, "z")
+        });
+        Assert.assertEq(
+            expected = "<pre data-wrap><code class=\"language-ts\">let x = 1</code></pre>"
+                ++ "<pre><code>y</code></pre>"
+                ++ "<pre><code>z</code></pre>",
             RichText.toHtml(Map.empty(), Map.empty(), Map.empty(), doc))
 
     /// details は summary をエスケープして summary に、中身はそのまま。

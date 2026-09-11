@@ -1,5 +1,5 @@
 ///
-/// 画像の出典（image.attrs.source / sourceUrl）と引用の出典（blockquote.attrs.cite / citeUrl）、
+/// 画像の出典（image.attrs.source / sourceUrl）と引用の出典（blockquote の最後の quoteCite。旧 attrs.cite / citeUrl は読む側だけ）、
 /// 画像のリンク・縮小・配置（image.attrs.href / size / align）が、
 /// 検査・HTML・平文・Markdown の書き出しと読み・往復（doc → Markdown → doc）で通る事を確かめる。
 /// 設計は docs/design/richtext-note-style.md の 3 章と 4 章。
@@ -25,6 +25,12 @@ mod TestRichTextSpike {
 
     def blockquoteWith(attrs: List[(String, Json)], blocks: List[Json]): Json = CmsTestKit.richNode("blockquote", attrs, blocks)
 
+    def quoteCite(inlines: List[Json]): Json = CmsTestKit.richNode("quoteCite", Nil, inlines)
+
+    /// 出典を content の最後に持つ引用。
+    def quoted(blocks: List[Json], cite: List[Json]): Json =
+        CmsTestKit.richNode("blockquote", Nil, blocks ::: (quoteCite(cite) :: Nil))
+
     def image(attrs: List[(String, Json)]): Json =
         CmsTestKit.richLeaf("image", ("assetId", Json.JString("asset001")) :: attrs)
 
@@ -34,7 +40,19 @@ mod TestRichTextSpike {
 
     def marked(kind: String, text: String): Json = CmsTestKit.richText(List#{ CmsTestKit.richMark(kind, Nil) }, text)
 
+    /// 古い gallery（読む側だけの互換）。中は古い形の image。
     def gallery(images: List[Json]): Json = CmsTestKit.richNode("gallery", List#{ ("columns", CmsTestKit.intJson(2)) }, images)
+
+    /// 画像 1 枚（image の中の imageItem）。キャプションが空なら content を付けない。
+    def item(attrs: List[(String, Json)], caption: List[Json]): Json =
+        if (List.isEmpty(caption)) CmsTestKit.richLeaf("imageItem", ("assetId", Json.JString("asset001")) :: attrs)
+        else CmsTestKit.richNode("imageItem", ("assetId", Json.JString("asset001")) :: attrs, caption)
+
+    /// 画像の塊。imageItem の並び。
+    def pictures(items: List[Json]): Json = CmsTestKit.richNode("image", Nil, items)
+
+    /// 1 枚だけの image。
+    def one(attrs: List[(String, Json)], caption: List[Json]): Json = pictures(item(attrs, caption) :: Nil)
 
     def s(name: String, value: String): (String, Json) = (name, Json.JString(value))
 
@@ -124,9 +142,9 @@ mod TestRichTextSpike {
         (doc(List#{ image(List#{ s("caption", ""), s("source", ""), s("sourceUrl", "") }) }), "<img src=\"u\" alt=\"\">"),
         // 文字はエスケープする
         (doc(List#{ image(List#{ s("source", "<a>") }) }), "<figure><img src=\"u\" alt=\"\"><figcaption><cite>&lt;a&gt;</cite></figcaption></figure>"),
-        // gallery の中の image も同じ figcaption
+        // 古い gallery の中の image も同じ figcaption。キャプションの無い画像は素の img
         (doc(List#{ gallery(List#{ image(List#{ s("caption", "写真"), s("source", "出典社"), s("sourceUrl", "https://src.example/") }), image(Nil) }) }),
-         "<div data-gallery=\"2\"><figure><img src=\"u\" alt=\"\"><figcaption>写真 ${citeLink()}</figcaption></figure><figure><img src=\"u\" alt=\"\"></figure></div>")
+         "<figure data-gallery=\"2\"><figure><img src=\"u\" alt=\"\"><figcaption>写真 ${citeLink()}</figcaption></figure><img src=\"u\" alt=\"\"></figure>")
     }
 
     @Test
@@ -153,9 +171,9 @@ mod TestRichTextSpike {
         (doc(List#{ image(List#{ s("href", ""), s("size", ""), s("align", "") }) }), "<img src=\"u\" alt=\"\">"),
         (doc(List#{ image(List#{ s("href", "https://go.example/?q=\"a\"") }) }),
          "<a href=\"https://go.example/?q=&quot;a&quot;\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"u\" alt=\"\"></a>"),
-        // gallery の中は figure が常にあるので size / align は figure に付く
+        // 並べた中でも、キャプションが無ければ figure を作らず size / align は img に付く
         (doc(List#{ gallery(List#{ image(List#{ s("href", "https://go.example/"), s("size", "small") }), image(Nil) }) }),
-         "<div data-gallery=\"2\"><figure data-size=\"small\">${linkedImg("")}</figure><figure><img src=\"u\" alt=\"\"></figure></div>")
+         "<figure data-gallery=\"2\">${linkedImg(" data-size=\"small\"")}<img src=\"u\" alt=\"\"></figure>")
     }
 
     @Test
@@ -206,7 +224,7 @@ mod TestRichTextSpike {
     def testToTextIgnoresPlacement(): Unit \ Assert =
         Assert.assertEq(
             expected = "写真",
-            RichText.toText(doc(List#{ gallery(List#{ image(List#{ s("caption", "写真"), s("href", "https://go.example/"), s("size", "small"), s("align", "left") }) }) })))
+            RichText.toText(doc(List#{ gallery(List#{ image(List#{ s("caption", "写真"), s("href", "https://go.example/"), s("size", "small"), s("align", "left") }), image(Nil) }) })))
 
     // ================================================================
     // 4. doc → Markdown
@@ -267,28 +285,28 @@ mod TestRichTextSpike {
 
     def readPairs(): List[(String, Json)] = List#{
         ("![](asset:asset001){width=800 height=450 source=\"出典社\" sourceUrl=https://src.example/}\n*写真*",
-         doc(List#{ captioned(List#{ ("width", CmsTestKit.intJson(800)), ("height", CmsTestKit.intJson(450)), s("source", "出典社"), s("sourceUrl", "https://src.example/") }, List#{ plain("写真") }) })),
+         doc(List#{ one(List#{ ("width", CmsTestKit.intJson(800)), ("height", CmsTestKit.intJson(450)), s("source", "出典社"), s("sourceUrl", "https://src.example/") }, List#{ plain("写真") }) })),
         // 知らない key は捨てる。並びの順も問わない
         ("![](asset:asset001){foo=bar height=450 width=800}",
-         doc(List#{ image(List#{ ("width", CmsTestKit.intJson(800)), ("height", CmsTestKit.intJson(450)) }) })),
+         doc(List#{ one(List#{ ("width", CmsTestKit.intJson(800)), ("height", CmsTestKit.intJson(450)) }, Nil) })),
         // width と height は片方だけなら無視
         ("![](asset:asset001){width=800 source=\"出典社\"}",
-         doc(List#{ image(List#{ s("source", "出典社") }) })),
+         doc(List#{ one(List#{ s("source", "出典社") }, Nil) })),
         // `\"` のエスケープ
         ("![](asset:asset001){source=\"a \\\"b\\\"\"}",
-         doc(List#{ image(List#{ s("source", "a \"b\"") }) })),
+         doc(List#{ one(List#{ s("source", "a \"b\"") }, Nil) })),
         // 空の `{}` は無いのと同じ
         ("![](asset:asset001){}",
-         doc(List#{ image(Nil) })),
-        // `> — [出典](URL)` は cite と citeUrl
+         doc(List#{ one(Nil, Nil) })),
+        // `> — [出典](URL)` は最後の quoteCite（リンクは出典の文字に掛かる）
         ("> 引用\n>\n> — [著者](https://src.example/)",
-         doc(List#{ blockquoteWith(List#{ s("cite", "著者"), s("citeUrl", "https://src.example/") }, List#{ simpleParagraph("引用") }) })),
+         doc(List#{ quoted(List#{ simpleParagraph("引用") }, List#{ linked("https://src.example/", "著者") }) })),
         // URL 無し
         ("> 引用\n>\n> — 著者",
-         doc(List#{ blockquoteWith(List#{ s("cite", "著者") }, List#{ simpleParagraph("引用") }) })),
-        // `[text](URL)` 1 つだけでなければ段落の文字列全部が cite
+         doc(List#{ quoted(List#{ simpleParagraph("引用") }, List#{ plain("著者") }) })),
+        // リンクの後ろの文字も出典の内容
         ("> 引用\n>\n> — [著者](https://src.example/) より",
-         doc(List#{ blockquoteWith(List#{ s("cite", "著者 より") }, List#{ simpleParagraph("引用") }) })),
+         doc(List#{ quoted(List#{ simpleParagraph("引用") }, List#{ linked("https://src.example/", "著者"), plain(" より") }) })),
         // 空行を挟まない `— 出典` は 1 つの段落の続き（cite にならない）
         ("> 引用\n> — 著者",
          doc(List#{ blockquote(List#{ simpleParagraph("引用\n— 著者") }) })),
@@ -311,21 +329,21 @@ mod TestRichTextSpike {
     ///
     def readPlacementPairs(): List[(String, Json)] = List#{
         ("[![](asset:asset001)](https://go.example/)",
-         doc(List#{ image(List#{ s("href", "https://go.example/") }) })),
+         doc(List#{ one(List#{ s("href", "https://go.example/") }, Nil) })),
         ("[![](asset:asset001){source=\"出典社\"}](https://go.example/)\n*写真*",
-         doc(List#{ captioned(List#{ s("href", "https://go.example/"), s("source", "出典社") }, List#{ plain("写真") }) })),
+         doc(List#{ one(List#{ s("href", "https://go.example/"), s("source", "出典社") }, List#{ plain("写真") }) })),
         ("![](asset:asset001){size=small align=left}",
-         doc(List#{ image(List#{ s("size", "small"), s("align", "left") }) })),
+         doc(List#{ one(List#{ s("size", "small"), s("align", "left") }, Nil) })),
         ("![](asset:asset001){align=right}",
-         doc(List#{ image(List#{ s("align", "right") }) })),
+         doc(List#{ one(List#{ s("align", "right") }, Nil) })),
         ("[![説明](asset:asset001){width=800 height=450 size=small align=left source=\"出典社\" sourceUrl=https://src.example/}](https://go.example/)\n*写真*",
-         doc(List#{ captioned(List#{ s("alt", "説明"), s("href", "https://go.example/"), s("size", "small"), s("align", "left"), s("source", "出典社"), s("sourceUrl", "https://src.example/"), ("width", CmsTestKit.intJson(800)), ("height", CmsTestKit.intJson(450)) }, List#{ plain("写真") }) })),
-        // gallery の中でも同じ
+         doc(List#{ one(List#{ s("alt", "説明"), s("href", "https://go.example/"), s("size", "small"), s("align", "left"), s("source", "出典社"), s("sourceUrl", "https://src.example/"), ("width", CmsTestKit.intJson(800)), ("height", CmsTestKit.intJson(450)) }, List#{ plain("写真") }) })),
+        // 複数枚でも同じ
         ("[![](asset:asset001){size=small}](https://go.example/) ![](asset:asset001)",
-         doc(List#{ gallery(List#{ image(List#{ s("href", "https://go.example/"), s("size", "small") }), image(Nil) }) })),
+         doc(List#{ pictures(List#{ item(List#{ s("href", "https://go.example/"), s("size", "small") }, Nil), item(Nil, Nil) }) })),
         // 決まった値でない size / align は捨てる（validate に通る doc を返す）
         ("![](asset:asset001){size=large align=center}",
-         doc(List#{ image(Nil) })),
+         doc(List#{ one(Nil, Nil) })),
         // 境界: `{...}` をリンクの外側に置いた形は image として読まず、段落の文字（リンク付きの `![](asset:…)` と `{…}`）になる
         ("[![](asset:asset001)](https://go.example/){size=small}",
          doc(List#{ paragraph(List#{ linked("https://go.example/", "![](asset:asset001)"), plain("{size=small}") }) })),
@@ -345,12 +363,12 @@ mod TestRichTextSpike {
     // ================================================================
 
     def roundTripDocs(): List[Json] = List#{
-        doc(List#{ captioned(List#{ s("alt", "説明"), s("source", "出典社"), s("sourceUrl", "https://src.example/"), ("width", CmsTestKit.intJson(800)), ("height", CmsTestKit.intJson(450)) }, List#{ plain("写真") }) }),
-        doc(List#{ image(List#{ s("source", "a \"b\" [c]") }) }),
-        doc(List#{ gallery(List#{ image(List#{ s("source", "出典社") }), image(List#{ s("sourceUrl", "https://src.example/") }) }) }),
-        doc(List#{ blockquoteWith(List#{ s("cite", "著者"), s("citeUrl", "https://src.example/") }, List#{ simpleParagraph("引用") }) }),
-        doc(List#{ blockquoteWith(List#{ s("cite", "著者") }, List#{ simpleParagraph("引用"), simpleParagraph("二段落目") }) }),
-        doc(List#{ blockquoteWith(List#{ s("citeUrl", "https://src.example/") }, List#{ simpleParagraph("引用") }) }),
+        doc(List#{ one(List#{ s("alt", "説明"), s("source", "出典社"), s("sourceUrl", "https://src.example/"), ("width", CmsTestKit.intJson(800)), ("height", CmsTestKit.intJson(450)) }, List#{ plain("写真") }) }),
+        doc(List#{ one(List#{ s("source", "a \"b\" [c]") }, Nil) }),
+        doc(List#{ pictures(List#{ item(List#{ s("source", "出典社") }, Nil), item(List#{ s("sourceUrl", "https://src.example/") }, Nil) }) }),
+        doc(List#{ quoted(List#{ simpleParagraph("引用") }, List#{ linked("https://src.example/", "著者") }) }),
+        doc(List#{ quoted(List#{ simpleParagraph("引用"), simpleParagraph("二段落目") }, List#{ plain("著者") }) }),
+        doc(List#{ quoted(List#{ simpleParagraph("引用") }, List#{ linked("https://src.example/", "https://src.example/") }) }),
         doc(List#{ blockquote(List#{ simpleParagraph("引用"), paragraph(List#{ plain("— "), linked("https://src.example/", "出典") }) }) }),
         doc(List#{ blockquote(List#{ simpleParagraph("— 本文だけ") }) }),
         doc(List#{ simpleParagraph("— 本文") })
@@ -362,15 +380,15 @@ mod TestRichTextSpike {
             expected = roundTripDocs(),
             roundTripDocs() |> List.map(roundTrip))
 
-    /// href だけ / href + caption + source / size + align（left / right） / 3 つ全部 / gallery の中。
+    /// href だけ / href + caption + source / size + align（left / right） / 3 つ全部 / 複数枚の中。
     def roundTripPlacementDocs(): List[Json] = List#{
-        doc(List#{ image(List#{ s("href", "https://go.example/") }) }),
-        doc(List#{ captioned(List#{ s("href", "https://go.example/"), s("source", "出典社") }, List#{ plain("写真") }) }),
-        doc(List#{ image(List#{ s("size", "small"), s("align", "left") }) }),
-        doc(List#{ image(List#{ s("size", "small"), s("align", "right") }) }),
-        doc(List#{ captioned(List#{ s("alt", "説明"), s("href", "https://go.example/"), s("size", "small"), s("align", "left"), s("source", "出典社"), s("sourceUrl", "https://src.example/"), ("width", CmsTestKit.intJson(800)), ("height", CmsTestKit.intJson(450)) }, List#{ plain("写真") }) }),
-        doc(List#{ gallery(List#{ image(List#{ s("href", "https://go.example/"), s("size", "small") }), image(List#{ s("align", "left") }) }) }),
-        doc(List#{ image(List#{ s("href", "https://go.example/") }), simpleParagraph("次") })
+        doc(List#{ one(List#{ s("href", "https://go.example/") }, Nil) }),
+        doc(List#{ one(List#{ s("href", "https://go.example/"), s("source", "出典社") }, List#{ plain("写真") }) }),
+        doc(List#{ one(List#{ s("size", "small"), s("align", "left") }, Nil) }),
+        doc(List#{ one(List#{ s("size", "small"), s("align", "right") }, Nil) }),
+        doc(List#{ one(List#{ s("alt", "説明"), s("href", "https://go.example/"), s("size", "small"), s("align", "left"), s("source", "出典社"), s("sourceUrl", "https://src.example/"), ("width", CmsTestKit.intJson(800)), ("height", CmsTestKit.intJson(450)) }, List#{ plain("写真") }) }),
+        doc(List#{ pictures(List#{ item(List#{ s("href", "https://go.example/"), s("size", "small") }, Nil), item(List#{ s("align", "left") }, Nil) }) }),
+        doc(List#{ one(List#{ s("href", "https://go.example/") }, Nil), simpleParagraph("次") })
     }
 
     @Test
@@ -425,7 +443,7 @@ mod TestRichTextSpike {
         (doc(List#{ captioned(Nil, Nil) }), "<img src=\"u\" alt=\"\">"),
         (doc(List#{ captioned(Nil, List#{ plain("") }) }), "<img src=\"u\" alt=\"\">"),
         (doc(List#{ gallery(List#{ captioned(Nil, linkCaption()), image(List#{ s("caption", "旧") }) }) }),
-         "<div data-gallery=\"2\"><figure><img src=\"u\" alt=\"\"><figcaption>${captionLinkHtml()}</figcaption></figure><figure><img src=\"u\" alt=\"\"><figcaption>旧</figcaption></figure></div>")
+         "<figure data-gallery=\"2\"><figure><img src=\"u\" alt=\"\"><figcaption>${captionLinkHtml()}</figcaption></figure><figure><img src=\"u\" alt=\"\"><figcaption>旧</figcaption></figure></figure>")
     }
 
     @Test
@@ -457,7 +475,7 @@ mod TestRichTextSpike {
         (doc(List#{ image(List#{ s("caption", "旧") }) }), "![](asset:asset001)\n*旧*"),
         (doc(List#{ captioned(List#{ s("caption", "旧") }, List#{ plain("新") }) }), "![](asset:asset001)\n*新*"),
         (doc(List#{ gallery(List#{ image(Nil), captioned(Nil, linkCaption()), image(List#{ s("caption", "旧") }) }) }),
-         "![](asset:asset001) ![](asset:asset001) ![](asset:asset001) {columns=2}\n** *撮影: [山田](https://src.example/)* *旧*"),
+         "![](asset:asset001) ![](asset:asset001) ![](asset:asset001)\n** *撮影: [山田](https://src.example/)* *旧*"),
         (doc(List#{ gallery(List#{ image(Nil), captioned(Nil, Nil) }) }), "![](asset:asset001) ![](asset:asset001)"),
         // 次のブロックとは空行で区切る
         (doc(List#{ captioned(Nil, List#{ plain("写真") }), simpleParagraph("次") }), "![](asset:asset001)\n*写真*\n\n次")
@@ -471,20 +489,20 @@ mod TestRichTextSpike {
 
     ///
     /// Markdown の読み。直後の行が `*` で始まり `*` で終わる時だけキャプション。境界: 直前に空行があれば段落、`*` で閉じなければ段落、
-    /// 旧 title は content に写す、title と行の両方あれば行が勝つ、gallery の枚数より少ない `*…*` は前から詰める。
+    /// 旧 title は content に写す、title と行の両方あれば行が勝つ、複数枚で `*…*` が 1 つだけなら全体のキャプション。
     ///
     def captionReadPairs(): List[(String, Json)] = List#{
-        ("![](asset:asset001)\n*撮影: [山田](https://src.example/)*", doc(List#{ captioned(Nil, linkCaption()) })),
-        ("![](asset:asset001)\n***太** と _斜_*", doc(List#{ captioned(Nil, List#{ marked("bold", "太"), plain(" と "), marked("italic", "斜") }) })),
-        ("![](asset:asset001)\n*a \\* b\\**", doc(List#{ captioned(Nil, List#{ plain("a * b*") }) })),
-        ("![](asset:asset001)\n\n*写真*", doc(List#{ image(Nil), paragraph(List#{ marked("italic", "写真") }) })),
+        ("![](asset:asset001)\n*撮影: [山田](https://src.example/)*", doc(List#{ one(Nil, linkCaption()) })),
+        ("![](asset:asset001)\n***太** と _斜_*", doc(List#{ one(Nil, List#{ marked("bold", "太"), plain(" と "), marked("italic", "斜") }) })),
+        ("![](asset:asset001)\n*a \\* b\\**", doc(List#{ one(Nil, List#{ plain("a * b*") }) })),
+        ("![](asset:asset001)\n\n*写真*", doc(List#{ one(Nil, Nil), paragraph(List#{ marked("italic", "写真") }) })),
         ("![](asset:asset001)\n*写真", doc(List#{ paragraph(List#{ plain("![](asset:asset001)\n*写真") }) })),
         ("![](asset:asset001)\n*写真*\n続き", doc(List#{ paragraph(List#{ plain("![](asset:asset001)\n"), marked("italic", "写真"), plain("\n続き") }) })),
-        ("![](asset:asset001 \"旧\")", doc(List#{ captioned(Nil, List#{ plain("旧") }) })),
-        ("![](asset:asset001 \"旧\")\n*新*", doc(List#{ captioned(Nil, List#{ plain("新") }) })),
+        ("![](asset:asset001 \"旧\")", doc(List#{ one(Nil, List#{ plain("旧") }) })),
+        ("![](asset:asset001 \"旧\")\n*新*", doc(List#{ one(Nil, List#{ plain("新") }) })),
         ("![](asset:asset001) ![](asset:asset001) ![](asset:asset001) {columns=2}\n** *撮影: [山田](https://src.example/)* *旧*",
-         doc(List#{ gallery(List#{ image(Nil), captioned(Nil, linkCaption()), captioned(Nil, List#{ plain("旧") }) }) })),
-        ("![](asset:asset001) ![](asset:asset001)\n*a*", doc(List#{ gallery(List#{ captioned(Nil, List#{ plain("a") }), image(Nil) }) })),
+         doc(List#{ pictures(List#{ item(Nil, Nil), item(Nil, linkCaption()), item(Nil, List#{ plain("旧") }) }) })),
+        ("![](asset:asset001) ![](asset:asset001)\n*a*", doc(List#{ pictures(List#{ item(Nil, List#{ plain("a") }), item(Nil, Nil) }) })),
         ("![](asset:asset001) ![](asset:asset001)\n*a* b", doc(List#{ paragraph(List#{ plain("![](asset:asset001) ![](asset:asset001)\n"), marked("italic", "a"), plain(" b") }) }))
     }
 
@@ -494,13 +512,13 @@ mod TestRichTextSpike {
             expected = captionReadPairs() |> List.map(snd),
             captionReadPairs() |> List.map(fst) |> List.map(Markdown.fromMarkdown))
 
-    /// 往復。link / bold / `*` の逃がし / gallery の複数キャプション / 出典と一緒。
+    /// 往復。link / bold / `*` の逃がし / 複数枚のキャプション / 出典と一緒。
     def roundTripCaptionDocs(): List[Json] = List#{
-        doc(List#{ captioned(Nil, linkCaption()) }),
-        doc(List#{ captioned(List#{ s("source", "出典社"), s("sourceUrl", "https://src.example/") }, List#{ marked("bold", "太"), plain(" と "), marked("italic", "斜"), plain(" と "), marked("strike", "消"), plain(" と "), marked("code", "c") }) }),
-        doc(List#{ captioned(Nil, List#{ plain("a * b* _c_ [d]") }) }),
-        doc(List#{ gallery(List#{ image(Nil), captioned(Nil, linkCaption()), captioned(List#{ s("href", "https://go.example/") }, List#{ plain("旧") }) }) }),
-        doc(List#{ captioned(Nil, List#{ plain("写真") }), simpleParagraph("次") })
+        doc(List#{ one(Nil, linkCaption()) }),
+        doc(List#{ one(List#{ s("source", "出典社"), s("sourceUrl", "https://src.example/") }, List#{ marked("bold", "太"), plain(" と "), marked("italic", "斜"), plain(" と "), marked("strike", "消"), plain(" と "), marked("code", "c") }) }),
+        doc(List#{ one(Nil, List#{ plain("a * b* _c_ [d]") }) }),
+        doc(List#{ pictures(List#{ item(Nil, Nil), item(Nil, linkCaption()), item(List#{ s("href", "https://go.example/") }, List#{ plain("旧") }) }) }),
+        doc(List#{ one(Nil, List#{ plain("写真") }), simpleParagraph("次") })
     }
 
     @Test
@@ -508,5 +526,262 @@ mod TestRichTextSpike {
         Assert.assertEq(
             expected = roundTripCaptionDocs(),
             roundTripCaptionDocs() |> List.map(roundTrip))
+
+    // ================================================================
+    // 8. 引用の出典も内容（quoteCite）。attrs.cite / citeUrl は読む側だけの互換
+    // ================================================================
+
+    /// リンクを掛けた出典「[著者](https://src.example/)」。
+    def citeLinkContent(): List[Json] = List#{ linked("https://src.example/", "著者") }
+
+    /// 出典のリンクの HTML（本文のリンクと同じ a）。
+    def citeContentLinkHtml(): String = "<cite><a href=\"https://src.example/\" target=\"_blank\" rel=\"noopener noreferrer\">著者</a></cite>"
+
+    ///
+    /// 検査。1 行 = (ノード, 通るか)。quoteCite は引用の最後の子だけで、中は text。マークは bold / italic / strike / code / link。
+    /// 旧 attrs だけの doc と、両方ある doc も通る。
+    ///
+    def validateQuoteCitePairs(): List[(Json, Bool)] = List#{
+        (quoted(List#{ simpleParagraph("引用") }, citeLinkContent()), true),
+        (quoted(List#{ simpleParagraph("引用") }, List#{ marked("bold", "太"), marked("italic", "斜"), marked("strike", "消"), marked("code", "c") }), true),
+        (quoted(List#{ simpleParagraph("引用") }, List#{ marked("underline", "下線") }), false),
+        (quoted(List#{ simpleParagraph("引用") }, List#{ marked("highlight", "蛍光") }), false),
+        (quoted(List#{ simpleParagraph("引用") }, List#{ plain("a"), CmsTestKit.richLeaf("hardBreak", Nil) }), false),
+        (quoted(List#{ simpleParagraph("引用") }, List#{ simpleParagraph("段落") }), false),
+        // 出典が空でも形としては通る
+        (quoted(List#{ simpleParagraph("引用") }, Nil), true),
+        // 最後でない quoteCite は通らない
+        (CmsTestKit.richNode("blockquote", Nil, List#{ quoteCite(List#{ plain("著者") }), simpleParagraph("引用") }), false),
+        // 引用の外の quoteCite も通らない
+        (quoteCite(List#{ plain("著者") }), false),
+        // 旧 attrs だけ / 旧 attrs と content の両方
+        (blockquoteWith(List#{ s("cite", "著者"), s("citeUrl", "https://src.example/") }, List#{ simpleParagraph("引用") }), true),
+        (CmsTestKit.richNode("blockquote", List#{ s("cite", "旧") }, List#{ simpleParagraph("引用"), quoteCite(List#{ plain("新") }) }), true)
+    }
+
+    @Test
+    def testValidateQuoteCiteContent(): Unit \ Assert =
+        Assert.assertEq(
+            expected = validateQuoteCitePairs() |> List.map(snd),
+            validateQuoteCitePairs() |> List.map(fst) |> List.map(node -> List.isEmpty(RichText.validate("fields.body", doc(List#{ node })))))
+
+    ///
+    /// HTML。figcaption > cite の中はマークの HTML。旧 attrs だけなら今まで通りの形で出る。両方あれば content。空なら素の blockquote。
+    ///
+    def quoteCiteHtmlPairs(): List[(Json, String)] = List#{
+        (doc(List#{ quoted(List#{ simpleParagraph("引用") }, citeLinkContent()) }),
+         "<figure data-quote><blockquote><p>引用</p></blockquote><figcaption>${citeContentLinkHtml()}</figcaption></figure>"),
+        (doc(List#{ quoted(List#{ simpleParagraph("引用") }, List#{ marked("bold", "著者") }) }),
+         "<figure data-quote><blockquote><p>引用</p></blockquote><figcaption><cite><strong>著者</strong></cite></figcaption></figure>"),
+        // 旧 attrs だけの doc も同じ形（cite の文字に citeUrl のリンクが掛かる）
+        (doc(List#{ blockquoteWith(List#{ s("cite", "著者"), s("citeUrl", "https://src.example/") }, List#{ simpleParagraph("引用") }) }),
+         "<figure data-quote><blockquote><p>引用</p></blockquote><figcaption>${citeContentLinkHtml()}</figcaption></figure>"),
+        // 両方あれば content が勝つ
+        (doc(List#{ CmsTestKit.richNode("blockquote", List#{ s("cite", "旧") }, List#{ simpleParagraph("引用"), quoteCite(List#{ plain("新") }) }) }),
+         "<figure data-quote><blockquote><p>引用</p></blockquote><figcaption><cite>新</cite></figcaption></figure>"),
+        (doc(List#{ quoted(List#{ simpleParagraph("引用") }, Nil) }), "<blockquote><p>引用</p></blockquote>"),
+        (doc(List#{ quoted(List#{ simpleParagraph("引用") }, List#{ plain("") }) }), "<blockquote><p>引用</p></blockquote>")
+    }
+
+    @Test
+    def testToHtmlQuoteCiteContent(): Unit \ Assert =
+        Assert.assertEq(
+            expected = quoteCiteHtmlPairs() |> List.map(snd),
+            quoteCiteHtmlPairs() |> List.map(fst) |> List.map(html))
+
+    /// 平文。出典は `— 出典` の 1 行で、URL は出ない。旧 attrs も同じ。
+    def quoteCiteTextPairs(): List[(Json, String)] = List#{
+        (doc(List#{ quoted(List#{ simpleParagraph("引用") }, citeLinkContent()) }), "引用\n— 著者"),
+        (doc(List#{ quoted(List#{ simpleParagraph("引用") }, List#{ marked("bold", "著"), plain("者") }) }), "引用\n— 著者"),
+        (doc(List#{ quoted(List#{ simpleParagraph("引用") }, Nil) }), "引用"),
+        (doc(List#{ quoted(List#{ simpleParagraph("引用") }, citeLinkContent()), simpleParagraph("次") }), "引用\n— 著者\n\n次")
+    }
+
+    @Test
+    def testToTextQuoteCiteContent(): Unit \ Assert =
+        Assert.assertEq(
+            expected = quoteCiteTextPairs() |> List.map(snd),
+            quoteCiteTextPairs() |> List.map(fst) |> List.map(RichText.toText))
+
+    /// Markdown の書き出し。引用の最後に空行を挟んで `> — …`。中は inline Markdown。旧 attrs も同じ形で出る。
+    def quoteCiteWritePairs(): List[(Json, String)] = List#{
+        (doc(List#{ quoted(List#{ simpleParagraph("引用") }, citeLinkContent()) }), "> 引用\n>\n> — [著者](https://src.example/)"),
+        (doc(List#{ quoted(List#{ simpleParagraph("引用") }, List#{ marked("bold", "著者"), plain(" より") }) }), "> 引用\n>\n> — **著者** より"),
+        (doc(List#{ blockquoteWith(List#{ s("cite", "著者"), s("citeUrl", "https://src.example/") }, List#{ simpleParagraph("引用") }) }), "> 引用\n>\n> — [著者](https://src.example/)"),
+        (doc(List#{ CmsTestKit.richNode("blockquote", List#{ s("cite", "旧") }, List#{ simpleParagraph("引用"), quoteCite(List#{ plain("新") }) }) }), "> 引用\n>\n> — 新"),
+        (doc(List#{ quoted(List#{ simpleParagraph("引用") }, Nil) }), "> 引用")
+    }
+
+    @Test
+    def testToMarkdownQuoteCiteContent(): Unit \ Assert =
+        Assert.assertEq(
+            expected = quoteCiteWritePairs() |> List.map(snd),
+            quoteCiteWritePairs() |> List.map(fst) |> List.map(Markdown.toMarkdown))
+
+    /// Markdown の読み。出典に付けられないマークは落として、必ず validate に通る doc を返す。
+    def quoteCiteReadPairs(): List[(String, Json)] = List#{
+        ("> 引用\n>\n> — **著者** より", doc(List#{ quoted(List#{ simpleParagraph("引用") }, List#{ marked("bold", "著者"), plain(" より") }) })),
+        ("> 引用\n>\n> — ==著者==", doc(List#{ quoted(List#{ simpleParagraph("引用") }, List#{ plain("著者") }) })),
+        ("> 引用\n>\n> — <u>著者</u>", doc(List#{ quoted(List#{ simpleParagraph("引用") }, List#{ plain("著者") }) }))
+    }
+
+    @Test
+    def testFromMarkdownQuoteCiteContent(): Unit \ Assert =
+        Assert.assertEq(
+            expected = quoteCiteReadPairs() |> List.map(snd),
+            quoteCiteReadPairs() |> List.map(fst) |> List.map(Markdown.fromMarkdown))
+
+    /// 読んだ doc は必ず検査に通る。
+    @Test
+    def testFromMarkdownQuoteCiteValidates(): Unit \ Assert =
+        Assert.assertEq(
+            expected = quoteCiteReadPairs() |> List.map(_ -> true),
+            quoteCiteReadPairs() |> List.map(fst) |> List.map(text -> List.isEmpty(RichText.validate("fields.body", Markdown.fromMarkdown(text)))))
+
+    /// 往復。link / bold / 出典の後ろの文字 / 2 段落の引用。
+    def roundTripQuoteCiteDocs(): List[Json] = List#{
+        doc(List#{ quoted(List#{ simpleParagraph("引用") }, citeLinkContent()) }),
+        doc(List#{ quoted(List#{ simpleParagraph("引用") }, List#{ marked("bold", "著者"), plain(" より") }) }),
+        doc(List#{ quoted(List#{ simpleParagraph("引用"), simpleParagraph("二段落目") }, List#{ plain("著者") }) }),
+        doc(List#{ quoted(List#{ simpleParagraph("引用") }, citeLinkContent()), simpleParagraph("次") })
+    }
+
+    @Test
+    def testRoundTripKeepsQuoteCiteContent(): Unit \ Assert =
+        Assert.assertEq(
+            expected = roundTripQuoteCiteDocs(),
+            roundTripQuoteCiteDocs() |> List.map(roundTrip))
+
+    /// 旧 attrs の doc は往復で content の形になる（書き出しは content だけ）。
+    @Test
+    def testRoundTripMigratesLegacyCite(): Unit \ Assert =
+        Assert.assertEq(
+            expected = doc(List#{ quoted(List#{ simpleParagraph("引用") }, citeLinkContent()) }),
+            roundTrip(doc(List#{ blockquoteWith(List#{ s("cite", "著者"), s("citeUrl", "https://src.example/") }, List#{ simpleParagraph("引用") }) })))
+
+
+    // ================================================================
+    // 9. image は 1 枚でも複数枚でも同じノード。キャプションは画像ごと
+    // ================================================================
+
+    /// 3 枚（キャプション無し）。
+    def three(): Json = pictures(List#{ item(Nil, Nil), item(Nil, Nil), item(Nil, Nil) })
+
+    /// 素の img（キャプションの無い画像）。
+    def bareImg(): String = "<img src=\"u\" alt=\"\">"
+
+    ///
+    /// 検査。1 行 = (ノード, 通るか)。image の中は imageItem だけで、1 つ以上。imageItem は image の外に置けない。
+    /// 旧い形（attrs.assetId の image、gallery）も通る。
+    ///
+    def validatePicturesPairs(): List[(Json, Bool)] = List#{
+        (one(Nil, Nil), true),
+        (three(), true),
+        (pictures(List#{ item(Nil, List#{ plain("1 枚目") }), item(Nil, Nil) }), true),
+        // 画像が 1 枚も無い
+        (pictures(Nil), false),
+        // image の中に置けるのは imageItem だけ
+        (pictures(List#{ item(Nil, Nil), image(Nil) }), false),
+        (pictures(List#{ item(Nil, Nil), simpleParagraph("段落") }), false),
+        // キャプションのマークは今までと同じ制限
+        (pictures(List#{ item(Nil, List#{ marked("underline", "下線") }) }), false),
+        // imageItem は image の中だけ
+        (item(Nil, Nil), false),
+        // 旧い形（読む側だけの互換）
+        (image(List#{ s("caption", "旧") }), true),
+        (gallery(List#{ image(Nil), image(Nil) }), true)
+    }
+
+    @Test
+    def testValidatePictures(): Unit \ Assert =
+        Assert.assertEq(
+            expected = validatePicturesPairs() |> List.map(snd),
+            validatePicturesPairs() |> List.map(fst) |> List.map(node -> List.isEmpty(RichText.validate("fields.body", doc(List#{ node })))))
+
+    ///
+    /// HTML。1 枚は今までの image と同じ figure / img、2 枚以上は `figure data-gallery="枚数"`。
+    /// キャプションのある画像だけ figure で包む。
+    ///
+    def picturesHtmlPairs(): List[(Json, String)] = List#{
+        // 1 枚
+        (doc(List#{ one(Nil, Nil) }), bareImg()),
+        (doc(List#{ one(Nil, List#{ plain("説明") }) }), "<figure>${bareImg()}<figcaption>説明</figcaption></figure>"),
+        // 3 枚。data-gallery は枚数
+        (doc(List#{ three() }), "<figure data-gallery=\"3\">${bareImg()}${bareImg()}${bareImg()}</figure>"),
+        // 画像ごとのキャプション（モックの 3 番）
+        (doc(List#{ pictures(List#{ item(Nil, Nil), item(Nil, List#{ plain("2 枚目だけ説明") }), item(Nil, Nil) }) }),
+         "<figure data-gallery=\"3\">${bareImg()}<figure>${bareImg()}<figcaption>2 枚目だけ説明</figcaption></figure>${bareImg()}</figure>"),
+        // 旧 gallery の doc も同じ形で出る。旧 columns は見ない（data-gallery は枚数の 3）
+        (doc(List#{ CmsTestKit.richNode("gallery", List#{ ("columns", CmsTestKit.intJson(2)) }, List#{ image(Nil), image(Nil), image(Nil) }) }),
+         "<figure data-gallery=\"3\">${bareImg()}${bareImg()}${bareImg()}</figure>"),
+        // 旧い形の image 1 枚は今までどおり
+        (doc(List#{ image(List#{ s("caption", "旧") }) }), "<figure>${bareImg()}<figcaption>旧</figcaption></figure>")
+    }
+
+    @Test
+    def testToHtmlPictures(): Unit \ Assert =
+        Assert.assertEq(
+            expected = picturesHtmlPairs() |> List.map(snd),
+            picturesHtmlPairs() |> List.map(fst) |> List.map(html))
+
+    /// Markdown の書き出し。画像の行の次の行に、枚数だけ `*…*` を空白区切りで（無い画像は `**`）。
+    def picturesWritePairs(): List[(Json, String)] = List#{
+        (doc(List#{ one(Nil, List#{ plain("説明") }) }), "![](asset:asset001)\n*説明*"),
+        (doc(List#{ three() }), "![](asset:asset001) ![](asset:asset001) ![](asset:asset001)"),
+        (doc(List#{ pictures(List#{ item(Nil, Nil), item(Nil, List#{ plain("2 枚目") }), item(Nil, Nil) }) }),
+         "![](asset:asset001) ![](asset:asset001) ![](asset:asset001)\n** *2 枚目* **")
+    }
+
+    @Test
+    def testToMarkdownPictures(): Unit \ Assert =
+        Assert.assertEq(
+            expected = picturesWritePairs() |> List.map(snd),
+            picturesWritePairs() |> List.map(fst) |> List.map(Markdown.toMarkdown))
+
+    ///
+    /// Markdown の読み。`*…*` を画像の順に配る。古い `{columns=N}` は読んで捨てる。
+    ///
+    def picturesReadPairs(): List[(String, Json)] = List#{
+        ("![](asset:asset001)\n*説明*", doc(List#{ one(Nil, List#{ plain("説明") }) })),
+        ("![](asset:asset001) ![](asset:asset001) ![](asset:asset001)", doc(List#{ three() })),
+        ("![](asset:asset001) ![](asset:asset001) ![](asset:asset001)\n** *2 枚目* **",
+         doc(List#{ pictures(List#{ item(Nil, Nil), item(Nil, List#{ plain("2 枚目") }), item(Nil, Nil) }) })),
+        ("![](asset:asset001) ![](asset:asset001) {columns=4}",
+         doc(List#{ pictures(List#{ item(Nil, Nil), item(Nil, Nil) }) }))
+    }
+
+    @Test
+    def testFromMarkdownPictures(): Unit \ Assert =
+        Assert.assertEq(
+            expected = picturesReadPairs() |> List.map(snd),
+            picturesReadPairs() |> List.map(fst) |> List.map(Markdown.fromMarkdown))
+
+    /// 往復。1 枚 / 3 枚 / 画像ごとのキャプション（マーク付き）。
+    def roundTripPicturesDocs(): List[Json] = List#{
+        doc(List#{ one(Nil, List#{ plain("説明") }) }),
+        doc(List#{ three() }),
+        doc(List#{ pictures(List#{ item(Nil, Nil), item(Nil, List#{ plain("2 枚目") }), item(Nil, Nil) }) }),
+        doc(List#{ pictures(List#{ item(Nil, List#{ marked("bold", "1 枚目") }), item(Nil, List#{ linked("https://src.example/", "2 枚目") }) }) })
+    }
+
+    @Test
+    def testRoundTripKeepsPictures(): Unit \ Assert =
+        Assert.assertEq(
+            expected = roundTripPicturesDocs(),
+            roundTripPicturesDocs() |> List.map(roundTrip))
+
+    /// 旧 gallery（と旧 columns）の doc は往復で新しい形になる。1 枚だけの gallery は 1 枚の image に。
+    def legacyPicturesDocs(): List[(Json, Json)] = List#{
+        (doc(List#{ CmsTestKit.richNode("gallery", List#{ ("columns", CmsTestKit.intJson(4)) }, List#{ image(Nil), image(List#{ s("caption", "旧") }) }) }),
+         doc(List#{ pictures(List#{ item(Nil, Nil), item(Nil, List#{ plain("旧") }) }) })),
+        (doc(List#{ gallery(List#{ image(List#{ s("caption", "旧") }) }) }), doc(List#{ one(Nil, List#{ plain("旧") }) })),
+        (doc(List#{ image(List#{ s("caption", "旧") }) }), doc(List#{ one(Nil, List#{ plain("旧") }) }))
+    }
+
+    @Test
+    def testRoundTripMigratesLegacyPictures(): Unit \ Assert =
+        Assert.assertEq(
+            expected = legacyPicturesDocs() |> List.map(snd),
+            legacyPicturesDocs() |> List.map(fst) |> List.map(roundTrip))
 
 }

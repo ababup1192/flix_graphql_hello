@@ -60,20 +60,25 @@ mod TestMarkdown {
 
     def hardBreak(): Json = CmsTestKit.richLeaf("hardBreak", Nil)
 
-    /// caption は content の text 1 つ（無ければ content 自体を付けない）。
-    def image(assetId: String, alt: Option[String], caption: Option[String], size: Option[(Int32, Int32)]): Json =
+    /// 画像 1 枚（image の中の imageItem）。caption は content の text 1 つ（無ければ content 自体を付けない）。
+    def picture(assetId: String, alt: Option[String], caption: Option[String], size: Option[(Int32, Int32)]): Json =
         let attrs =
             (("assetId", Json.JString(assetId)) :: Nil)
                 ::: (alt |> Option.map(found -> ("alt", Json.JString(found))) |> Option.toList)
                 ::: (size |> Option.map(match (width, height) -> List#{ ("width", CmsTestKit.intJson(width)), ("height", CmsTestKit.intJson(height)) }) |> Option.getWithDefault(Nil));
         match caption {
-            case Some(found) => CmsTestKit.richNode("image", attrs, List#{ plain(found) })
-            case None        => CmsTestKit.richLeaf("image", attrs)
+            case Some(found) => CmsTestKit.richNode("imageItem", attrs, List#{ plain(found) })
+            case None        => CmsTestKit.richLeaf("imageItem", attrs)
         }
 
-    def embed(url: String): Json = CmsTestKit.richLeaf("embed", List#{ ("url", Json.JString(url)) })
+    /// 画像の塊。1 枚でも複数枚でも同じ image。
+    def pictures(items: List[Json]): Json = CmsTestKit.richNode("image", Nil, items)
 
-    def gallery(columns: Int32, images: List[Json]): Json = CmsTestKit.richNode("gallery", List#{ ("columns", CmsTestKit.intJson(columns)) }, images)
+    /// 1 枚だけの image。
+    def image(assetId: String, alt: Option[String], caption: Option[String], size: Option[(Int32, Int32)]): Json =
+        pictures(List#{ picture(assetId, alt, caption, size) })
+
+    def embed(url: String): Json = CmsTestKit.richLeaf("embed", List#{ ("url", Json.JString(url)) })
 
     def linkCard(url: String): Json = CmsTestKit.richLeaf("linkCard", List#{ ("url", Json.JString(url)) })
 
@@ -148,13 +153,13 @@ mod TestMarkdown {
         (doc(List#{ image("asset001", Some("説明"), Some("写真"), None) }), "![説明](asset:asset001)\n*写真*"),
         (doc(List#{ image("asset001", Some("説明"), Some("写真"), Some((640, 480))) }), "![説明](asset:asset001){width=640 height=480}\n*写真*"),
         (doc(List#{ image("asset001", None, Some("引用 \"符\""), None) }), "![](asset:asset001)\n*引用 \"符\"*"),
-        // gallery: 1 行に画像を 2 つ以上、空白区切り。columns は枚数（4 で丸める）。枚数と違う時だけ行末に {columns=N}。caption は次の行に枚数だけ `*…*`（無い画像は `**`）
-        (doc(List#{ gallery(2, List#{ image("asset001", None, None, None), image("asset002", None, Some("図 2"), None) }) }), "![](asset:asset001) ![](asset:asset002)\n** *図 2*"),
-        (doc(List#{ gallery(3, List#{ image("asset001", None, None, None), image("asset002", None, None, Some((640, 480))), image("asset003", Some("c"), None, None) }) }), "![](asset:asset001) ![](asset:asset002){width=640 height=480} ![c](asset:asset003)"),
-        // gallery の alt は image と同じく [] に入る（caption の位置に移らない）
-        (doc(List#{ gallery(2, List#{ image("asset001", Some("a"), None, None), image("asset002", Some("b"), Some("図"), None) }) }), "![a](asset:asset001) ![b](asset:asset002)\n** *図*"),
-        (doc(List#{ gallery(4, List#{ image("asset001", None, None, None), image("asset002", None, None, None), image("asset003", None, None, None), image("asset004", None, None, None), image("asset005", None, None, None) }) }), "![](asset:asset001) ![](asset:asset002) ![](asset:asset003) ![](asset:asset004) ![](asset:asset005)"),
-        (doc(List#{ gallery(3, List#{ image("asset001", None, None, None), image("asset002", None, None, None) }) }), "![](asset:asset001) ![](asset:asset002) {columns=3}"),
+        // 複数枚: 1 行に画像を 2 つ以上、空白区切り。列数は書かない（枚数から決まる）。caption は次の行に枚数だけ `*…*`（無い画像は `**`）
+        (doc(List#{ pictures(List#{ picture("asset001", None, None, None), picture("asset002", None, Some("図 2"), None) }) }), "![](asset:asset001) ![](asset:asset002)\n** *図 2*"),
+        (doc(List#{ pictures(List#{ picture("asset001", None, None, None), picture("asset002", None, None, Some((640, 480))), picture("asset003", Some("c"), None, None) }) }), "![](asset:asset001) ![](asset:asset002){width=640 height=480} ![c](asset:asset003)"),
+        // 複数枚の alt も 1 枚の時と同じく [] に入る（caption の位置に移らない）
+        (doc(List#{ pictures(List#{ picture("asset001", Some("a"), None, None), picture("asset002", Some("b"), Some("図"), None) }) }), "![a](asset:asset001) ![b](asset:asset002)\n** *図*"),
+        (doc(List#{ pictures(List#{ picture("asset001", None, None, None), picture("asset002", None, None, None), picture("asset003", None, None, None), picture("asset004", None, None, None), picture("asset005", None, None, None) }) }), "![](asset:asset001) ![](asset:asset002) ![](asset:asset003) ![](asset:asset004) ![](asset:asset005)"),
+        (doc(List#{ pictures(List#{ picture("asset001", None, None, None), picture("asset002", None, None, None) }) }), "![](asset:asset001) ![](asset:asset002)"),
         // embed: URL だけの段落
         (doc(List#{ embed("https://www.youtube.com/watch?v=dQw4w9WgXcQ") }), "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
         (doc(List#{ embed("https://vimeo.com/123456") }), "https://vimeo.com/123456"),
@@ -221,14 +226,14 @@ mod TestMarkdown {
         ("![写真](asset:asset001 \"図\")", doc(List#{ image("asset001", Some("写真"), Some("図"), None) })),
         ("![写真](asset:asset001 \"\")", doc(List#{ image("asset001", Some("写真"), None, None) })),
         ("![写真](asset:asset001 \"\"){width=640 height=480}", doc(List#{ image("asset001", Some("写真"), None, Some((640, 480))) })),
-        ("![](asset:asset001 \"a\") ![](asset:asset002 \"b\")", doc(List#{ gallery(2, List#{ image("asset001", None, Some("a"), None), image("asset002", None, Some("b"), None) }) })),
+        ("![](asset:asset001 \"a\") ![](asset:asset002 \"b\")", doc(List#{ pictures(List#{ picture("asset001", None, Some("a"), None), picture("asset002", None, Some("b"), None) }) })),
         // asset 管理外の画像（`![alt](URL)`）は image にならず、alt を URL へのリンクにした文字になる
         ("![外部](https://example.com/a.png)", doc(List#{ paragraph(List#{ linked("https://example.com/a.png", "外部") }) })),
         ("前 ![外部](https://example.com/a.png) 後", doc(List#{ paragraph(List#{ plain("前 "), linked("https://example.com/a.png", "外部"), plain(" 後") }) })),
-        // gallery の {columns=N} は 2 〜 4 に丸める。枚数と同じなら書かない
-        ("![](asset:asset001) ![](asset:asset002) {columns=9}", doc(List#{ gallery(4, List#{ image("asset001", None, None, None), image("asset002", None, None, None) }) })),
-        ("![](asset:asset001) ![](asset:asset002) {columns=1}", doc(List#{ gallery(2, List#{ image("asset001", None, None, None), image("asset002", None, None, None) }) })),
-        ("![](asset:asset001)   ![](asset:asset002)  {columns=2}", doc(List#{ gallery(2, List#{ image("asset001", None, None, None), image("asset002", None, None, None) }) })),
+        // 古い `{columns=N}` は読んで捨てる（列数は枚数から決まる）
+        ("![](asset:asset001) ![](asset:asset002) {columns=9}", doc(List#{ pictures(List#{ picture("asset001", None, None, None), picture("asset002", None, None, None) }) })),
+        ("![](asset:asset001) ![](asset:asset002) {columns=1}", doc(List#{ pictures(List#{ picture("asset001", None, None, None), picture("asset002", None, None, None) }) })),
+        ("![](asset:asset001)   ![](asset:asset002)  {columns=2}", doc(List#{ pictures(List#{ picture("asset001", None, None, None), picture("asset002", None, None, None) }) })),
         // summary の無い details は「詳細」。中身の前後の空行は無くてもよい
         ("<details>\n中身\n</details>", doc(List#{ details("詳細", List#{ simpleParagraph("中身") }) })),
         // 閉じない details は末尾まで
@@ -317,10 +322,10 @@ mod TestMarkdown {
         horizontalRule(),
         image("asset001", Some("説明"), Some("キャプション"), Some((640, 480))),
         embed("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
-        gallery(3, List#{ image("asset002", None, None, None), image("asset003", None, Some("図 2"), None), image("asset004", Some("d"), None, None) }),
+        pictures(List#{ picture("asset002", None, None, None), picture("asset003", None, Some("図 2"), None), picture("asset004", Some("d"), None, None) }),
         linkCard("https://example.com/card"),
         codeBlockWith(Some("ts"), Some("src/a.ts"), Some("1,3-5"), "const y = 2;"),
-        details("補足", List#{ simpleParagraph("畳んだ中身"), gallery(2, List#{ image("asset005", None, None, None), image("asset006", None, None, None) }) }),
+        details("補足", List#{ simpleParagraph("畳んだ中身"), pictures(List#{ picture("asset005", None, None, None), picture("asset006", None, None, None) }) }),
         paragraph(List#{ plain("和は "), mathText("a^2"), plain(" で $10") }),
         mathBlock("E = mc^2"),
         codeBlock(Some("mermaid"), "graph TD;\nA-->B"),
@@ -517,6 +522,66 @@ mod TestMarkdown {
         Assert.assertEq(
             expected = List#{ doc(List#{ paragraph(List#{ marked("sub", "a") }) }), doc(List#{ paragraph(List#{ marked("sup", "a") }) }) },
             List#{ Markdown.fromMarkdown("^~a~^"), Markdown.fromMarkdown("~^a^~") })
+
+    /// CommonMark のフェンス。~~~ でも 4 個以上でも開き、同じ記号で開いた数以上でしか閉じない。
+    /// 書き戻しは常に ` で、中身の ` の並びより 1 つ多い数（最小は 3）。
+    @Test
+    def testFenceVariants(): Unit \ Assert =
+        let cases = List#{
+            // ~~~ で開き ~~~ で閉じる。書き戻しは ```
+            ("~~~\nx\n~~~",              doc(List#{ codeBlock(None, "x") }),        "```\nx\n```"),
+            // ~~~ の中の ``` は中身
+            ("~~~ts\n```\n~~~",          doc(List#{ codeBlock(Some("ts"), "```") }), "````ts\n```\n````"),
+            // ``` 4 個の中の ``` 3 個は中身。書き戻しも 4 個
+            ("````\n```\n````",          doc(List#{ codeBlock(None, "```") }),      "````\n```\n````"),
+            // 中身の ```` には ````` で囲む
+            ("`````\n````\n`````",       doc(List#{ codeBlock(None, "````") }),     "`````\n````\n`````"),
+            // ``` で開いた物は ~~~ では閉じない
+            ("```\n~~~\n```",            doc(List#{ codeBlock(None, "~~~") }),      "```\n~~~\n```"),
+            // ~~~ で開いた物は ``` では閉じない
+            ("~~~\n```\nx\n~~~",         doc(List#{ codeBlock(None, "```\nx") }),   "````\n```\nx\n````"),
+            // 4 個で開いた物は 3 個では閉じない
+            ("````\n```\nx\n````",       doc(List#{ codeBlock(None, "```\nx") }),   "````\n```\nx\n````"),
+            // 閉じないまま終われば末尾まで
+            ("~~~\nx\ny",                doc(List#{ codeBlock(None, "x\ny") }),     "```\nx\ny\n```")
+        };
+        Assert.assertEq(
+            expected = cases,
+            cases |> List.map(match (markdown, tree, _) -> (markdown, Markdown.fromMarkdown(markdown), Markdown.toMarkdown(tree))))
+
+    /// フェンスの折り返しの印は `{…}` の中の `wrap`。強調する行と並べても書ける。
+    @Test
+    def testFenceWrapRoundTrip(): Unit \ Assert =
+        let cases = List#{
+            ("```ts {wrap}\nx\n```",        codeBlockWrap(Some("ts"), None, true)),
+            ("``` {wrap}\nx\n```",          codeBlockWrap(None, None, true)),
+            ("```ts {1,3-5 wrap}\nx\n```",  codeBlockWrap(Some("ts"), Some("1,3-5"), true)),
+            ("```ts {1,3-5}\nx\n```",       codeBlockWrap(Some("ts"), Some("1,3-5"), false)),
+            ("```ts\nx\n```",               codeBlockWrap(Some("ts"), None, false))
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(match (markdown, tree) -> (markdown, tree, markdown)),
+            cases |> List.map(match (markdown, _) -> (markdown, Markdown.fromMarkdown(markdown), Markdown.toMarkdown(Markdown.fromMarkdown(markdown)))))
+
+    /// wrap は `{…}` の中の語だけ。中身の `wrap` も言語名の `wrap` も折り返しにならない。
+    /// `{…}` の中の知らない語は落ちる（強調する行としても読めないため）。
+    @Test
+    def testFenceWrapIsOnlyInBraces(): Unit \ Assert =
+        Assert.assertEq(
+            expected = (
+                doc(List#{ codeBlock(None, "wrap") }),
+                doc(List#{ codeBlock(Some("wrap"), "x") }),
+                doc(List#{ codeBlock(None, "x") })),
+            (Markdown.fromMarkdown("```\nwrap\n```"),
+             Markdown.fromMarkdown("```wrap\nx\n```"),
+             Markdown.fromMarkdown("``` {nowrap}\nx\n```")))
+
+    def codeBlockWrap(language: Option[String], highlightLines: Option[String], wrap: Bool): Json =
+        CmsTestKit.richNode("codeBlock",
+            (language |> Option.map(found -> ("language", Json.JString(found))) |> Option.toList)
+                ::: (highlightLines |> Option.map(found -> ("highlightLines", Json.JString(found))) |> Option.toList)
+                ::: (if (wrap) ("wrap", Json.JBool(true)) :: Nil else Nil),
+            List#{ plain("x") }) |> found -> doc(List#{ found })
 
     /// 往復した記事は validate で Nil。平文は Markdown から記号を落とした物と同じ。
     @Test
