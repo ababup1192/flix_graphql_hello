@@ -41,6 +41,17 @@ mod ContentEntries {
         EntriesQueries.findEntryByStage({ id = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft), projectId = Tenant.currentId() }) |> Option.map(EntryRows.toEntry(Stage.Draft))
 
     ///
+    /// id の並びで複数。無い id は落ちる。並びは ids の順（SQL の順ではない。呼ぶ側が「新しい順」のような意味を付けているため）。
+    ///
+    pub def findMany(_proof: Granted[ReadDraft], ids: List[EntryId]): List[Entry] \ DbRead + Tenant =
+        if (List.isEmpty(ids)) Nil else {
+            let found = EntriesQueries.findEntriesByStage({ ids = List.map(EntryId.text, ids), stage = EntryRows.stageToDb(Stage.Draft), projectId = Tenant.currentId() })
+                |> List.map(EntryRows.toEntry(Stage.Draft))
+                |> List.map(entry -> (entry#id, entry)) |> List.toMap;
+            ids |> List.filterMap(id -> Map.get(id, found))
+        }
+
+    ///
     /// id で 1 つ。無ければ notFound。
     ///
     pub def get(_proof: Granted[ReadDraft], id: EntryId): Entry \ DbRead + CmsErr + Tenant =

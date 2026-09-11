@@ -39,27 +39,34 @@ mod SchemaCounts {
         let tenant = Tenant.currentId();
         let key = ApiId.text(field#apiId);
         let path = pathOf(field#apiId);
-        let byStage = SchemaImpactQueries.countFieldValues({ typeId = owner, path = path, projectId = tenant })
-            |> List.map(row -> (row#stage, Rows.total(Some(row)))) |> List.toMap;
+        let max = FieldImpact.sampleSize();
+        let values = SchemaImpactQueries.listFieldValues({ typeId = owner, path = path, max = max, projectId = tenant });
+        let ofStage = stage -> values |> List.filter(row -> row#stage == Some(stage)) |> hits;
         {
             typeId = field#typeId,
             apiId = field#apiId,
-            draft = Map.getWithDefault("draft", 0i64, byStage),
-            published = Map.getWithDefault("published", 0i64, byStage),
+            draft = ofStage("draft"),
+            published = ofStage("published"),
             missingPublished =
-                if (tightens(changes, field, isRequired)) SchemaImpactQueries.countMissingPublished({ typeId = owner, path = path, projectId = tenant }) |> Rows.total else 0i64,
+                if (tightens(changes, field, isRequired)) SchemaImpactQueries.listMissingPublished({ typeId = owner, path = path, max = max, projectId = tenant }) |> hits else FieldImpact.none(),
             outsideConfig = match narrowed(changes, field) {
-                case Some(Narrowing.Options(kept))             => SchemaImpactQueries.countOutsideOptions({ typeId = owner, apiId = key, options = kept, projectId = tenant }) |> Rows.total
-                case Some(Narrowing.MaxLength(limit))          => SchemaImpactQueries.countOverLength({ typeId = owner, path = valuePath(field#apiId), limit = limit, projectId = tenant }) |> Rows.total
-                case Some(Narrowing.Range(low, high, integer)) => SchemaImpactQueries.countOutsideRange({ typeId = owner, path = valuePath(field#apiId), low = low, high = high, integer = integer, projectId = tenant }) |> Rows.total
-                case None                                      => 0i64
+                case Some(Narrowing.Options(kept))             => SchemaImpactQueries.listOutsideOptions({ typeId = owner, apiId = key, options = kept, max = max, projectId = tenant }) |> hits
+                case Some(Narrowing.MaxLength(limit))          => SchemaImpactQueries.listOverLength({ typeId = owner, path = valuePath(field#apiId), limit = limit, max = max, projectId = tenant }) |> hits
+                case Some(Narrowing.Range(low, high, integer)) => SchemaImpactQueries.listOutsideRange({ typeId = owner, path = valuePath(field#apiId), low = low, high = high, integer = integer, max = max, projectId = tenant }) |> hits
+                case None                                      => FieldImpact.none()
             },
             duplicatePublished =
-                if (tightens(changes, field, isUnique)) SchemaImpactQueries.countDuplicatePublished({ typeId = owner, apiId = key, projectId = tenant }) |> Rows.total else 0i64
+                if (tightens(changes, field, isUnique)) SchemaImpactQueries.listDuplicatePublished({ typeId = owner, apiId = key, max = max, projectId = tenant }) |> hits else FieldImpact.none()
         }
 
     def countType(typeId: TypeId): TypeCount \ DbRead + Tenant =
-        { typeId = typeId, entries = EntriesQueries.countEntriesOfType({ typeId = TypeId.toInt64(typeId), projectId = Tenant.currentId() }) |> Rows.total }
+        { typeId = typeId, entries = SchemaImpactQueries.listEntriesOfType({ typeId = TypeId.toInt64(typeId), max = FieldImpact.sampleSize(), projectId = Tenant.currentId() }) |> hits }
+
+    /// 見本の行（id と、どの行にも同じ total）を Hit にする。行が無ければ 0 件。
+    /// 列は式（キャスト）なので生成器が Option にする。実際には NULL にならない
+    def hits(rows: List[{ id = Option[String], total = Option[Int64] | r }]): Hit =
+        { total = rows |> List.head |> Option.flatMap(row -> row#total) |> Option.getWithDefault(0i64),
+          entries = rows |> List.filterMap(row -> row#id |> Option.flatMap(EntryId.parse)) }
 
     ///
     /// フィールドの値を指す jsonpath。入れ子の子も拾うので `$.**`。

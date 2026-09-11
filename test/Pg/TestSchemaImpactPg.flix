@@ -63,7 +63,7 @@ mod TestSchemaImpactPg {
             let counted = owner#fields |> List.filterMap(field -> {
                 let (fields, _) = SchemaCounts.forChanges(List#{SchemaChange.FieldRemoved(field)});
                 match List.head(fields) {
-                    case Some(count) => if (count#draft > 0i64) Some(ApiId.text(field#apiId)) else None
+                    case Some(count) => if (count#draft#total > 0i64) Some(ApiId.text(field#apiId)) else None
                     case None        => None
                 }
             });
@@ -84,7 +84,7 @@ mod TestSchemaImpactPg {
             discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId("n1")),
                 CmsTestKit.entryData(List#{("hero", Json.JObject(Map#{ "headline" => Json.JString("深い所") }))}));
             let (fields, _) = SchemaCounts.forChanges(List#{SchemaChange.FieldRemoved(headline)});
-            fields |> List.map(count -> (ApiId.text(count#apiId), count#draft, count#published))
+            fields |> List.map(count -> (ApiId.text(count#apiId), count#draft#total, count#published#total))
         }));
         Assert.assertEq(expected = Ok(Ok(List#{("headline", 1i64, 0i64)})), result)
 
@@ -106,9 +106,9 @@ mod TestSchemaImpactPg {
             let required = SchemaCounts.forChanges(List#{SchemaChange.FieldRequired(title)}) |> fst;
             let unique = SchemaCounts.forChanges(List#{SchemaChange.FieldUnique(title)}) |> fst;
             let untouched = SchemaCounts.forChanges(List#{SchemaChange.FieldRemoved(note)}) |> fst;
-            (required |> List.map(count -> count#missingPublished),
-             unique |> List.map(count -> count#duplicatePublished),
-             untouched |> List.map(count -> (count#missingPublished, count#duplicatePublished)))
+            (required |> List.map(count -> count#missingPublished#total),
+             unique |> List.map(count -> count#duplicatePublished#total),
+             untouched |> List.map(count -> (count#missingPublished#total, count#duplicatePublished#total)))
         }));
         // b3 の title が空なので required は 1 件、b1 と b2 が重なるので unique は 2 件、
         // note は性質を締めていないのでどちらも数えない
@@ -184,12 +184,31 @@ mod TestSchemaImpactPg {
                 let now = narrowedSamples() |> List.findMap(match (api, _, _, _, config) -> if (api == ApiId.text(field#apiId)) Some(config) else None) |> Option.getWithDefault(field#config);
                 let (fields, _) = SchemaCounts.forChanges(List#{SchemaChange.FieldConfigNarrowed({ config = now | field }, field#config)});
                 match List.head(fields) {
-                    case Some(count) => if (count#outsideConfig > 0i64) Some(ApiId.text(field#apiId)) else None
+                    case Some(count) => if (count#outsideConfig#total > 0i64) Some(ApiId.text(field#apiId)) else None
                     case None        => None
                 }
             });
             List.sort(counted)
         }));
         Assert.assertEq(expected = Ok(Ok(List.sort(blockedByRule()))), result)
+
+
+    // ---- 見本 ----
+
+    ///
+    /// 件数は全件、見本は sampleSize 件まで。7 件に値があれば total は 7、id は 5 つ。
+    /// 見本は更新の新しい順（画面で「他 N 件」の前に出るのは直近に触った物）。
+    ///
+    @Test
+    def testPgCountKeepsTotalButSamplesEntries(): Unit \ {IO, Assert} =
+        let ids = List#{"s1", "s2", "s3", "s4", "s5", "s6", "s7"};
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(ids, () -> {
+            let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+            let body = ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("body", FieldKind.Text, FieldConfig.empty()));
+            ids |> List.forEach(id -> discard ContentEntries.create(Session.grant(), blogs#id, Some(CmsTestKit.entryId(id)), CmsTestKit.entryData(List#{("body", Json.JString(id))})));
+            let (fields, _) = SchemaCounts.forChanges(List#{SchemaChange.FieldRemoved(body)});
+            fields |> List.map(count -> (count#draft#total, List.length(count#draft#entries), count#published#total, List.length(count#published#entries)))
+        }));
+        Assert.assertEq(expected = Ok(Ok(List#{(7i64, 5, 0i64, 0)})), result)
 
 }

@@ -84,6 +84,9 @@ type alias SchemaEffect =
     , field : Maybe String
     , draft : Int
     , published : Int
+
+    {- 当たるコンテンツの見本。先頭 5 件（更新の新しい順）。残りの数は draft / published から引く。 -}
+    , entries : List EntryRow
     }
 
 

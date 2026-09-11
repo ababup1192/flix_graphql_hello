@@ -7,115 +7,140 @@ mod SchemaImpactQueries {
     ///
     /// 生成元 schema_impact.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 501080777
+    pub def sourceHash(): Int32 = -889098210
 
     ///
-    /// countFieldValues の 1 行。
+    /// listFieldValues の 1 行。
     ///
-    pub type alias CountFieldValuesRow = { stage = String, total = Option[Int64] }
+    pub type alias ListFieldValuesRow = { id = Option[String], stage = Option[String], total = Option[Int64] }
 
-    def countFieldValuesDecoder(): Decoder[CountFieldValuesRow] =
+    def listFieldValuesDecoder(): Decoder[ListFieldValuesRow] =
         forA (
-            stage <- Decoder.str("stage");
+            id <- Decoder.opt(Decoder.str("id"));
+            stage <- Decoder.opt(Decoder.str("stage"));
             total <- Decoder.opt(Decoder.int64("total"))
-        ) yield { stage = stage, total = total }
+        ) yield { id = id, stage = stage, total = total }
 
     ///
-    /// countFieldValues: SELECT c.stage, count(*)::bigint AS total FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND jsonb_path_exists(c.data, $3::jsonpath) GROUP BY c.stage
+    /// listFieldValues: SELECT hits.id::text AS id, hits.stage::text AS stage, hits.total::bigint AS total FROM ( SELECT e.id, c.stage, count(*) OVER (PARTITION BY c.stage)::bigint AS total, row_number() OVER (PARTITION BY c.stage ORDER BY e.updated_at DESC, e.id) AS n FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND jsonb_path_exists(c.data, $3::jsonpath) ) AS hits WHERE n <= $4
     ///
-    pub def countFieldValues(args: { typeId = Int64, path = String, projectId = Int64 }): List[CountFieldValuesRow] \ DbRead =
-        let sql = "SELECT c.stage, count(*)::bigint AS total\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id\n    WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n      AND jsonb_path_exists(c.data, $3::jsonpath)\n    GROUP BY c.stage";
-        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#path)};
-        RawSql.runWithAllow(() -> Sql.fetchAs(countFieldValuesDecoder(), sql, params))
+    pub def listFieldValues(args: { typeId = Int64, path = String, max = Int32, projectId = Int64 }): List[ListFieldValuesRow] \ DbRead =
+        let sql = "SELECT hits.id::text AS id, hits.stage::text AS stage, hits.total::bigint AS total\n    FROM (\n        SELECT e.id, c.stage,\n               count(*) OVER (PARTITION BY c.stage)::bigint AS total,\n               row_number() OVER (PARTITION BY c.stage ORDER BY e.updated_at DESC, e.id) AS n\n        FROM entries AS e\n        JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id\n        WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n          AND jsonb_path_exists(c.data, $3::jsonpath)\n    ) AS hits\n    WHERE n <= $4";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#path), SqlValue.Int32(args#max)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listFieldValuesDecoder(), sql, params))
 
     ///
-    /// countMissingPublished の 1 行。
+    /// listMissingPublished の 1 行。
     ///
-    pub type alias CountMissingPublishedRow = { total = Option[Int64] }
+    pub type alias ListMissingPublishedRow = { id = Option[String], total = Option[Int64] }
 
-    def countMissingPublishedDecoder(): Decoder[CountMissingPublishedRow] =
+    def listMissingPublishedDecoder(): Decoder[ListMissingPublishedRow] =
         forA (
+            id <- Decoder.opt(Decoder.str("id"));
             total <- Decoder.opt(Decoder.int64("total"))
-        ) yield { total = total }
+        ) yield { id = id, total = total }
 
     ///
-    /// countMissingPublished: SELECT count(*)::bigint AS total FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'published' WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND NOT jsonb_path_exists(c.data, $3::jsonpath)
+    /// listMissingPublished: SELECT hits.id::text AS id, hits.total::bigint AS total FROM ( SELECT e.id, count(*) OVER ()::bigint AS total, row_number() OVER (ORDER BY e.updated_at DESC, e.id) AS n FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'published' WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND NOT jsonb_path_exists(c.data, $3::jsonpath) ) AS hits WHERE n <= $4
     ///
-    pub def countMissingPublished(args: { typeId = Int64, path = String, projectId = Int64 }): Option[CountMissingPublishedRow] \ DbRead =
-        let sql = "SELECT count(*)::bigint AS total\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'published'\n    WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n      AND NOT jsonb_path_exists(c.data, $3::jsonpath)";
-        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#path)};
-        RawSql.runWithAllow(() -> Sql.fetchOneAs(countMissingPublishedDecoder(), sql, params))
+    pub def listMissingPublished(args: { typeId = Int64, path = String, max = Int32, projectId = Int64 }): List[ListMissingPublishedRow] \ DbRead =
+        let sql = "SELECT hits.id::text AS id, hits.total::bigint AS total\n    FROM (\n        SELECT e.id, count(*) OVER ()::bigint AS total, row_number() OVER (ORDER BY e.updated_at DESC, e.id) AS n\n        FROM entries AS e\n        JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'published'\n        WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n          AND NOT jsonb_path_exists(c.data, $3::jsonpath)\n    ) AS hits\n    WHERE n <= $4";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#path), SqlValue.Int32(args#max)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listMissingPublishedDecoder(), sql, params))
 
     ///
-    /// countDuplicatePublished の 1 行。
+    /// listDuplicatePublished の 1 行。
     ///
-    pub type alias CountDuplicatePublishedRow = { total = Option[Int64] }
+    pub type alias ListDuplicatePublishedRow = { id = Option[String], total = Option[Int64] }
 
-    def countDuplicatePublishedDecoder(): Decoder[CountDuplicatePublishedRow] =
+    def listDuplicatePublishedDecoder(): Decoder[ListDuplicatePublishedRow] =
         forA (
+            id <- Decoder.opt(Decoder.str("id"));
             total <- Decoder.opt(Decoder.int64("total"))
-        ) yield { total = total }
+        ) yield { id = id, total = total }
 
     ///
-    /// countDuplicatePublished: SELECT coalesce(sum(n), 0)::bigint AS total FROM ( SELECT count(*) AS n FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'published' WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND c.data ->> $3 IS NOT NULL GROUP BY c.data ->> $3 HAVING count(*) > 1 ) AS duplicated
+    /// listDuplicatePublished: SELECT hits.id::text AS id, hits.total::bigint AS total FROM ( SELECT e.id, count(*) OVER ()::bigint AS total, row_number() OVER (ORDER BY e.updated_at DESC, e.id) AS n FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'published' WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND c.data ->> $3 IS NOT NULL AND (c.data ->> $3) IN ( SELECT c2.data ->> $3 FROM entries AS e2 JOIN entry_contents AS c2 ON c2.entry_id = e2.id AND c2.project_id = e2.project_id AND c2.stage = 'published' WHERE e2.type_id = $1 AND e2.project_id = $2 AND e2.deleted_at IS NULL AND c2.data ->> $3 IS NOT NULL GROUP BY 1 HAVING count(*) > 1 ) ) AS hits WHERE n <= $4
     ///
-    pub def countDuplicatePublished(args: { typeId = Int64, apiId = String, projectId = Int64 }): Option[CountDuplicatePublishedRow] \ DbRead =
-        let sql = "SELECT coalesce(sum(n), 0)::bigint AS total\n    FROM (\n        SELECT count(*) AS n\n        FROM entries AS e\n        JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'published'\n        WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n          AND c.data ->> $3 IS NOT NULL\n        GROUP BY c.data ->> $3\n        HAVING count(*) > 1\n    ) AS duplicated";
-        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#apiId)};
-        RawSql.runWithAllow(() -> Sql.fetchOneAs(countDuplicatePublishedDecoder(), sql, params))
+    pub def listDuplicatePublished(args: { typeId = Int64, apiId = String, max = Int32, projectId = Int64 }): List[ListDuplicatePublishedRow] \ DbRead =
+        let sql = "SELECT hits.id::text AS id, hits.total::bigint AS total\n    FROM (\n        SELECT e.id, count(*) OVER ()::bigint AS total, row_number() OVER (ORDER BY e.updated_at DESC, e.id) AS n\n        FROM entries AS e\n        JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'published'\n        WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n          AND c.data ->> $3 IS NOT NULL\n          AND (c.data ->> $3) IN (\n              SELECT c2.data ->> $3\n              FROM entries AS e2\n              JOIN entry_contents AS c2 ON c2.entry_id = e2.id AND c2.project_id = e2.project_id AND c2.stage = 'published'\n              WHERE e2.type_id = $1 AND e2.project_id = $2 AND e2.deleted_at IS NULL\n                AND c2.data ->> $3 IS NOT NULL\n              GROUP BY 1\n              HAVING count(*) > 1\n          )\n    ) AS hits\n    WHERE n <= $4";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#apiId), SqlValue.Int32(args#max)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listDuplicatePublishedDecoder(), sql, params))
 
     ///
-    /// countOutsideOptions の 1 行。
+    /// listOutsideOptions の 1 行。
     ///
-    pub type alias CountOutsideOptionsRow = { total = Option[Int64] }
+    pub type alias ListOutsideOptionsRow = { id = Option[String], total = Option[Int64] }
 
-    def countOutsideOptionsDecoder(): Decoder[CountOutsideOptionsRow] =
+    def listOutsideOptionsDecoder(): Decoder[ListOutsideOptionsRow] =
         forA (
+            id <- Decoder.opt(Decoder.str("id"));
             total <- Decoder.opt(Decoder.int64("total"))
-        ) yield { total = total }
+        ) yield { id = id, total = total }
 
     ///
-    /// countOutsideOptions: SELECT count(*)::bigint AS total FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft' WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND c.data ->> $3 IS NOT NULL AND NOT (c.data ->> $3 = ANY($4))
+    /// listOutsideOptions: SELECT hits.id::text AS id, hits.total::bigint AS total FROM ( SELECT e.id, count(*) OVER ()::bigint AS total, row_number() OVER (ORDER BY e.updated_at DESC, e.id) AS n FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft' WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND c.data ->> $3 IS NOT NULL AND NOT (c.data ->> $3 = ANY($4)) ) AS hits WHERE n <= $5
     ///
-    pub def countOutsideOptions(args: { typeId = Int64, apiId = String, options = List[String], projectId = Int64 }): Option[CountOutsideOptionsRow] \ DbRead =
-        let sql = "SELECT count(*)::bigint AS total\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft'\n    WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n      AND c.data ->> $3 IS NOT NULL AND NOT (c.data ->> $3 = ANY($4))";
-        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#apiId), SqlValue.StrArray(args#options)};
-        RawSql.runWithAllow(() -> Sql.fetchOneAs(countOutsideOptionsDecoder(), sql, params))
+    pub def listOutsideOptions(args: { typeId = Int64, apiId = String, options = List[String], max = Int32, projectId = Int64 }): List[ListOutsideOptionsRow] \ DbRead =
+        let sql = "SELECT hits.id::text AS id, hits.total::bigint AS total\n    FROM (\n        SELECT e.id, count(*) OVER ()::bigint AS total, row_number() OVER (ORDER BY e.updated_at DESC, e.id) AS n\n        FROM entries AS e\n        JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft'\n        WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n          AND c.data ->> $3 IS NOT NULL AND NOT (c.data ->> $3 = ANY($4))\n    ) AS hits\n    WHERE n <= $5";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#apiId), SqlValue.StrArray(args#options), SqlValue.Int32(args#max)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listOutsideOptionsDecoder(), sql, params))
 
     ///
-    /// countOverLength の 1 行。
+    /// listOverLength の 1 行。
     ///
-    pub type alias CountOverLengthRow = { total = Option[Int64] }
+    pub type alias ListOverLengthRow = { id = Option[String], total = Option[Int64] }
 
-    def countOverLengthDecoder(): Decoder[CountOverLengthRow] =
+    def listOverLengthDecoder(): Decoder[ListOverLengthRow] =
         forA (
+            id <- Decoder.opt(Decoder.str("id"));
             total <- Decoder.opt(Decoder.int64("total"))
-        ) yield { total = total }
+        ) yield { id = id, total = total }
 
     ///
-    /// countOverLength: SELECT count(*)::bigint AS total FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft' WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND EXISTS ( SELECT 1 FROM jsonb_path_query(c.data, $3::jsonpath) AS v WHERE jsonb_typeof(v) = 'string' AND length(v #>> '{}') > $4 )
+    /// listOverLength: SELECT hits.id::text AS id, hits.total::bigint AS total FROM ( SELECT e.id, count(*) OVER ()::bigint AS total, row_number() OVER (ORDER BY e.updated_at DESC, e.id) AS n FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft' WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND EXISTS ( SELECT 1 FROM jsonb_path_query(c.data, $3::jsonpath) AS v WHERE jsonb_typeof(v) = 'string' AND length(v #>> '{}') > $4 ) ) AS hits WHERE n <= $5
     ///
-    pub def countOverLength(args: { typeId = Int64, path = String, limit = Int32, projectId = Int64 }): Option[CountOverLengthRow] \ DbRead =
-        let sql = "SELECT count(*)::bigint AS total\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft'\n    WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n      AND EXISTS (\n          SELECT 1 FROM jsonb_path_query(c.data, $3::jsonpath) AS v\n          WHERE jsonb_typeof(v) = 'string' AND length(v #>> '{}') > $4\n      )";
-        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#path), SqlValue.Int32(args#limit)};
-        RawSql.runWithAllow(() -> Sql.fetchOneAs(countOverLengthDecoder(), sql, params))
+    pub def listOverLength(args: { typeId = Int64, path = String, limit = Int32, max = Int32, projectId = Int64 }): List[ListOverLengthRow] \ DbRead =
+        let sql = "SELECT hits.id::text AS id, hits.total::bigint AS total\n    FROM (\n        SELECT e.id, count(*) OVER ()::bigint AS total, row_number() OVER (ORDER BY e.updated_at DESC, e.id) AS n\n        FROM entries AS e\n        JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft'\n        WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n          AND EXISTS (\n              SELECT 1 FROM jsonb_path_query(c.data, $3::jsonpath) AS v\n              WHERE jsonb_typeof(v) = 'string' AND length(v #>> '{}') > $4\n          )\n    ) AS hits\n    WHERE n <= $5";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#path), SqlValue.Int32(args#limit), SqlValue.Int32(args#max)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listOverLengthDecoder(), sql, params))
 
     ///
-    /// countOutsideRange の 1 行。
+    /// listOutsideRange の 1 行。
     ///
-    pub type alias CountOutsideRangeRow = { total = Option[Int64] }
+    pub type alias ListOutsideRangeRow = { id = Option[String], total = Option[Int64] }
 
-    def countOutsideRangeDecoder(): Decoder[CountOutsideRangeRow] =
+    def listOutsideRangeDecoder(): Decoder[ListOutsideRangeRow] =
         forA (
+            id <- Decoder.opt(Decoder.str("id"));
             total <- Decoder.opt(Decoder.int64("total"))
-        ) yield { total = total }
+        ) yield { id = id, total = total }
 
     ///
-    /// countOutsideRange: SELECT count(*)::bigint AS total FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft' WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND EXISTS ( SELECT 1 FROM jsonb_path_query(c.data, $3::jsonpath) AS v WHERE jsonb_typeof(v) = 'number' AND ( ($4::float8 IS NOT NULL AND (v #>> '{}')::float8 < $4::float8) OR ($5::float8 IS NOT NULL AND (v #>> '{}')::float8 > $5::float8) OR ($6 AND (v #>> '{}')::numeric <> trunc((v #>> '{}')::numeric)) ) )
+    /// listOutsideRange: SELECT hits.id::text AS id, hits.total::bigint AS total FROM ( SELECT e.id, count(*) OVER ()::bigint AS total, row_number() OVER (ORDER BY e.updated_at DESC, e.id) AS n FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft' WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND EXISTS ( SELECT 1 FROM jsonb_path_query(c.data, $3::jsonpath) AS v WHERE jsonb_typeof(v) = 'number' AND ( ($4::float8 IS NOT NULL AND (v #>> '{}')::float8 < $4::float8) OR ($5::float8 IS NOT NULL AND (v #>> '{}')::float8 > $5::float8) OR ($6 AND (v #>> '{}')::numeric <> trunc((v #>> '{}')::numeric)) ) ) ) AS hits WHERE n <= $7
     ///
-    pub def countOutsideRange(args: { typeId = Int64, path = String, low = Option[Float64], high = Option[Float64], integer = Bool, projectId = Int64 }): Option[CountOutsideRangeRow] \ DbRead =
-        let sql = "SELECT count(*)::bigint AS total\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft'\n    WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n      AND EXISTS (\n          SELECT 1 FROM jsonb_path_query(c.data, $3::jsonpath) AS v\n          WHERE jsonb_typeof(v) = 'number' AND (\n                 ($4::float8 IS NOT NULL AND (v #>> '{}')::float8 < $4::float8)\n              OR ($5::float8 IS NOT NULL AND (v #>> '{}')::float8 > $5::float8)\n              OR ($6 AND (v #>> '{}')::numeric <> trunc((v #>> '{}')::numeric))\n          )\n      )";
-        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#path), SqlValue.ofOption(SqlValue.NullType.Float64, SqlValue.Float64, args#low), SqlValue.ofOption(SqlValue.NullType.Float64, SqlValue.Float64, args#high), SqlValue.Bool(args#integer)};
-        RawSql.runWithAllow(() -> Sql.fetchOneAs(countOutsideRangeDecoder(), sql, params))
+    pub def listOutsideRange(args: { typeId = Int64, path = String, low = Option[Float64], high = Option[Float64], integer = Bool, max = Int32, projectId = Int64 }): List[ListOutsideRangeRow] \ DbRead =
+        let sql = "SELECT hits.id::text AS id, hits.total::bigint AS total\n    FROM (\n        SELECT e.id, count(*) OVER ()::bigint AS total, row_number() OVER (ORDER BY e.updated_at DESC, e.id) AS n\n        FROM entries AS e\n        JOIN entry_contents AS c ON c.entry_id = e.id AND c.project_id = e.project_id AND c.stage = 'draft'\n        WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n          AND EXISTS (\n              SELECT 1 FROM jsonb_path_query(c.data, $3::jsonpath) AS v\n              WHERE jsonb_typeof(v) = 'number' AND (\n                     ($4::float8 IS NOT NULL AND (v #>> '{}')::float8 < $4::float8)\n                  OR ($5::float8 IS NOT NULL AND (v #>> '{}')::float8 > $5::float8)\n                  OR ($6 AND (v #>> '{}')::numeric <> trunc((v #>> '{}')::numeric))\n              )\n          )\n    ) AS hits\n    WHERE n <= $7";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#path), SqlValue.ofOption(SqlValue.NullType.Float64, SqlValue.Float64, args#low), SqlValue.ofOption(SqlValue.NullType.Float64, SqlValue.Float64, args#high), SqlValue.Bool(args#integer), SqlValue.Int32(args#max)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listOutsideRangeDecoder(), sql, params))
+
+    ///
+    /// listEntriesOfType の 1 行。
+    ///
+    pub type alias ListEntriesOfTypeRow = { id = Option[String], total = Option[Int64] }
+
+    def listEntriesOfTypeDecoder(): Decoder[ListEntriesOfTypeRow] =
+        forA (
+            id <- Decoder.opt(Decoder.str("id"));
+            total <- Decoder.opt(Decoder.int64("total"))
+        ) yield { id = id, total = total }
+
+    ///
+    /// listEntriesOfType: SELECT hits.id::text AS id, hits.total::bigint AS total FROM ( SELECT e.id, count(*) OVER ()::bigint AS total, row_number() OVER (ORDER BY e.updated_at DESC, e.id) AS n FROM entries AS e WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL ) AS hits WHERE n <= $3
+    ///
+    pub def listEntriesOfType(args: { typeId = Int64, max = Int32, projectId = Int64 }): List[ListEntriesOfTypeRow] \ DbRead =
+        let sql = "SELECT hits.id::text AS id, hits.total::bigint AS total\n    FROM (\n        SELECT e.id, count(*) OVER ()::bigint AS total, row_number() OVER (ORDER BY e.updated_at DESC, e.id) AS n\n        FROM entries AS e\n        WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL\n    ) AS hits\n    WHERE n <= $3";
+        let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Int32(args#max)};
+        RawSql.runWithAllow(() -> Sql.fetchAs(listEntriesOfTypeDecoder(), sql, params))
 
 }

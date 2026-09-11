@@ -10,6 +10,7 @@ module Page.Schema exposing (Model, Msg, init, load, update, view)
 
 import Api
 import Api.Admin.Enum.FieldKind as FieldKind exposing (FieldKind)
+import EntryLabel
 import Html exposing (Html, div, span, text)
 import Html.Attributes exposing (class, disabled, placeholder, value)
 import Html.Events exposing (onClick, onInput)
@@ -38,6 +39,9 @@ type alias Model =
     , panel : Panel
     , confirmRemove : Maybe FieldDef
     , removeImpact : Loaded Model.SchemaImpact
+
+    {- 保存の前に見た影響。影響があれば箱を出し、見た物を付けて送る。 -}
+    , confirmSave : Maybe Model.SchemaImpact
     , errors : List String
     , busy : Bool
     , newType : NewType
@@ -89,6 +93,36 @@ type alias EditForm =
     , sourceField : String
     , dirty : Bool
     }
+
+
+{-| 編集の下書きを送る形に。dry-run と保存で同じ物を渡す。
+-}
+patchOf : EditForm -> Queries.FieldPatch
+patchOf form =
+    { fieldId = form.id
+    , name = form.name
+    , required = form.required
+    , unique = form.unique
+    , localized = form.localized
+    , maxLength = String.toInt form.maxLength
+    , sourceField = form.sourceField
+    , min = String.toFloat form.min
+    , max = String.toFloat form.max
+    , integer = integerOf form
+    , options = optionsOf form.options
+    }
+
+
+{-| 見た影響を付けて保存を送る。
+-}
+saveCalls : Context -> Model -> Model.SchemaImpact -> List (Api.Call Msg)
+saveCalls ctx model impact =
+    case model.panel of
+        Editing form ->
+            [ Api.call (\id -> Queries.updateField id ctx.project { patch = patchOf form, expected = impact }) GotField ]
+
+        _ ->
+            []
 
 
 {-| integer は NUMBER だけの設定。他の種類で送るとサーバが config を弾き、
@@ -166,6 +200,9 @@ type Msg
     | EditOpened FieldDef
     | EditChanged (EditForm -> EditForm)
     | EditSubmitted
+    | GotSaveImpact (Result Api.Problem Model.SchemaImpact)
+    | SaveConfirmed
+    | SaveCancelled
     | RemoveAsked FieldDef
     | RemoveCancelled
     | RemoveConfirmed
@@ -191,6 +228,7 @@ init project apiId =
     , panel = Closed
     , confirmRemove = Nothing
     , removeImpact = Loaded.Loading
+    , confirmSave = Nothing
     , errors = []
     , busy = False
     , newType = { name = "", apiId = "", singleton = False }
@@ -318,7 +356,7 @@ update ctx msg model =
             ( failed problem model, [] )
 
         EditOpened field ->
-            ( { model | panel = Editing (formOf field), confirmRemove = Nothing, errors = [] }, [] )
+            ( { model | panel = Editing (formOf field), confirmRemove = Nothing, confirmSave = Nothing, errors = [] }, [] )
 
         EditChanged change ->
             ( { model
@@ -336,30 +374,34 @@ update ctx msg model =
         EditSubmitted ->
             case model.panel of
                 Editing form ->
-                    ( { model | busy = True, errors = [] }
-                    , [ Api.call
-                            (\id ->
-                                Queries.updateField id
-                                    ctx.project
-                                    { fieldId = form.id
-                                    , name = form.name
-                                    , required = form.required
-                                    , unique = form.unique
-                                    , localized = form.localized
-                                    , maxLength = String.toInt form.maxLength
-                                    , sourceField = form.sourceField
-                                    , min = String.toFloat form.min
-                                    , max = String.toFloat form.max
-                                    , integer = integerOf form
-                                    , options = optionsOf form.options
-                                    }
-                            )
-                            GotField
-                      ]
+                    ( { model | busy = True, errors = [], confirmSave = Nothing }
+                    , [ Api.call (\id -> Queries.updateFieldImpact id ctx.project (patchOf form)) GotSaveImpact ]
                     )
 
                 _ ->
                     ( model, [] )
+
+        -- **影響が無ければそのまま送る。** あれば箱を出して、見た上で押してもらう
+        GotSaveImpact (Ok impact) ->
+            if impact.safe then
+                ( model, saveCalls ctx model impact )
+
+            else
+                ( { model | busy = False, confirmSave = Just impact }, [] )
+
+        GotSaveImpact (Err problem) ->
+            ( failed problem model, [] )
+
+        SaveConfirmed ->
+            case model.confirmSave of
+                Just impact ->
+                    ( { model | busy = True, confirmSave = Nothing }, saveCalls ctx model impact )
+
+                Nothing ->
+                    ( model, [] )
+
+        SaveCancelled ->
+            ( { model | confirmSave = Nothing }, [] )
 
         RemoveAsked field ->
             ( { model | confirmRemove = Just field, removeImpact = Loaded.Loading }
@@ -1003,6 +1045,7 @@ viewEditPanel model detail form =
                 }
             ]
         , viewEditConfig detail form
+        , viewSaveConfirm model form
         , div [ class "flex gap-2 border-t border-edge pt-4" ]
             [ Ui.button [ onClick EditSubmitted, Html.Attributes.disabled (not form.dirty || model.busy) ]
                 [ text (busyText model "保存") ]
@@ -1010,6 +1053,27 @@ viewEditPanel model detail form =
             ]
         , viewRemove model form
         ]
+
+
+{-| 保存する前に見た影響。**影響がある時だけ出る。** 当たるコンテンツを並べ、見た上で押してもらう。
+-}
+viewSaveConfirm : Model -> EditForm -> Html Msg
+viewSaveConfirm model form =
+    case model.confirmSave of
+        Just impact ->
+            Ui.callout Ui.toneWarn
+                [ class "gap-2 p-3" ]
+                (Ui.subheading ("「" ++ form.name ++ "」をこの設定にすると")
+                    :: viewEffects model impact.effects
+                    ++ [ div [ class "flex gap-2" ]
+                            [ Ui.button [ onClick SaveConfirmed ] [ text (busyText model "承知して保存する") ]
+                            , Ui.ghostButton [ onClick SaveCancelled ] [ text "やめる" ]
+                            ]
+                       ]
+                )
+
+        Nothing ->
+            text ""
 
 
 {-| 種類ごとの制約。**CMS が持っている物は全部出す**（画面から使えないと無いのと同じ）。
@@ -1098,7 +1162,7 @@ viewRemove model form =
                 Ui.callout Ui.toneWarn
                     [ class "gap-2 p-3" ]
                     (Ui.subheading ("「" ++ form.name ++ "」を削除しますか")
-                        :: viewImpact model.removeImpact
+                        :: viewImpact model model.removeImpact
                         ++ [ div [ class "flex gap-2" ]
                                 [ Ui.button
                                     [ onClick RemoveConfirmed, disabled (Loaded.toMaybe model.removeImpact == Nothing) ]
@@ -1121,8 +1185,8 @@ viewRemove model form =
 `safe` なら「影響はありません」。効果があるなら 1 行ずつ、当たるコンテンツの件数を添える。
 
 -}
-viewImpact : Loaded Model.SchemaImpact -> List (Html Msg)
-viewImpact loaded =
+viewImpact : Model -> Loaded Model.SchemaImpact -> List (Html Msg)
+viewImpact model loaded =
     case loaded of
         Loaded.Loading ->
             [ Ui.note [ text "影響を調べています…" ] ]
@@ -1138,14 +1202,79 @@ viewImpact loaded =
                 [ Ui.note [ text "このフィールドに値を入れているコンテンツはありません。消しても配信は変わりません" ] ]
 
             else
-                List.map viewEffect impact.effects
+                viewEffects model impact.effects
 
 
-{-| 影響 1 行。
+{-| 影響の行。**同じフィールドの 2 つ目からは見本を出さない。** 参照を作る種類は「値が消える」と
+「参照が消える」の 2 行になるが、当たるコンテンツは同じなので、並べ直すと同じ 5 件が 2 回出る。
 -}
-viewEffect : Model.SchemaEffect -> Html Msg
-viewEffect effect =
-    Ui.note [ text (effectText effect.kind ++ "（下書き " ++ String.fromInt effect.draft ++ " 件 / 公開中 " ++ String.fromInt effect.published ++ " 件）") ]
+viewEffects : Model -> List Model.SchemaEffect -> List (Html Msg)
+viewEffects model effects =
+    effects
+        |> List.indexedMap
+            (\index effect ->
+                let
+                    seen : Bool
+                    seen =
+                        List.take index effects |> List.any (\earlier -> earlier.field == effect.field)
+                in
+                viewEffect model (not seen) effect
+            )
+
+
+{-| 影響 1 行と、当たるコンテンツの見本。
+
+見本は **別のタブで開く**（確認の箱を閉じずに中身を見に行けるように）。サーバが返すのは
+先頭 5 件なので、残りは「他 N 件」。件数の行が正で、見本は目印。
+
+-}
+viewEffect : Model -> Bool -> Model.SchemaEffect -> Html Msg
+viewEffect model withEntries effect =
+    let
+        fields : List FieldDef
+        fields =
+            Loaded.toMaybe model.detail |> Maybe.map .fields |> Maybe.withDefault []
+
+        shown : Int
+        shown =
+            List.length effect.entries
+
+        rest : Int
+        rest =
+            max effect.draft effect.published - shown
+
+        line : Html Msg
+        line =
+            Ui.note [ text (effectText effect.kind ++ "（下書き " ++ String.fromInt effect.draft ++ " 件 / 公開中 " ++ String.fromInt effect.published ++ " 件）") ]
+    in
+    if withEntries then
+        div [ class "flex flex-col gap-1" ]
+            (line
+                :: List.map (viewHitEntry model fields) effect.entries
+                ++ (if rest > 0 then
+                        [ span [ class "pl-4 text-xs text-ink-faint" ] [ text ("他 " ++ String.fromInt rest ++ " 件") ] ]
+
+                    else
+                        []
+                   )
+            )
+
+    else
+        line
+
+
+{-| 当たるコンテンツ 1 件。見出しは一覧と同じ決め方（EntryLabel）。
+-}
+viewHitEntry : Model -> List FieldDef -> Model.EntryRow -> Html Msg
+viewHitEntry model fields row =
+    div [ class "pl-4 text-sm" ]
+        [ Ui.link
+            [ Html.Attributes.href (Route.toString (Route.Entry model.project model.apiId row.id))
+            , Html.Attributes.target "_blank"
+            , Html.Attributes.rel "noopener"
+            ]
+            [ text (EntryLabel.byField fields row) ]
+        ]
 
 
 {-| 影響の種類の言い方。サーバの enum に 1 対 1 で当てる。

@@ -1,5 +1,6 @@
 module Queries exposing
-    ( Kind
+    ( FieldPatch
+    , Kind
     , addField
     , all
     , apiKeys
@@ -47,6 +48,7 @@ module Queries exposing
     , updateContentType
     , updateEntry
     , updateField
+    , updateFieldImpact
     , updateProjectVisibility
     , versions
     , viewer
@@ -504,36 +506,37 @@ type alias FieldPatch =
     }
 
 
-{-| フィールドを直す。
-
-**expected をまだ送っていない。** 影響のある変更（required や unique を立てる、選択肢を減らす）は
-サーバが止め、何件に当たるかを violations で返す。確認の画面が付くまでは、値を埋めてから直す事になる。
-
+{-| フィールドを直す。`expected` は `updateFieldImpact` で見た影響。
+影響が無い時も見た物（空）を送る。サーバは見た時より悪くなった時だけ止める。
 -}
-updateField : String -> Slug -> FieldPatch -> ( Api.Request, D.Decoder FieldDef )
+updateField : String -> Slug -> { patch : FieldPatch, expected : Model.SchemaImpact } -> ( Api.Request, D.Decoder FieldDef )
 updateField id project args =
     Api.mutation { id = id, kind = "updateField", project = project }
         (AdminMutation.updateField
-            identity
-            { id = args.fieldId
-            , input =
-                { name = Opt.Present args.name
-                , required = Opt.Present args.required
-                , unique = Opt.Present args.unique
-                , localized = Opt.Present args.localized
-                , config =
-                    Opt.Present
-                        { maxLength = presentOr args.maxLength
-                        , sourceField = presentIf (not (String.isEmpty args.sourceField)) args.sourceField
-                        , min = presentOr args.min
-                        , max = presentOr args.max
-                        , integer = presentOr args.integer
-                        , options = presentIf (not (List.isEmpty args.options)) args.options
-                        }
-                }
-            }
+            (\optional -> { optional | expected = Opt.Present (expectedOf args.expected) })
+            { id = args.patch.fieldId, input = fieldPatchInput args.patch }
             fieldDef
         )
+
+
+{-| 直す内容を API の形にする。dry-run と本番で同じ物を送る（ずれると dry-run の答えが当てにならない）。
+-}
+fieldPatchInput : FieldPatch -> Input.FieldPatch
+fieldPatchInput args =
+    { name = Opt.Present args.name
+    , required = Opt.Present args.required
+    , unique = Opt.Present args.unique
+    , localized = Opt.Present args.localized
+    , config =
+        Opt.Present
+            { maxLength = presentOr args.maxLength
+            , sourceField = presentIf (not (String.isEmpty args.sourceField)) args.sourceField
+            , min = presentOr args.min
+            , max = presentOr args.max
+            , integer = presentOr args.integer
+            , options = presentIf (not (List.isEmpty args.options)) args.options
+            }
+    }
 
 
 presentOr : Maybe a -> Opt.OptionalArgument a
@@ -563,16 +566,41 @@ removeFieldImpact id project fieldId =
                 , field = Opt.Absent
                 }
             }
-            (SS.map2 Model.SchemaImpact
-                SchemaImpact.safe
-                (SchemaImpact.effects
-                    (SS.map4 Model.SchemaEffect
-                        (SchemaEffect.kind |> SS.map SchemaEffectKind.toString)
-                        SchemaEffect.field
-                        SchemaEffect.draft
-                        SchemaEffect.published
-                    )
-                )
+            schemaImpact
+        )
+
+
+{-| フィールドを直す前に、当たるコンテンツを数える。patch は `updateField` に送る物と同じ。
+-}
+updateFieldImpact : String -> Slug -> FieldPatch -> ( Api.Request, D.Decoder Model.SchemaImpact )
+updateFieldImpact id project args =
+    Api.query { id = id, kind = "fieldImpact", project = project }
+        (Api.Admin.Query.fieldImpact
+            { input =
+                { action = SchemaAction.UpdateField
+                , fieldId = Opt.Present args.fieldId
+                , typeId = Opt.Absent
+                , patch = Opt.Present (fieldPatchInput args)
+                , field = Opt.Absent
+                }
+            }
+            schemaImpact
+        )
+
+
+{-| 押す前の影響。当たるコンテンツの見本は `entryRow` で読む（見出しを付けて別タブで開けるように）。
+-}
+schemaImpact : SelectionSet Model.SchemaImpact Api.Admin.Object.SchemaImpact
+schemaImpact =
+    SS.map2 Model.SchemaImpact
+        SchemaImpact.safe
+        (SchemaImpact.effects
+            (SS.map5 Model.SchemaEffect
+                (SchemaEffect.kind |> SS.map SchemaEffectKind.toString)
+                SchemaEffect.field
+                SchemaEffect.draft
+                SchemaEffect.published
+                (SchemaEffect.entries entryRow)
             )
         )
 

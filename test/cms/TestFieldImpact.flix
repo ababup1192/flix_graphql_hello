@@ -11,9 +11,14 @@ mod TestFieldImpact {
     def field(id: Int64, api: String, kind: FieldKind): FieldDef =
         { id = FieldId.FieldId(id) | CmsTestKit.fieldDef(api, kind) }
 
+    /// n 件当たった。見本は e1, e2, ... を n 件まで（sampleSize を超えない）。
+    def hit(n: Int64): Hit =
+        let shown = Int64.clampToInt32(min = 0, max = FieldImpact.sampleSize(), n);
+        { total = n, entries = List.range(1, shown + 1) |> List.map(i -> CmsTestKit.entryId("e${i}")) }
+
     /// 数え上げの結果。触れていない数は 0。
     def counted(api: String, pairs: List[(String, Int64)]): FieldCount =
-        let pick = key -> List.findMap(match (name, value) -> if (name == key) Some(value) else None, pairs) |> Option.getWithDefault(0i64);
+        let pick = key -> List.findMap(match (name, value) -> if (name == key) Some(value) else None, pairs) |> Option.getWithDefault(0i64) |> hit;
         { typeId = TypeId.TypeId(1i64), apiId = CmsTestKit.apiId(api),
           draft = pick("draft"), published = pick("published"),
           missingPublished = pick("missing"), outsideConfig = pick("outside"), duplicatePublished = pick("duplicate") }
@@ -103,8 +108,8 @@ mod TestFieldImpact {
     def testFieldImpactTypeRemoved(): Unit \ Assert =
         let blogs = CmsTestKit.contentType(1i64, "blogs", TypeKind.Collection, "記事", Nil);
         let table = List#{
-            (List#{{ typeId = TypeId.TypeId(1i64), entries = 5i64 }}, List#{"EntriesRemoved:-(0/5)"}),
-            (List#{{ typeId = TypeId.TypeId(1i64), entries = 0i64 }}, Nil),
+            (List#{{ typeId = TypeId.TypeId(1i64), entries = hit(5i64) }}, List#{"EntriesRemoved:-(0/5)"}),
+            (List#{{ typeId = TypeId.TypeId(1i64), entries = hit(0i64) }}, Nil),
             (Nil,                                                     Nil)
         };
         Assert.assertEq(expected = table |> List.map(match (_, want) -> want),
@@ -122,7 +127,7 @@ mod TestFieldImpact {
         Assert.assertEq(expected = Nil,
             labels(List#{SchemaChange.FieldsReordered(TypeId.TypeId(1i64)), SchemaChange.TypeAdded(blogs)},
                    List#{counted("title", List#{("draft", 9i64), ("published", 9i64)})},
-                   List#{{ typeId = TypeId.TypeId(1i64), entries = 9i64 }}))
+                   List#{{ typeId = TypeId.TypeId(1i64), entries = hit(9i64) }}))
 
     ///
     /// 複数の変更をまとめて渡した時は、変更の順に出る。
@@ -136,5 +141,24 @@ mod TestFieldImpact {
                    List#{counted("body", List#{("draft", 1i64), ("published", 1i64)}),
                          counted("title", List#{("missing", 3i64)})},
                    Nil))
+
+
+    // ---- 見本 ----
+
+    ///
+    /// 影響には当たった entry の見本が付く。件数は正確なまま、見本だけ sampleSize に絞る。
+    /// 消す時は下書きと公開中の見本を合わせ、同じ entry は 1 つ、公開中を先に並べる。
+    ///
+    @Test
+    def testFieldImpactCarriesSample(): Unit \ Assert =
+        let ids = names -> names |> List.map(CmsTestKit.entryId);
+        let count = { typeId = TypeId.TypeId(1i64), apiId = CmsTestKit.apiId("body"),
+                      draft = { total = 40i64, entries = ids(List#{"d1", "d2", "p1"}) },
+                      published = { total = 30i64, entries = ids(List#{"p1", "p2", "p3"}) },
+                      missingPublished = FieldImpact.none(), outsideConfig = FieldImpact.none(), duplicatePublished = FieldImpact.none() };
+        let effects = FieldImpact.of(List#{SchemaChange.FieldRemoved(field(10i64, "body", FieldKind.Text))}, List#{count}, Nil);
+        Assert.assertEq(
+            expected = List#{(40i64, 30i64, List#{"p1", "p2", "p3", "d1", "d2"})},
+            effects |> List.map(effect -> (effect#draft, effect#published, effect#entries |> List.map(EntryId.text))))
 
 }

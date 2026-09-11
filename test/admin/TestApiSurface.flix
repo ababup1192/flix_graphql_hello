@@ -74,7 +74,7 @@ mod TestApiSurface {
                 "Query: contentTypes contentType entries entry assets asset publishCheck impact publishPlan viewer me members invitations apiKeys webhooks webhookDeliveries schedules auditEvents fieldImpact" ::
                 "Referrer: entry via stage" ::
                 "Schedule: id entryId action runAt withDependencies status requestedBy lastError overdue createdAt doneAt" ::
-                "SchemaEffect: kind field draft published" ::
+                "SchemaEffect: kind field draft published entries" ::
                 "SchemaImpact: safe effects" ::
                 "Upload: asset uploadUrl expiresInSeconds" ::
                 "Viewer: kind name roles scope permissions" ::

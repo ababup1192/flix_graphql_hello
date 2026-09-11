@@ -156,6 +156,8 @@ type SchemaEffect {
   draft: Int!
   """公開中に当たる件数"""
   published: Int!
+  """当たる entry の見本。先頭 5 件（更新の新しい順）。残りは draft / published から引く"""
+  entries: [Entry!]!
 }
 
 """スキーマを変える前の影響（dry-run）"""

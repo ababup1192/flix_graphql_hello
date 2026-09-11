@@ -44,3 +44,12 @@ draft =
 published : SelectionSet Int Api.Admin.Object.SchemaEffect
 published =
     Object.selectionForField "Int" "published" [] Decode.int
+
+
+{-| 当たる entry の見本。先頭 5 件（更新の新しい順）。残りは draft / published から引く
+-}
+entries :
+    SelectionSet decodesTo Api.Admin.Object.Entry
+    -> SelectionSet (List decodesTo) Api.Admin.Object.SchemaEffect
+entries object____ =
+    Object.selectionForCompositeField "entries" [] object____ (Basics.identity >> Decode.list)

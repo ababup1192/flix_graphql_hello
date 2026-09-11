@@ -9,8 +9,13 @@ mod SchemaEffectResolvers {
             kind      = (_context, source) -> Ok(AdminMapping.effectKindTo(source#kind)),
             field     = (_context, source) -> Ok(source#apiId |> Option.map(ApiId.text)),
             draft     = (_context, source) -> Ok(Int64.clampToInt32(min = Int32.minValue(), max = Int32.maxValue(), source#draft)),
-            published = (_context, source) -> Ok(Int64.clampToInt32(min = Int32.minValue(), max = Int32.maxValue(), source#published))
+            published = (_context, source) -> Ok(Int64.clampToInt32(min = Int32.minValue(), max = Int32.maxValue(), source#published)),
+            entries   = (_context, source) -> Ok(entriesOf(source))
         }
+
+    /// 見本の entry を読む。ラムダの中で effect を使わないための切り出し（VerifyError）。
+    def entriesOf(source: SchemaEffect): List[Entry] \ DbRead + CmsErr + Tenant + Session =
+        ContentEntries.findMany(Session.grant(), source#entries)
 
 }
 
