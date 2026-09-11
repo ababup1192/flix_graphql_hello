@@ -195,7 +195,8 @@ export class LinkDialog {
       children.push(this.row(typed, "外部のページ", 0, "is-url"));
     }
     if (shown.length > 0) {
-      children.push(head("コンテンツ"));
+      // 打つ前は「最近の」と名乗る。全件のつもりで眺めて「無い」と諦めさせない
+      children.push(head(typed ? "コンテンツ" : "最近のコンテンツ"));
       shown.forEach((candidate, index) => {
         children.push(this.row(candidate.title, `${candidate.type} · ${stageLabel(candidate.stage)}`, urlRow.length + index, ""));
       });
@@ -204,7 +205,7 @@ export class LinkDialog {
       children.push(this.more(this.candidates.length - SHOWN));
     }
     if (children.length === 0) {
-      children.push(note(typed ? "見つかりません" : "コンテンツの名前か URL を入れてください"));
+      children.push(note(typed ? "見つかりません" : "コンテンツ名か URL を入力してください"));
     }
     this.list.replaceChildren(...children);
     if (this.byKey) this.list.querySelector<HTMLElement>(".is-at")?.scrollIntoView({ block: "nearest" });

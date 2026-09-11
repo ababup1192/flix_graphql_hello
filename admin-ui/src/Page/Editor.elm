@@ -693,6 +693,8 @@ update ctx msg model =
 
         LinkSearched query ->
             -- **型ごとに 1 本ずつ投げる**（CMS の一覧は型の中しか探せない）。⌘K と同じやり方。
+            -- 型ごとの上限は面が出す数（8）より多く取る。少ないと「残り N 件」が出ず、
+            -- 打って絞る前に諦める事になる。全部は引かない（打てば CMS 側で絞れる）。
             ( { model | linkCandidates = [] }
             , ctx.types
                 |> List.map
@@ -701,7 +703,7 @@ update ctx msg model =
                             (\id ->
                                 Queries.entries id
                                     ctx.project
-                                    { typeId = summary.id, search = query, stage = "", conditions = [], ids = [], order = "", first = 5, skip = 0 }
+                                    { typeId = summary.id, search = query, stage = "", conditions = [], ids = [], order = "", first = linkCandidatesPerType, skip = 0 }
                             )
                             (GotLinkCandidates summary.name)
                     )
@@ -2539,6 +2541,13 @@ encodeInsert apiId order =
 
         Nothing ->
             ""
+
+
+{-| 本文のリンクの候補を、型ごとに何件まで引くか。
+-}
+linkCandidatesPerType : Int
+linkCandidatesPerType =
+    20
 
 
 encodeCandidate : Model.LinkCandidate -> E.Value
