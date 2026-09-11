@@ -13,7 +13,15 @@
 // TypeScript の api.ts と Elm が持つ）。打った文字を `linksearch` の event で外に出し、
 // 候補は `entries` の属性で返してもらう。
 
-export type Candidate = { id: string; title: string; type: string; stage?: string; path?: string | null };
+export type Candidate = {
+  id: string;
+  title: string;
+  type: string;
+  // 型に人が選んだアイコン。`<svg>` の中身の markup で、Elm の `Ui.Icon` の表から来る。
+  icon?: string;
+  stage?: string;
+  path?: string | null;
+};
 
 // 選んだ物には**入れる文字**を添える。選択が空の時にこれを本文へ挿し込む
 // （Notion / Craft / Zenn / Google ドキュメントが揃って、選んだ物の名前を入れる）。
@@ -163,9 +171,10 @@ export class LinkDialog {
     if (current.entryId) {
       const found = this.linkedOf(current.entryId);
       label.textContent = "今のリンク先（コンテンツ）";
-      icon.innerHTML = ICON_ENTRY;
+      icon.innerHTML = found?.icon ? wrap(found.icon) : ICON_ENTRY;
       if (found) {
         body.textContent = `${found.title}（${found.type} · ${stageLabel(found.stage)}）`;
+        body.title = body.textContent;
         where.textContent = found.path ?? `#entry:${current.entryId}`;
         if (!found.path) where.classList.add("is-weak");
       } else {
@@ -203,7 +212,9 @@ export class LinkDialog {
       // 打つ前は「最近の」と名乗る。全件のつもりで眺めて「無い」と諦めさせない
       children.push(head(typed ? "コンテンツ" : "最近のコンテンツ"));
       shown.forEach((candidate, index) => {
-        children.push(this.row(candidate.title, `${candidate.type} · ${stageLabel(candidate.stage)}`, urlRow.length + index, ""));
+        children.push(
+          this.row(candidate.title, `${candidate.type} · ${stageLabel(candidate.stage)}`, urlRow.length + index, "", candidate.icon),
+        );
       });
     }
     if (this.candidates.length < this.total) {
@@ -235,13 +246,15 @@ export class LinkDialog {
     return button;
   }
 
-  private row(title: string, side: string, index: number, extra: string): HTMLElement {
+  private row(title: string, side: string, index: number, extra: string, art?: string): HTMLElement {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "tt-link-item" + (index === this.at ? " is-at" : "") + (extra ? " " + extra : "");
+    // **題も種類も枠で切れる。** 切れた分は乗せれば読めるようにする。
+    button.title = `${title}（${side}）`;
     const icon = document.createElement("span");
     icon.className = "tt-link-icon";
-    icon.innerHTML = extra === "is-url" ? ICON_OUT : ICON_ENTRY;
+    icon.innerHTML = extra === "is-url" ? ICON_OUT : art ? wrap(art) : ICON_ENTRY;
     const main = document.createElement("span");
     main.className = "tt-link-title";
     main.textContent = title;
@@ -262,6 +275,11 @@ export class LinkDialog {
     });
     return button;
   }
+}
+
+// 型のアイコンを行の頭の大きさに合わせる。中身は `Ui.Icon` の表から来た形だけ。
+function wrap(inner: string): string {
+  return `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 }
 
 // 外部は「外へ出る矢印」、コンテンツは「紙」。行の頭で 2 種類を見分ける。

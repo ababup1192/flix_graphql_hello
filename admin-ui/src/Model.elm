@@ -168,6 +168,9 @@ type alias LinkCandidate =
     { id : String
     , title : String
     , typeName : String
+
+    {- 型に人が選んだアイコンの名前。行の頭を型ごとに見分けるのに使う。 -}
+    , typeIcon : String
     , stage : String
     , path : Maybe String
     }

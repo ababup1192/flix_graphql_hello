@@ -13,7 +13,6 @@ import Html.Attributes exposing (class, href)
 import Html.Events
 import Model exposing (ContentTypeSummary, Person, Project)
 import Route exposing (Route)
-import Svg
 import Ui
 import Ui.Icon as Icon
 
@@ -540,12 +539,12 @@ slugOf config =
 {-| アイコン付きの行。アイコンは**文字より薄く**して、名前が読みやすいままにする。
 文言が固定の行（「メディア」など）に使う。
 -}
-linkWith : Config msg -> Route -> String -> List (Svg.Svg msg) -> Html msg
+linkWith : Config msg -> Route -> String -> List Icon.Shape -> Html msg
 linkWith config route label icon =
     navRow config route icon (text label)
 
 
-navRow : Config msg -> Route -> List (Svg.Svg msg) -> Html msg -> Html msg
+navRow : Config msg -> Route -> List Icon.Shape -> Html msg -> Html msg
 navRow config route icon label =
     let
         on : Bool

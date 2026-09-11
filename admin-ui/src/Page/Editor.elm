@@ -178,9 +178,9 @@ type Msg
     | GotReferrers (Result Api.Problem (List Model.Referrer))
     | LinkSearched String
     | LinkMoreAsked
-    | GotLinkCandidates String (Result Api.Problem Model.EntryList)
+    | GotLinkCandidates TypeMark (Result Api.Problem Model.EntryList)
     | LinkResolveAsked (List String)
-    | GotLinkedEntries String (Result Api.Problem Model.EntryList)
+    | GotLinkedEntries TypeMark (Result Api.Problem Model.EntryList)
     | GotSchedules (Result Api.Problem (List Model.ScheduleRow))
     | GotRefs String String (Result Api.Problem Model.EntryList)
     | GotRefLabels (Result Api.Problem Model.EntryList)
@@ -715,11 +715,11 @@ update ctx msg model =
             , linkFetch ctx model.linkQuery (model.linkPage + 1)
             )
 
-        GotLinkCandidates typeName (Ok page) ->
+        GotLinkCandidates mark (Ok page) ->
             ( { model
                 | linkCandidates =
                     model.linkCandidates
-                        ++ List.map (\row -> { id = row.id, title = EntryLabel.forRow row, typeName = typeName, stage = row.stage, path = row.path }) page.nodes
+                        ++ List.map (\row -> { id = row.id, title = EntryLabel.forRow row, typeName = mark.name, typeIcon = mark.icon, stage = row.stage, path = row.path }) page.nodes
 
                 -- 件数は最初の 1 回で数える（2 回目からは同じ数が返り、足すと二重になる）。
                 , linkTotal =
@@ -753,15 +753,15 @@ update ctx msg model =
                                         ctx.project
                                         { typeId = summary.id, search = "", stage = "", conditions = [], ids = ids, order = "", first = List.length ids, skip = 0 }
                                 )
-                                (GotLinkedEntries summary.name)
+                                (GotLinkedEntries (markOf summary))
                         )
                 )
 
-        GotLinkedEntries typeName (Ok page) ->
+        GotLinkedEntries mark (Ok page) ->
             ( { model
                 | linkedEntries =
                     model.linkedEntries
-                        ++ List.map (\row -> { id = row.id, title = EntryLabel.forRow row, typeName = typeName, stage = row.stage, path = row.path }) page.nodes
+                        ++ List.map (\row -> { id = row.id, title = EntryLabel.forRow row, typeName = mark.name, typeIcon = mark.icon, stage = row.stage, path = row.path }) page.nodes
               }
             , []
             )
@@ -2559,6 +2559,17 @@ encodeInsert apiId order =
             ""
 
 
+{-| 候補の行の頭に出す型の目印。名前とアイコン。
+-}
+type alias TypeMark =
+    { name : String, icon : String }
+
+
+markOf : Model.ContentTypeSummary -> TypeMark
+markOf summary =
+    { name = summary.name, icon = summary.icon }
+
+
 {-| 本文のリンクの候補を、型ごとに 1 回で何件引くか。
 -}
 linkCandidatesPerType : Int
@@ -2587,7 +2598,7 @@ linkFetch ctx query page =
                             , skip = page * linkCandidatesPerType
                             }
                     )
-                    (GotLinkCandidates summary.name)
+                    (GotLinkCandidates (markOf summary))
             )
 
 
@@ -2597,6 +2608,10 @@ encodeCandidate candidate =
         [ ( "id", E.string candidate.id )
         , ( "title", E.string candidate.title )
         , ( "type", E.string candidate.typeName )
+
+        -- 行の頭のアイコン。**`<svg>` の中身をそのまま渡す**（Web Component は Elm の
+        -- Svg を受け取れない）。中身は `Ui.Icon` の表から出た物だけ。
+        , ( "icon", E.string (Icon.markupByName candidate.typeIcon) )
         , ( "stage", E.string candidate.stage )
         , ( "path", candidate.path |> Maybe.map E.string |> Maybe.withDefault E.null )
         ]

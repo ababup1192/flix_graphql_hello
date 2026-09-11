@@ -1,5 +1,6 @@
 module Ui.Icon exposing
-    ( byName
+    ( Shape
+    , byName
     , calendar
     , caret
     , check
@@ -9,6 +10,7 @@ module Ui.Icon exposing
     , entry
     , expand
     , grip
+    , markupByName
     , media
     , ofKind
     , panel
@@ -31,9 +33,18 @@ import Svg exposing (Svg, svg)
 import Svg.Attributes as A
 
 
+{-| アイコンの形。**Elm と Web Component の両方で同じ形を使う**ので、
+Svg の値ではなく素の形で持ち、描く時に Svg か文字列のどちらかにする。
+-}
+type Shape
+    = Path String
+    | Circle String String String
+    | Rect String String String String String
+
+
 {-| 16px で描く。文の中や表の行に置く既定の大きさ。
 -}
-view : List (Svg msg) -> Html msg
+view : List Shape -> Html msg
 view paths =
     svg
         [ A.viewBox "0 0 24 24"
@@ -46,7 +57,43 @@ view paths =
         , A.strokeLinejoin "round"
         , A.class "shrink-0"
         ]
-        paths
+        (List.map toSvg paths)
+
+
+{-| Web Component へ渡す形。`<svg>` の中身だけを文字列にする。
+
+WhyNot: TypeScript 側に同じ形の表を作らない。増やした時に片方だけ古くなる。
+
+-}
+markupByName : String -> String
+markupByName name =
+    byName name |> List.map toMarkup |> String.concat
+
+
+toSvg : Shape -> Svg msg
+toSvg shape =
+    case shape of
+        Path d ->
+            Svg.path [ A.d d ] []
+
+        Circle cx cy r ->
+            Svg.circle [ A.cx cx, A.cy cy, A.r r ] []
+
+        Rect x y width height radius ->
+            Svg.rect [ A.x x, A.y y, A.width width, A.height height, A.rx radius ] []
+
+
+toMarkup : Shape -> String
+toMarkup shape =
+    case shape of
+        Path d ->
+            "<path d=\"" ++ d ++ "\"/>"
+
+        Circle cx cy r ->
+            "<circle cx=\"" ++ cx ++ "\" cy=\"" ++ cy ++ "\" r=\"" ++ r ++ "\"/>"
+
+        Rect x y width height radius ->
+            "<rect x=\"" ++ x ++ "\" y=\"" ++ y ++ "\" width=\"" ++ width ++ "\" height=\"" ++ height ++ "\" rx=\"" ++ radius ++ "\"/>"
 
 
 
@@ -56,7 +103,7 @@ view paths =
 {-| フィールドの種類のアイコン。**一覧・入力欄のラベル・種類を選ぶ所で同じ物を使う**
 （場所ごとに変えると、同じ種類だと分からなくなる）。
 -}
-ofKind : String -> List (Svg msg)
+ofKind : String -> List Shape
 ofKind kind =
     case kind of
         "TEXT" ->
@@ -104,7 +151,7 @@ ofKind kind =
 
 {-| 日付と日時で同じ暦を使う。**違うのは時刻を持つかだけ**で、絵で分ける物ではない。
 -}
-calendar : List (Svg.Svg msg)
+calendar : List Shape
 calendar =
     [ rect "3" "5" "18" "16" "2", path "M8 3v4", path "M16 3v4", path "M3 11h18" ]
 
@@ -146,7 +193,7 @@ choices =
 
 {-| 名前からアイコン。知らない名前は一覧のアイコンにする（CMS が名前を増やしても壊れない）。
 -}
-byName : String -> List (Svg msg)
+byName : String -> List Shape
 byName name =
     case name of
         "file" ->
@@ -206,26 +253,26 @@ byName name =
 
 {-| 何件も持つ API（COLLECTION）。**積み重なった紙**。
 -}
-collection : List (Svg msg)
+collection : List Shape
 collection =
     [ rect "3" "7" "18" "14" "2", path "M6 4h12" ]
 
 
 {-| 1 件だけの API（SINGLETON）。**紙 1 枚**。
 -}
-singleton : List (Svg msg)
+singleton : List Shape
 singleton =
     [ path "M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z", path "M14 3v5h5" ]
 
 
-media : List (Svg msg)
+media : List Shape
 media =
     [ rect "3" "4" "18" "16" "2", circle "9" "10" "2", path "M21 16l-5-5-7 7" ]
 
 
 {-| プロジェクトの設定。歯車。
 -}
-project : List (Svg msg)
+project : List Shape
 project =
     [ circle "12" "12" "3"
     , path "M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 003.68 15a1.65 1.65 0 00-1.51-1H2a2 2 0 110-4h.09A1.65 1.65 0 003.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6 1.65 1.65 0 0010 3.09V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0020.4 9v0a1.65 1.65 0 001.51 1H22a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"
@@ -238,31 +285,31 @@ project =
 
 {-| 掴んで動かす所。**行の左端**に置く（GitHub / Notion / Contentful と同じ）。
 -}
-grip : List (Svg msg)
+grip : List Shape
 grip =
     [ circle "9" "6" "1", circle "15" "6" "1", circle "9" "12" "1", circle "15" "12" "1", circle "9" "18" "1", circle "15" "18" "1" ]
 
 
-panel : List (Svg msg)
+panel : List Shape
 panel =
     [ rect "3" "3" "18" "18" "2", path "M9 3v18", path "M16 15l-3-3 3-3" ]
 
 
 {-| 列の状態を表す丸（GitHub の Projects と同じ形）。
 -}
-stage : List (Svg msg)
+stage : List Shape
 stage =
     [ circle "12" "12" "8" ]
 
 
 {-| コンテンツ 1 件。カードの左肩に置く。
 -}
-entry : List (Svg msg)
+entry : List Shape
 entry =
     [ circle "12" "12" "9", circle "12" "12" "3" ]
 
 
-caret : List (Svg msg)
+caret : List Shape
 caret =
     [ path "M6 9l6 6 6-6" ]
 
@@ -271,33 +318,33 @@ caret =
 外向き（左下と右上へ出る）が広げる、内向きが元に戻す。
 Contentful / Notion / Sanity / Google ドキュメントが揃ってこの形を使っている。
 -}
-expand : List (Svg msg)
+expand : List Shape
 expand =
     [ path "M15 3h6v6", path "M9 21H3v-6", path "M21 3l-7 7", path "M3 21l7-7" ]
 
 
-collapse : List (Svg msg)
+collapse : List Shape
 collapse =
     [ path "M20 10h-6V4", path "M4 14h6v6", path "M21 3l-7 7", path "M3 21l7-7" ]
 
 
 {-| 検索。上のバーの中央の欄に置く。**狭い画面ではこれだけが残る。**
 -}
-search : List (Svg msg)
+search : List Shape
 search =
     [ circle "11" "11" "7", path "M20 20l-4.3-4.3" ]
 
 
 {-| 選んでいる物の印。行の右端に置く。
 -}
-check : List (Svg msg)
+check : List Shape
 check =
     [ path "M4 12.5l5 5 11-11" ]
 
 
 {-| クリップボードへコピー。値の枠の中の右端に置く（GitHub / Stripe と同じ位置）。
 -}
-copy : List (Svg msg)
+copy : List Shape
 copy =
     [ rect "9" "9" "11" "11" "2", path "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" ]
 
@@ -306,16 +353,16 @@ copy =
 -- 下ごしらえ
 
 
-path : String -> Svg msg
+path : String -> Shape
 path d =
-    Svg.path [ A.d d ] []
+    Path d
 
 
-circle : String -> String -> String -> Svg msg
+circle : String -> String -> String -> Shape
 circle cx cy r =
-    Svg.circle [ A.cx cx, A.cy cy, A.r r ] []
+    Circle cx cy r
 
 
-rect : String -> String -> String -> String -> String -> Svg msg
+rect : String -> String -> String -> String -> String -> Shape
 rect x y width height radius =
-    Svg.rect [ A.x x, A.y y, A.width width, A.height height, A.rx radius ] []
+    Rect x y width height radius

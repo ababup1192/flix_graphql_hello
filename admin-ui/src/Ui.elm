@@ -68,6 +68,7 @@ import Html.Events as E
 import Json.Decode
 import Svg
 import Svg.Attributes as SvgA
+import Ui.Icon as Icon
 
 
 {-| 主な操作のボタン。色はアクセント（GitHub / Contentful と同じで、黒ではなく青系）。
@@ -488,7 +489,7 @@ page attrs =
 
 {-| 画面の題の行。`meta` は題のすぐ右（API の名前など）、`actions` は右端に寄る。
 -}
-pageHeader : { title : String, icon : Maybe ( List (Svg.Svg msg), msg ), meta : List (Html msg), actions : List (Html msg) } -> Html msg
+pageHeader : { title : String, icon : Maybe ( List Icon.Shape, msg ), meta : List (Html msg), actions : List (Html msg) } -> Html msg
 pageHeader args =
     -- 狭い画面では折り返す。題と操作を 1 行に押し込むと、どちらも 1 文字ずつ縦に割れる
     Html.div [ A.class "flex min-h-8 flex-wrap items-center gap-x-3 gap-y-2" ]
@@ -502,7 +503,7 @@ pageHeader args =
 {-| 題の左のアイコン。**押すと選び直せる**（Notion のページの絵文字と同じ）。
 選べない人には出さない。
 -}
-viewHeaderIcon : Maybe ( List (Svg.Svg msg), msg ) -> Html msg
+viewHeaderIcon : Maybe ( List Icon.Shape, msg ) -> Html msg
 viewHeaderIcon icon =
     case icon of
         Just ( paths, onPick ) ->
@@ -511,28 +512,10 @@ viewHeaderIcon icon =
                 , A.title "アイコンを選ぶ"
                 , E.onClick onPick
                 ]
-                [ Html.div [ A.class "scale-125" ] [ iconView paths ] ]
+                [ Html.div [ A.class "scale-125" ] [ Icon.view paths ] ]
 
         Nothing ->
             Html.text ""
-
-
-{-| ここだけ `Ui.Icon.view` と同じ物を持つ。
-WhyNot: `Ui.Icon` を import しない。`Ui.Icon` が `Ui` を使うと循環する。
--}
-iconView : List (Svg.Svg msg) -> Html msg
-iconView paths =
-    Svg.svg
-        [ SvgA.viewBox "0 0 24 24"
-        , SvgA.width "16"
-        , SvgA.height "16"
-        , SvgA.fill "none"
-        , SvgA.stroke "currentColor"
-        , SvgA.strokeWidth "1.8"
-        , SvgA.strokeLinecap "round"
-        , SvgA.strokeLinejoin "round"
-        ]
-        paths
 
 
 {-| 右のレールの小見出し。表の見出しと同じ重さにして、レールが本文と競わないようにする。
