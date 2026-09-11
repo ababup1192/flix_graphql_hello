@@ -1,0 +1,137 @@
+<title>ギャラリーの挙動</title>
+<style>
+  :root { --bg: #0d1117; --panel: #161b22; --edge: #30363d; --fg: #e6edf0; --fg-2: #8b949e; --fg-3: #6e7681; --frame: #7fb3d5; --bar: #2b2f33; --on: #4bb08a; --warn: #e0925f; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 0; padding: 28px 32px 48px; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 6px; }
+  p.lead { color: var(--fg-2); font-size: 13px; margin: 0 0 28px; max-width: 60rem; line-height: 1.8; }
+
+  .step { border: 1px dashed var(--edge); border-radius: 8px; padding: 64px 28px 24px; position: relative; margin-bottom: 28px; }
+  .step > h2 { position: absolute; top: 12px; left: 16px; font-size: 12px; font-weight: 600; color: var(--fg-2); margin: 0; }
+  .step > .q { position: absolute; top: 12px; right: 16px; font-size: 11px; color: var(--warn); }
+  .note { font-size: 12px; color: var(--fg-3); margin: 14px 0 0; line-height: 1.8; }
+  .note b { color: var(--fg-2); font-weight: 600; }
+
+  figure { margin: 0; position: relative; }
+  .shot { display: block; width: 100%; aspect-ratio: 4 / 3; border-radius: 2px; background: linear-gradient(130deg, #2d4e6b, #1b2430 70%); }
+  .shot.b { background: linear-gradient(130deg, #4a3a63, #221a2e 70%); }
+  .shot.c { background: linear-gradient(130deg, #2f5c4a, #16251f 70%); }
+  .one { max-width: 26rem; margin: 0 auto; }
+  figcaption { margin-top: .5em; text-align: center; font-size: 13px; color: var(--fg-2); }
+  figcaption.ph { color: var(--fg-3); }
+  figcaption.hide { visibility: hidden; }
+
+  figure[data-gallery] { display: grid; gap: 8px; }
+  figure[data-gallery="2"] { grid-template-columns: repeat(2, 1fr); }
+  figure[data-gallery="3"] { grid-template-columns: repeat(3, 1fr); }
+  figure[data-gallery] > figcaption { grid-column: 1 / -1; }
+  figure[data-gallery] figure figcaption { font-size: 12px; }
+  .sel { outline: 4px solid var(--frame); }
+  .sel-in { outline: 3px solid var(--frame); }
+
+  .bar { position: absolute; top: -56px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 16px;
+    height: 44px; padding: 0 14px; border-radius: 6px; background: var(--bar); box-shadow: 0 2px 8px rgb(0 0 0 / .35); white-space: nowrap; }
+  .bar span { display: inline-flex; align-items: center; height: 30px; padding: 0 4px; color: #fff; font-size: 12px; }
+  .bar span.on { color: var(--on); }
+
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
+  .arrow { text-align: center; color: var(--fg-3); font-size: 22px; margin: 10px 0; }
+</style>
+
+<h1>ギャラリーとキャプションの挙動（こちらの想定）</h1>
+<p class="lead">違う所を指差してください。橙色の印が付いている所は、まだ決まっていない点です。</p>
+
+<div class="step">
+  <h2>1. 画像を 2 枚以上えらぶと、並んだ状態で入る</h2>
+  <figure data-gallery="2">
+    <span class="shot"></span>
+    <span class="shot b"></span>
+  </figure>
+  <p class="note">メディアの面で 2 枚えらぶと、こう入ります。<b>列数は選ばせません。</b>2 枚なら 2 列、3 枚なら 3 列、4 枚以上は 3 列で折り返します。</p>
+</div>
+
+<div class="step">
+  <h2>2. 並んだ画像ぜんたいを選んだ時（枠は外側）</h2>
+  <figure data-gallery="2" class="sel">
+    <div class="bar"><span class="on">1 枚ずつに戻す</span><span>削除</span></div>
+    <span class="shot"></span>
+    <span class="shot b"></span>
+  </figure>
+  <p class="note">帯は <b>2 つだけ</b>。縮小と配置は並べている間は出しません（列の幅が決まっているので効かないため）。</p>
+</div>
+
+<div class="step">
+  <h2>3. 並んだ中の 1 枚を選んだ時（枠は内側）</h2>
+  <figure data-gallery="2">
+    <span class="shot"></span>
+    <figure style="position: relative">
+      <div class="bar"><span>リンク</span><span>ALT</span><span>削除</span></div>
+      <span class="shot b sel-in"></span>
+    </figure>
+  </figure>
+  <p class="note">帯は <b>リンク / ALT / 削除</b>。縮小と配置は出しません。<br>「ぜんたい」と「1 枚」で帯が変わります。<b>ここが分かりにくいかもしれません。</b></p>
+</div>
+
+<div class="step">
+  <h2>4. キャプションは画像ごと。空の時は場所だけ空ける</h2>
+  <div class="row">
+    <div>
+      <figure data-gallery="2">
+        <figure><span class="shot"></span><figcaption class="hide">キャプションを入力</figcaption></figure>
+        <figure><span class="shot b"></span><figcaption class="hide">キャプションを入力</figcaption></figure>
+      </figure>
+      <p class="note">触っていない時。<b>文字は出しませんが、場所は空けます</b>（乗せた時に本文が動かないように）。</p>
+    </div>
+    <div>
+      <figure data-gallery="2">
+        <figure><span class="shot"></span><figcaption class="ph">キャプションを入力</figcaption></figure>
+        <figure><span class="shot b"></span><figcaption>2 枚目の説明</figcaption></figure>
+      </figure>
+      <p class="note">乗せた時、または書いた時。</p>
+    </div>
+  </div>
+</div>
+
+<div class="step">
+  <h2>5. 1 枚消すと、単独の画像に戻る</h2>
+  <div class="row">
+    <div>
+      <figure data-gallery="2">
+        <span class="shot"></span>
+        <figure style="position: relative"><div class="bar"><span>削除</span></div><span class="shot b sel-in"></span></figure>
+      </figure>
+      <p class="note">2 枚目を消すと…</p>
+    </div>
+    <div>
+      <figure class="one"><span class="shot"></span><figcaption class="hide">キャプションを入力</figcaption></figure>
+      <p class="note">…1 枚の画像に戻り、帯も <b>リンク / ALT / 縮小 / 配置 / 削除</b> の 5 つに戻ります。</p>
+    </div>
+  </div>
+</div>
+
+<div class="step">
+  <h2>6. 逆向き。1 枚の画像に画像を足すと並ぶ</h2>
+  <p class="note"><b>ここが未定です。</b>1 枚の画像の隣に画像を足す道が今ありません。<br>
+  案 A: 画像を選んだ帯に「画像を足す」を置く。案 B: 2 枚目を貼ると自動で隣に並ぶ。案 C: 並べ直しは「1 枚ずつに戻す」→ メディアから選び直す。</p>
+</div>
+
+<div class="step">
+  <h2 style="color: var(--warn)">7. ぜんたいのキャプション（要るかどうか）</h2>
+  <span class="q">未定</span>
+  <div class="row">
+    <div>
+      <figure data-gallery="2">
+        <figure><span class="shot"></span><figcaption>1 枚目</figcaption></figure>
+        <figure><span class="shot b"></span><figcaption>2 枚目</figcaption></figure>
+        <figcaption>3 枚の写真（ぜんたい）</figcaption>
+      </figure>
+      <p class="note">案 A: 画像ごと＋ぜんたいの <b>2 層</b>。</p>
+    </div>
+    <div>
+      <figure data-gallery="2">
+        <figure><span class="shot"></span><figcaption>1 枚目</figcaption></figure>
+        <figure><span class="shot b"></span><figcaption>2 枚目</figcaption></figure>
+      </figure>
+      <p class="note">案 B: <b>画像ごとだけ</b>（ぜんたいは持たない）。ユーザーの「いらないかも」はこちら。<br>作りは単純になり、HTML も入れ子が浅くなります。</p>
+    </div>
+  </div>
+</div>

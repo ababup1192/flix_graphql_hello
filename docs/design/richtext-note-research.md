@@ -20,7 +20,7 @@
 | 太字 | あり | `**` / `__` の Markdown ショートカット、Ctrl+B | https://note.com/info/n/naf341f23d0e5 |
 | 斜体 | Markdown 記事では「対応」と書かれているが、公式のツールバー項目には無い。要確認（推測: 貼り付け時にだけ効く） | https://note.com/samurai_worker/n/n5dde9444a33f |
 | 取り消し線 | あり | `~~ ~~`、Ctrl+Shift+X | https://note.com/info/n/n611d3e257e54 |
-| 引用 | あり | 背景を薄グレーに。「出典元」を右下に書け、URL を埋め込める | https://note.com/info/n/n611d3e257e54 |
+| 引用 | あり | 左に細い縦線（2026-09-11 に実物で確認。公式記事の「背景を薄グレーに」は古い版の説明で、今の編集画面は線のみ）。「出典元」を右下に書け、URL を埋め込める | https://note.com/info/n/n611d3e257e54 |
 | コード | あり | 「コード用のエリアを埋め込む」ブロック。Ctrl+Alt+\\。インラインコードは `` ` `` の貼り付け変換のみ（推測）。シンタックスハイライトは「今後予定」として 2022 年に告知、編集画面では反映されず投稿後に反映との利用者報告 | https://www.help-note.com/hc/ja/articles/360012426133 、https://note.com/info/n/nbd9ec2e0ade5 、https://note.com/sumini/n/n9cc3d458f5a1 |
 | 区切り線 | あり | + ボタン「区切り線」、`---` | https://note.com/info/n/n611d3e257e54 |
 | 箇条書き / 番号付き | あり | `-` / `1.`、5 段階まで、Tab / Shift+Tab、Ctrl+] / Ctrl+[ | https://note.com/info/n/n611d3e257e54 |

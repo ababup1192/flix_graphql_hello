@@ -20,8 +20,7 @@
   .body h2 { font-size: 1.5rem; line-height: 1.5; margin: 2.8em 0 .9em; }
   .body h3 { font-size: 1.2rem; line-height: 1.5; margin: 2.2em 0 .8em; }
   .body a { color: var(--accent); text-decoration: underline; text-underline-offset: .2em; }
-  .body hr { border: 0; text-align: center; margin: 3em 0; }
-  .body hr::before { content: "＊　＊　＊"; color: var(--fg-3); letter-spacing: .3em; }
+  .body hr { border: 0; border-top: 1px solid var(--line); height: 0; margin: 3em 0; }
 
   /* 画像 + キャプション + 出典 */
   .body figure { margin: 2.2em 0; }
@@ -33,7 +32,8 @@
   .body figcaption cite a { color: inherit; }
 
   /* 引用 + 出典（出典は figcaption に置く。blockquote の外） */
-  .body figure[data-quote] blockquote { margin: 0; padding: .2em 0 .2em 1.25em; border-left: 3px solid var(--line); color: var(--fg-2); }
+  .body figure[data-quote] { margin: 2.2em 0; padding: .2em 0 .2em 1.25em; border-left: 3px solid var(--line); }
+  .body figure[data-quote] blockquote { margin: 0; padding: 0; border-left: 0; color: var(--fg-2); }
   .body figure[data-quote] blockquote p:last-child { margin-bottom: 0; }
   .body figure[data-quote] figcaption { text-align: right; }
   .body figure[data-quote] figcaption cite::before { content: "— "; }
@@ -182,7 +182,7 @@
 
     <hr>
 
-    <p>区切り線は note と同じく「＊」の並びで出す。これも hr に CSS を当てるだけで、HTML は素の hr。</p>
+    <p>区切り線は note と同じ 1 本の横線。これも hr に CSS を当てるだけで、HTML は素の hr。</p>
   </div>
 
 

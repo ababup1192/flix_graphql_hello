@@ -1,0 +1,75 @@
+<title>引用モック</title>
+<style>
+  :root { --bg: #252c33; --quote-bg: #0d1117; --fg: #e6edf0; --fg-2: #9aa3aa; --fg-3: #79828a; --rule: #5c6771; --plus: #79828a; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 0; padding: 32px; }
+  h1 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+  p.lead { color: var(--fg-2); font-size: 13px; margin: 0 0 32px; }
+  .grid { display: flex; flex-direction: column; gap: 36px; }
+  .state { border: 1px dashed #3d464e; border-radius: 8px; padding: 48px 40px 32px; position: relative; }
+  .state > h2 { position: absolute; top: 12px; left: 16px; font-size: 12px; font-weight: 500; color: var(--fg-2); margin: 0; }
+
+  /* 引用ぜんたい。線も枠も無い。濃い背景の箱と、その外の下の出典だけ。
+     WhyNot: 左に縦線を引かない（2026-09-11 に実物で確認。最初のスクリーンショットに
+     写っていた縦線は引用の物ではなかった）。 */
+  .quote { position: relative; margin: 28px 0; }
+  /* 引用の本文は濃い背景の箱 */
+  .quote .box { background: var(--quote-bg); padding: 34px 46px; }
+  .quote .box p { margin: 0 0 26px; font-size: 17px; line-height: 1.8; }
+  .quote .box p:last-child { margin-bottom: 0; }
+  /* 出典は箱の外、下の右 */
+  .quote .cite { margin-top: 18px; text-align: right; font-size: 15px; color: var(--fg); }
+  .quote .cite.is-empty { color: var(--fg-3); }
+  .quote .cite a { color: inherit; text-decoration: underline; text-underline-offset: .2em; }
+
+  /* 空の段落に出る「+」。引用の左の外 */
+  .plus { position: absolute; left: -46px; bottom: 18px; width: 40px; height: 40px; border-radius: 50%;
+    border: 1px solid #4c555d; color: var(--plus); display: flex; align-items: center; justify-content: center; font-size: 22px; }
+
+  .para { color: var(--fg-2); font-size: 15px; }
+  hr.rule { border: 0; border-top: 1px solid #4c555d; margin: 26px 0; }
+  .note { font-size: 12px; color: var(--fg-3); margin-top: 12px; }
+</style>
+
+<h1>引用モック（note の実物に合わせる）</h1>
+<p class="lead">2026-09-11 のスクリーンショットから起こした。本文は濃い背景の箱、出典は箱の外の下の右。線も枠も無い。</p>
+
+<div class="grid">
+
+  <section class="state">
+    <h2>1. 出典がまだ空（placeholder が出る）</h2>
+    <div class="quote">
+      <div class="box"><p>aaaaaaa</p><p>aaa</p></div>
+      <div class="cite is-empty">出典を入力</div>
+    </div>
+    <p class="note">箱と出典の間は 18px ほど空く。左に線は引かない。</p>
+  </section>
+
+  <section class="state">
+    <h2>2. 出典を入れた（カーソルが出典にある）</h2>
+    <hr class="rule">
+    <div class="quote">
+      <div class="plus">+</div>
+      <div class="box"><p>aaaaaaa</p><p>aaa</p></div>
+      <div class="cite">テスト</div>
+    </div>
+    <p class="note">入れた出典は本文と同じ濃さの白。下線も枠も出さない。左の「+」は本文の空段落の目印で、引用の一部ではない。</p>
+  </section>
+
+  <section class="state">
+    <h2>3. 出典に URL がある（こちらの決め。note に無い）</h2>
+    <div class="quote">
+      <div class="box"><p>Simplicity is the ultimate sophistication.</p></div>
+      <div class="cite"><a href="#">Leonardo da Vinci</a></div>
+    </div>
+    <p class="note">URL は出典の文字にリンクとして掛ける。欄を 2 つ横に並べない（note は 1 つ）。</p>
+  </section>
+
+  <section class="state">
+    <h2>4. 出典が無いまま確定した（欄も placeholder も出さない）</h2>
+    <div class="quote">
+      <div class="box"><p>出典の無い引用。箱だけ。</p></div>
+    </div>
+    <p class="note">焦点が外れていて出典が空なら、その行ごと出さない。</p>
+  </section>
+
+</div>

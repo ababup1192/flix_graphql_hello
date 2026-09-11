@@ -1,0 +1,105 @@
+<title>画像とギャラリーのモック</title>
+<style>
+  :root { --bg: #0d1117; --panel: #161b22; --edge: #30363d; --fg: #e6edf0; --fg-2: #8b949e; --fg-3: #6e7681; --frame: #7fb3d5; --bar: #2b2f33; --on: #4bb08a; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 0; padding: 32px; }
+  h1 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+  p.lead { color: var(--fg-2); font-size: 13px; margin: 0 0 32px; }
+  .grid { display: flex; flex-direction: column; gap: 44px; }
+  .state { border: 1px dashed var(--edge); border-radius: 8px; padding: 88px 32px 32px; position: relative; }
+  .state > h2 { position: absolute; top: 12px; left: 16px; font-size: 12px; font-weight: 500; color: var(--fg-2); margin: 0; }
+
+  figure { margin: 0; position: relative; }
+  .shot { display: block; width: 100%; aspect-ratio: 4 / 3; border-radius: 2px; background: linear-gradient(130deg, #2d4e6b, #1b2430 70%); }
+  .shot.b { background: linear-gradient(130deg, #4a3a63, #221a2e 70%); }
+  .shot.c { background: linear-gradient(130deg, #2f5c4a, #16251f 70%); }
+  figcaption { margin-top: .6em; text-align: center; font-size: 13px; color: var(--fg-2); }
+  figcaption.is-empty { color: var(--fg-3); }
+  .one { max-width: 34rem; margin: 0 auto; }
+
+  /* 複数枚。並べ方は編集画面では折り返し */
+  figure[data-gallery] { display: grid; gap: 8px; }
+  figure[data-gallery="2"] { grid-template-columns: repeat(2, 1fr); }
+  figure[data-gallery="3"] { grid-template-columns: repeat(3, 1fr); }
+  figure[data-gallery="4"] { grid-template-columns: repeat(3, 1fr); }
+  figure[data-gallery] > figcaption { grid-column: 1 / -1; }
+  figure[data-gallery] figure figcaption { font-size: 12px; }
+
+  .sel { outline: 4px solid var(--frame); }
+
+  .bar { position: absolute; top: -68px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 18px;
+    height: 52px; padding: 0 16px; border-radius: 6px; background: var(--bar); box-shadow: 0 2px 8px rgb(0 0 0 / .35); white-space: nowrap; }
+  .bar button { all: unset; display: inline-flex; align-items: center; justify-content: center; height: 36px; padding: 0 6px; border-radius: 4px; color: #fff; font-size: 13px; }
+  .bar button.is-on { color: var(--on); }
+  .bar svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .note { font-size: 12px; color: var(--fg-3); margin-top: 14px; }
+</style>
+
+<h1>画像とギャラリーのモック</h1>
+<p class="lead">docs/design/richtext-gallery-ui.md の決め。node は 1 つで、1 枚でも複数枚でも同じ。列数は選ばせず枚数から決める。キャプションは全体と画像ごとの 2 層。</p>
+
+<div class="grid">
+
+  <section class="state">
+    <h2>1. 1 枚（今までどおり）</h2>
+    <figure class="one sel">
+      <div class="bar">
+        <button title="リンク"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l3-3a5 5 0 0 0-7.1-7.1l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.1 0l-3 3a5 5 0 0 0 7.1 7.1l1.5-1.5"/></svg></button>
+        <button title="ALT">ALT</button>
+        <button title="縮小"><svg viewBox="0 0 24 24"><path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M14 10l7-7"/><path d="M3 21l7-7"/></svg></button>
+        <button title="配置"><svg viewBox="0 0 24 24"><path d="M3 5h18"/><path d="M3 10h10"/><path d="M3 15h10"/><path d="M3 20h18"/></svg></button>
+        <button title="削除"><svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg></button>
+      </div>
+      <span class="shot"></span>
+      <figcaption class="is-empty">キャプションを入力</figcaption>
+    </figure>
+    <p class="note">帯は note と同じ リンク / ALT / 縮小 / 配置 / 削除 の 5 つ。キャプションは画像の下の欄に直接書く。</p>
+  </section>
+
+  <section class="state">
+    <h2>2. 3 枚（列数は選ばせず枚数から決まる）</h2>
+    <figure data-gallery="3" class="sel">
+      <div class="bar">
+        <button class="is-on" title="1 枚ずつに戻す"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1"/></svg></button>
+        <button title="削除"><svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg></button>
+      </div>
+      <span class="shot"></span>
+      <span class="shot b"></span>
+      <span class="shot c"></span>
+      <figcaption class="is-empty">キャプションを入力</figcaption>
+    </figure>
+    <p class="note">帯は「1 枚ずつに戻す」「削除」だけ。列数の欄は無い。縮小と配置は並べている間は出さない。</p>
+  </section>
+
+  <section class="state">
+    <h2>3. 画像ごとのキャプション（2 層）</h2>
+    <figure data-gallery="3">
+      <span class="shot"></span>
+      <figure><span class="shot b"></span><figcaption>2 枚目だけ説明</figcaption></figure>
+      <span class="shot c"></span>
+      <figcaption>3 枚の写真</figcaption>
+    </figure>
+    <p class="note">画像ごとのキャプションがある画像だけ figure で包む。無い画像は素の img のまま。全体のキャプションは下に 1 つ。</p>
+  </section>
+
+  <section class="state">
+    <h2>4. 4 枚以上（編集画面は折り返す。横に送るかはサイトの CSS が決める）</h2>
+    <figure data-gallery="4">
+      <span class="shot"></span>
+      <span class="shot b"></span>
+      <span class="shot c"></span>
+      <span class="shot"></span>
+      <figcaption>4 枚の写真</figcaption>
+    </figure>
+    <p class="note">HTML は並べ方を持たない。`data-gallery` の値は枚数。横スクロールにしたいサイトは CSS で決める。</p>
+  </section>
+
+  <section class="state">
+    <h2>5. 1 枚に戻った時（自動で単独の見た目に）</h2>
+    <figure class="one">
+      <span class="shot b"></span>
+      <figcaption>2 枚目だけ説明</figcaption>
+    </figure>
+    <p class="note">node は同じなので、子が 1 つになれば自動でこの見た目になる。作り直しは起きない。</p>
+  </section>
+
+</div>
