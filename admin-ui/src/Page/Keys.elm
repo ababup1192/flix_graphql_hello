@@ -16,12 +16,13 @@ import Api.Admin.Enum.Role as Role
 import Api.Admin.Enum.WebhookEvent as WebhookEvent
 import Html exposing (Html, div, span, text)
 import Html.Attributes exposing (class, placeholder, value)
-import Html.Events exposing (onClick, onInput)
+import Html.Events exposing (onInput)
 import Loaded exposing (Loaded)
 import Model exposing (ApiKeyRow, IssuedKey, IssuedWebhook, Slug, WebhookRow)
 import Queries
 import Time
 import Ui
+import Ui.Confirm
 import Ui.DateTime
 import Ui.Reply as Reply exposing (Reply)
 import Ui.Secret
@@ -70,6 +71,7 @@ type Msg
     | GotHookDeleted (Result Api.Problem String)
     | EscapePressed
     | ZoneKnown Time.Zone
+    | Ignored
 
 
 init : Model
@@ -228,6 +230,9 @@ update ctx msg model =
         ZoneKnown zone ->
             ( { model | zone = zone }, [] )
 
+        Ignored ->
+            ( model, [] )
+
 
 scopeOptions : List ( String, String )
 scopeOptions =
@@ -283,6 +288,34 @@ view model =
             Nothing ->
                 viewHookForm model
         , viewHooks model
+        , case model.confirmRevoke of
+            Just row ->
+                Ui.Confirm.view
+                    { title = "「" ++ row.name ++ "」を失効しますか"
+                    , body = "この API キーを使っているサイトやツールは、すぐに読み書きできなくなります。元には戻せません。"
+                    , confirm = "失効"
+                    , reply = model.revoking
+                    , onConfirm = RevokeConfirmed
+                    , onCancel = RevokeCancelled
+                    , ignore = Ignored
+                    }
+
+            Nothing ->
+                text ""
+        , case model.confirmHookDelete of
+            Just hook ->
+                Ui.Confirm.view
+                    { title = "「" ++ hook.name ++ "」を削除しますか"
+                    , body = "この URL への通知が止まります。配信の記録も見られなくなります。元には戻せません。"
+                    , confirm = "削除"
+                    , reply = model.deleting
+                    , onConfirm = HookDeleteConfirmed
+                    , onCancel = HookDeleteCancelled
+                    , ignore = Ignored
+                    }
+
+            Nothing ->
+                text ""
         ]
 
 
@@ -317,7 +350,7 @@ viewKeys model =
                 else
                     Ui.table
                         (Ui.headRowOf keyColumns [ text "名前", text "キー", text "権限", text "作成日", text "有効期限", text "最後に使った日", text "" ]
-                            :: List.concatMap (viewKey model) rows
+                            :: List.map (viewKey model) rows
                         )
         }
         model.keys
@@ -333,9 +366,9 @@ hookColumns =
     "grid-cols-[1fr_260px_80px_60px]"
 
 
-{-| 鍵の 1 行と、失効の確認。確認は行の直下に出す（何を失効するかが目に入ったまま押せる）。
+{-| 鍵の 1 行。失効は確認のモーダルを経る。
 -}
-viewKey : Model -> ApiKeyRow -> List (Html Msg)
+viewKey : Model -> ApiKeyRow -> Html Msg
 viewKey model row =
     let
         revoked : Bool
@@ -370,27 +403,6 @@ viewKey model row =
           else
             div [ class "text-right" ] [ Ui.dangerLink (RevokeAsked row) "失効" ]
         ]
-        :: (case model.confirmRevoke of
-                Just asked ->
-                    if asked.id == row.id then
-                        [ Ui.callout Ui.toneWarn
-                            [ class "gap-2 rounded-none border-x-0 p-3" ]
-                            [ Ui.subheading ("「" ++ row.name ++ "」を失効しますか")
-                            , Ui.note [ text "この API キーを使っているサイトやツールは、すぐに読み書きできなくなります。元には戻せません。" ]
-                            , div [ class "flex items-center gap-2" ]
-                                [ Ui.button [ onClick RevokeConfirmed, Html.Attributes.disabled (Reply.isSending model.revoking) ] [ text "失効" ]
-                                , Ui.ghostButton [ onClick RevokeCancelled ] [ text "キャンセル" ]
-                                , Reply.view model.revoking
-                                ]
-                            ]
-                        ]
-
-                    else
-                        []
-
-                Nothing ->
-                    []
-           )
 
 
 {-| 末尾 4 文字。古い鍵は持っていないので「…」だけ。
@@ -455,13 +467,13 @@ viewHooks model =
                     Ui.table [ Ui.empty "Webhook がありません" ]
 
                 else
-                    Ui.table (Ui.headRowOf hookColumns [ text "名前 / URL", text "イベント", text "状態", text "" ] :: List.concatMap (viewHook model) rows)
+                    Ui.table (Ui.headRowOf hookColumns [ text "名前 / URL", text "イベント", text "状態", text "" ] :: List.map viewHook rows)
         }
         model.hooks
 
 
-viewHook : Model -> WebhookRow -> List (Html Msg)
-viewHook model hook =
+viewHook : WebhookRow -> Html Msg
+viewHook hook =
     Ui.rowOf hookColumns
         [ div [ class "flex min-w-0 flex-col" ]
             [ span [ class "font-medium" ] [ text hook.name ]
@@ -475,27 +487,6 @@ viewHook model hook =
             Ui.chip Ui.toneNeutral "無効"
         , div [ class "text-right" ] [ Ui.dangerLink (HookDeleteAsked hook) "削除" ]
         ]
-        :: (case model.confirmHookDelete of
-                Just asked ->
-                    if asked.id == hook.id then
-                        [ Ui.callout Ui.toneWarn
-                            [ class "gap-2 rounded-none border-x-0 p-3" ]
-                            [ Ui.subheading ("「" ++ hook.name ++ "」を削除しますか")
-                            , Ui.note [ text "この URL への通知が止まります。配信の記録も見られなくなります。" ]
-                            , div [ class "flex items-center gap-2" ]
-                                [ Ui.button [ onClick HookDeleteConfirmed, Html.Attributes.disabled (Reply.isSending model.deleting) ] [ text "削除" ]
-                                , Ui.ghostButton [ onClick HookDeleteCancelled ] [ text "キャンセル" ]
-                                , Reply.view model.deleting
-                                ]
-                            ]
-                        ]
-
-                    else
-                        []
-
-                Nothing ->
-                    []
-           )
 
 
 {-| イベントの言い方。GitHub は名前を並べる。「4 種類」では何が来るか分からない。

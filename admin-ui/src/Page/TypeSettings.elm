@@ -13,12 +13,13 @@ module Page.TypeSettings exposing (Model, Msg(..), init, load, unsaved, update, 
 import Api
 import Html exposing (Html, div, span, text)
 import Html.Attributes exposing (class, placeholder, value)
-import Html.Events exposing (onClick, onInput)
+import Html.Events exposing (onInput)
 import Loaded exposing (Loaded)
 import Model exposing (ContentTypeDetail, Slug)
 import Queries
 import Route
 import Ui
+import Ui.Confirm
 import Ui.Reply as Reply exposing (Reply)
 
 
@@ -49,6 +50,7 @@ type Msg
     | DeleteConfirmed
     | GotDeleted (Result Api.Problem String)
     | EscapePressed
+    | Ignored
 
 
 init : Slug -> String -> Model
@@ -151,6 +153,9 @@ update ctx msg model =
         EscapePressed ->
             ( { model | confirmDelete = False }, [] )
 
+        Ignored ->
+            ( model, [] )
+
 
 {-| 入力を触った。未保存にし、前の返事を下ろす。
 -}
@@ -220,15 +225,18 @@ viewDanger model detail =
         [ Ui.subheading "この API を削除"
         , Ui.note
             [ text (String.fromInt (List.length detail.fields) ++ " 個のフィールドの定義も一緒に削除されます。コンテンツが 1 件でも残っている場合は削除できません。先にコンテンツを削除してください。") ]
+        , div [] [ Ui.dangerLink DeleteAsked "この API を削除…" ]
         , if model.confirmDelete then
-            div [ class "flex flex-col gap-2" ]
-                [ div [ class "flex items-center gap-2" ]
-                    [ Ui.button [ onClick DeleteConfirmed, Html.Attributes.disabled (Reply.isSending model.deleting) ] [ text "削除" ]
-                    , Ui.ghostButton [ onClick DeleteCancelled ] [ text "キャンセル" ]
-                    ]
-                , Reply.view model.deleting
-                ]
+            Ui.Confirm.view
+                { title = "「" ++ detail.name ++ "」を削除しますか"
+                , body = String.fromInt (List.length detail.fields) ++ " 個のフィールドの定義も一緒に削除されます。元には戻せません。"
+                , confirm = "削除"
+                , reply = model.deleting
+                , onConfirm = DeleteConfirmed
+                , onCancel = DeleteCancelled
+                , ignore = Ignored
+                }
 
           else
-            div [] [ Ui.dangerLink DeleteAsked "この API を削除…" ]
+            text ""
         ]
