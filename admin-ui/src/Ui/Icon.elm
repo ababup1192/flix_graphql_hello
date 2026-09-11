@@ -4,6 +4,7 @@ module Ui.Icon exposing
     , check
     , choices
     , collapse
+    , copy
     , entry
     , expand
     , grip
@@ -291,6 +292,13 @@ search =
 check : List (Svg msg)
 check =
     [ path "M4 12.5l5 5 11-11" ]
+
+
+{-| クリップボードへコピー。値の枠の中の右端に置く（GitHub / Stripe と同じ位置）。
+-}
+copy : List (Svg msg)
+copy =
+    [ rect "9" "9" "11" "11" "2", path "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" ]
 
 
 
