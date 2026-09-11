@@ -239,7 +239,12 @@ export class BlockMenu {
       }),
     );
     // 絞り込みで行数が変わると高さが変わるので、置き直す（下に入らなければ上へ返る）。
+    //
+    // **置き直しが先。** `place()` は高さを測り直すのに `maxHeight` を一度空にするので、
+    // 面が中身の高さまで伸びて送りが先頭に戻る。先に送ると必ず取り消される。
     this.pop.place();
+    const active = list.querySelector<HTMLElement>(".is-at");
+    if (active) active.scrollIntoView({ block: "nearest" });
   }
 
   private pick(item: Item) {
@@ -272,6 +277,9 @@ export class BlockMenu {
     const at = editor.state.selection.from;
     editor.chain().focus().insertContent({ type: "mathBlock", attrs: { tex: "" } }).run();
     window.setTimeout(() => {
+      // WhyNot: 生きているか見ずに触らない。1 拍の間に画面を閉じられると、
+      // 壊した後の view を読んで例外になる（node view の索引がもう無い）。
+      if (!this.alive) return;
       let found = -1;
       editor.state.doc.descendants((node, pos) => {
         if (node.type.name !== "mathBlock") return;

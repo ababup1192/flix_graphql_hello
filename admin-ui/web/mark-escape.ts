@@ -112,6 +112,28 @@ function escapeBySpace(view: EditorView, from: number, to: number, text: string)
   return true;
 }
 
+// コードの箱の右端で打った `` ` ``。**箱の外に入れる。**
+//
+// WhyNot: 箱の中に残さない。`` `x` `` は箱の外で書く記法なので、箱の右端で打った 1 つが
+// 中に入ると「バッククォート 1 つでコードになった」ように見える（`a`b` の 1 つでは
+// ならない事と食い違う）。
+function escapeByTick(view: EditorView, from: number, to: number, text: string): boolean {
+  if (text !== "`") return false;
+  const state = view.state;
+  const code = state.schema.marks.code;
+  if (!code) return false;
+  const here = state.storedMarks ?? state.doc.resolve(from).marks();
+  if (!code.isInSet(here)) return false;
+  // 右にまだ箱の中の文字があるなら、打った物は箱の中。
+  const after = state.doc.resolve(to).nodeAfter;
+  if (after && code.isInSet(after.marks)) return false;
+  const tr = state.tr.insertText(text, from, to);
+  tr.removeMark(from, from + text.length, code);
+  tr.setStoredMarks(here.filter((mark) => mark.type !== code));
+  view.dispatch(tr);
+  return true;
+}
+
 /** 段落を変えた時とマークの右端で、掛かっている装飾から抜ける。 */
 export const MarkEscape = Extension.create({
   name: "markEscape",
@@ -145,7 +167,8 @@ export const MarkEscape = Extension.create({
             return escapeMark(view);
           },
 
-          handleTextInput: (view, from, to, text) => escapeBySpace(view, from, to, text),
+          handleTextInput: (view, from, to, text) =>
+            escapeBySpace(view, from, to, text) || escapeByTick(view, from, to, text),
         },
       }),
     ];

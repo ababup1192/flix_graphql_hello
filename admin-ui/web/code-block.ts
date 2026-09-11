@@ -296,10 +296,12 @@ export function codeBlockView(lowlight: Lowlight) {
           return row;
         })
       );
+      // **置き直しが先。** `place()` は高さを測り直すのに `maxHeight` を一度空にするので、
+      // 面が中身の高さまで伸びて送りが先頭に戻る。先に送ると必ず取り消される
+      // （上下で選んでいっても一覧が付いてこなかった）。
+      pop.place();
       const active = list.querySelector<HTMLElement>(".is-at");
       if (active) active.scrollIntoView({ block: "nearest" });
-      // 候補の数で面の高さが変わるので、置き直す（下に入らなければ上へ返る）。
-      pop.place();
     };
 
     const open = () => {

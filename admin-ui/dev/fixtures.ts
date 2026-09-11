@@ -34,6 +34,22 @@ export const FIXTURES: Fixture[] = [
     },
   },
   {
+    name: "inline-code",
+    title: "文の中のコード",
+    doc: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "まえ " },
+            { type: "text", marks: [{ type: "code" }], text: "code" },
+          ],
+        },
+      ],
+    },
+  },
+  {
     name: "image",
     title: "画像 1 枚",
     doc: {
@@ -90,6 +106,47 @@ export const FIXTURES: Fixture[] = [
           attrs: { language: "typescript", fileName: "hello.ts" },
           content: [{ type: "text", text: 'const greet = (name: string) => `hello ${name}`;\ngreet("world");' }],
         },
+        paragraph(""),
+      ],
+    },
+  },
+  {
+    name: "code-lines",
+    title: "5 行のコード",
+    doc: {
+      type: "doc",
+      content: [
+        {
+          type: "codeBlock",
+          attrs: { language: null, fileName: null, highlightLines: null },
+          content: [{ type: "text", text: "const a = 1;\nconst b = 2;\nconst c = 3;\nconst d = 4;\nconst e = 5;" }],
+        },
+        paragraph(""),
+      ],
+    },
+  },
+  {
+    name: "math",
+    title: "ブロックの数式",
+    doc: {
+      type: "doc",
+      content: [paragraph("すうしきのまえ"), { type: "mathBlock", attrs: { tex: "E = mc^2" } }, paragraph("")],
+    },
+  },
+  {
+    name: "blocks",
+    title: "段落とコードと数式",
+    doc: {
+      type: "doc",
+      content: [
+        paragraph("外の段落 その 1"),
+        {
+          type: "codeBlock",
+          attrs: { language: null, fileName: null, highlightLines: null },
+          content: [{ type: "text", text: "const a = 1\nconst b = 2" }],
+        },
+        paragraph("外の段落 その 2"),
+        { type: "mathBlock", attrs: { tex: "E = mc^2" } },
         paragraph(""),
       ],
     },
