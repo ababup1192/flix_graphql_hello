@@ -23,8 +23,9 @@ mod ApiKeys {
     /// 発行する。今のプロジェクトに付く。manageApiKeys の証明と、ログインの JWT で来た本人の証明（`Granted[Interactive]`。PAT や鍵からは作れない）の 2 つを受ける。
     /// write の鍵は発行者が持つ役割より高い役割にはできず、期限は未来だけ。
     ///
-    pub def create(_proof: Granted[ManageApiKeys], _login: Granted[Interactive], pepper: SecretHash.Pepper, draft: ApiKeyDraft, nowMillis: Int64): IssuedApiKey \ DbWrite + CmsErr + IdGen + Tenant + Session =
+    pub def create(_proof: Granted[ManageApiKeys], _login: Granted[Interactive], pepper: SecretHash.Pepper, draft: ApiKeyDraft, nowMillis: Int64): IssuedApiKey \ Db + CmsErr + IdGen + Tenant + Session =
         CmsErr.raiseIfAny(Naming.validateName("name", draft#name));
+        requireUniqueName(draft#name);
         requireRoleWithinIssuer(draft#scope);
         CmsErr.raiseIfAny(validateExpiry(draft#expiresAt, nowMillis));
         let key = prefix() ++ IdGen.freshSecret();
@@ -34,6 +35,17 @@ mod ApiKeys {
             pepperId = pepper#pepperId, scope = draft#scope, expiresAt = draft#expiresAt })) |> Rows.expectId;
         Audit.record(AuditChange.ApiKeyCreated(publicId, draft#name));
         { id = id, publicId = publicId, name = draft#name, scope = draft#scope, expiresAt = draft#expiresAt, key = key }
+
+    ///
+    /// 生きている鍵の中で同じ名前は 1 本だけ。失効した物とは被って良い。
+    ///
+    /// WhyNot: 失効した物も含めて断らない。鍵の入れ替えは「同じ名前で発行し直す → 差し替える → 古い方を失効」の
+    /// 順で、失効した名前が使えないと入れ替えのたびに名前を変える事になる。
+    /// WhyNot: 一意制約で守らない。同じ Tx の中で先に読んで検査する（一意制約の違反は Tx を abort させ、翻訳できない）。
+    ///
+    def requireUniqueName(name: String): Unit \ DbRead + CmsErr + Tenant =
+        let taken = AuthQueries.countActiveApiKeysNamed({ projectId = Tenant.currentId(), name = name }) |> Rows.total;
+        CmsErr.raiseIfAny(if (taken == 0i64) Nil else Violation.Violation("name", "「${name}」はすでにあります。古い方を失効するか、別の名前にしてください") :: Nil)
 
     ///
     /// 期限は今より後。無ければ期限無し。純粋。

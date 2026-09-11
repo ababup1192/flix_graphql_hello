@@ -136,6 +136,22 @@ mod TestAuthPg {
     def readKey(name: String): ApiKeyDraft = { name = name, scope = ApiKeyScope.Read, expiresAt = None }
 
     ///
+    /// 同じ名前の鍵は、生きている物の中では 1 本だけ。失効した物とは被って良い（鍵の入れ替えは
+    /// 「同じ名前で発行し直す → 古い方を失効」の順になるため）。
+    ///
+    @Test
+    def testPgApiKeyNameIsUniqueAmongActive(): Unit \ {IO, Assert} =
+        let pepper = PgTestSupport.pepper();
+        let result = PgTestSupport.withDb(() -> PgTestSupport.asOwner(() -> {
+            let first = ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, readKey("site"), 0i64);
+            let duplicated = CmsTestKit.runWithResult(() -> ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, readKey("site"), 0i64)) |> CmsTestKit.failurePaths;
+            ApiKeys.revoke(Session.grant(), first#publicId);
+            let reissued = CmsTestKit.runWithResult(() -> ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, readKey("site"), 0i64)) |> Result.isOk;
+            (duplicated, reissued)
+        }));
+        Assert.assertEq(expected = Ok(Ok((List#{"name"}, true))), result)
+
+    ///
     /// 管理 API を通した形。owner の me に役割と組織とプロジェクトが出て、身元が無ければ me は null で mutation は権限エラー。
     ///
     @Test

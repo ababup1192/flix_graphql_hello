@@ -7,7 +7,7 @@ mod AuthQueries {
     ///
     /// 生成元 auth.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 1130474062
+    pub def sourceHash(): Int32 = -1459169569
 
     ///
     /// findUserByIdentity の 1 行。
@@ -533,6 +533,24 @@ mod AuthQueries {
         let sql = "SELECT id, project_id, name, scope, role, expires_at, revoked_at FROM api_keys WHERE key_hash = $1";
         let params = List#{SqlValue.Str(keyHash)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findApiKeyByHashDecoder(), sql, params))
+
+    ///
+    /// countActiveApiKeysNamed の 1 行。
+    ///
+    pub type alias CountActiveApiKeysNamedRow = { total = Option[Int64] }
+
+    def countActiveApiKeysNamedDecoder(): Decoder[CountActiveApiKeysNamedRow] =
+        forA (
+            total <- Decoder.opt(Decoder.int64("total"))
+        ) yield { total = total }
+
+    ///
+    /// countActiveApiKeysNamed: SELECT count(*)::bigint AS total FROM api_keys WHERE project_id = $1 AND name = $2 AND revoked_at IS NULL
+    ///
+    pub def countActiveApiKeysNamed(args: { projectId = Int64, name = String }): Option[CountActiveApiKeysNamedRow] \ DbRead =
+        let sql = "SELECT count(*)::bigint AS total FROM api_keys WHERE project_id = $1 AND name = $2 AND revoked_at IS NULL";
+        let params = List#{SqlValue.Int64(args#projectId), SqlValue.Str(args#name)};
+        RawSql.runWithAllow(() -> Sql.fetchOneAs(countActiveApiKeysNamedDecoder(), sql, params))
 
     ///
     /// listApiKeys の 1 行。

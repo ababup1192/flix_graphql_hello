@@ -163,6 +163,11 @@ query findApiKeyByHash(keyHash: String) -> one {
     SELECT id, project_id, name, scope, role, expires_at, revoked_at FROM api_keys WHERE key_hash = :keyHash
 }
 
+// 生きている鍵の中で同じ名前があるか（失効した物は数えない）
+query countActiveApiKeysNamed(projectId: Int64, name: String) -> one {
+    SELECT count(*)::bigint AS total FROM api_keys WHERE project_id = :projectId AND name = :name AND revoked_at IS NULL
+}
+
 query listApiKeys(projectId: Int64) -> many {
     SELECT id, public_id, name, key_hint, scope, role, created_at, expires_at, last_used_at, revoked_at FROM api_keys WHERE project_id = :projectId ORDER BY id
 }

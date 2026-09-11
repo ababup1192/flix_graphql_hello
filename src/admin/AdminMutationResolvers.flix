@@ -200,7 +200,7 @@ mod AdminMutationResolvers {
         }
 
     /// 鍵を発行する。manageApiKeys の証明と、ログインの JWT で来た本人の証明の 2 つを作って渡す。
-    def createApiKeyWith(pepper: SecretHash.Pepper, name: String, scope: GeneratedAdmin.ApiKeyScope, role: Option[GeneratedAdmin.Role], expiresAt: Option[String]): IssuedApiKey \ DbWrite + CmsErr + IdGen + Tenant + Session + Time.Clock.Clock =
+    def createApiKeyWith(pepper: SecretHash.Pepper, name: String, scope: GeneratedAdmin.ApiKeyScope, role: Option[GeneratedAdmin.Role], expiresAt: Option[String]): IssuedApiKey \ Db + CmsErr + IdGen + Tenant + Session + Time.Clock.Clock =
         ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, {
             name = name, scope = AdminMapping.apiKeyScopeOf(scope, role),
             expiresAt = expiresAt |> Option.map(text -> AdminMapping.timestampOf("expiresAt", text)) }, Time.Clock.now())
