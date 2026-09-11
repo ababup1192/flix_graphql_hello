@@ -299,6 +299,7 @@ type alias PatRow =
     { id : String
     , name : String
     , scope : String
+    , createdAt : String
     , expiresAt : String
     , lastUsedAt : Maybe String
     , revokedAt : Maybe String

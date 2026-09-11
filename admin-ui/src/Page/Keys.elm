@@ -531,39 +531,17 @@ viewLastUsed model row =
                 absolute =
                     Ui.DateTime.formatLocal model.zone at
             in
-            case model.today |> Maybe.andThen (\today -> Ui.DateTime.daysFromToday model.zone today at) of
+            case Ui.DateTime.agoText model.zone model.today at of
                 Just ago ->
-                    span [ class "text-[11px] text-ink-soft", Html.Attributes.title absolute ] [ text (relative (negate ago)) ]
+                    span [ class "text-[11px] text-ink-soft", Html.Attributes.title absolute ] [ text ago ]
 
                 Nothing ->
                     span [ class "font-mono text-[11px] text-ink-soft" ] [ text absolute ]
 
 
-{-| 「今日」「昨日」「3 日前」「2 か月前」。GitHub の "within the last week" よりは細かく、日付よりは読みやすい所。
--}
-relative : Int -> String
-relative daysAgo =
-    if daysAgo <= 0 then
-        "今日"
-
-    else if daysAgo == 1 then
-        "昨日"
-
-    else if daysAgo < 30 then
-        String.fromInt daysAgo ++ " 日前"
-
-    else if daysAgo < 365 then
-        String.fromInt (daysAgo // 30) ++ " か月前"
-
-    else
-        String.fromInt (daysAgo // 365) ++ " 年前"
-
-
-{-| ISO 8601 の日時を手元のタイムゾーンの日付（YYYY-MM-DD）に。
--}
 dateOf : Time.Zone -> String -> String
-dateOf zone iso =
-    String.left 10 (Ui.DateTime.formatLocal zone iso)
+dateOf =
+    Ui.DateTime.localDate
 
 
 viewHookForm : Model -> Html Msg

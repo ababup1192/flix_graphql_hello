@@ -17,6 +17,8 @@ import Loaded exposing (Loaded)
 import Model exposing (AssetList, AssetRow, Slug, Upload)
 import Queries
 import Ui
+import Ui.Confirm
+import Ui.Reply as Reply exposing (Reply)
 
 
 {-| 選んだファイルの見出しだけ。**中身は持たない**（Elm の port は File を通せない。
@@ -36,6 +38,11 @@ type alias Model =
     , selected : Maybe AssetRow
     , alt : String
     , errors : List String
+
+    {- 代替テキストの保存の返事と、削除の確認。 -}
+    , altReply : Reply
+    , confirmDelete : Maybe AssetRow
+    , deleting : Reply
     , pending : Maybe Upload
 
     {- 継ぎ足しを頼んでいる間の印。二重に押せないようにする。 -}
@@ -55,13 +62,28 @@ type Msg
     | AltTyped String
     | AltSaved
     | GotAltSaved (Result Api.Problem AssetRow)
-    | Deleted String
+    | DeleteAsked AssetRow
+    | DeleteCancelled
+    | DeleteConfirmed
     | GotDeleted (Result Api.Problem String)
+    | EscapePressed
+    | Ignored
 
 
 init : Model
 init =
-    { assets = Loaded.Loading, picked = Nothing, uploading = Nothing, selected = Nothing, alt = "", errors = [], pending = Nothing, loadingMore = False }
+    { assets = Loaded.Loading
+    , picked = Nothing
+    , uploading = Nothing
+    , selected = Nothing
+    , alt = ""
+    , errors = []
+    , altReply = Reply.idle
+    , confirmDelete = Nothing
+    , deleting = Reply.idle
+    , pending = Nothing
+    , loadingMore = False
+    }
 
 
 {-| 1 回に引く枚数。
@@ -142,31 +164,58 @@ update ctx msg model =
             ( failed problem { model | uploading = Nothing }, [] )
 
         Selected asset ->
-            ( { model | selected = Just asset, alt = asset.alt }, [] )
+            ( { model | selected = Just asset, alt = asset.alt, altReply = Reply.idle }, [] )
 
         AltTyped alt ->
-            ( { model | alt = alt }, [] )
+            ( { model | alt = alt, altReply = Reply.touched model.altReply }, [] )
 
         AltSaved ->
             case model.selected of
                 Just asset ->
-                    ( model, [ Api.call (\id -> Queries.updateAsset id ctx.project { assetId = asset.id, alt = model.alt }) GotAltSaved ] )
+                    ( { model | altReply = Reply.sending }
+                    , [ Api.call (\id -> Queries.updateAsset id ctx.project { assetId = asset.id, alt = model.alt }) GotAltSaved ]
+                    )
 
                 Nothing ->
                     ( model, [] )
 
         GotAltSaved (Ok asset) ->
-            ( { model | selected = Just asset, assets = Loaded.map (\page -> { page | nodes = List.map (replace asset) page.nodes }) model.assets }, [] )
+            ( { model
+                | selected = Just asset
+                , altReply = Reply.done "保存しました"
+                , assets = Loaded.map (\page -> { page | nodes = List.map (replace asset) page.nodes }) model.assets
+              }
+            , []
+            )
 
         GotAltSaved (Err problem) ->
-            ( failed problem model, [] )
+            ( { model | altReply = Reply.failed problem }, [] )
 
-        Deleted assetId ->
-            ( model, [ Api.call (\id -> Queries.deleteAsset id ctx.project assetId) GotDeleted ] )
+        DeleteAsked asset ->
+            ( { model | confirmDelete = Just asset, deleting = Reply.idle }, [] )
+
+        DeleteCancelled ->
+            ( { model | confirmDelete = Nothing }, [] )
+
+        DeleteConfirmed ->
+            case model.confirmDelete of
+                Just asset ->
+                    ( { model | deleting = Reply.sending }, [ Api.call (\id -> Queries.deleteAsset id ctx.project asset.id) GotDeleted ] )
+
+                Nothing ->
+                    ( model, [] )
+
+        EscapePressed ->
+            ( { model | confirmDelete = Nothing }, [] )
+
+        Ignored ->
+            ( model, [] )
 
         GotDeleted (Ok assetId) ->
             ( { model
                 | selected = Nothing
+                , confirmDelete = Nothing
+                , deleting = Reply.idle
                 , assets =
                     Loaded.map
                         (\page ->
@@ -180,7 +229,7 @@ update ctx msg model =
             )
 
         GotDeleted (Err problem) ->
-            ( failed problem model, [] )
+            ( { model | deleting = Reply.failed problem }, [] )
 
 
 replace : AssetRow -> AssetRow -> AssetRow
@@ -227,7 +276,7 @@ view model =
             , case model.uploading of
                 Just uploading ->
                     Ui.card [ class "flex items-center gap-3 p-4 text-[13px] text-ink" ]
-                        [ Ui.spinner, text (uploading.fileName ++ " を送っています…") ]
+                        [ Ui.spinner, text (uploading.fileName ++ " をアップロード中…") ]
 
                 Nothing ->
                     text ""
@@ -236,6 +285,20 @@ view model =
         , case model.selected of
             Just asset ->
                 viewPanel model asset
+
+            Nothing ->
+                text ""
+        , case model.confirmDelete of
+            Just asset ->
+                Ui.Confirm.view
+                    { title = "「" ++ asset.fileName ++ "」を削除しますか"
+                    , body = "このメディアを使っているコンテンツからは見えなくなります。元には戻せません。"
+                    , confirm = "削除"
+                    , reply = model.deleting
+                    , onConfirm = DeleteConfirmed
+                    , onCancel = DeleteCancelled
+                    , ignore = Ignored
+                    }
 
             Nothing ->
                 text ""
@@ -371,8 +434,8 @@ viewPanel model asset =
         , Ui.field { label = "代替テキスト（alt）", hint = Just "画像が出ない時と読み上げに使います", errors = [] }
             [ Ui.input [ value model.alt, onInput AltTyped ] ]
         , div [ class "flex items-center gap-2" ]
-            [ Ui.button [ onClick AltSaved ] [ text "保存" ]
-            , div [ class "ml-auto" ] [ Ui.dangerLink (Deleted asset.id) "削除" ]
+            [ Reply.saveButton { label = "保存", dirty = model.alt /= asset.alt, reply = model.altReply, onSave = AltSaved }
+            , div [ class "ml-auto" ] [ Ui.dangerLink (DeleteAsked asset) "削除" ]
             ]
         , Ui.railSection "ファイル"
             []

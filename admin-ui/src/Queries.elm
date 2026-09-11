@@ -1236,13 +1236,14 @@ personalTokens id =
     Api.accountQuery { id = id, kind = "personalTokens" }
         (Api.Account.Query.me
             (Me.personalAccessTokens
-                (SS.map6 Model.PatRow
-                    Pat.id
-                    Pat.name
-                    (Pat.scope |> SS.map PatScope.toString)
-                    Pat.expiresAt
-                    Pat.lastUsedAt
-                    Pat.revokedAt
+                (SS.succeed Model.PatRow
+                    |> SS.with Pat.id
+                    |> SS.with Pat.name
+                    |> SS.with (Pat.scope |> SS.map PatScope.toString)
+                    |> SS.with Pat.createdAt
+                    |> SS.with Pat.expiresAt
+                    |> SS.with Pat.lastUsedAt
+                    |> SS.with Pat.revokedAt
                 )
             )
         )

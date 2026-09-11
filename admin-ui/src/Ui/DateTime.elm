@@ -1,6 +1,7 @@
 module Ui.DateTime exposing
     ( Model
     , Msg
+    , agoText
     , atDate
     , dayAfterToIso
     , dayToIso
@@ -9,6 +10,7 @@ module Ui.DateTime exposing
     , formatLocalShort
     , init
     , isDayChosen
+    , localDate
     , toIso
     , toIsoDate
     , update
@@ -55,6 +57,45 @@ type alias Model =
     {- 人が日を選んだか。まだなら塗らない（値が空なのに選ばれて見えないように）。 -}
     , picked : Bool
     }
+
+
+{-| 手元のタイムゾーンでの日付（`YYYY-MM-DD`）。一覧の「作成日」「有効期限」に使う。
+-}
+localDate : Time.Zone -> String -> String
+localDate zone iso =
+    String.left 10 (formatLocal zone iso)
+
+
+{-| 今日から見た言い方（「今日」「昨日」「3 日前」「2 か月前」）。今日が分からなければ Nothing。
+
+読む人の問いが「まだ使われているか」「いつ招待したか」のような**近さ**の時に使う。
+正確な日時は `title` に添えて、ホバーで読めるようにする（GitHub の "Last used within
+the last week" と同じ考え方で、あちらより細かい）。
+
+-}
+agoText : Time.Zone -> Maybe { year : Int, month : Int, day : Int } -> String -> Maybe String
+agoText zone today iso =
+    today
+        |> Maybe.andThen (\day -> daysFromToday zone day iso)
+        |> Maybe.map (\ago -> spell (negate ago))
+
+
+spell : Int -> String
+spell daysAgo =
+    if daysAgo <= 0 then
+        "今日"
+
+    else if daysAgo == 1 then
+        "昨日"
+
+    else if daysAgo < 30 then
+        String.fromInt daysAgo ++ " 日前"
+
+    else if daysAgo < 365 then
+        String.fromInt (daysAgo // 30) ++ " か月前"
+
+    else
+        String.fromInt (daysAgo // 365) ++ " 年前"
 
 
 {-| `YYYY-MM-DD` から始める。読めなければ今日から（絞り込みのように、すでに入っている

@@ -436,27 +436,9 @@ viewInvitedAt model invite =
         absolute =
             Ui.DateTime.formatLocal model.zone invite.invitedAt
     in
-    case model.today |> Maybe.andThen (\today -> Ui.DateTime.daysFromToday model.zone today invite.invitedAt) of
+    case Ui.DateTime.agoText model.zone model.today invite.invitedAt of
         Just ago ->
-            span [ class "text-[11px] text-ink-soft", Html.Attributes.title absolute ] [ text (relative (negate ago)) ]
+            span [ class "text-[11px] text-ink-soft", Html.Attributes.title absolute ] [ text ago ]
 
         Nothing ->
             span [ class "font-mono text-[11px] text-ink-soft" ] [ text absolute ]
-
-
-relative : Int -> String
-relative daysAgo =
-    if daysAgo <= 0 then
-        "今日"
-
-    else if daysAgo == 1 then
-        "昨日"
-
-    else if daysAgo < 30 then
-        String.fromInt daysAgo ++ " 日前"
-
-    else if daysAgo < 365 then
-        String.fromInt (daysAgo // 30) ++ " か月前"
-
-    else
-        String.fromInt (daysAgo // 365) ++ " 年前"

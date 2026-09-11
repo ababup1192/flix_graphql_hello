@@ -457,6 +457,15 @@ update msg model =
                         _ ->
                             ( workspace, [] )
                 )
+                |> Tuple.mapSecond
+                    (\effect ->
+                        case pageMsg of
+                            Account.CopyRequested value ->
+                                Effect.batch [ effect, Effect.Copy value, Effect.After copiedMillis (AccountMsg Account.CopyShown) ]
+
+                            _ ->
+                                effect
+                    )
 
         ProjectMsg pageMsg ->
             withPage model
@@ -858,6 +867,12 @@ escapeToPage model =
                 EntriesPage _ ->
                     update (EntriesMsg Entries.DatePickClosed) model
 
+                AccountPage _ ->
+                    update (AccountMsg Account.EscapePressed) model
+
+                MediaPage _ ->
+                    update (MediaMsg Media.EscapePressed) model
+
                 _ ->
                     ( model, Effect.none )
 
@@ -1197,10 +1212,20 @@ enterPage route model =
                 Route.Account ->
                     { model | route = route, phase = Ready { workspace | page = AccountPage (Account.init workspace.person) } }
                         |> sendAll (List.map (Api.mapCall AccountMsg) Account.load)
+                        |> Tuple.mapSecond
+                            (\effect ->
+                                -- 一覧の作成日・有効期限・最後に使った日を手元のタイムゾーンで出す
+                                Effect.batch [ effect, Effect.Today (\zone year month day -> AccountMsg (Account.TodayKnown zone year month day)) ]
+                            )
 
                 Route.AccountTokens ->
                     { model | route = route, phase = Ready { workspace | page = AccountPage (Account.init workspace.person) } }
                         |> sendAll (List.map (Api.mapCall AccountMsg) Account.load)
+                        |> Tuple.mapSecond
+                            (\effect ->
+                                -- 一覧の作成日・有効期限・最後に使った日を手元のタイムゾーンで出す
+                                Effect.batch [ effect, Effect.Today (\zone year month day -> AccountMsg (Account.TodayKnown zone year month day)) ]
+                            )
 
                 Route.Settings _ Route.ProjectSettings ->
                     ( { model
