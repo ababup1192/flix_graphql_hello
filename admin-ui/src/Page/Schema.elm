@@ -633,13 +633,20 @@ ifSame current updated =
         current
 
 
-{-| 外したフィールドの名前。帯に「何を外したか」を入れるために、消す前の一覧から引く。
+{-| 右の面が出している欄の名前。**ここに無い名前で来た理由は、まとめて面に出す。**
+-}
+panelFields : List String
+panelFields =
+    [ "name", "apiId" ]
+
+
+{-| 削除したフィールドの名前。帯に「何を外したか」を入れるために、消す前の一覧から引く。
 -}
 removedName : Model -> String -> Maybe String
 removedName model fieldId =
     Loaded.toMaybe model.detail
         |> Maybe.andThen (\detail -> detail.fields |> List.filter (\field -> field.id == fieldId) |> List.head)
-        |> Maybe.map (\field -> "「" ++ field.name ++ "」を外しました")
+        |> Maybe.map (\field -> "「" ++ field.name ++ "」を削除しました")
 
 
 failed : Api.Problem -> Model -> Model
@@ -1000,6 +1007,7 @@ viewAddPanel args model form =
             [ Ui.checkbox { label = "必須（公開する時にチェックします）", checked = form.required, onToggle = RequiredToggled }
             , Ui.checkbox { label = "複数（値をいくつも入れられます）", checked = form.many, onToggle = ManyToggled }
             ]
+        , Ui.errors (Reply.unmatched panelFields model.reply)
         , div [ class "flex items-center gap-2" ]
             [ Reply.addButton
                 { label = "追加する"
@@ -1099,6 +1107,7 @@ viewEditPanel model detail form =
             ]
         , viewEditConfig detail form
         , viewSaveConfirm model form
+        , Ui.errors (Reply.unmatched panelFields model.reply)
         , div [ class "flex items-center gap-2 border-t border-edge pt-4" ]
             [ Reply.saveButton
                 { label = "保存"

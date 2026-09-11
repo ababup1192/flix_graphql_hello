@@ -11,6 +11,7 @@ module Ui.Reply exposing
     , saveButton
     , sending
     , touched
+    , unmatched
     , unsavedChip
     , view
     )
@@ -133,6 +134,25 @@ errorsFor name reply =
     case reply of
         Failed { byField } ->
             byField |> List.filter (\( field, _ ) -> field == name) |> List.map Tuple.second
+
+        _ ->
+            []
+
+
+{-| **画面が出していない欄に振り分いた理由。** 画面が持っている欄の名前を渡す。
+
+WhyNot: 欄に振り分けたら終わり、にしない。サーバは画面に無い名前でも返す
+（フィールドを足す時の `fields.tmpNote` など）。振り分け先が無いと理由はどこにも
+出ず、押しても何も起きないように見える（実際に何も出なかった）。
+
+-}
+unmatched : List String -> Reply -> List String
+unmatched shown reply =
+    case reply of
+        Failed { byField } ->
+            byField
+                |> List.filter (\( field, _ ) -> not (List.member field shown) && field /= "id")
+                |> List.map Tuple.second
 
         _ ->
             []
