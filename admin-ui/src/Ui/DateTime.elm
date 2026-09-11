@@ -48,6 +48,12 @@ type alias Model =
     {- 一覧に出している月。日を選ばずに前後の月を見られる。 -}
     , shownYear : Int
     , shownMonth : Int
+
+    {- 今日。暦の中で枠を付けるだけに使う。 -}
+    , today : Maybe { year : Int, month : Int, day : Int }
+
+    {- 人が日を選んだか。まだなら塗らない（値が空なのに選ばれて見えないように）。 -}
+    , picked : Bool
     }
 
 
@@ -58,10 +64,10 @@ atDate : { year : Int, month : Int, day : Int } -> String -> Model
 atDate today date =
     case parseDate date of
         Just ( year, month, day ) ->
-            { year = year, month = month, day = day, hour = 0, minute = 0, shownYear = year, shownMonth = month }
+            { year = year, month = month, day = day, hour = 0, minute = 0, shownYear = year, shownMonth = month, today = Just today, picked = True }
 
         Nothing ->
-            { year = today.year, month = today.month, day = today.day, hour = 0, minute = 0, shownYear = today.year, shownMonth = today.month }
+            { year = today.year, month = today.month, day = today.day, hour = 0, minute = 0, shownYear = today.year, shownMonth = today.month, today = Just today, picked = False }
 
 
 {-| その Msg が「日を押した」か。押した時点で値を決めて閉じる画面が使う
@@ -99,6 +105,8 @@ init today =
     , minute = 0
     , shownYear = year
     , shownMonth = month
+    , today = Just today
+    , picked = True
     }
 
 
@@ -113,7 +121,7 @@ update msg model =
             { model | shownYear = year, shownMonth = month }
 
         DayChosen year month day ->
-            { model | year = year, month = month, day = day, shownYear = year, shownMonth = month }
+            { model | year = year, month = month, day = day, shownYear = year, shownMonth = month, picked = True }
 
         HourChosen typed ->
             { model | hour = String.toInt typed |> Maybe.withDefault model.hour }
@@ -264,7 +272,7 @@ zoneAbbr zone iso =
 -}
 dayToIso : Time.Zone -> String -> Maybe String
 dayToIso zone date =
-    Maybe.map (\( year, month, day ) -> toIso zone { year = year, month = month, day = day, hour = 0, minute = 0, shownYear = year, shownMonth = month })
+    Maybe.map (\( year, month, day ) -> toIso zone { year = year, month = month, day = day, hour = 0, minute = 0, shownYear = year, shownMonth = month, today = Nothing, picked = True })
         (parseDate date)
 
 
@@ -278,7 +286,7 @@ dayAfterToIso zone date =
                 ( nextYear, nextMonth, nextDate ) =
                     nextDay year month day
             in
-            toIso zone { year = nextYear, month = nextMonth, day = nextDate, hour = 0, minute = 0, shownYear = nextYear, shownMonth = nextMonth }
+            toIso zone { year = nextYear, month = nextMonth, day = nextDate, hour = 0, minute = 0, shownYear = nextYear, shownMonth = nextMonth, today = Nothing, picked = True }
         )
         (parseDate date)
 
@@ -618,17 +626,35 @@ viewDay model day =
     let
         chosen : Bool
         chosen =
-            model.year == model.shownYear && model.month == model.shownMonth && model.day == day
+            model.picked && model.year == model.shownYear && model.month == model.shownMonth && model.day == day
+
+        isToday : Bool
+        isToday =
+            model.today == Just { year = model.shownYear, month = model.shownMonth, day = day }
     in
     Html.button
         [ class
+            -- 今日は枠で示す。選んでいる日は塗りなので、塗りと枠で見分けが付く
             ("h-7 rounded text-[12px] "
+                ++ (if isToday && not chosen then
+                        "border border-accent "
+
+                    else
+                        ""
+                   )
                 ++ (if chosen then
                         "bg-accent font-semibold text-white"
 
                     else
                         "text-ink hover:bg-well"
                    )
+            )
+        , Html.Attributes.title
+            (if isToday then
+                "今日"
+
+             else
+                ""
             )
         , onClick (DayChosen model.shownYear model.shownMonth day)
         ]

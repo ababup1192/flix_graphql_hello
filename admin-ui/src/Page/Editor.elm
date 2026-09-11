@@ -1340,6 +1340,8 @@ dateModelOf model apiId =
             , minute = sliceInt 14 16 local |> Maybe.withDefault 0
             , shownYear = year
             , shownMonth = month
+            , today = started.today
+            , picked = True
             }
 
         _ ->

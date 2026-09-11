@@ -317,6 +317,10 @@ viewDay model number =
 
                 _ ->
                     False
+
+        isToday : Bool
+        isToday =
+            model.today == Just day
     in
     div
         [ class
@@ -331,7 +335,14 @@ viewDay model number =
         ]
         [ Html.button
             [ class
+                -- 今日は枠で示す。選んでいる日は塗りなので、塗りと枠で見分けが付く
                 ("h-7 w-7 rounded text-[12px] "
+                    ++ (if isToday && not isEdge then
+                            "border border-accent "
+
+                        else
+                            ""
+                       )
                     ++ (if isEdge then
                             "bg-accent font-semibold text-white"
 
@@ -343,6 +354,13 @@ viewDay model number =
                        )
                 )
             , Html.Attributes.type_ "button"
+            , Html.Attributes.title
+                (if isToday then
+                    "今日"
+
+                 else
+                    ""
+                )
             , onClick (DayChosen day)
             , onMouseEnter (DayHovered day)
             ]
