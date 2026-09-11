@@ -1,0 +1,179 @@
+<title>役割で分けたツールバー</title>
+<style>
+  :root { --bg: #0d1117; --panel: #161b22; --well: #1c2128; --edge: #30363d; --fg: #e6edf0; --fg-2: #8b949e; --fg-3: #6e7681; --sel: #1f3a5f; --on: #4bb08a; --bar: #24292f; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 0; padding: 28px 32px 56px; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 6px; }
+  p.lead { color: var(--fg-2); font-size: 13px; margin: 0 0 26px; max-width: 62rem; line-height: 1.85; }
+
+  .case { border: 1px dashed var(--edge); border-radius: 8px; padding: 50px 24px 22px; position: relative; margin-bottom: 26px; }
+  .case > h2 { position: absolute; top: 12px; left: 16px; font-size: 12px; font-weight: 600; color: var(--fg-2); margin: 0; }
+  .case > .tag { position: absolute; top: 12px; right: 16px; font-size: 11px; color: var(--on); }
+  .note { font-size: 12px; color: var(--fg-3); margin: 14px 0 0; line-height: 1.85; }
+  .note b { color: var(--fg-2); font-weight: 600; }
+
+  .head { display: flex; align-items: center; gap: 2px; background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 6px 6px 0 0; padding: 6px 8px; }
+  .head .sep { width: 1px; height: 20px; background: var(--edge); margin: 0 7px; }
+  .body { border: 1px solid var(--edge); border-top: 0; border-radius: 0 0 6px 6px; padding: 20px 16px; color: var(--fg-2); font-size: 15px; min-height: 58px; position: relative; }
+
+  .t { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 5px;
+    border-radius: 4px; color: var(--fg-2); font-size: 13px; }
+  .t:hover { background: var(--well); color: var(--fg); }
+  .t svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+  .t.wide { padding: 0 9px; gap: 5px; }
+  .t.b { font-weight: 700; } .t.i { font-style: italic; font-family: serif; } .t.u { text-decoration: underline; } .t.s { text-decoration: line-through; }
+  .t sup, .t sub { font-size: .62em; }
+
+  .float { position: absolute; display: inline-flex; align-items: center; gap: 3px; background: var(--bar);
+    border-radius: 6px; box-shadow: 0 6px 20px rgb(0 0 0 / .45); padding: 4px 6px; }
+  .float .t { color: #fff; }
+  .float .t:hover { background: rgb(255 255 255 / .12); }
+  .float .sep { width: 1px; height: 18px; background: rgb(255 255 255 / .2); margin: 0 4px; }
+  .mark { background: var(--sel); border-radius: 2px; padding: 1px 0; }
+
+  .pop { position: absolute; z-index: 4; background: var(--bar); border-radius: 6px; box-shadow: 0 8px 24px rgb(0 0 0 / .5); padding: 5px; min-width: 11rem; }
+  .pop .row { display: flex; align-items: center; gap: 9px; padding: 6px 9px; border-radius: 4px; color: #d8dee4; font-size: 13px; }
+  .pop .row:hover { background: rgb(255 255 255 / .12); color: #fff; }
+  .pop .row svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.9; }
+
+  .count { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 10px; background: var(--well); color: var(--fg-3); font-size: 11px; }
+  .plus { position: absolute; left: -34px; width: 28px; height: 28px; border: 1px solid var(--edge); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; color: var(--fg-3); font-size: 17px; }
+</style>
+
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l3-3a5 5 0 0 0-7.1-7.1l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.1 0l-3 3a5 5 0 0 0 7.1 7.1l1.5-1.5"/></symbol>
+  <symbol id="i-img" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-5 5-2-2-4 4"/></symbol>
+  <symbol id="i-ul" viewBox="0 0 24 24"><circle cx="4" cy="7" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="17" r="1"/><path d="M9 7h12M9 12h12M9 17h12"/></symbol>
+  <symbol id="i-ol" viewBox="0 0 24 24"><path d="M9 7h12M9 12h12M9 17h12"/><path d="M4 6h1v4M4 14h2l-2 3h2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M3 7l2 2 3-3M3 16l2 2 3-3M12 7h9M12 17h9"/></symbol>
+  <symbol id="i-quote" viewBox="0 0 24 24"><path d="M7 15c-2 0-3-1.3-3-3s1-3 3-3c0-2 1-3 3-4M17 15c-2 0-3-1.3-3-3s1-3 3-3c0-2 1-3 3-4"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="M9 6l-5 6 5 6M15 6l5 6-5 6"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h5l10-10-5-5L4 15z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 10H4V5"/><path d="M4 10a8 8 0 1 1 2 8"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 10h5V5"/><path d="M20 10a8 8 0 1 0-2 8"/></symbol>
+  <symbol id="i-caret" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+</svg>
+
+<h1>役割で分けたツールバー</h1>
+<p class="lead">「よく使うか」でなく<b>「何に対して効くか」</b>で分けます。<br>
+ヘッダは<b>押すだけで入る物</b>、浮く帯は<b>文字を選んでから掛ける物</b>。説明が要らなくなります。</p>
+
+<div class="case">
+  <h2>今（案 A を入れた後）</h2>
+  <span class="count">ヘッダ 9 + …</span>
+  <div class="head">
+    <span class="t wide">本文 <svg viewBox="0 0 24 24" style="width:14px;height:14px"><use href="#i-caret"/></svg></span>
+    <span class="sep"></span>
+    <span class="t b">B</span><span class="t i">I</span><span class="t s">S</span>
+    <span class="t"><svg><use href="#i-code"/></svg></span><span class="t">Σ</span>
+    <span class="sep"></span>
+    <span class="t"><svg><use href="#i-link"/></svg></span>
+    <span class="sep"></span>
+    <span class="t"><svg><use href="#i-ul"/></svg></span><span class="t"><svg><use href="#i-ol"/></svg></span>
+    <span class="t"><svg><use href="#i-more"/></svg></span>
+    <span style="flex:1"></span>
+    <span class="t"><svg><use href="#i-undo"/></svg></span><span class="t"><svg><use href="#i-redo"/></svg></span>
+  </div>
+  <div class="body">本文をここに書く。</div>
+  <p class="note">文字に掛ける物（太字・斜体・打ち消し・コード・数式・リンク）が<b>ヘッダにも浮く帯にも</b>あります。<br>畳んだ「…」の中身も、文字に掛ける物とブロックが混ざっています。</p>
+</div>
+
+<div class="case">
+  <h2>案 D　ヘッダは「入れる物」、浮く帯は「掛ける物」</h2>
+  <span class="tag">推し</span>
+  <span class="count">ヘッダ 6</span>
+  <div class="head">
+    <span class="t wide">本文 <svg viewBox="0 0 24 24" style="width:14px;height:14px"><use href="#i-caret"/></svg></span>
+    <span class="sep"></span>
+    <span class="t"><svg><use href="#i-img"/></svg></span>
+    <span class="t"><svg><use href="#i-ul"/></svg></span><span class="t"><svg><use href="#i-ol"/></svg></span>
+    <span style="flex:1"></span>
+    <span class="t"><svg><use href="#i-undo"/></svg></span><span class="t"><svg><use href="#i-redo"/></svg></span>
+  </div>
+  <div class="body" style="min-height: 118px">
+    <span style="color: var(--fg)">選んだ文字に <span class="mark">装飾を掛ける</span>。</span>
+    <div class="float" style="top: 54px; left: 128px">
+      <span class="t b">B</span><span class="t i">I</span><span class="t s">S</span>
+      <span class="t"><svg><use href="#i-code"/></svg></span><span class="t">Σ</span>
+      <span class="t"><svg><use href="#i-link"/></svg></span>
+      <span class="sep"></span>
+      <span class="t"><svg><use href="#i-more"/></svg></span>
+    </div>
+  </div>
+  <p class="note"><b>ヘッダ 6 個</b>: 段落の種類 / 画像 / 箇条書き / 番号付き / 元に戻す / やり直す。どれも押すだけで入ります。<br>
+  <b>浮く帯 6 個 + 「…」</b>: 太字 / 斜体 / 打ち消し / コード / 数式 / リンク。「…」に 下線・蛍光ペン・上付き・下付き。<br>
+  画像・コード・区切り線・表・数式ブロック・引用は「+」の一覧にあります（下の参考）。</p>
+</div>
+
+<div class="case">
+  <h2>案 D の「…」を開いた所</h2>
+  <div class="head">
+    <span class="t wide">本文 <svg viewBox="0 0 24 24" style="width:14px;height:14px"><use href="#i-caret"/></svg></span>
+    <span class="sep"></span>
+    <span class="t"><svg><use href="#i-img"/></svg></span>
+    <span class="t"><svg><use href="#i-ul"/></svg></span><span class="t"><svg><use href="#i-ol"/></svg></span>
+    <span style="flex:1"></span>
+    <span class="t"><svg><use href="#i-undo"/></svg></span><span class="t"><svg><use href="#i-redo"/></svg></span>
+  </div>
+  <div class="body" style="min-height: 210px">
+    <span style="color: var(--fg)">選んだ文字に <span class="mark">装飾を掛ける</span>。</span>
+    <div class="float" style="top: 54px; left: 128px">
+      <span class="t b">B</span><span class="t i">I</span><span class="t s">S</span>
+      <span class="t"><svg><use href="#i-code"/></svg></span><span class="t">Σ</span>
+      <span class="t"><svg><use href="#i-link"/></svg></span>
+      <span class="sep"></span>
+      <span class="t" style="color:#fff; background: rgb(255 255 255 / .12)"><svg><use href="#i-more"/></svg></span>
+    </div>
+    <div class="pop" style="top: 96px; left: 290px">
+      <div class="row"><span style="width:16px;text-align:center;text-decoration:underline">U</span>下線</div>
+      <div class="row"><svg><use href="#i-pen"/></svg>蛍光ペン</div>
+      <div class="row"><span style="width:16px;text-align:center">x<sup>2</sup></span>上付き</div>
+      <div class="row"><span style="width:16px;text-align:center">x<sub>2</sub></span>下付き</div>
+    </div>
+  </div>
+  <p class="note">浮く帯が横に長くなりすぎないよう、使う頻度の低い 4 つは畳みます（note の帯は 3 つでした）。</p>
+</div>
+
+<div class="case">
+  <h2>案 E　畳まず全部を浮く帯に出す</h2>
+  <span class="count">ヘッダ 6</span>
+  <div class="head">
+    <span class="t wide">本文 <svg viewBox="0 0 24 24" style="width:14px;height:14px"><use href="#i-caret"/></svg></span>
+    <span class="sep"></span>
+    <span class="t"><svg><use href="#i-img"/></svg></span>
+    <span class="t"><svg><use href="#i-ul"/></svg></span><span class="t"><svg><use href="#i-ol"/></svg></span>
+    <span style="flex:1"></span>
+    <span class="t"><svg><use href="#i-undo"/></svg></span><span class="t"><svg><use href="#i-redo"/></svg></span>
+  </div>
+  <div class="body" style="min-height: 118px">
+    <span style="color: var(--fg)">選んだ文字に <span class="mark">装飾を掛ける</span>。</span>
+    <div class="float" style="top: 54px; left: 60px">
+      <span class="t b">B</span><span class="t i">I</span><span class="t u">U</span><span class="t s">S</span>
+      <span class="t"><svg><use href="#i-pen"/></svg></span>
+      <span class="t">x<sup>2</sup></span><span class="t">x<sub>2</sub></span>
+      <span class="t"><svg><use href="#i-code"/></svg></span><span class="t">Σ</span>
+      <span class="t"><svg><use href="#i-link"/></svg></span>
+    </div>
+  </div>
+  <p class="note">10 個が 1 列。畳む操作が要らない代わりに、<b>帯が横に長く</b>なり、短い語を選んだ時に画面からはみ出しやすくなります。</p>
+</div>
+
+<div class="case">
+  <h2>参考　「+」の一覧（どの案でも同じ）</h2>
+  <div style="position: relative; height: 232px; padding-left: 40px">
+    <div class="plus" style="left: 6px; top: 8px">+</div>
+    <div class="pop" style="left: 44px; top: 6px; min-width: 12rem">
+      <div class="row"><svg><use href="#i-img"/></svg>画像</div>
+      <div class="row"><svg viewBox="0 0 24 24"><path d="M4 12h16"/></svg>区切り線</div>
+      <div class="row"><svg><use href="#i-quote"/></svg>引用</div>
+      <div class="row"><svg><use href="#i-code"/></svg>コード</div>
+      <div class="row"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="1"/><path d="M3 10h18M9 10v9M15 10v9"/></svg>表</div>
+      <div class="row"><span style="width:16px;text-align:center">Σ</span>数式</div>
+      <div class="row"><svg><use href="#i-check"/></svg>チェックリスト</div>
+      <div class="row"><svg><use href="#i-link"/></svg>埋め込み</div>
+    </div>
+  </div>
+  <p class="note">空の行で「+」を押すか `/` を打つと開きます。<b>ブロックを入れる物はここに集約。</b>画像だけはヘッダにも置きます（毎回使うため）。</p>
+</div>

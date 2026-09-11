@@ -1,12 +1,16 @@
-// 本文の画像と、画像の横並び（gallery）。
+// 本文の画像。1 枚でも複数枚でも `image` 1 つで、中に `imageItem` を並べる。
 //
 // 帯と列の決めは `docs/design/richtext-gallery-ui.md`（見た目は `richtext-gallery-mock.html`）。
 // **列は人に選ばせず枚数から決まる**。並べている間の帯は 1 枚ずつに戻す / 削除。
 //
-// WhyNot: 全体のキャプション（並べた画像の下に 1 つ）をまだ置かない。置き場は CMS の
-// `imageCaption` ノードで、doc の形が `image` の中に `imageItem` を並べる形に変わってから繋ぐ。
+// WhyNot: `gallery` の node を持たない。別 node だと「並べる / 1 枚ずつ」が node の作り直しになり、
+// 選択とキャプションが毎回飛ぶ。子の出し入れだけで済む形にする（`richtext-gallery-ui.md` 1）。
+// 読む側だけは旧 `gallery` と旧 `image`（attrs.assetId）を `liftImageItems` で写す。
 //
-// CMS の `image` は `assetId` を持つ node で、`src` は持たない
+// WhyNot: 全体のキャプション（並べた画像の下に 1 つ）を置かない。キャプションは画像ごとの 1 層だけ
+// （`docs/design/richtext-gallery-ui.md` 4）。
+//
+// CMS の `imageItem` は `assetId` を持つ node で、`src` は持たない
 // （`src/cms/rules/RichText.flix`）。URL は asset の id から画面では引けないので、
 // **Elm が `assets` の属性で id → URL の対応を渡す**。
 //
@@ -27,6 +31,7 @@ import { NodeSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/stat
 import { leaveBlock } from "./block-edges";
 import { isHttpUrl } from "./note-input";
 import { ICONS, svg } from "./icons";
+import { bar as barOf, iconButton } from "./ui";
 
 export type AssetInfo = { id: string; url: string; alt?: string };
 
@@ -81,11 +86,11 @@ type BarMode = "tools" | "align" | "alt" | "href" | "source";
 // 帯が tools 以外になっている node view の「戻す」。Esc（エディタに焦点がある時）で呼ぶ。
 const openBars = new Set<() => boolean>();
 
-/** 選択が image のキャプションの中にあるか（キャプションの文字を選んでいる時も含む）。 */
+/** 選択が画像のキャプションの中にあるか（キャプションの文字を選んでいる時も含む）。 */
 export function insideImage(state: any): boolean {
   const $from = state.selection.$from;
   if (state.selection instanceof NodeSelection) return false;
-  for (let depth = $from.depth; depth > 0; depth -= 1) if ($from.node(depth).type.name === "image") return true;
+  for (let depth = $from.depth; depth > 0; depth -= 1) if ($from.node(depth).type.name === "imageItem") return true;
   return false;
 }
 
@@ -156,10 +161,10 @@ function barInput(placeholder: string, className: string, url: boolean): HTMLInp
   return input;
 }
 
-export function imageNode(store: AssetStore) {
+/** 画像 1 枚。attrs を持ち、中身はその 1 枚のキャプション。 */
+export function imageItemNode(store: AssetStore) {
   return Node.create({
-    name: "image",
-    group: "block",
+    name: "imageItem",
     // WhyNot: `inline*` にしない。hardBreak が入り、キャプションが 2 行になる（1 行の決まり）。
     content: "text*",
     marks: "link bold italic strike code",
@@ -181,10 +186,7 @@ export function imageNode(store: AssetStore) {
     },
 
     parseHTML() {
-      return [
-        { tag: "figure[data-asset-id]", contentElement: "figcaption" },
-        { tag: "img[data-asset-id]" },
-      ];
+      return [{ tag: "figure[data-asset-id]", contentElement: "figcaption" }, { tag: "img[data-asset-id]" }];
     },
 
     renderHTML({ HTMLAttributes }) {
@@ -234,7 +236,7 @@ export function imageNode(store: AssetStore) {
             // キャプションの外（画像そのもの）を押したら node ごと選ぶ。
             // atom でなくなったので、ProseMirror は押しても node を選ばない。
             handleClickOn(view: any, _pos: number, node: any, nodePos: number, event: MouseEvent) {
-              if (node.type.name !== "image") return false;
+              if (node.type.name !== "imageItem") return false;
               const target = event.target as HTMLElement | null;
               if (target?.closest("figcaption")) return false;
               view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, nodePos)));
@@ -271,8 +273,7 @@ export function imageNode(store: AssetStore) {
         // 画像の上に浮く帯。中身は mode で入れ替わる（帯の下に面を足さない。note と同じ）。
         //
         // WhyNot: 本文の流れに置かない。開く度に下の本文が押し下がる。
-        const bar = document.createElement("div");
-        bar.className = "tt-image-bar";
+        const bar = barOf({ className: "tt-image-bar" });
         bar.hidden = true;
         let mode: BarMode = "tools";
 
@@ -326,7 +327,8 @@ export function imageNode(store: AssetStore) {
         };
 
         // tools: リンク / ALT / 縮小 / 配置 / 横に並べる / 削除。
-        // 並べている間は 1 枚ずつに戻す / 削除 だけ（縮小と配置は 1 枚の物）。
+        // 並べた中の 1 枚は リンク / ALT / 削除（`docs/design/richtext-gallery-flow.html` 3）。
+        // 「1 枚ずつに戻す」は並べた物ぜんたいの帯にあり、1 枚の帯には出さない。
         //
         // WhyNot: 帯に「キャプション」を置かない。欄は画像の下に出ていて押せば入力できる。
         // note の帯にも無い。
@@ -339,28 +341,20 @@ export function imageNode(store: AssetStore) {
           editor.view.focus();
         });
         const alignTool = tool(ICONS.alignCenter, "配置", () => setMode("align", false));
-        // 単独の image が隣り合っている時だけ出す。押すと続きの image を 1 つの gallery に畳む。
+        // 1 枚だけの image が隣り合っている時だけ出す。押すと続きの image を 1 つに畳む。
         const rowTool = tool(ICONS.columns, "横に並べる", () => {
-          const found = current();
-          if (found) foldIntoGallery(editor.view, found.pos);
-        });
-        // 並べている間だけ出す。押すと gallery を解いて 1 枚ずつの画像に戻す。
-        const unfoldTool = tool(ICONS.image, "1 枚ずつに戻す", () => {
           const pos = getPos();
-          if (pos === undefined) return;
-          unfoldGallery(editor.view, pos);
+          if (pos !== undefined) foldImages(editor.view, imagePosOf(editor.view.state.doc, pos));
         });
-        unfoldTool.classList.add("is-on");
-        unfoldTool.setAttribute("aria-pressed", "true");
         const trashTool = tool(ICONS.trash, "削除", () => {
           const found = current();
           if (!found) return;
           editor.view.dispatch(editor.view.state.tr.delete(found.pos, found.pos + found.node.nodeSize));
           editor.view.focus();
         });
-        const toolsFor = (gallery: boolean, withRow: boolean) =>
-          gallery ? [unfoldTool, trashTool] : [linkTool, altTool, smallTool, alignTool, ...(withRow ? [rowTool] : []), trashTool];
-        const tools = [linkTool, altTool, smallTool, alignTool, rowTool, unfoldTool, trashTool];
+        const toolsFor = (many: boolean, withRow: boolean) =>
+          many ? [linkTool, altTool, trashTool] : [linkTool, altTool, smallTool, alignTool, ...(withRow ? [rowTool] : []), trashTool];
+        const tools = [linkTool, altTool, smallTool, alignTool, rowTool, trashTool];
 
         // align: 左 / 中央 / 右。押すと書いて tools に戻る。
         const alignButtons = ALIGNS.map(({ value, icon, title }) => {
@@ -414,9 +408,10 @@ export function imageNode(store: AssetStore) {
           }
         });
 
-        const inGallery = () => {
+        // 並べている（親の image に 2 枚以上ある）間か。
+        const withOthers = () => {
           const pos = getPos();
-          return pos !== undefined && editor.view.state.doc.resolve(pos).parent.type.name === "gallery";
+          return pos !== undefined && editor.view.state.doc.resolve(pos).parent.childCount >= 2;
         };
         // 帯は node ごと選んでいる間か、tools 以外に入れ替わっている間（出典は選んでいなくても押せる）。
         const render = () => {
@@ -426,8 +421,10 @@ export function imageNode(store: AssetStore) {
           if (mode === "tools") {
             const pos = getPos();
             if (pos === undefined) return;
-            const gallery = inGallery();
-            bar.replaceChildren(...toolsFor(gallery, adjacentImages(editor.view.state.doc.resolve(pos)).length >= 2));
+            const many = withOthers();
+            const doc = editor.view.state.doc;
+            const row = many ? 0 : adjacentImages(doc.resolve(imagePosOf(doc, pos))).length;
+            bar.replaceChildren(...toolsFor(many, row >= 2));
             for (const button of tools) button.hidden = false;
             return;
           }
@@ -535,7 +532,7 @@ export function imageNode(store: AssetStore) {
             return bar.contains(target) || source.contains(target);
           },
           update(updated: any) {
-            if (updated.type.name !== "image") return false;
+            if (updated.type.name !== "imageItem") return false;
             attrs = updated.attrs;
             paint(attrs);
             dom.classList.toggle("is-empty", updated.childCount === 0);
@@ -563,11 +560,18 @@ export function imageNode(store: AssetStore) {
   });
 }
 
+/** `imageItem` の位置から、包む `image` の位置。 */
+function imagePosOf(doc: any, itemPos: number): number {
+  const $pos = doc.resolve(itemPos);
+  return $pos.before($pos.depth);
+}
+
 // `$pos` の指す image と、その前後に続く image の並び（doc の直下だけ）。
 function adjacentImages($pos: any): Array<{ pos: number; node: any }> {
   const parent = $pos.parent;
   const index = $pos.index();
   const isImage = (i: number) => i >= 0 && i < parent.childCount && parent.child(i).type.name === "image";
+  if (!isImage(index)) return [];
   let first = index;
   while (isImage(first - 1)) first -= 1;
   let last = index;
@@ -581,117 +585,164 @@ function adjacentImages($pos: any): Array<{ pos: number; node: any }> {
   return run;
 }
 
-// 隣り合う image を 1 つの gallery に畳む。畳んだ後は先頭の 1 枚を選んだままにする。
-function foldIntoGallery(view: any, pos: number) {
+// 隣り合う image を 1 つに畳む。畳んだ後は先頭の 1 枚を選んだままにする。
+//
+// WhyNot: node を作り直す形にしない。中の imageItem はそのまま持ち上げるので、
+// キャプションも出典も畳む前の物が残る。
+function foldImages(view: any, imagePos: number) {
   const state = view.state;
-  const $pos = state.doc.resolve(pos);
-  const run = adjacentImages($pos);
+  const run = adjacentImages(state.doc.resolve(imagePos));
   if (run.length < 2) return;
-  const galleryType = state.schema.nodes.gallery;
-  if (!galleryType) return;
-  // gallery の中では効かない attrs は落とす（CMS は gallery の image に size / align を受けない）。
-  const images = run.map((found) => found.node.type.create({ ...found.node.attrs, size: null, align: null }, found.node.content, found.node.marks));
+  const items: any[] = [];
+  for (const found of run) {
+    found.node.forEach((item: any) => {
+      // 並べている間は効かない attrs は落とす（CMS は並べた imageItem に size / align を受けない）。
+      items.push(item.type.create({ ...item.attrs, size: null, align: null }, item.content, item.marks));
+    });
+  }
   const from = run[0].pos;
   const to = run[run.length - 1].pos + run[run.length - 1].node.nodeSize;
-  const tr = state.tr.replaceWith(from, to, galleryType.create(null, images));
+  const tr = state.tr.replaceWith(from, to, state.schema.nodes.image.create(null, items));
   tr.setSelection(NodeSelection.create(tr.doc, from + 1));
   view.dispatch(tr);
   view.focus();
 }
 
-// `pos` の指す image を包む gallery を解いて、中の画像を 1 枚ずつの image に戻す。
-// 解いた後は元の 1 枚を選んだままにする。
-function unfoldGallery(view: any, pos: number) {
+// `imagePos` の image を 1 枚ずつの image に分ける。分けた後は先頭の 1 枚を選んだままにする。
+function splitImages(view: any, imagePos: number) {
   const state = view.state;
-  const $pos = state.doc.resolve(pos);
-  if ($pos.depth === 0 || $pos.parent.type.name !== "gallery") return;
-  const gallery = $pos.parent;
-  const from = $pos.before($pos.depth);
-  const images: any[] = [];
-  gallery.forEach((child: any) => images.push(child));
-  const tr = state.tr.replaceWith(from, from + gallery.nodeSize, images);
-  const at = from + images.slice(0, $pos.index()).reduce((sum, child) => sum + child.nodeSize, 0);
-  tr.setSelection(NodeSelection.create(tr.doc, at));
+  const image = state.doc.nodeAt(imagePos);
+  if (!image || image.type.name !== "image" || image.childCount < 2) return;
+  const singles: any[] = [];
+  image.forEach((item: any) => singles.push(image.type.create(null, item)));
+  const tr = state.tr.replaceWith(imagePos, imagePos + image.nodeSize, singles);
+  tr.setSelection(NodeSelection.create(tr.doc, imagePos + 1));
   view.dispatch(tr);
   view.focus();
 }
 
-export function galleryNode(store: AssetStore) {
+/** 画像の入れ物。中は `imageItem` の並びで、attrs は持たない。 */
+export function imageNode(_store: AssetStore) {
   return Node.create({
-    name: "gallery",
+    name: "image",
     group: "block",
-    // WhyNot: `image+` にしない。最後の 1 枚を消せなくなる。空になった物は
-    // 下の plugin が node ごと落とす（空の gallery は CMS が断る）。
-    content: "image*",
-
-    addAttributes() {
-      return { columns: { default: null } };
-    },
+    // WhyNot: `imageItem*` にしない。空の image を作れると、隣に画像を入れた時に
+    // ProseMirror が先にある image へ中身を吸わせ、元の 1 枚が消える（実際に消えた）。
+    // 最後の 1 枚の削除は帯が image ごと落とす。
+    content: "imageItem+",
+    // WhyNot: 素の block にしない。**下の段落に画像を入れると前の image が置き換わる。**
+    // 入れる場所を探す時に前の image まで範囲が広がるので、境目を閉じる
+    //（`defining` は使わない。型だけ残して中身を既定の imageItem で埋め直し、assetId が消える）。
+    isolating: true,
 
     parseHTML() {
-      return [{ tag: "div[data-gallery]" }];
+      return [{ tag: "div[data-gallery]" }, { tag: "figure[data-gallery]" }];
     },
 
     renderHTML() {
-      return ["div", { "data-gallery": "" }, 0];
+      return ["figure", { "data-gallery": "" }, 0];
     },
 
     addNodeView() {
-      return ({ node }: ViewArgs) => {
+      return ({ node, getPos, editor }: ViewArgs) => {
         const dom = document.createElement("div");
-        dom.className = "tt-gallery";
+
+        // 並べた物ぜんたいの帯。1 枚ずつに戻す / 削除 の 2 つだけ
+        // （`docs/design/richtext-gallery-flow.html` 2。縮小と配置は列の幅が決まっていて効かない）。
+        //
+        // WhyNot: 中の 1 枚の帯に「1 枚ずつに戻す」を置かない。1 枚を選んだつもりで押すと
+        // 並びごと解ける。ぜんたいと 1 枚で帯を分ける（枠も外側と内側で分かれている）。
+        const bar = barOf({ className: "tt-image-bar tt-gallery-tools" });
+        bar.hidden = true;
+        const tool = (icon: string, title: string, onClick: () => void) =>
+          iconButton({ className: "tt-image-tool tt-image-icon", icon: svg(icon, BAR_ICON), title, onClick });
+        bar.append(
+          tool(ICONS.image, "1 枚ずつに戻す", () => {
+            const pos = getPos();
+            if (pos !== undefined) splitImages(editor.view, pos);
+          }),
+          tool(ICONS.trash, "削除", () => {
+            const pos = getPos();
+            const found = pos === undefined ? null : editor.view.state.doc.nodeAt(pos);
+            if (pos === undefined || !found) return;
+            editor.view.dispatch(editor.view.state.tr.delete(pos, pos + found.nodeSize));
+            editor.view.focus();
+          })
+        );
+        dom.append(bar);
 
         const grid = document.createElement("div");
-        grid.className = "tt-gallery-grid";
         dom.append(grid);
 
         // 列は枚数から決まるので、帯も select も無い（`docs/design/richtext-gallery-ui.md` 2）。
+        // 1 枚の時は入れ物を素の div にして、今までの単独の画像と同じ見た目にする。
         const paint = (count: number) => {
-          const columns = columnsFor(count);
+          const many = count >= 2;
+          dom.className = many ? "tt-images tt-gallery" : "tt-images";
+          grid.className = many ? "tt-gallery-grid" : "tt-images-one";
           dom.dataset.count = String(count);
-          grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+          grid.style.gridTemplateColumns = many ? `repeat(${columnsFor(count)}, minmax(0, 1fr))` : "";
+          if (!many) bar.hidden = true;
         };
         paint(node.childCount);
 
         return {
           dom,
           contentDOM: grid,
-          update(updated: { type: { name: string }; childCount: number }) {
-            if (updated.type.name !== "gallery") return false;
+          update(updated: any) {
+            if (updated.type.name !== "image") return false;
             paint(updated.childCount);
             return true;
+          },
+          selectNode() {
+            dom.classList.add("ProseMirror-selectednode");
+            // 1 枚だけの時はぜんたいの帯を出さない（「1 枚ずつに戻す」が意味を持たない）。
+            bar.hidden = (editor.view.state.doc.nodeAt(getPos() ?? -1)?.childCount ?? 0) < 2;
+          },
+          deselectNode() {
+            dom.classList.remove("ProseMirror-selectednode");
+            bar.hidden = true;
           },
         };
       };
     },
 
     addProseMirrorPlugins() {
-      return [emptyGalleryPlugin()];
+      return [emptyImagePlugin(), imageFramePlugin()];
     },
   });
 }
 
-// 中身が 0 になった gallery を node ごと落とし、1 枚だけになった gallery は解いて単独の画像に戻す。
-// 横に並べるのは 2 枚以上なので、減った時も同じ境目で戻す。
-function emptyGalleryPlugin() {
+// 並べた物ぜんたいを選ぶ道。**中の画像の外側（列の隙間と枠の余白）を押した時だけ。**
+// 画像そのものを押した時は imageItem の plugin が 1 枚を選ぶので、ここへは来ない。
+function imageFramePlugin() {
   return new Plugin({
-    key: new PluginKey("galleryNotEmpty"),
+    key: new PluginKey("imageFrameClick"),
+    props: {
+      handleClickOn(view: any, _pos: number, node: any, nodePos: number, event: MouseEvent) {
+        if (node.type.name !== "image") return false;
+        const target = event.target as HTMLElement | null;
+        if (target?.closest(".tt-image") || target?.closest(".tt-image-bar")) return false;
+        view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, nodePos)));
+        return true;
+      },
+    },
+  });
+}
+
+// 中身が 0 枚になった image を node ごと落とす（空の image は CMS が断る）。
+function emptyImagePlugin() {
+  return new Plugin({
+    key: new PluginKey("imageNotEmpty"),
     appendTransaction(transactions: readonly { docChanged: boolean }[], _old: any, next: any) {
       if (!transactions.some((transaction) => transaction.docChanged)) return null;
-      const found: Array<{ pos: number; size: number; only: any }> = [];
+      const found: Array<{ pos: number; size: number }> = [];
       next.doc.descendants((node: any, pos: number) => {
-        if (node.type.name !== "gallery") return;
-        if (node.childCount === 0) found.push({ pos, size: node.nodeSize, only: null });
-        else if (node.childCount === 1) found.push({ pos, size: node.nodeSize, only: node.child(0) });
+        if (node.type.name === "image" && node.childCount === 0) found.push({ pos, size: node.nodeSize });
       });
       if (found.length === 0) return null;
       const tr = next.tr;
-      for (const one of found.reverse()) {
-        const from = tr.mapping.map(one.pos);
-        const to = tr.mapping.map(one.pos + one.size);
-        if (one.only) tr.replaceWith(from, to, one.only);
-        else tr.delete(from, to);
-      }
+      for (const one of found.reverse()) tr.delete(tr.mapping.map(one.pos), tr.mapping.map(one.pos + one.size));
       return tr;
     },
   });
@@ -767,13 +818,16 @@ export function imageDropExtension(onFiles: (files: File[]) => void) {
   });
 }
 
-/** 選んだメディアを本文に入れる形。**2 枚以上は横並び（gallery）にする。** */
+/** 1 枚ぶんの `image`（上がり終わった画像を仮の見た目と差し替える所で使う）。 */
+export function imageOf(schema: any, assetId: string): any {
+  return schema.nodes.image.create(null, schema.nodes.imageItem.create({ assetId }));
+}
+
+/** 選んだメディアを本文に入れる形。**2 枚以上でも `image` 1 つで、中に並べる。** */
 export function insertionOf(assetIds: string[]): Record<string, unknown> | null {
-  const images = assetIds.filter((id) => id).map((id) => ({ type: "image", attrs: { assetId: id } }));
-  if (images.length === 0) return null;
-  if (images.length === 1) return images[0];
-  // WhyNot: attrs.columns を書かない。列は枚数から決まるので、doc に持つと古い値が残る。
-  return { type: "gallery", content: images };
+  const items = assetIds.filter((id) => id).map((id) => ({ type: "imageItem", attrs: { assetId: id } }));
+  if (items.length === 0) return null;
+  return { type: "image", content: items };
 }
 
 /**
@@ -781,7 +835,7 @@ export function insertionOf(assetIds: string[]): Record<string, unknown> | null 
  * WhyNot: CMS 側で trim しない。Markdown に写すと `* cap*` が箇条書きに見えるので、画面で落とした形を正とする。
  */
 export function trimCaption(node: any): any {
-  if (!node || typeof node !== "object" || node.type !== "image" || !Array.isArray(node.content)) return node;
+  if (!node || typeof node !== "object" || node.type !== "imageItem" || !Array.isArray(node.content)) return node;
   const content = node.content.map((child: any) => ({ ...child }));
   const cut = (index: number, pattern: RegExp) => {
     const child = content[index];
@@ -801,11 +855,29 @@ export function trimCaption(node: any): any {
   return { ...node, content };
 }
 
+/**
+ * 旧い形を読む時だけ新しい形に写す。書く時は新しい形しか出さない。
+ * - `gallery`（中に image を並べた物）→ `image`（中は imageItem。attrs.columns は捨てる）
+ * - `attrs.assetId` を持つ `image`（1 枚）→ `image > imageItem`
+ */
+export function liftImageItems(node: any): any {
+  if (!node || typeof node !== "object") return node;
+  const next = Array.isArray(node.content) ? { ...node, content: node.content.map(liftImageItems) } : { ...node };
+  if (next.type === "gallery") {
+    const items = (Array.isArray(next.content) ? next.content : [])
+      .filter((child: any) => child?.type === "image" || child?.type === "imageItem")
+      .flatMap((child: any) => (child.type === "imageItem" ? [child] : Array.isArray(child.content) && !child.attrs?.assetId ? child.content : [{ ...child, type: "imageItem" }]));
+    return { type: "image", content: items };
+  }
+  if (next.type !== "image" || typeof next.attrs?.assetId !== "string") return next;
+  return { type: "image", content: [{ type: "imageItem", attrs: next.attrs, content: Array.isArray(next.content) ? next.content : [] }] };
+}
+
 /** 旧い形（attrs.caption の文字列）を、読む時だけ中身（text）に写す。書く時は中身しか出さない。 */
 export function liftCaption(node: any): any {
   if (!node || typeof node !== "object") return node;
   const next = Array.isArray(node.content) ? { ...node, content: node.content.map(liftCaption) } : { ...node };
-  if (next.type !== "image" || typeof next.attrs?.caption !== "string") return next;
+  if (next.type !== "imageItem" || typeof next.attrs?.caption !== "string") return next;
   const { caption, ...attrs } = next.attrs;
   const empty = !Array.isArray(next.content) || next.content.length === 0;
   return {

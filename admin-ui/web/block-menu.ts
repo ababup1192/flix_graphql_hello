@@ -1,10 +1,11 @@
 // 空の段落の左に出る「+」と、そこから開くブロックの一覧。`/` でも同じ一覧が開く。
 //
 // **「+」は空の段落にカーソルがある間は常時出す**（ホバーではない。note が 2023 年に変えた点。
-// `docs/design/richtext-note-style.md` 6.1）。一覧は 画像 / 区切り線 / 引用 / コード / 表 / 数式 / 埋め込み。
+// `docs/design/richtext-note-style.md` 6.1）。一覧は 画像 / 区切り線 / 引用 / コード / 表 / 数式 /
+// チェックリスト / 埋め込み。
 //
-// **ブロックを入れる口はここに集める。** ツールバーは文字に掛ける物とリンク・一覧だけにした
-// （`docs/design/toolbar-mock.html` の案 A）ので、画像・コード・区切り線・表はここからしか入らない。
+// **ブロックを入れる口はここに集める。** ヘッダは押すだけで入る物、浮く帯は文字に掛ける物
+// （`docs/design/toolbar-split-mock.html` の案 D）なので、画像以外はここからしか入らない。
 //
 // WhyNot: 「+」を ProseMirror の DOM の中に入れない。段落の node view を作ると、打っている間に
 // 作り直されて「知らない DOM」として戻される（表の掴みと同じ理由）。`.tt-mount` の層に置く。
@@ -41,6 +42,7 @@ const ICONS: Record<string, string> = {
   embed: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
   math: '<path d="M17 5H7l6 7-6 7h10"/>',
+  taskList: '<path d="M11 6h10"/><path d="M11 12h10"/><path d="M11 18h10"/><path d="M3 6l1.5 1.5L7 5"/><path d="M3 12l1.5 1.5L7 11"/><path d="M3 18l1.5 1.5L7 17"/>',
 };
 
 function svg(paths: string): string {
@@ -91,6 +93,7 @@ export class BlockMenu {
       { label: "コード", keys: ["こーど", "code"], icon: ICONS.code, run: () => chain().toggleCodeBlock().run() },
       { label: "表", keys: ["ひょう", "table", "てーぶる"], icon: ICONS.table, run: () => args.onTable() },
       { label: "数式", keys: ["すうしき", "math", "tex", "katex", "formula"], icon: ICONS.math, run: () => this.insertMath() },
+      { label: "チェックリスト", keys: ["ちぇっくりすと", "task", "todo", "check"], icon: ICONS.taskList, run: () => chain().toggleTaskList().run() },
       { label: "埋め込み", keys: ["うめこみ", "embed", "url", "りんく", "link"], icon: ICONS.embed, run: () => this.askUrl() },
     ];
 

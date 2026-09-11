@@ -1,0 +1,209 @@
+<title>エディタの守り方</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #f3f5f6; --raised: #fff; --ink: #16202a; --ink-2: #55656f; --ink-3: #8695a0;
+    --line: #d5dee2; --fast: #1f7a6b; --fast-soft: #e0efec; --slow: #a8501c; --slow-soft: #f6e7dd;
+    --code: #eef2f4; --dead: #b9c4ca;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #111a20; --raised: #18242c; --ink: #e6edf0; --ink-2: #9db0ba; --ink-3: #6d8593;
+      --line: #263640; --fast: #5cc6b0; --fast-soft: #123230; --slow: #e0925f; --slow-soft: #3a2418;
+      --code: #0e171d; --dead: #3c4a52;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #111a20; --raised: #18242c; --ink: #e6edf0; --ink-2: #9db0ba; --ink-3: #6d8593;
+    --line: #263640; --fast: #5cc6b0; --fast-soft: #123230; --slow: #e0925f; --slow-soft: #3a2418;
+    --code: #0e171d; --dead: #3c4a52;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--paper); color: var(--ink); font-family: "IBM Plex Sans", -apple-system, "Hiragino Sans", sans-serif; font-size: 15px; line-height: 1.8; }
+  .wrap { max-width: 66rem; margin: 0 auto; padding: 3.5rem 1.5rem 5rem; display: flex; flex-direction: column; gap: 3rem; }
+  header { display: flex; flex-direction: column; gap: .4rem; }
+  .stamp { font-family: "IBM Plex Mono", monospace; font-size: .74rem; color: var(--ink-3); letter-spacing: .06em; text-transform: uppercase; }
+  h1 { font-size: 1.7rem; font-weight: 600; margin: 0; letter-spacing: -.01em; }
+  header p { margin: 0; color: var(--ink-2); max-width: 46rem; }
+  section { display: flex; flex-direction: column; gap: 1.1rem; }
+  h2 { font-size: 1.05rem; font-weight: 600; margin: 0; padding-bottom: .45rem; border-bottom: 1px solid var(--line); }
+  h2 .n { font-family: "IBM Plex Mono", monospace; color: var(--fast); margin-right: .55rem; font-size: .92rem; }
+  p { margin: 0; max-width: 50rem; }
+  .lede { color: var(--ink-2); }
+
+  .shock { background: var(--slow-soft); border-left: 3px solid var(--slow); padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: .3rem; }
+  .shock b { font-weight: 600; }
+  .shock span { color: var(--ink-2); font-size: .92rem; }
+
+  /* 層の図 */
+  .layers { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 48rem) { .layers { grid-template-columns: 1fr; } }
+  .layer { background: var(--raised); border: 1px solid var(--line); padding: 1.1rem 1.25rem; display: flex; flex-direction: column; gap: .7rem; }
+  .layer.f { border-top: 3px solid var(--fast); }
+  .layer.s { border-top: 3px solid var(--slow); }
+  .layer h3 { margin: 0; font-size: .95rem; font-weight: 600; display: flex; align-items: baseline; gap: .6rem; }
+  .layer .big { font-family: "IBM Plex Mono", monospace; font-size: 1.9rem; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
+  .layer.f .big { color: var(--fast); } .layer.s .big { color: var(--slow); }
+  .layer ul { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .3rem; font-size: .88rem; color: var(--ink-2); }
+  .layer .when { font-family: "IBM Plex Mono", monospace; font-size: .76rem; color: var(--ink-3); letter-spacing: .04em; }
+
+  /* 棒 */
+  .bars { display: flex; flex-direction: column; gap: .5rem; }
+  .bar { display: grid; grid-template-columns: 9rem 1fr 4.5rem; align-items: center; gap: .75rem; font-size: .88rem; }
+  .bar .track { height: 22px; background: var(--code); position: relative; }
+  .bar .fill { height: 100%; }
+  .bar .num { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; color: var(--ink-2); text-align: right; font-size: .82rem; }
+
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; min-width: 40rem; font-size: .88rem; }
+  th, td { text-align: left; padding: .6rem .7rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: .74rem; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+  td.num { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+  .yes { color: var(--fast); font-weight: 600; } .no { color: var(--dead); }
+
+  .steps { display: flex; flex-direction: column; gap: .75rem; }
+  .step { display: grid; grid-template-columns: 2.2rem 1fr; gap: .9rem; background: var(--raised); border: 1px solid var(--line); padding: 1rem 1.1rem; }
+  .step .k { font-family: "IBM Plex Mono", monospace; font-size: 1.2rem; color: var(--fast); line-height: 1.3; }
+  .step h3 { margin: 0 0 .2rem; font-size: .97rem; font-weight: 600; }
+  .step p { font-size: .89rem; color: var(--ink-2); margin: 0; }
+  .step .meta { font-family: "IBM Plex Mono", monospace; font-size: .76rem; color: var(--ink-3); margin-top: .4rem; }
+
+  pre { margin: 0; background: var(--code); border: 1px solid var(--line); padding: .8rem 1rem; overflow-x: auto;
+    font-family: "IBM Plex Mono", monospace; font-size: .78rem; line-height: 1.7; }
+  .k2 { color: var(--fast); } .c2 { color: var(--ink-3); }
+  .note { font-size: .84rem; color: var(--ink-3); border-top: 1px solid var(--line); padding-top: .9rem; }
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="stamp">admin-ui / 2026-09-12</div>
+  <h1>エディタの守り方</h1>
+  <p>1 日で 23 件の不具合を直したが、同じ形が繰り返し、直したつもりが直っていない事も起きた。<br>
+  調べた結果、足りないのは新しい道具ではなかった。</p>
+</header>
+
+<section>
+  <h2><span class="n">00</span>まず分かった事</h2>
+  <div class="shock">
+    <b>175 件の検査が、どこからも呼ばれていない。</b>
+    <span>`npm run check` にも CI にも入っておらず、今は赤のまま放置されている。今日 338 行を足したが、誰も回していない。</span>
+  </div>
+  <div class="shock" style="background: var(--fast-soft); border-left-color: var(--fast)">
+    <b>検査は既に実機で打鍵している。</b>
+    <span>状態を直接作るのは 3 件だけで、打鍵が 119 件。「打鍵する形に変える」はほぼ済んでいた。質は高い。</span>
+  </div>
+</section>
+
+<section>
+  <h2><span class="n">01</span>175 件を分けると、8 割は画面が要らない</h2>
+  <p class="lede">何を読んでいるかで機械的に分類した結果。</p>
+  <div class="layers">
+    <div class="layer f">
+      <h3><span class="big">140</span> 画面が要らない</h3>
+      <ul>
+        <li>本文の形と、選んでいる場所（71 件）</li>
+        <li>部品が出ているかどうか（69 件）</li>
+      </ul>
+      <div class="when">数秒 / 毎回回す / CMS も管理画面も不要</div>
+    </div>
+    <div class="layer s">
+      <h3><span class="big">35</span> 画面が要る</h3>
+      <ul>
+        <li>位置・はみ出し・重なり・スクロール（29 件）</li>
+        <li>保存して読み直す（6 件）</li>
+      </ul>
+      <div class="when">分単位 / 印を付けた時だけ / CMS と DB が要る</div>
+    </div>
+  </div>
+  <p class="lede">今の検査は 175 件すべてが右側の回し方をしている。固定の待ち時間が 164 か所、合計 70 秒。<br>
+  画面の遷移が 37 回あり、起動だけで 60〜90 秒かかる。</p>
+</section>
+
+<section>
+  <h2><span class="n">02</span>今日の 23 件を、案ごとに数えた</h2>
+  <div class="bars">
+    <div class="bar"><span>開発用の画面</span><div class="track"><div class="fill" style="width:96%; background:var(--fast)"></div></div><span class="num">22 / 23</span></div>
+    <div class="bar"><span>軽い層に分ける</span><div class="track"><div class="fill" style="width:65%; background:var(--fast)"></div></div><span class="num">15 / 23</span></div>
+    <div class="bar"><span>lint で禁じる</span><div class="track"><div class="fill" style="width:39%; background:var(--fast)"></div></div><span class="num">9 / 23</span></div>
+    <div class="bar"><span>Elm に移す</span><div class="track"><div class="fill" style="width:39%; background:var(--dead)"></div></div><span class="num">2〜9</span></div>
+    <div class="bar"><span>操作を記録する</span><div class="track"><div class="fill" style="width:2%; background:var(--dead)"></div></div><span class="num">0</span></div>
+    <div class="bar"><span>往復を機械で回す</span><div class="track"><div class="fill" style="width:2%; background:var(--dead)"></div></div><span class="num">0</span></div>
+  </div>
+  <p class="lede">記録の仕組みは他社に採用例がなく、読めない検査が増えるだけ。<br>
+  往復を機械で回す案は本文の変換に効くもので、今日の 23 件には 1 件も当たらない。</p>
+</section>
+
+<section>
+  <h2><span class="n">03</span>やる順</h2>
+  <div class="steps">
+    <div class="step">
+      <div class="k">1</div>
+      <div>
+        <h3>手組みを lint で禁じる</h3>
+        <p>部品の外で帯を手組みしたり、画面の座標から面を置いたりするのを機械が止める。文言の見張りと同じ形で、その仕組みは既にあり CI にも乗っている。</p>
+        <div class="meta">手間 小 ・ 9 件が構造的に消える ・ 今日できる</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="k">2</div>
+      <div>
+        <h3>開発用の画面を作る</h3>
+        <p>エディタだけを置いた 1 枚。名前を付けた初期状態を切り替えられる。検査の入口を 1 行差し替えるだけで 140 件が CMS 無しで回る。起動の 60〜90 秒と遷移の 74 秒が消える。</p>
+        <div class="meta">手間 小 ・ TipTap 本体も同じ形（デモ画面を検査の的にしている）</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="k">3</div>
+      <div>
+        <h3>軽い層と重い層に分け、回すのは機械に任せる</h3>
+        <p>軽い 140 件は毎回、重い 35 件は印を付けた時だけ。エージェントは検査を書くだけで回さない。</p>
+        <div class="meta">手間 中 ・ 1 人あたり 10〜25 万トークンが 1 万以下になる見込み</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="n">04</span>軽い層はこう書ける</h2>
+  <p class="lede">今は画面を開いて打鍵し、見た目から結果を推測している。<br>
+  軽い層では、掛かっている装飾を直接読める。今日の食い違いはここで防げた。</p>
+  <pre><span class="c2">// 今（画面が要る。数秒 + 起動 60〜90 秒）</span>
+await page.goto(<span class="k2">"/p/default/c/blogs/new"</span>)
+await page.waitForTimeout(2500)
+await ed.click(); await page.keyboard.type(<span class="k2">"code"</span>)
+<span class="c2">// 結果は見た目から推測</span>
+
+<span class="c2">// 軽い層（画面が要らない。数ミリ秒）</span>
+editor.commands.setContent(<span class="k2">"&lt;p&gt;code&lt;/p&gt;"</span>)
+editor.commands.selectAll()
+editor.commands.toggleCode()
+press(<span class="k2">"ArrowRight"</span>); type(<span class="k2">"x"</span>)
+expect(editor.isActive(<span class="k2">"code"</span>)).toBe(<span class="k2">false</span>)  <span class="c2">← 直接読める</span></pre>
+</section>
+
+<section>
+  <h2><span class="n">05</span>他社はどうしているか</h2>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>会社</th><th>軽い層</th><th>重い層</th><th>特徴</th></tr></thead>
+    <tbody>
+      <tr><td>TipTap</td><td class="num">200</td><td class="num">65</td><td>デモ画面そのものを検査の的にしている</td></tr>
+      <tr><td>ProseMirror</td><td>多数</td><td>限定</td><td>ブラウザでしか意味のない物だけを分離。その一覧が今回の分類とほぼ一致</td></tr>
+      <tr><td>Lexical</td><td>あり</td><td>あり</td><td>毎回は 1 種類だけ、全部は印を付けた時だけ</td></tr>
+      <tr><td>Slate</td><td>あり</td><td>あり</td><td>失敗したら 5 回まで自動で再試行</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="lede">4 社とも、ランダムな入力で試す方式は採っていない。手で書いた場合に、確かめたい条件を自動で全部に掛ける形が主流。</p>
+</section>
+
+<section>
+  <h2><span class="n">06</span>自動化できない 2 つ</h2>
+  <p>日本語の変換中の挙動と、Safari での確認は、道具の制約で自動化できない。<br>
+  ここだけは確認の手順を文書にして、変更した所に絞って人が見る。</p>
+</section>
+
+<p class="note">根拠は admin-ui の読み取り（検査 175 件の分類、`waitForTimeout` 164 か所、`web/*.ts` 6,298 行にテスト 0 件）と、他社 4 社のリポジトリの実測。</p>
+
+</div>

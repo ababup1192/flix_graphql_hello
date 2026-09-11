@@ -7,14 +7,15 @@
 //   3. 画像の代替テキスト
 //   4. 入れ子（表 in 表・上付き＋下付き）が作れない事と、CMS が断る事
 //   4d.「+」と `/` の一覧から埋め込み（embed / linkCard）を入れられる
-//   4d2. ツールバーの数式で文中の数式（math の mark）、「+」の一覧の「数式」でブロックの数式（mathBlock）
+//   4d2. 浮く帯の数式で文中の数式（math の mark）、「+」の一覧の「数式」でブロックの数式（mathBlock）
 //   4f. すべての帯とすべての浮く面（横断。部品は `web/ui.ts`）
 //   4g. ブロックの中の全選択がそのブロックの中だけに閉じる
 //   4h. ファイル名の拡張子から言語が入る
 //   4i. ツールバーが本文の枠の中で上に貼り付く
-//   4j. ツールバーが 9 個 +「…」で、「…」が開いて中の物が効く（案 A）
+//   4j. ヘッダが 6 個・浮く帯が 6 個 +「…」で、「…」が開いて中の物が効く（案 D）
 //   4k. `` `x` `` が前の 1 文字を巻き込まない / バッククォート 1 つでは変わらない
 //   4l. 入力規則の一覧（記法 → 付くマーク）。記号が重なる組で片方が片方を食わない
+//   4m. 掛けた装飾から抜ける道（Enter で落ちる / リストでは残る / コードと数式の → キー / Space 2 回 / ボタン）
 //   5. ツールバーが幅 1440 / 1024 / 768 で溢れない
 
 import { chromium } from "playwright";
@@ -47,6 +48,35 @@ page.on("console", (message) => {
 
 const docOf = () => page.evaluate(() => document.querySelector("tiptap-editor")?.getAttribute("doc") ?? "");
 
+// 今出ている帯 1 つの中身。
+//
+// **画像の帯は image の node ごとに 1 つずつ作られていて、選んでいない物は hidden で隠れている。**
+// `.tt-image-bar .tt-image-tool` を全部集めると、3 枚並べた gallery ではボタンが 3 組に重なる。
+// 出ている帯が 1 つだけである事も一緒に見る（2 つ出ていたら帯を作る所が二重に走っている）。
+const openBars = () =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".tt-image-bar")]
+      .filter((bar) => !bar.hidden && bar.offsetParent !== null)
+      .map((bar) => [...bar.querySelectorAll(".tt-image-tool")].filter((tool) => !tool.hidden).map((tool) => tool.getAttribute("aria-label")).join("/"))
+  );
+const openBar = async () => {
+  const bars = await openBars();
+  return bars.length === 1 ? bars[0] : `帯が ${bars.length} つ出ています: ${JSON.stringify(bars)}`;
+};
+
+// doc の中の imageItem を順に。**画像の attrs もキャプションも imageItem が持つ**
+// （`image` は入れ物で attrs を持たない。`docs/design/richtext-note-style.md` 3）。
+function itemsOf(doc) {
+  const out = [];
+  const walk = (node) => {
+    if (!node || typeof node !== "object") return;
+    if (node.type === "imageItem") out.push(node);
+    for (const child of node.content ?? []) walk(child);
+  };
+  walk(doc);
+  return out;
+}
+
 function types(doc) {
   const out = new Set();
   const walk = (node) => {
@@ -66,18 +96,27 @@ async function openNew(title) {
   await page.locator("tiptap-editor .tt-body").click();
 }
 
-// 道具を 1 つ使う。**ツールバーは 9 個 +「…」しか出さない**（`docs/design/toolbar-mock.html` の案 A）ので、
-// 畳んだ物は「…」から、ブロックを入れる物は「+」の一覧から押す。
-const FOLDED = new Set(["下線", "蛍光ペン", "上付き", "下付き", "チェックリスト", "引用"]);
-// ツールバーから外した物と、「+」の一覧でのその名前。
-const IN_PLUS = { 画像: "画像", コードブロック: "コード", 区切り線: "区切り線", 表: "表" };
+// 道具を 1 つ使う。**役割で 3 か所に分かれている**（`docs/design/toolbar-split-mock.html` の案 D）:
+// ヘッダは押すだけで入る 6 個、浮く帯は文字に掛ける 6 個 +「…」、ブロックは「+」の一覧。
+//
+// 「…」と帯の物は**文字を選んでいないと押せない**（帯が出ない）。呼ぶ前に選んでおく。
+const FOLDED = new Set(["下線", "蛍光ペン", "上付き", "下付き"]);
+const IN_BUBBLE = new Set(["太字", "斜体", "打ち消し", "コード（文の中）", "数式（文の中）", "リンク"]);
+// ヘッダから外した物と、「+」の一覧でのその名前。
+// **画像は外さない**（書くたびに使うのでヘッダに残す）。「+」の一覧にも同じ口がある。
+const IN_PLUS = { コードブロック: "コード", 区切り線: "区切り線", 表: "表", 引用: "引用", チェックリスト: "チェックリスト" };
 
 async function use(title) {
   if (FOLDED.has(title)) {
-    await page.locator(".tt-more").click();
+    await page.locator(".tt-bubble .tt-more").click();
     await page.waitForTimeout(250);
     await page.locator(`.tt-more-item[data-more="${title}"]`).click();
     await page.waitForTimeout(250);
+    return;
+  }
+  if (IN_BUBBLE.has(title)) {
+    await page.locator(`.tt-bubble-tool[data-bubble="${title}"]`).click();
+    await page.waitForTimeout(200);
     return;
   }
   if (IN_PLUS[title]) {
@@ -105,10 +144,10 @@ try {
   await openNew(`rich-underline ${marker}`);
   await page.keyboard.type("したせん");
   for (let i = 0; i < 4; i += 1) await page.keyboard.press("Shift+ArrowLeft");
-  check((await page.locator('.tt-tool[title="下線"]').count()) === 0, "下線はツールバーに出さない（「…」に畳む）", "出ています");
+  check((await page.locator('.tt-tool[title="下線"]').count()) === 0, "下線はヘッダに出さない（帯の「…」に畳む）", "出ています");
   await use("下線");
   check(types(JSON.parse((await docOf()) || "{}")).has("mark:underline"), "下線の mark が入る", (await docOf()).slice(0, 200));
-  await page.locator(".tt-more").click();
+  await page.locator(".tt-bubble .tt-more").click();
   await page.waitForTimeout(250);
   check(
     await page.locator('.tt-more-item[data-more="下線"]').evaluate((el) => el.classList.contains("is-on")),
@@ -123,7 +162,8 @@ try {
   await openNew(`rich-table ${marker}`);
   await page.keyboard.type("表のテスト");
   await page.keyboard.press("Enter");
-  check((await page.locator('.tt-tool[title="表"]').count()) === 0, "表はツールバーに出さない（「+」の一覧だけ）", "出ています");
+  check((await page.locator('.tt-tool[title="表"]').count()) === 0, "表はヘッダに出さない（「+」の一覧だけ）", "出ています");
+  check((await page.locator('.tt-tool[title="画像"]').count()) === 1, "画像はヘッダに残す", `${await page.locator('.tt-tool[title="画像"]').count()} 個`);
   await use("表");
   await page.waitForSelector(".tt-size-grid", { timeout: 4000 });
   check((await page.locator(".tt-size-cell").count()) === 64, "大きさを升目で選べる", `${await page.locator(".tt-size-cell").count()} 升`);
@@ -354,20 +394,25 @@ try {
   await page.waitForTimeout(700);
   const altBox = page.locator(".tt-image-alt").first();
   check((await page.locator(".tt-image.is-active .tt-image-caption").count()) === 1, "画像を選ぶとキャプションの figcaption が出る", `${await page.locator(".tt-image.is-active .tt-image-caption").count()} 個`);
+  check(
+    (JSON.parse((await docOf()) || "{}").content ?? []).some((node) => node.type === "image" && !node.attrs && node.content?.[0]?.type === "imageItem"),
+    "1 枚でも image の中に imageItem が 1 つ（image に attrs は無い）",
+    (await docOf()).slice(0, 300),
+  );
   // 画像の帯は画像を押して node ごと選んだ時だけ。リンク / ALT / 縮小 / 配置 / 削除 の 5 つ（単独の画像。横に並べるは隣が画像の時だけ）
   // 画像を node ごと選ぶ（帯は node ごと選んだ時だけ出る）。
   const selectImage = async () => {
     await page.evaluate(() => {
       const editor = document.querySelector("tiptap-editor").editor;
       let at = -1;
-      editor.state.doc.descendants((node, pos) => { if (node.type.name === "image" && at < 0) at = pos; });
+      editor.state.doc.descendants((node, pos) => { if (node.type.name === "imageItem" && at < 0) at = pos; });
       editor.chain().focus().setNodeSelection(at).run();
     });
     await page.waitForTimeout(300);
   };
   await selectImage();
-  const imageBar = await page.locator(".tt-image-bar .tt-image-tool").evaluateAll((els) => els.filter((el) => !el.hidden).map((el) => el.getAttribute("aria-label")));
-  check(imageBar.join("/") === "リンク/代替テキスト/縮小/配置/削除", "画像の帯は リンク / ALT / 縮小 / 配置 / 削除 の順に並ぶ", imageBar.join("/"));
+  const imageBar = await openBar();
+  check(imageBar === "リンク/代替テキスト/縮小/配置/削除", "画像の帯は リンク / ALT / 縮小 / 配置 / 削除 の順に並ぶ", imageBar);
   // 配置を押すと帯が 左 / 中央 / 右 の 3 つに入れ替わり、1 つ押すと align を書いて元の帯に戻る
   await page.locator('.tt-image-tool[title="配置"]').first().click();
   await page.waitForTimeout(200);
@@ -375,7 +420,7 @@ try {
   check(alignBar.join("/") === "左に寄せる/中央に寄せる/右に寄せる", "配置を押すと帯が 左 / 中央 / 右 に入れ替わる", alignBar.join("/"));
   await page.locator('.tt-image-tool[title="左に寄せる"]').first().click();
   await page.waitForTimeout(400);
-  const aligned = (JSON.parse((await docOf()) || "{}").content ?? []).find((node) => node.type === "image");
+  const aligned = itemsOf(JSON.parse((await docOf()) || "{}"))[0];
   check(aligned?.attrs?.align === "left", "左に寄せる で align=left が入る", JSON.stringify(aligned?.attrs ?? {}));
   check((await page.locator('.tt-image-tool[title="配置"]').count()) === 1, "配置を選ぶと元の帯に戻る");
   await page.locator('.tt-image-tool[title="配置"]').first().click();
@@ -386,9 +431,9 @@ try {
   await page.keyboard.type("きゃぷしょん");
   await page.keyboard.press("Enter");
   await page.waitForTimeout(600);
-  const withCaption = (JSON.parse((await docOf()) || "{}").content ?? []).find((node) => node.type === "image");
-  check(withCaption?.content?.[0]?.text === "きゃぷしょん" && withCaption?.attrs?.caption === undefined, "キャプションが image の content に入る（attrs.caption は出ない）", JSON.stringify(withCaption ?? {}));
-  check((JSON.parse((await docOf()) || "{}").content ?? []).filter((node) => node.type === "image").length === 1 && withCaption?.content?.length === 1, "キャプションの中の Enter は何もしない", JSON.stringify(withCaption?.content ?? []));
+  const withCaption = itemsOf(JSON.parse((await docOf()) || "{}"))[0];
+  check(withCaption?.content?.[0]?.text === "きゃぷしょん" && withCaption?.attrs?.caption === undefined, "キャプションが imageItem の content に入る（attrs.caption は出ない）", JSON.stringify(withCaption ?? {}));
+  check(itemsOf(JSON.parse((await docOf()) || "{}")).length === 1 && withCaption?.content?.length === 1, "キャプションの中の Enter は何もしない", JSON.stringify(withCaption?.content ?? []));
   // キャプションの中では画像の帯は出ず、キャプションの上に 太字 / 打ち消し / リンク の 3 つ
   check(await page.locator(".tt-image .tt-image-bar").first().isHidden(), "キャプションを打っている間は画像の帯が出ない");
   const captionBar = await page.locator(".tt-bubble-caption button").evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
@@ -417,8 +462,8 @@ try {
   await page.keyboard.press("Enter");
   await page.waitForTimeout(600);
   const withAlt = JSON.parse((await docOf()) || "{}");
-  const image = (withAlt.content ?? []).find((node) => node.type === "image");
-  check(image?.attrs?.alt === "さんぷるの代替", "代替テキストが image の attrs に入る", JSON.stringify(image?.attrs ?? {}));
+  const image = itemsOf(withAlt)[0];
+  check(image?.attrs?.alt === "さんぷるの代替", "代替テキストが imageItem の attrs に入る", JSON.stringify(image?.attrs ?? {}));
   check((await page.locator('.tt-image-tool[title="代替テキスト"]').count()) === 1, "適用の後は元の帯に戻る");
 
   const around = JSON.parse((await docOf()) || "{}");
@@ -426,13 +471,42 @@ try {
   check(kinds.includes("paragraph image paragraph"), "画像の上下に行ができる", kinds);
   await save("代替テキスト付きの下書きが保存できる");
 
+  // 3b. 画像を 2 枚続けて入れる
+  //
+  // メディアの画面を開くとエディタが焦点を失い、疑似行（`web/block-edges.ts`）が消える。
+  // 選択はその行の跡＝直前の画像のキャプションに戻るので、そこへ入れると「空の textblock は
+  // 入れた物で置き換える」で 1 枚目の imageItem ごと置き換わっていた（1 枚目の assetId が消えた）。
+  await openNew(`rich-two-images ${marker}`);
+  const insertPicked = async (nth) => {
+    await use("画像");
+    await page.waitForTimeout(900);
+    await page.locator(".fixed .grid button").nth(nth).click();
+    await page.getByRole("button", { name: /本文に挿入/ }).click();
+    await page.waitForTimeout(700);
+  };
+  await insertPicked(0);
+  const firstId = itemsOf(JSON.parse((await docOf()) || "{}"))[0]?.attrs?.assetId ?? "";
+  // 画像の下（本文の枠の余白）を押して行を足す。ここで押せる状態にしないとヘッダの画像は薄いまま。
+  const body = await page.locator("tiptap-editor .tt-body").boundingBox();
+  await page.mouse.click(body.x + body.width / 2, body.y + body.height - 6);
+  await page.waitForTimeout(300);
+  await insertPicked(1);
+  const twoImages = JSON.parse((await docOf()) || "{}");
+  const images = (twoImages.content ?? []).filter((node) => node.type === "image");
+  const items = itemsOf(twoImages);
+  check(images.length === 2, "画像を 2 枚続けて入れると image が 2 つになる", `${images.length} つ: ${JSON.stringify((twoImages.content ?? []).map((node) => node.type))}`);
+  check(items[0]?.attrs?.assetId === firstId && firstId !== "", "2 枚目を入れても 1 枚目の assetId が残る", `${firstId} → ${JSON.stringify(items[0]?.attrs ?? {})}`);
+  check(items.every((item) => item?.attrs?.assetId), "どの imageItem も assetId を持つ（既定値に潰れない）", JSON.stringify(items.map((item) => item?.attrs ?? {})));
+  await save("画像 2 枚の下書きが保存できる");
+
   // 4. 入れ子ができない
   await openNew(`rich-nest ${marker}`);
   await use("表");
   await page.waitForSelector(".tt-size-grid", { timeout: 4000 });
   await page.locator(".tt-size-cell").nth(1 * 8 + 1).click();
   await page.waitForTimeout(600);
-  for (const title of ["引用", "箇条書き"]) {
+  // 引用は「+」の一覧に移ったので、セルの中では口そのものが無い（この節の最後で見る）。
+  for (const title of ["箇条書き"]) {
     await page.locator(".tt-body table th").first().click();
     await page.waitForTimeout(200);
     await use(title);
@@ -452,9 +526,11 @@ try {
 
   // 上付き＋下付き
   await openNew(`rich-raised ${marker}`);
+  await page.keyboard.type("a");
+  await page.keyboard.press("Shift+ArrowLeft");
+  await page.waitForTimeout(300);
   await use("上付き");
   await use("下付き");
-  await page.keyboard.type("a");
   await page.waitForTimeout(400);
   const raised = (JSON.parse((await docOf()) || "{}").content?.[0]?.content?.[0]?.marks ?? []).map((m) => m.type);
   check(raised.length === 1 && raised[0] === "sub", "上付きと下付きは重ならない", raised.join("+"));
@@ -620,21 +696,22 @@ try {
   await page.waitForTimeout(300);
   check(JSON.stringify(JSON.parse((await docOf()) || "{}")).includes("もどった"), "消した後は段落に続きが打てる", (await docOf()).slice(0, 200));
 
-  // 引用の出典は箱の外の下の右に 1 欄。↑ も ↓ も引用の外の行へ出る
-  const classOf = () => page.evaluate(() => String(document.activeElement?.className ?? ""));
+  // 引用の出典は箱の外の下の右。出典は引用の最後の子の quoteCite で、マークを掛けられる。
+  // ↑ も ↓ も引用の外の行へ出る
   await openNew(`rich-quote-cite ${marker}`);
   await page.keyboard.type("いんようのまえ");
   await page.keyboard.press("Enter");
   await page.keyboard.type("> ひきよう");
   await page.waitForTimeout(400);
-  const citeField = page.locator(".tt-quote-cite").first();
-  check((await page.locator(".tt-quote-field").count()) === 1, "出典の欄は 1 つだけ", `${await page.locator(".tt-quote-field").count()} 個`);
+  const citeRow = page.locator(".tt-quote-cite-row").first();
+  check((await page.locator(".tt-quote-cite-row").count()) === 1, "出典の行は 1 つだけ", `${await page.locator(".tt-quote-cite-row").count()} 個`);
   check((await page.locator(".tt-quote-link").count()) === 0, "出典の行に印（ボタン）は出さない", `${await page.locator(".tt-quote-link").count()} 個`);
   check(
-    (await citeField.getAttribute("placeholder")) === "出典を入力",
+    (await page.locator(".tt-quote-hint").first().textContent()) === "出典を入力",
     "空の出典には placeholder「出典を入力」が出る",
-    String(await citeField.getAttribute("placeholder"))
+    String(await page.locator(".tt-quote-hint").first().textContent())
   );
+  check((await page.locator("cite.tt-quote-cite").count()) === 0, "出典が空の間は quoteCite を作らない", `${await page.locator("cite.tt-quote-cite").count()} 個`);
   const citeBelow = await page.evaluate(() => {
     const box = document.querySelector(".tt-quote blockquote").getBoundingClientRect();
     const row = document.querySelector(".tt-quote-cite-row").getBoundingClientRect();
@@ -649,7 +726,13 @@ try {
     段落: { type: "paragraph", content: [{ type: "text", text: "次の段落" }] },
     画像: { type: "image", attrs: { src: "https://placehold.co/600x200.png", alt: "え" } },
     コード: { type: "codeBlock", attrs: { language: "javascript" }, content: [{ type: "text", text: "const a = 1;" }] },
-    引用: { type: "blockquote", attrs: { cite: "つぎのしゅってん" }, content: [{ type: "paragraph", content: [{ type: "text", text: "つぎのいんよう" }] }] },
+    引用: {
+      type: "blockquote",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "つぎのいんよう" }] },
+        { type: "quoteCite", content: [{ type: "text", text: "つぎのしゅってん" }] },
+      ],
+    },
   })) {
     for (const cite of ["しゅってん", null]) {
       await page.evaluate(
@@ -657,7 +740,13 @@ try {
           document.querySelector("tiptap-editor").editor.commands.setContent({
             type: "doc",
             content: [
-              { type: "blockquote", attrs: { cite }, content: [{ type: "paragraph", content: [{ type: "text", text: "ひきよう" }] }] },
+              {
+                type: "blockquote",
+                content: [
+                  { type: "paragraph", content: [{ type: "text", text: "ひきよう" }] },
+                  ...(cite ? [{ type: "quoteCite", content: [{ type: "text", text: cite }] }] : []),
+                ],
+              },
               node,
               { type: "paragraph", content: [{ type: "text", text: "おわり" }] },
             ],
@@ -668,9 +757,8 @@ try {
       await page.waitForTimeout(500);
       const gap = await page.evaluate(() => {
         const quote = document.querySelector("tiptap-editor .tt-body .tt-quote");
-        const row = quote.querySelector(".tt-quote-cite-row");
-        // 行を出さない時は箱の下端で測る（出典が空の引用は行ごと出さない）。
-        const above = getComputedStyle(row).display === "none" ? quote.querySelector("blockquote") : row;
+        // 出典は箱に重ねて置くので、下端は出典（あれば）か、場所を空けている行で測る。
+        const above = quote.querySelector("blockquote > cite") ?? quote.querySelector(".tt-quote-cite-row");
         return above.getBoundingClientRect().bottom - quote.nextElementSibling.getBoundingClientRect().top;
       });
       check(gap <= 0, `引用の出典の行が次のブロック（${kind}・出典${cite ? "あり" : "なし"}）に重ならない`, `${gap.toFixed(1)}px 食い込んでいます`);
@@ -680,25 +768,76 @@ try {
   await openNew(`rich-quote-cite2 ${marker}`);
   await page.keyboard.type("> ひきよう");
   await page.waitForTimeout(400);
-  await citeField.click();
+  await citeRow.click();
   await page.waitForTimeout(300);
-  check((await classOf()).includes("tt-quote-cite"), "出典の欄を押すと焦点が入る", await classOf());
+  check((await focusOf()).inside === "quoteCite", "出典の行を押すと出典に焦点が入る", JSON.stringify(await focusOf()));
   await page.keyboard.type("でんき");
   await page.waitForTimeout(300);
-  check(await citeField.inputValue() === "でんき", "出典の欄に打った字が入る（本文に落ちない）", await citeField.inputValue());
+  check(
+    (await page.locator("cite.tt-quote-cite").first().textContent()) === "でんき",
+    "出典に打った字が入る（本文に落ちない）",
+    String(await page.locator("cite.tt-quote-cite").first().textContent())
+  );
+  // 出典の文字にもマークを掛けられる（帯の太字とリンク。CMS が受けるのは captionMarkNames の 5 つ）。
+  await page.evaluate(() => {
+    const editor = document.querySelector("tiptap-editor").editor;
+    let at = null;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "quoteCite") at = { from: pos + 1, to: pos + node.nodeSize - 1 };
+    });
+    editor.chain().focus().setTextSelection(at).run();
+  });
+  await page.waitForTimeout(400);
+  check(await page.locator(".tt-bubble").first().isVisible(), "出典の文字を選ぶと帯が出る", "帯が出ません");
+  // 出典はキャプションと同じ 1 行の文字なので、帯は 3 つ（太字 / 打ち消し / リンク）だけ。
+  const citeBar = await page.locator(".tt-bubble-caption button").evaluateAll((all) => all.map((one) => one.title));
+  check(
+    citeBar.join("/") === "太字/打ち消し/リンク" && (await page.locator(".tt-bubble-caption").isVisible()),
+    "出典の中では帯が 太字 / 打ち消し / リンク の 3 つ",
+    citeBar.join("/")
+  );
+  check(await page.locator(".tt-bubble .tt-more").isHidden(), "出典の中では帯に「…」を出さない", "出ています");
+  await page.evaluate(() => document.querySelector("tiptap-editor").editor.chain().focus().toggleBold().run());
+  await page.evaluate(() => document.querySelector("tiptap-editor").editor.chain().focus().setLink({ href: "https://src.example/" }).run());
+  await page.waitForTimeout(300);
+  check((await page.locator("cite.tt-quote-cite strong").count()) === 1, "出典に太字が掛かる", `${await page.locator("cite.tt-quote-cite strong").count()} 個`);
+  check((await page.locator("cite.tt-quote-cite a").count()) === 1, "出典にリンクが掛かる", `${await page.locator("cite.tt-quote-cite a").count()} 個`);
   await page.keyboard.press("ArrowUp");
   await page.waitForTimeout(300);
-  check((await focusOf()).dom !== "tt-quote-field", "出典の ↑ で引用の外の行へ出る", JSON.stringify(await focusOf()));
-  check(
-    JSON.stringify(JSON.parse((await docOf()) || "{}")).includes('"cite":"でんき"'),
-    "出典が blockquote の cite に入る",
-    (await docOf()).slice(0, 300)
-  );
-  await citeField.click();
+  check((await focusOf()).inside !== "quoteCite", "出典の ↑ で引用の外の行へ出る", JSON.stringify(await focusOf()));
+  const quoteDoc = JSON.stringify(JSON.parse((await docOf()) || "{}"));
+  check(quoteDoc.includes('"type":"quoteCite"'), "出典が引用の最後の子（quoteCite）に入る", (await docOf()).slice(0, 300));
+  check(!quoteDoc.includes('"cite":'), "旧い attrs.cite / citeUrl は書かない", (await docOf()).slice(0, 300));
+  // 出典に中身がある時は、行（node view の飾り）の上に cite が重なる。押す相手は cite。
+  await page.locator("cite.tt-quote-cite").first().click();
   await page.waitForTimeout(300);
   await page.keyboard.press("ArrowDown");
   await page.waitForTimeout(300);
-  check((await focusOf()).dom !== "tt-quote-field", "出典の ↓ でも引用の外の行へ出る", JSON.stringify(await focusOf()));
+  check((await focusOf()).inside !== "quoteCite", "出典の ↓ でも引用の外の行へ出る", JSON.stringify(await focusOf()));
+
+  // 旧い形（attrs.cite / citeUrl）の doc を開くと quoteCite に写る
+  await openNew(`rich-quote-legacy ${marker}`);
+  await page.evaluate(() => {
+    document.querySelector("tiptap-editor").setAttribute(
+      "doc",
+      JSON.stringify({
+        type: "doc",
+        content: [
+          {
+            type: "blockquote",
+            attrs: { cite: "むかしのしゅってん", citeUrl: "https://src.example/" },
+            content: [{ type: "paragraph", content: [{ type: "text", text: "ふるいいんよう" }] }],
+          },
+        ],
+      })
+    );
+  });
+  await page.waitForTimeout(600);
+  check(
+    (await page.locator("cite.tt-quote-cite a").first().textContent()) === "むかしのしゅってん",
+    "旧い attrs.cite が出典（quoteCite）に写り、citeUrl がリンクになる",
+    String(await page.locator("cite.tt-quote-cite").first().textContent())
+  );
 
   // コードブロックのファイル名の欄も、↑↓ で前後の行へ出る
   await openNew(`rich-code-file ${marker}`);
@@ -787,15 +926,17 @@ try {
     check(types(embedDoc).has(way.want), `${way.name} から ${way.url.includes("youtube") ? "YouTube" : "他"} の URL が ${way.want} になる`, JSON.stringify(embedDoc).slice(0, 200));
   }
 
-  // 4d2. 数式は `$…$` を知らなくても入る（ツールバーの Σ と「+」の一覧の「数式」）
+  // 4d2. 数式は `$…$` を知らなくても入る（浮く帯の Σ と「+」の一覧の「数式」）
   await openNew(`rich-math-inline ${marker}`);
-  await page.keyboard.type("速さは");
-  await page.locator('.tt-tool[title="数式（文の中）"]').click();
+  await page.keyboard.type("速さはx");
+  await page.keyboard.press("Shift+ArrowLeft");
+  await page.waitForTimeout(300);
+  await use("数式（文の中）");
   await page.waitForTimeout(300);
   await page.keyboard.type("E = mc^2");
   await page.waitForTimeout(400);
   const inlineDoc = JSON.parse((await docOf()) || "{}");
-  check(types(inlineDoc).has("mark:math"), "ツールバーの数式で文中の数式が入る", JSON.stringify(inlineDoc).slice(0, 200));
+  check(types(inlineDoc).has("mark:math"), "浮く帯の数式で文中の数式が入る", JSON.stringify(inlineDoc).slice(0, 200));
   check(JSON.stringify(inlineDoc).includes("E = mc^2"), "文中の数式にそのまま TeX が打てる", JSON.stringify(inlineDoc).slice(0, 200));
 
   await openNew(`rich-math-block ${marker}`);
@@ -811,7 +952,7 @@ try {
   check(types(blockDoc).has("mathBlock"), "+ からブロックの数式が入る", JSON.stringify(blockDoc).slice(0, 200));
   check(JSON.stringify(blockDoc).includes("\\\\frac{1}{2}"), "ブロックの数式の欄に打った TeX が入る", JSON.stringify(blockDoc).slice(0, 200));
 
-  // 4e. gallery（画像の横並び）の下の空の段落でも「+」が本文の枠の中に出る。
+  // 4e. 並べた画像（image > imageItem+）の下の空の段落でも「+」が本文の枠の中に出る。
   // キャプションの開閉や画像の読み込みは transaction を伴わずに高さを変えるので、
   // 一度測っただけの位置は取り残され、枠の外（下のフィールド）に出ていた。
   const galleryIds = await fetch(`${cms}/p/default/admin/graphql`, {
@@ -832,7 +973,7 @@ try {
           type: "doc",
           content: [
             { type: "paragraph", content: [{ type: "text", text: "まえがき" }] },
-            { type: "gallery", attrs: { columns: 2 }, content: ids.map((id) => ({ type: "image", attrs: { assetId: id } })) },
+            { type: "image", content: ids.map((id) => ({ type: "imageItem", attrs: { assetId: id } })) },
             { type: "paragraph" },
           ],
         }),
@@ -844,7 +985,7 @@ try {
       const editor = document.querySelector("tiptap-editor").editor;
       let at = null;
       editor.state.doc.descendants((node, pos) => {
-        if (at === null && node.type.name === "image") at = pos + 1;
+        if (at === null && node.type.name === "imageItem") at = pos + 1;
       });
       editor.commands.focus();
       editor.commands.setTextSelection(at);
@@ -881,42 +1022,94 @@ try {
     const wantColumns = Math.min(galleryIds.length, 3);
     check(columns === wantColumns, `${galleryIds.length} 枚の gallery は ${wantColumns} 列になる`, `${columns} 列`);
 
-    // 並べている間の帯は 1 枚ずつに戻す / 削除 の 2 つ（縮小と配置は出さない）。
+    // 並べた中の 1 枚は リンク / ALT / 削除、ぜんたいは 1 枚ずつに戻す / 削除
+    //（`docs/design/richtext-gallery-flow.html` 2・3。縮小と配置はどちらにも出さない）。
     await page.locator(".tt-gallery-grid .tt-image img").first().click();
     await page.waitForTimeout(300);
-    const galleryBar = await page.locator(".tt-image-bar .tt-image-tool").evaluateAll((els) => els.filter((el) => !el.hidden).map((el) => el.getAttribute("aria-label")));
-    check(galleryBar.join("/") === "1 枚ずつに戻す/削除", "並べている画像の帯は 1 枚ずつに戻す / 削除", galleryBar.join("/"));
+    const oneBar = await openBar();
+    check(oneBar === "リンク/代替テキスト/削除", "並べた中の 1 枚の帯は リンク / ALT / 削除", oneBar);
 
-    // 「1 枚ずつに戻す」で gallery が解け、枚数ぶんの image が並ぶ。
+    // ぜんたいは枠の外周の余白（中の画像の外）を押して選ぶ。
+    const frame = await page.locator(".tt-gallery").first().boundingBox();
+    await page.mouse.click(frame.x + 4, frame.y + frame.height / 2);
+    await page.waitForTimeout(300);
+    const galleryBar = await openBar();
+    check(galleryBar === "1 枚ずつに戻す/削除", "並べた画像ぜんたいの帯は 1 枚ずつに戻す / 削除", galleryBar);
+    check((await page.locator(".tt-gallery.ProseMirror-selectednode").count()) === 1, "ぜんたいを選ぶと枠が外側に出る", `${await page.locator(".tt-gallery.ProseMirror-selectednode").count()} 個`);
+
+    // 「1 枚ずつに戻す」で image が枚数ぶんに分かれる（帯はぜんたいの物）。
     await page.locator('.tt-image-tool[title="1 枚ずつに戻す"]').first().click();
     await page.waitForTimeout(600);
     const loosened = JSON.parse((await docOf()) || "{}").content ?? [];
     check(
-      loosened.filter((node) => node.type === "image").length === galleryIds.length && !loosened.some((node) => node.type === "gallery"),
-      "「1 枚ずつに戻す」で gallery が解ける",
+      loosened.filter((node) => node.type === "image").length === galleryIds.length &&
+        loosened.filter((node) => node.type === "image").every((node) => node.content?.length === 1),
+      "「1 枚ずつに戻す」で image が 1 枚ずつに分かれる",
       loosened.map((node) => node.type).join(" ")
     );
 
-    // 1 枚だけになった gallery は解けて単独の画像に戻る。
+    // 隣り合う 1 枚の帯には「横に並べる」が出て、押すと image 1 つに畳まれる。
+    await page.locator(".tt-image img").first().click();
+    await page.waitForTimeout(300);
+    const rowBar = await openBar();
+    check(rowBar === "リンク/代替テキスト/縮小/配置/横に並べる/削除", "隣り合う 1 枚の帯には「横に並べる」が出る", rowBar);
+    await page.locator('.tt-image-tool[title="横に並べる"]').first().click();
+    await page.waitForTimeout(600);
+    const folded = JSON.parse((await docOf()) || "{}").content ?? [];
+    check(
+      folded.filter((node) => node.type === "image").length === 1 && folded.find((node) => node.type === "image")?.content?.length === galleryIds.length,
+      "「横に並べる」で image 1 つに畳まれる",
+      JSON.stringify(folded)
+    );
+
+    // 最後の 1 枚を消すと image ごと消える（空の image は CMS が断る）。
     await page.evaluate((ids) => {
       document.querySelector("tiptap-editor").setAttribute(
         "doc",
         JSON.stringify({
           type: "doc",
           content: [
-            { type: "gallery", attrs: { columns: 2 }, content: ids.slice(0, 2).map((id) => ({ type: "image", attrs: { assetId: id } })) },
+            { type: "image", content: [{ type: "imageItem", attrs: { assetId: ids[0] } }] },
             { type: "paragraph" },
           ],
         }),
       );
     }, galleryIds);
     await page.waitForTimeout(1000);
-    await page.locator(".tt-gallery-grid .tt-image img").first().click();
+    await page.locator(".tt-image img").first().click();
     await page.waitForTimeout(300);
     await page.locator('.tt-image-tool[title="削除"]').first().click();
     await page.waitForTimeout(600);
-    const unfolded = types(JSON.parse((await docOf()) || "{}"));
-    check(!unfolded.has("gallery") && unfolded.has("image"), "1 枚になった gallery は解けて単独の画像に戻る", [...unfolded].join(" "));
+    check(!types(JSON.parse((await docOf()) || "{}")).has("image"), "最後の 1 枚を消すと image ごと消える", (await docOf()).slice(0, 200));
+
+    // 旧い形（gallery と attrs.assetId の image と attrs.caption）は、読む時に新しい形へ写る。
+    await page.evaluate((ids) => {
+      document.querySelector("tiptap-editor").setAttribute(
+        "doc",
+        JSON.stringify({
+          type: "doc",
+          content: [
+            { type: "image", attrs: { assetId: ids[0], caption: "ふるいきゃぷしょん", size: "small" } },
+            { type: "gallery", attrs: { columns: 2 }, content: ids.slice(0, 2).map((id) => ({ type: "image", attrs: { assetId: id } })) },
+            { type: "paragraph" },
+          ],
+        }),
+      );
+    }, galleryIds);
+    await page.waitForTimeout(1200);
+    const lifted = await page.evaluate(() => document.querySelector("tiptap-editor").editor.getJSON());
+    const liftedImages = (lifted.content ?? []).filter((node) => node.type === "image");
+    check(!JSON.stringify(lifted).includes('"gallery"'), "旧 gallery は開いた時に image に写る", JSON.stringify(lifted.content));
+    check(
+      liftedImages.length === 2 && liftedImages[0].content?.length === 1 && liftedImages[1].content?.length === 2,
+      "旧 image は 1 枚の image > imageItem に、旧 gallery は 2 枚に写る",
+      JSON.stringify(lifted.content)
+    );
+    check(
+      liftedImages[0]?.content?.[0]?.content?.[0]?.text === "ふるいきゃぷしょん" && liftedImages[0]?.content?.[0]?.attrs?.size === "small",
+      "旧 attrs.caption は imageItem の content に、attrs は imageItem に移る",
+      JSON.stringify(liftedImages[0] ?? {})
+    );
   }
 
   // 4f. 帯と浮く面の横断の確認（部品は `web/ui.ts`。`docs/design/editor-dom-parts.md`）。
@@ -1177,34 +1370,55 @@ try {
     await page.waitForTimeout(400);
   }
 
-  // 4j. ツールバーは 9 個 +「…」（案 A）で、畳んだ物は「…」から出る
+  // 4j. ヘッダは「押すだけで入る物」6 個、浮く帯は「文字に掛ける物」6 個 +「…」（案 D）
   await openNew(`rich-toolbar ${marker}`);
   const shape = await page.locator(".tt-bar").first().evaluate((el) => ({
     tools: Array.from(el.querySelectorAll(".tt-tool")).map((tool) => tool.getAttribute("title")),
     block: el.querySelectorAll(".tt-block").length,
   }));
-  check(shape.block === 1, "ツールバーに段落の種類のドロップダウンが 1 つ", `${shape.block} 個`);
+  check(shape.block === 1, "ヘッダに段落の種類のドロップダウンが 1 つ", `${shape.block} 個`);
   check(
-    shape.tools.join(" / ") ===
-      "太字 / 斜体 / 打ち消し / コード（文の中） / 数式（文の中） / リンク / 箇条書き / 番号付き / その他の書式 / 元に戻す（⌘Z） / やり直す（⇧⌘Z）",
-    "ツールバーは 9 個 +「…」+ 元に戻す / やり直す",
+    shape.tools.join(" / ") === "画像 / 箇条書き / 番号付き / 元に戻す（⌘Z） / やり直す（⇧⌘Z）",
+    "ヘッダは 6 個（段落の種類 / 画像 / 箇条書き / 番号付き / 元に戻す / やり直す）",
     shape.tools.join(" / ")
   );
-  await page.locator(".tt-more").click();
+  check(
+    shape.tools.every((title) => !["太字", "斜体", "打ち消し", "コード（文の中）", "数式（文の中）", "リンク", "その他の書式"].includes(title)),
+    "文字に掛ける物と「…」はヘッダに出さない",
+    shape.tools.join(" / ")
+  );
+  // 浮く帯は文字を選んだ時だけ出る
+  await page.keyboard.type("たいじ");
+  for (let i = 0; i < 3; i += 1) await page.keyboard.press("Shift+ArrowLeft");
+  await page.waitForTimeout(400);
+  const bubbleShape = await page.locator(".tt-bubble").first().evaluate((el) =>
+    // 直下だけ。キャプション（出典）の 3 つは `.tt-bubble-caption` の中にいる。
+    Array.from(el.querySelectorAll(":scope > .tt-bubble-tool")).filter((tool) => !tool.hidden).map((tool) => tool.getAttribute("title"))
+  );
+  check(
+    bubbleShape.join(" / ") === "太字 / 斜体 / 打ち消し / コード（文の中） / 数式（文の中） / リンク / その他の書式",
+    "浮く帯は 6 個 +「…」",
+    bubbleShape.join(" / ")
+  );
+  await page.locator(".tt-bubble .tt-more").click();
   await page.waitForTimeout(300);
   const folded = await page.locator(".tt-more-pop").evaluate((el) => ({
     groups: Array.from(el.querySelectorAll(".tt-more-group")).map((head) => head.textContent),
     items: Array.from(el.querySelectorAll(".tt-more-item")).map((item) => item.dataset.more),
   }));
-  check(folded.groups.join(" / ") === "文字 / ブロック", "「…」は「文字」「ブロック」の 2 つに分かれる", folded.groups.join(" / "));
-  check(
-    folded.items.join(" / ") === "下線 / 蛍光ペン / 上付き / 下付き / チェックリスト / 引用",
-    "「…」に畳んだのは 6 つ",
-    folded.items.join(" / ")
-  );
+  check(folded.groups.join(" / ") === "文字", "「…」は「文字」だけ", folded.groups.join(" / "));
+  check(folded.items.join(" / ") === "下線 / 蛍光ペン / 上付き / 下付き", "「…」に畳んだのは 4 つ", folded.items.join(" / "));
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
   check(await page.locator(".tt-more-pop").isHidden(), "「…」は Esc で閉じる", "開いたままです");
+  // ブロックを入れる物は「+」の一覧に揃っている
+  await openNew(`rich-plus ${marker}`);
+  await page.locator(".tt-plus").click();
+  await page.waitForTimeout(300);
+  const plus = await page.locator(".tt-blocks").evaluate((el) => Array.from(el.querySelectorAll(".tt-blocks-item")).map((item) => item.textContent.trim()));
+  check(plus.includes("チェックリスト") && plus.includes("引用"), "チェックリストと引用は「+」の一覧にある", plus.join(" / "));
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
 
   // 4k. `` `x` `` でコードにする時、前の 1 文字を巻き込まない
   //（TipTap の markInputRule は捕まえた前の 1 文字ごと消す）
@@ -1228,6 +1442,38 @@ try {
     return JSON.parse((await docOf()) || "{}");
   })();
   check(!types(oneTick).has("mark:code"), "バッククォート 1 つではコードにならない", JSON.stringify(oneTick).slice(0, 200));
+
+  // 箱の右端で打った `` ` `` は箱の中に入らない（入ると 1 つでコードになったように見える）。
+  // 素の文字は今までどおり箱を伸ばし、ボタンで始めたコードも続けて打てる。
+  for (const [typed, want] of [
+    ["`", '<p>まえ <code>code</code>`</p>'],
+    ["z", "<p>まえ <code>codez</code></p>"],
+  ]) {
+    await openNew(`rich-tick-edge ${typed} ${marker}`);
+    await page.evaluate(() => {
+      document.querySelector("tiptap-editor").setAttribute(
+        "doc",
+        JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "まえ " }, { type: "text", marks: [{ type: "code" }], text: "code" }] }] })
+      );
+    });
+    await page.waitForTimeout(500);
+    await page.locator(".tt-body p").first().click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(typed);
+    await page.waitForTimeout(400);
+    const got = (await page.locator(".tt-body").first().innerHTML()).trim();
+    check(got === want, `コードの箱の右端で「${typed}」を打つと ${want}`, got.slice(0, 200));
+  }
+  // 帯のボタンは文字を選んでから押す物なので、捨て字を 1 つ選んで掛け、そのまま打ち替える。
+  await openNew(`rich-tick-button ${marker}`);
+  await page.keyboard.type("x");
+  await page.keyboard.press("Shift+ArrowLeft");
+  await page.waitForTimeout(300);
+  await use("コード（文の中）");
+  await page.keyboard.type("abc");
+  await page.waitForTimeout(400);
+  const byButton = (await page.locator(".tt-body").first().innerHTML()).trim();
+  check(byButton === "<p><code>abc</code></p>", "ボタンでコードにしてから打つと全部が箱に入る", byButton.slice(0, 200));
 
   // 4l. 入力規則の一覧（記法 → 付くマーク）。
   //
@@ -1264,6 +1510,154 @@ try {
       plain === rule.want && marks === rule.marks,
       `「${rule.text}」→ 本文「${rule.want}」/ マーク「${rule.marks || "なし"}」`,
       `本文「${plain}」/ マーク「${marks || "なし"}」`
+    );
+  }
+
+  // 4m. 掛けた装飾から抜ける道（`web/mark-escape.ts`）。
+  //
+  // 抜ける道は 3 つ: **→ キー / Space 2 回 / ボタンをもう一度**。
+  // どれも「箱の右端に立ったカーソルから外へ出る」同じ形で、段落を変えた時は黙って落ちる。
+
+  // 本文の 1 行を「文字[マーク]」の並びで読む。
+  const lineAt = async (index) => {
+    const doc = JSON.parse((await docOf()) || "{}");
+    const nodes = doc.content?.[index]?.content ?? [];
+    return nodes.map((node) => `${node.text ?? ""}[${(node.marks ?? []).map((mark) => mark.type).join("+") || "なし"}]`).join(" ");
+  };
+
+  // 今打った文字を左へ選ぶ（帯の道具は選んでいないと押せない）。
+  const selectBack = async (count) => {
+    for (let i = 0; i < count; i += 1) await page.keyboard.press("Shift+ArrowLeft");
+    await page.waitForTimeout(250);
+  };
+
+  await openNew(`escape enter ${marker}`);
+  await page.keyboard.type("したせん");
+  await selectBack(4);
+  await use("下線");
+  await page.keyboard.press("Meta+ArrowRight");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("つぎ");
+  await page.waitForTimeout(400);
+  check((await lineAt(1)) === "つぎ[なし]", "Enter で新しい段落を作ると装飾が落ちる", await lineAt(1));
+
+  await openNew(`escape list ${marker}`);
+  await page.keyboard.type("- こうもく");
+  await selectBack(4);
+  await use("太字");
+  await page.keyboard.press("Meta+ArrowRight");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("つぎ");
+  await page.waitForTimeout(400);
+  const listDoc = JSON.parse((await docOf()) || "{}");
+  const second = listDoc.content?.[0]?.content?.[1]?.content?.[0]?.content?.[0] ?? {};
+  check(
+    (second.marks ?? []).some((mark) => mark.type === "bold"),
+    "リストの項目を増やす時は装飾が残る",
+    JSON.stringify(second).slice(0, 200)
+  );
+
+  // 掛けた直後は必ず「文字を選んでいる」形（帯の道具は選ばないと押せない）。
+  // **そのまま → を 1 回**で抜けられる所まで見る。畳んでから押す道も同じ結果になる。
+  //
+  // WhyNot: 行末へ畳むのに `End` を使わない。macOS では効かず、選んだままで次の文字を
+  // 打つ形になる（打った文字が選択を置き換えて、見ている物が変わる）。`Meta+ArrowRight`。
+  for (const [title, word] of [["コード（文の中）", "code"], ["数式（文の中）", "x^2"]]) {
+    const mark = title.startsWith("数式") ? "math" : "code";
+
+    await openNew(`escape arrow ${mark} ${marker}`);
+    await page.keyboard.type(word);
+    await selectBack(word.length);
+    await use(title);
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.type("そと");
+    await page.waitForTimeout(400);
+    check(
+      (await lineAt(0)) === `${word}[${mark}] そと[なし]`,
+      `選んでボタンを押した直後の → キーで ${title} の箱から出る`,
+      await lineAt(0)
+    );
+
+    await openNew(`escape arrow caret ${mark} ${marker}`);
+    await page.keyboard.type(word);
+    await selectBack(word.length);
+    await use(title);
+    await page.keyboard.press("Meta+ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.type("そと");
+    await page.waitForTimeout(400);
+    check(
+      (await lineAt(0)) === `${word}[${mark}] そと[なし]`,
+      `行末に畳んでからの → キーで ${title} の箱から出る`,
+      await lineAt(0)
+    );
+  }
+
+  await openNew(`escape space ${marker}`);
+  await page.keyboard.type("code");
+  await selectBack(4);
+  await use("コード（文の中）");
+  await page.keyboard.press("Meta+ArrowRight");
+  await page.keyboard.type(" ");
+  await page.waitForTimeout(400);
+  check((await lineAt(0)) === "code [code]", "Space 1 回では抜けない（箱の中に空白が入る）", await lineAt(0));
+  await page.keyboard.type(" ");
+  await page.keyboard.type("そと");
+  await page.waitForTimeout(400);
+  check((await lineAt(0)) === "code [code]  そと[なし]", "Space 2 回でインラインコードの箱から出る", await lineAt(0));
+
+  await openNew(`escape button ${marker}`);
+  await page.keyboard.type("code");
+  await selectBack(4);
+  await use("コード（文の中）");
+  await page.waitForTimeout(300);
+  await use("コード（文の中）");
+  await page.waitForTimeout(400);
+  check((await lineAt(0)) === "code[なし]", "ボタンをもう一度押すと装飾が外れる", await lineAt(0));
+
+  // 4n. リストの項目の中で Shift+Enter した 2 行目が、1 行目の文字の左端と揃う。
+  // 3 種（チェックリスト・箇条書き・番号付き）で、段落の行の箱の左端を Range から測る。
+  await openNew(`list wrap ${marker}`);
+  await use("チェックリスト");
+  await page.keyboard.type("チェックの一行目");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("二行目");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(300);
+  await use("箇条書き");
+  await page.keyboard.type("箇条書きの一行目");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("二行目");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(300);
+  await use("番号付き");
+  await page.keyboard.type("番号の一行目");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("二行目");
+  await page.waitForTimeout(400);
+  const listLines = await page.evaluate(() =>
+    [...document.querySelectorAll("tiptap-editor .tt-body li")]
+      .map((li) => {
+        const paragraph = li.querySelector("p");
+        if (!paragraph) return null;
+        const range = document.createRange();
+        range.selectNodeContents(paragraph);
+        return {
+          kind: li.closest('ul[data-type="taskList"]') ? "チェックリスト" : li.closest("ol") ? "番号付き" : "箇条書き",
+          lefts: [...range.getClientRects()].filter((box) => box.width > 0).map((box) => Math.round(box.left * 100) / 100),
+        };
+      })
+      .filter((row) => row !== null)
+  );
+  check(listLines.length === 3, "3 種のリストが 1 項目ずつ出来る", JSON.stringify(listLines));
+  for (const row of listLines) {
+    const [first, second] = row.lefts;
+    check(
+      row.lefts.length === 2 && Math.abs(first - second) < 0.5,
+      `${row.kind}の項目の 2 行目が 1 行目と揃う`,
+      `行の左端 ${JSON.stringify(row.lefts)}`
     );
   }
 

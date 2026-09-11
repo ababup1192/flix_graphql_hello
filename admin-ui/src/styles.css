@@ -258,11 +258,25 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
   padding: 1.1rem 1.4rem;
   background: var(--color-quote);
   color: var(--color-ink);
+  position: relative;
 }
 .tt-body blockquote > * + * { margin-top: 0.7rem; }
 .tt-quote { margin: var(--tt-block-gap) 0; }
-/* 箱と出典の間はモックと同じ 18px。 */
-.tt-quote-cite-row { display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 18px; }
+/* 箱と出典の間はモックと同じ 18px。行そのものは場所を空けるだけで、出典は箱に重ねて置く
+   （出典は引用の最後の子なので contentDOM の中に居て、行の中には入れられない）。 */
+.tt-quote-cite-row { display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 18px; min-height: 1.45em; }
+/* 出典は箱の外の下、右寄せ。絶対位置の基準は箱（padding box）なので、左右は 0 で箱の端に揃う。 */
+.tt-body blockquote > cite {
+  position: absolute;
+  top: calc(100% + 18px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  display: block;
+  text-align: right;
+  font-style: normal;
+  font-size: 0.95em;
+}
 /* 焦点も出典も無い引用は、出典の文字を見せない。
    WhyNot: display: none で消さない。乗せた時に行が現れると、その分だけ下の本文が動く
    （実測で 47px）。書いている間にマウスを動かすたび本文が上下するのを避け、
@@ -868,7 +882,12 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 /* 画像の横並び。**列の数は選ばせず枚数から決まる**（`docs/design/richtext-gallery-ui.md` 2）。
    WhyNot: 枠と面を持たせない。列を選ぶ帯が消えて中身が画像だけになったので、囲うと本文の中で
    ここだけ部品のように浮く（公開側の figure[data-gallery] にも枠は無い）。 */
-.tt-gallery { margin: var(--tt-block-gap) 0; }
+/* 帯は並べた物の上に浮くので、位置の基準は枠が持つ（中の 1 枚の帯はその 1 枚が基準）。
+   WhyNot: 余白を 0 にしない。**ぜんたいを選ぶ所が列の隙間しか無くなる**（3 列で埋まると
+   中の画像しか押せない）。見た目は変わらないが、外周 8px が「ぜんたい」を押せる場所になる。 */
+.tt-gallery { position: relative; margin: var(--tt-block-gap) 0; padding: 8px; }
+/* ぜんたいを選んだ時の枠は外側。中の 1 枚を選んだ時は内側（`.tt-image ... img` の outline）。 */
+.tt-gallery.ProseMirror-selectednode { outline: 4px solid #7fb3d5; outline-offset: 0; }
 .tt-gallery-grid { display: grid; gap: 8px; }
 /* WhyNot: 中の 1 枚に最小の幅を残さない。単独の画像の `min-width`（画像 4rem・キャプション 8rem）は
    本文の幅を前提にした値で、列に分けた枡はそれより狭くなる。狭い画面や 4 列で枠の右に溢れる。 */
@@ -1064,29 +1083,14 @@ body.tt-dragging-row, body.tt-dragging-row * { cursor: ns-resize !important; }
 /* 引用の出典の欄。入れた出典は本文と同じ濃さで、下線も枠も出さない（note の実物）。
    WhyNot: 薄いまま出さない。出典は読ませる物で、箱の外に出た時点で本文の一部。
    placeholder だけを薄くする。 */
-.tt-quote-field {
-  width: 16rem;
-  max-width: 100%;
-  min-width: 0;
-  border: 0;
-  background: transparent;
+.tt-quote-cite {
   color: var(--color-ink);
-  font-size: 0.95em;
   font-family: inherit;
-  text-align: right;
+  /* WhyNot: focus に枠も破線も出さない。note の出典には下線が無く、画像のキャプションでも消した。 */
   outline: none;
 }
-/* 中身の幅まで縮める。印（🔗）が出典の文字のすぐ左に並ぶ。 */
-@supports (field-sizing: content) {
-  .tt-quote-field { field-sizing: content; width: auto; }
-}
-/* WhyNot: focus に破線を出さない。note の出典には下線が無く、画像の欄でも消した。 */
-.tt-quote-field:focus { color: var(--color-ink); }
-.tt-quote-field::placeholder { color: var(--color-ink-faint); }
-/* URL が掛かっている出典はリンクとして見せる（公開側の `<cite><a>` と同じ読み方）。 */
-.tt-quote-field.is-linked { text-decoration: underline; text-underline-offset: 0.2em; }
-/* 出典の URL が http(s) でない。CMS の validate が断るので、画面でも同じ理由を赤で出す。 */
-.tt-quote-field.is-bad { color: var(--color-bad); }
+/* 出典を入れる口。**入れた出典と同じ場所に出す**ので、行は右寄せのまま。 */
+.tt-quote-hint { color: var(--color-ink-faint); font-size: 0.95em; cursor: text; }
 
 
 /* 外部リンクのカードと埋め込み。編集中は URL と見出し（ホスト名 / 提供元）だけの薄い枠
@@ -1190,7 +1194,7 @@ body.tt-dragging-row, body.tt-dragging-row * { cursor: ns-resize !important; }
 .tt-link-card.ProseMirror-selectednode { outline: 4px solid #7fb3d5; outline-offset: 0; }
 .tt-link-card > .tt-image-bar { top: -76px; }
 
-/* 文字を選んだ時に選択の下に浮く帯。note の本文の帯と同じ 7 つ（H2 / H3 / 太字 / 打ち消し / コード / 引用 / リンク）。
+/* 文字を選んだ時に選択の下に浮く帯。文字に掛ける物 6 つ（太字 / 斜体 / 打ち消し / コード / 数式 / リンク）+「…」。
    ライトでは濃い帯、ダークではパネル色（濃い帯が背景に沈む）。 */
 .tt-bubble {
   display: flex;
@@ -1221,9 +1225,10 @@ body.tt-dragging-row, body.tt-dragging-row * { cursor: ns-resize !important; }
   opacity: 0.85;
 }
 .tt-bubble-icon { display: inline-flex; align-items: center; justify-content: center; padding: 5px; }
-/* 見出しは大きい T と小さい T（note と同じ）。段落ごとに効く物なので、文字の飾りとは大きさで見分ける。 */
-.tt-bubble-h2 { font-size: 15px; font-weight: 700; }
-.tt-bubble-h3 { font-size: 11px; font-weight: 700; }
+.tt-bubble-i { font-style: italic; }
+/* 「…」を分ける縦線。帯が濃い地なので、ツールバーの .tt-divider とは色が違う。 */
+.tt-bubble-divider { width: 1px; align-self: stretch; margin: 2px 3px; background: currentColor; opacity: 0.25; }
+.tt-bubble-divider[hidden] { display: none; }
 .tt-bubble-tool:hover { opacity: 1; background: rgb(255 255 255 / 12%); }
 .tt-bubble-tool.is-on { opacity: 1; background: rgb(255 255 255 / 20%); }
 :root[data-theme="dark"] .tt-bubble:not(.is-caption) .tt-bubble-tool:hover,

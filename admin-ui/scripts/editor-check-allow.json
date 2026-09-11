@@ -1,0 +1,68 @@
+[
+  {
+    "file": "web/block-edges.ts",
+    "rule": "measure",
+    "count": 1,
+    "why": "面を置くためではなく、キャレットが本文の上端・下端に居るかを測っている"
+  },
+  {
+    "file": "web/block-menu.ts",
+    "rule": "measure",
+    "count": 2,
+    "why": "「+」を行の高さに合わせる。popover の親基準に寄せる余地があるが、行ごとに親が変わるので未着手"
+  },
+  {
+    "file": "web/block-menu.ts",
+    "rule": "place",
+    "count": 2,
+    "why": "同上。「+」そのものの置き所（面ではない）"
+  },
+  {
+    "file": "web/code-block.ts",
+    "rule": "editable",
+    "count": 2,
+    "why": "行番号の桁と検索の帯。bar() ではなくコードの本文に重ねる層で、押し始めの止めは別に持っている"
+  },
+  {
+    "file": "web/code-block.ts",
+    "rule": "place",
+    "count": 1,
+    "why": "検索で当たった行に帯を重ねる。行の高さの掛け算で、測っていない"
+  },
+  {
+    "file": "web/link-card-node.ts",
+    "rule": "editable",
+    "count": 2,
+    "why": "node view の外枠そのものを打てなくしている（帯ではない）"
+  },
+  {
+    "file": "web/table-drag.ts",
+    "rule": "measure",
+    "count": 4,
+    "why": "掴んだ行・列の当たり判定。面の置き所ではない"
+  },
+  {
+    "file": "web/table-drag.ts",
+    "rule": "place",
+    "count": 10,
+    "why": "掴んでいる間だけ出る影と線。押した場所に追う物で、popover には載らない"
+  },
+  {
+    "file": "web/tiptap-editor.ts",
+    "rule": "bar",
+    "count": 1,
+    "why": "tt-bar は本文の外の道具の帯（ProseMirror の中の帯ではない）"
+  },
+  {
+    "file": "web/tiptap-editor.ts",
+    "rule": "measure",
+    "count": 12,
+    "why": "表の枠線・選択の範囲・キャプションの位置。popover に寄せ切れていない分が残っている"
+  },
+  {
+    "file": "web/tiptap-editor.ts",
+    "rule": "place",
+    "count": 8,
+    "why": "同上。表の道具と URL の欄が本文の枠を基準に置かれている"
+  }
+]

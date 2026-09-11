@@ -82,3 +82,20 @@ WordPress は 2 層だが、Ghost は全体に 1 つ、Substack と Medium は�
 3. 作例の CSS: `figure[data-gallery]` の並べ方（折り返し）
 
 1 は今日やった「キャプションを内容にする」と同じ規模。2 は node view の作り直し。
+
+## 画面の実装（2026-09-12）
+
+`web/image-node.ts` を 2 つの node に分けた。
+
+- `image`: 入れ物。`content: "imageItem+"`、`group: block`、attrs は無し。
+  node view は入れ物の div で、2 枚以上の時だけ `tt-gallery` / `tt-gallery-grid` の class を付けて
+  枚数から列を決める。1 枚の時は素の div で、今までの単独の画像と同じ見た目になる
+- `imageItem`: 画像 1 枚。attrs（assetId / alt / href / size / align / source / sourceUrl / width / height）と、
+  content にその 1 枚のキャプション。帯も枠もこちらが持つ
+- 「横に並べる」は隣り合う `image` の `imageItem` を 1 つの `image` に移すだけ、
+  「1 枚ずつに戻す」は `imageItem` の数だけ `image` に分けるだけ。**node は作り直さない**
+- 読む時だけ `liftImageItems` が旧 `gallery` と旧 `image`（attrs.assetId）を写す。書くのは新しい形だけ
+
+`image` は `isolating`。素の block だと、画像の下の段落に次の画像を入れた時に
+ProseMirror が入れ場所を探して前の `image` まで範囲に入れ、1 枚目が置き換わる。
+`defining` は使わない（型だけ残して中身を既定の `imageItem` で埋め直し、assetId が消える）。

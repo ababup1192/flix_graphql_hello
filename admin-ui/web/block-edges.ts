@@ -28,6 +28,7 @@ import type { Node as PmNode } from "@tiptap/pm/model";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 import { NodeSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
+import { MarkEscape } from "./mark-escape";
 
 type Pending = { pos: number | null };
 
@@ -204,6 +205,11 @@ function isSolid(node: PmNode | null | undefined): boolean {
 
 export const BlockEdges = Extension.create({
   name: "blockEdges",
+
+  // ブロックから出る道と同じ話で、マークから出る道（`web/mark-escape.ts`）を一緒に入れる。
+  addExtensions() {
+    return [MarkEscape];
+  },
 
   addProseMirrorPlugins() {
     return [
