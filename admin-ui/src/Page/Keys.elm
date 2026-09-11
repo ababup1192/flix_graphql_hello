@@ -46,7 +46,7 @@ type alias Model =
     , confirmHookDelete : Maybe WebhookRow
     , deleting : Reply
     , zone : Time.Zone
-    , today : String
+    , today : Maybe { year : Int, month : Int, day : Int }
     , showRevoked : Bool
     }
 
@@ -101,7 +101,7 @@ init =
     , confirmHookDelete = Nothing
     , deleting = Reply.idle
     , zone = Time.utc
-    , today = ""
+    , today = Nothing
     , showRevoked = False
     }
 
@@ -251,7 +251,7 @@ update ctx msg model =
             ( { model | confirmRevoke = Nothing, confirmHookDelete = Nothing }, [] )
 
         TodayKnown zone year month day ->
-            ( { model | zone = zone, today = pad 4 year ++ "-" ++ pad 2 month ++ "-" ++ pad 2 day }, [] )
+            ( { model | zone = zone, today = Just { year = year, month = month, day = day } }, [] )
 
         RevokedToggled ->
             ( { model | showRevoked = not model.showRevoked }, [] )
@@ -467,7 +467,7 @@ viewKey model row =
         , span [ class "text-ink-soft" ] [ text (scopeText row.scope) ]
         , span [ class "font-mono text-[11px] text-ink-soft" ] [ text (dateOf model.zone row.createdAt) ]
         , viewExpiry model row
-        , span [ class "font-mono text-[11px] text-ink-soft" ] [ text (row.lastUsedAt |> Maybe.map (dateOf model.zone) |> Maybe.withDefault "未使用") ]
+        , viewLastUsed model row
         , if revoked then
             text ""
 
@@ -487,8 +487,8 @@ hintOf hint =
         "…" ++ hint
 
 
-{-| 有効期限。無期限はそう書く。切れていれば赤で「期限切れ」（GitHub の "Expired" と同じ）。
-今日の日付が届く前は日付だけ出す。
+{-| 有効期限。無期限はそう書く。切れていれば赤で「期限切れ」、7 日を切れば琥珀で「あと N 日」
+（GitHub と同じ。色を使うのは期限だけで、使われているかどうかには色を付けない）。
 -}
 viewExpiry : Model -> ApiKeyRow -> Html Msg
 viewExpiry model row =
@@ -502,16 +502,61 @@ viewExpiry model row =
                 day =
                     dateOf model.zone at
             in
-            if not (String.isEmpty model.today) && day < model.today then
-                span [ class "font-mono text-[11px] text-[color:var(--color-bad)]" ] [ text ("期限切れ " ++ day) ]
+            case model.today |> Maybe.andThen (\today -> Ui.DateTime.daysFromToday model.zone today at) of
+                Just left ->
+                    if left < 0 then
+                        span [ class "font-mono text-[11px] text-[color:var(--color-bad)]", Html.Attributes.title day ] [ text "期限切れ" ]
 
-            else
-                span [ class "font-mono text-[11px] text-ink-soft" ] [ text day ]
+                    else if left <= 7 then
+                        span [ class "font-mono text-[11px] text-[color:var(--color-warn)]", Html.Attributes.title day ] [ text ("あと " ++ String.fromInt left ++ " 日") ]
+
+                    else
+                        span [ class "font-mono text-[11px] text-ink-soft" ] [ text day ]
+
+                Nothing ->
+                    span [ class "font-mono text-[11px] text-ink-soft" ] [ text day ]
 
 
-pad : Int -> Int -> String
-pad width n =
-    String.padLeft width '0' (String.fromInt n)
+{-| 最後に使った日。読む人の問いは「まだ使われているか」なので相対で出し、絶対の日時はホバーに。
+-}
+viewLastUsed : Model -> ApiKeyRow -> Html Msg
+viewLastUsed model row =
+    case row.lastUsedAt of
+        Nothing ->
+            span [ class "text-[11px] text-ink-faint" ] [ text "未使用" ]
+
+        Just at ->
+            let
+                absolute : String
+                absolute =
+                    Ui.DateTime.formatLocal model.zone at
+            in
+            case model.today |> Maybe.andThen (\today -> Ui.DateTime.daysFromToday model.zone today at) of
+                Just ago ->
+                    span [ class "text-[11px] text-ink-soft", Html.Attributes.title absolute ] [ text (relative (negate ago)) ]
+
+                Nothing ->
+                    span [ class "font-mono text-[11px] text-ink-soft" ] [ text absolute ]
+
+
+{-| 「今日」「昨日」「3 日前」「2 か月前」。GitHub の "within the last week" よりは細かく、日付よりは読みやすい所。
+-}
+relative : Int -> String
+relative daysAgo =
+    if daysAgo <= 0 then
+        "今日"
+
+    else if daysAgo == 1 then
+        "昨日"
+
+    else if daysAgo < 30 then
+        String.fromInt daysAgo ++ " 日前"
+
+    else if daysAgo < 365 then
+        String.fromInt (daysAgo // 30) ++ " か月前"
+
+    else
+        String.fromInt (daysAgo // 365) ++ " 年前"
 
 
 {-| ISO 8601 の日時を手元のタイムゾーンの日付（YYYY-MM-DD）に。

@@ -1,6 +1,7 @@
 module Ui.DateTime exposing
     ( Model
     , Msg
+    , daysFromToday
     , formatLocal
     , init
     , toIso
@@ -160,6 +161,28 @@ formatLocal zone iso =
 
         _ ->
             String.left 16 iso
+
+
+{-| 今日（手元の年月日）から、その ISO 8601 の日時の日までの日数。過去なら負。
+「あと 3 日」「3 日前」を出すのに使う。時刻は見ず、手元のタイムゾーンでの日付だけで数える。
+-}
+daysFromToday : Time.Zone -> { year : Int, month : Int, day : Int } -> String -> Maybe Int
+daysFromToday zone today iso =
+    case ( parseInt 0 4 iso, ( parseInt 5 7 iso, parseInt 8 10 iso ), ( parseInt 11 13 iso, parseInt 14 16 iso ) ) of
+        ( Just year, ( Just month, Just day ), ( Just hour, Just minute ) ) ->
+            let
+                at : Time.Posix
+                at =
+                    Time.millisToPosix (wallMillis year month day hour minute)
+
+                local : Int
+                local =
+                    daysFromEpoch (Time.toYear zone at) (monthNumber (Time.toMonth zone at)) (Time.toDay zone at)
+            in
+            Just (local - daysFromEpoch today.year today.month today.day)
+
+        _ ->
+            Nothing
 
 
 parseInt : Int -> Int -> String -> Maybe Int
