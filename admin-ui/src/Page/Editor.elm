@@ -95,6 +95,11 @@ type alias Model =
        まだ引いていないフィールドは鍵ごと無い。
     -}
     , refs : Dict String (List ( String, String ))
+
+    {- フィールドごとに、打った文字に当たるコンテンツの件数。**出した数より多ければ**
+       「ほかに N 件」と断るのに使う。
+    -}
+    , refTotals : Dict String Int
     , refQuery : Dict String String
     , refOpen : Maybe String
 
@@ -250,6 +255,7 @@ init project apiId entryId =
     , row = Nothing
     , touched = False
     , refs = Dict.empty
+    , refTotals = Dict.empty
     , refQuery = Dict.empty
     , refOpen = Nothing
     , refLabels = Dict.empty
@@ -503,13 +509,14 @@ update ctx msg model =
             else
                 ( { model
                     | refs = Dict.insert apiId (labelsOf page) model.refs
+                    , refTotals = Dict.insert apiId page.totalCount model.refTotals
                     , refLabels = Dict.union (Dict.fromList (labelsOf page)) model.refLabels
                   }
                 , []
                 )
 
         GotRefs apiId _ (Err _) ->
-            ( { model | refs = Dict.insert apiId [] model.refs }, [] )
+            ( { model | refs = Dict.insert apiId [] model.refs, refTotals = Dict.insert apiId 0 model.refTotals }, [] )
 
         GotRefLabels (Ok page) ->
             ( { model | refLabels = Dict.union (Dict.fromList (labelsOf page)) model.refLabels }, [] )
@@ -2723,8 +2730,30 @@ viewRefCandidates args model field chosen =
                 [ viewNoCandidates args model field ]
 
             Just candidates ->
-                List.map (viewRefCandidate field chosen) candidates
+                List.map (viewRefCandidate field chosen) candidates ++ viewRefRest model field candidates
         )
+
+
+{-| 出し切れなかった分の断り。
+
+WhyNot: 出した分だけで終わらせない。1 度に引くのは 20 件なので、21 件目以降は
+黙って落ちる。**ここからは絞って辿り着く**ので、その旨を添える。
+
+-}
+viewRefRest : Model -> FieldDef -> List ( String, String ) -> List (Html Msg)
+viewRefRest model field candidates =
+    let
+        rest : Int
+        rest =
+            (Dict.get field.apiId model.refTotals |> Maybe.withDefault 0) - List.length candidates
+    in
+    if rest > 0 then
+        [ span [ class "border-t border-edge px-2 py-2 text-[11px] text-ink-faint" ]
+            [ text ("ほかに " ++ String.fromInt rest ++ " 件あります。打つと絞り込めます。") ]
+        ]
+
+    else
+        []
 
 
 {-| 候補が無い時。**まだ 1 件も無いのか、絞り込んで消えたのかを分ける。**

@@ -52,6 +52,11 @@ type alias Model =
 
     {- 参照の候補。打つたびに引き直す。 -}
     , candidates : List ( String, String )
+
+    {- 打った文字に当たるコンテンツの件数。**出した数より多ければ**
+       「ほかに N 件」と断るのに使う。
+    -}
+    , candidateTotal : Int
     , candidateQuery : String
 
     {- 検索を打った回数。**最後の 1 回だけ引く**（Elm はタイマーを取り消せないので、
@@ -116,6 +121,7 @@ init project apiId params =
     , today = Nothing
     , labels = Dict.empty
     , candidates = []
+    , candidateTotal = 0
     , candidateQuery = ""
     , typedAt = 0
     }
@@ -192,13 +198,14 @@ update ctx msg model =
         GotCandidates (Ok page) ->
             ( { model
                 | candidates = List.map (\row -> ( row.id, EntryLabel.forRow row )) page.nodes
+                , candidateTotal = page.totalCount
                 , labels = Dict.union (labelsOf page) model.labels
               }
             , []
             )
 
         GotCandidates (Err _) ->
-            ( { model | candidates = [] }, [] )
+            ( { model | candidates = [], candidateTotal = 0 }, [] )
 
         SearchTyped search ->
             -- **打つ度には問い合わせない。** 一覧を空にして描き直すと、画面がちらつき
@@ -254,7 +261,7 @@ update ctx msg model =
                     ( model, [] )
 
         FilterClosed ->
-            ( { model | adding = Nothing, candidates = [], candidateQuery = "" }, [] )
+            ( { model | adding = Nothing, candidates = [], candidateTotal = 0, candidateQuery = "" }, [] )
 
         FilterFieldChosen apiId ->
             case fieldsOf model |> List.filter (\field -> field.apiId == apiId) |> List.head of
@@ -320,7 +327,7 @@ update ctx msg model =
 
                     else
                         refine ctx
-                            { model | adding = Nothing, candidates = [], candidateQuery = "" }
+                            { model | adding = Nothing, candidates = [], candidateTotal = 0, candidateQuery = "" }
                             (\query -> { query | conditions = query.conditions ++ [ draft ], page = 1 })
 
                 Nothing ->
@@ -362,9 +369,16 @@ startAdding ctx model field =
 
         next : Model
         next =
-            { model | adding = Just { apiId = field.apiId, op = op, value = "" }, candidates = [], candidateQuery = "" }
+            { model | adding = Just { apiId = field.apiId, op = op, value = "" }, candidates = [], candidateTotal = 0, candidateQuery = "" }
     in
     ( next, candidateCalls ctx next "" )
+
+
+{-| 1 度に出す候補の数。**残りは打って絞る**ので、出し切らなくて良い。
+-}
+candidatePageSize : Int
+candidatePageSize =
+    20
 
 
 {-| 参照の候補を引く。**打つたびに引き直す**（先読みした固定の一覧は、参照先が増えると
@@ -378,7 +392,7 @@ candidateCalls ctx model search =
                 (\id ->
                     Queries.entries id
                         ctx.project
-                        { typeId = typeId, search = search, stage = "", conditions = [], ids = [], order = "", first = 20, skip = 0 }
+                        { typeId = typeId, search = search, stage = "", conditions = [], ids = [], order = "", first = candidatePageSize, skip = 0 }
                 )
                 GotCandidates
             ]
@@ -806,9 +820,31 @@ viewEntryPicker model draft =
                 [ span [ class "px-2 py-2 text-xs text-ink-faint" ] [ text "候補がありません" ] ]
 
              else
-                List.map (viewCandidate draft) model.candidates
+                List.map (viewCandidate draft) model.candidates ++ viewCandidateRest model
             )
         ]
+
+
+{-| 出し切れなかった分の断り。
+
+WhyNot: 出した分だけで終わらせない。1 度に引くのは 20 件なので、21 件目以降は
+黙って落ちる。**ここからは絞って辿り着く**ので、その旨を添える。
+
+-}
+viewCandidateRest : Model -> List (Html Msg)
+viewCandidateRest model =
+    let
+        rest : Int
+        rest =
+            model.candidateTotal - List.length model.candidates
+    in
+    if rest > 0 then
+        [ span [ class "border-t border-edge px-2 py-2 text-[11px] text-ink-faint" ]
+            [ text ("ほかに " ++ String.fromInt rest ++ " 件あります。打つと絞り込めます。") ]
+        ]
+
+    else
+        []
 
 
 viewCandidate : Condition -> ( String, String ) -> Html Msg
