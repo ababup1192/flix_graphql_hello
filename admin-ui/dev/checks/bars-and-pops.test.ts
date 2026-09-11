@@ -4,7 +4,7 @@
 //   - 帯の余白: 押してもキャレットが出ず、打っても帯に入らない
 //   - 浮く面: 画面からも本文の枠からも出ず、本文を送っても基準の欄に付いたまま
 import { expect, test, afterEach, vi } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, settle, press, type Harness } from "../harness";
 
 let harness: Harness | null = null;

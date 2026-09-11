@@ -1,6 +1,6 @@
 // ブロックの中の全選択は、そのブロックの中だけに閉じる（`selectAllInBlock`）。
 import { expect, test, afterEach, vi } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, settle, type Harness } from "../harness";
 
 let harness: Harness | null = null;

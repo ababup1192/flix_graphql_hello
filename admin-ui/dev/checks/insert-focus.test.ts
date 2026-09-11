@@ -2,7 +2,7 @@
 //
 // 中に文字を書けるブロックは中に、書けないブロック（カード・埋め込み）はその下の段落に。
 import { expect, test, afterEach, vi } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, toEnd, settle, type Harness } from "../harness";
 
 let harness: Harness | null = null;

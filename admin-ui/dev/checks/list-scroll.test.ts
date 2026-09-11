@@ -4,7 +4,7 @@
 // 中身の高さまで伸びて送りが先頭に戻るので、送るのは置き直した後でなければ
 // 効かない（言語の候補で、下キーを押しても一覧が付いてこなかった）。
 import { expect, test, afterEach } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, type Harness } from "../harness";
 
 let harness: Harness | null = null;

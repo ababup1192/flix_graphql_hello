@@ -5,7 +5,7 @@
 //
 // キャプションに何が入るか（imageItem の content）は `image.test.ts`。
 import { expect, test, afterEach } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, settle, type Harness } from "../harness";
 
 let harness: Harness | null = null;

@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { playwright } from "@vitest/browser-playwright";
 import elmPlugin from "vite-plugin-elm";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -16,7 +17,7 @@ export default defineConfig({
     include: ["dev/checks/**/*.test.ts"],
     browser: {
       enabled: true,
-      provider: "playwright",
+      provider: playwright(),
       headless: true,
       instances: [{ browser: "chromium" }],
     },

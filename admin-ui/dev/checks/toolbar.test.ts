@@ -3,7 +3,7 @@
 // ヘッダは押すだけで入る物、浮く帯は文字に掛ける物 6 個 +「…」、ブロックを入れる口は
 // 「+」の一覧。**どこに何があるか**だけを見る（位置と溢れは `toolbar-width.test.ts`）。
 import { expect, test, afterEach, vi } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, toEnd, settle, type Harness } from "../harness";
 
 let harness: Harness | null = null;

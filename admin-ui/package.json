@@ -18,18 +18,20 @@
     "checks": "vitest run --config vitest.config.ts"
   },
   "devDependencies": {
-    "@dillonkearns/elm-graphql": "4.3.1",
-    "@types/node": "^22.20.1",
-    "@vitest/browser": "^3.2.7",
+    "@dillonkearns/elm-graphql": "^4.3.2",
+    "@types/node": "^22.20.2",
+    "@vitest/browser": "^5.0.0",
+    "@vitest/browser-playwright": "^5.0.0",
     "elm": "0.19.1-6",
-    "elm-format": "0.8.7",
-    "elm-review": "^2.12.0",
+    "elm-format": "^0.8.8",
+    "elm-review": "^2.13.5",
     "elm-test": "0.19.1-revision12",
+    "highlight.js": "^11.12.0",
     "playwright": "^1.49.0",
-    "typescript": "5.6.3",
-    "vite": "5.4.11",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
     "vite-plugin-elm": "3.0.1",
-    "vitest": "^3.2.7"
+    "vitest": "^5.0.0"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -46,7 +48,6 @@
     "@tiptap/extension-task-list": "^2.27.3",
     "@tiptap/extension-underline": "^2.27.3",
     "@tiptap/starter-kit": "^2.27.3",
-    "highlight.js": "^11.11.1",
     "katex": "^0.18.7",
     "lowlight": "^3.3.0",
     "mermaid": "^11.17.2",

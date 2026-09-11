@@ -2,7 +2,7 @@
 //
 // 帯に何が並ぶかは `toolbar.test.ts`。
 import { expect, test, afterEach, vi } from "vitest";
-import { page } from "@vitest/browser/context";
+import { page } from "vitest/browser";
 import { mount, type Harness } from "../harness";
 
 let harness: Harness | null = null;

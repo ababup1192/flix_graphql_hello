@@ -2,7 +2,7 @@
 //
 // 見るのは **doc に何が入るか**と一覧の中身だけ。帯の位置と行の揃いは `code-layout.test.ts`。
 import { expect, test, afterEach, vi } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, settle, press, type Harness } from "../harness";
 
 let harness: Harness | null = null;

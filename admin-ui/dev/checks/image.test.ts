@@ -4,7 +4,7 @@
 // 出ている帯が 1 つだけである事も一緒に見る（2 つ出ていたら帯を作る所が二重に走っている）。
 // 並べた画像の枠と列、キャプションから矢印で出る所は `gallery-layout.test.ts` と `caption-exit.test.ts`。
 import { expect, test, afterEach, vi } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, settle, type Harness } from "../harness";
 
 let harness: Harness | null = null;

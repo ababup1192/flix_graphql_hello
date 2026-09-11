@@ -4,7 +4,7 @@
 // 片方が片方を食わない事を 1 枚の表で見る。打つのは行の頭から（TipTap の太字・斜体・
 // 打ち消しは前が行頭か空白の時だけ効く）。
 import { expect, test, afterEach } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, type Harness } from "../harness";
 
 let harness: Harness | null = null;

@@ -3,7 +3,7 @@
 // 普段は組版だけ、箱のどこを押しても TeX の欄、掴みで選ぶと削除の帯。
 // 見るのは doc と焦点の行き先だけ（ホバーで出る削除の濃さや当たり判定は `math-layout.test.ts`）。
 import { expect, test, afterEach, vi } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, toEnd, settle, press, type Harness } from "../harness";
 
 let harness: Harness | null = null;

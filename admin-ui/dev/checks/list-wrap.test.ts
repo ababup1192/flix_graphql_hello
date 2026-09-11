@@ -2,7 +2,7 @@
 //
 // 行の箱は Range から測る（折り返した行ごとの矩形が出る）。
 import { expect, test, afterEach, vi } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, toEnd, settle, press, type Harness } from "../harness";
 
 let harness: Harness | null = null;

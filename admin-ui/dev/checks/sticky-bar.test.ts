@@ -3,7 +3,7 @@
 // WhyNot: 画面の上の帯（下書き保存 / 公開）との重なりはここでは見られない。あれは Elm の
 // 画面が持つ物で、この検査はエディタの部品を 1 つだけ立てる。人が実機で見る。
 import { expect, test, afterEach, vi } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, settle, type Harness } from "../harness";
 
 let harness: Harness | null = null;

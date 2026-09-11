@@ -1,6 +1,6 @@
 // 「+」と `/` の一覧から埋め込みを入れる。提供元で embed（YouTube 等）と linkCard に分かれる。
 import { expect, test, afterEach, vi } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, toEnd, settle, press, type Harness } from "../harness";
 
 let harness: Harness | null = null;

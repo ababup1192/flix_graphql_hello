@@ -7,7 +7,7 @@
 // 入力規則が消した後だと空になり、抜けたのか掛かっていないのか区別できない。
 // 本文は docs/design/editor-dom-parts.md の「マークの抜け方」。
 import { expect, test, afterEach } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, toEnd, lineAt, type Harness } from "../harness";
 
 let harness: Harness | null = null;

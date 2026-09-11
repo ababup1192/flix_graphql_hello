@@ -2,7 +2,7 @@
 //
 // TeX の値と焦点の行き先は `math.test.ts`。
 import { expect, test, afterEach, vi } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, settle, press, type Harness } from "../harness";
 
 let harness: Harness | null = null;

@@ -2,7 +2,7 @@
 //
 // 中身（升の数・寄せの入り方・升の中に入れられる物）は `table.test.ts`。
 import { expect, test, afterEach, vi } from "vitest";
-import { page, userEvent } from "@vitest/browser/context";
+import { page, userEvent } from "vitest/browser";
 import { mount, settle, press, type Harness } from "../harness";
 
 let harness: Harness | null = null;

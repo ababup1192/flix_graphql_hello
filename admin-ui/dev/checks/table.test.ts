@@ -2,7 +2,7 @@
 //
 // 帯と掴みの位置・幅・掴んだ入れ替えは `table-layout.test.ts`。
 import { expect, test, afterEach, vi } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, toEnd, settle, press, type Harness } from "../harness";
 
 let harness: Harness | null = null;

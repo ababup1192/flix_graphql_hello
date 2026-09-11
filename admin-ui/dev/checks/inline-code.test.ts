@@ -3,7 +3,7 @@
 //
 // TipTap の markInputRule は捕まえた前の 1 文字ごと消すので、`a`b`` が `b` だけになっていた。
 import { expect, test, afterEach } from "vitest";
-import { userEvent } from "@vitest/browser/context";
+import { userEvent } from "vitest/browser";
 import { mount, toEnd, lineAt, type Harness } from "../harness";
 
 let harness: Harness | null = null;
