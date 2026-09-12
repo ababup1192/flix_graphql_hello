@@ -63,7 +63,7 @@ mod TestMicrocmsPg {
                         Value.Obj(Map#{ "level" => Value.Int(3), "text" => Value.Str("画像") }) ::
                         Value.Obj(Map#{ "level" => Value.Int(3), "text" => Value.Str("数式") }) ::
                         Value.Obj(Map#{ "level" => Value.Int(3), "text" => Value.Str("囲みと埋め込み") }) ::
-                        Value.Obj(Map#{ "level" => Value.Int(4), "text" => Value.Str("動画とカード") }) :: Nil) })
+                        Value.Obj(Map#{ "level" => Value.Int(4), "text" => Value.Str("カードと埋め込み") }) :: Nil) })
                 }) :: Nil) }) }), None),
                 (Value.Obj(Map#{ "insidesaleServices" => Value.Obj(Map#{ "nodes" => Value.List(Value.Obj(Map#{
                     "name" => Value.Str("名前 2"), "sortOrder" => Value.Float(2.0), "logo" => Value.Obj(Map#{ "alt" => Value.Str("1 枚目・横長。本文の中に置く画像") }),
