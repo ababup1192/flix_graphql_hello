@@ -1,4 +1,4 @@
-module Navigate exposing (Asked(..), Move(..), askedOf, moveFor, pick)
+module Navigate exposing (Asked(..), Landing(..), Move(..), askedOf, landingOf, moveFor, needsTypes, pick)
 
 {-| URL のプロジェクトをどう扱うか、の判断だけを持つ。
 
@@ -68,6 +68,50 @@ moveFor { wanted, current, known } =
                 -- WhyNot: 読み込み直さない。入っていないプロジェクトは読み込み直しても
                 -- 手に入らず、同じ判断をもう一度通って永久に読み込み直す。
                 Unknown slug
+
+
+{-| プロジェクトの入口（`ProjectHome` / `Home`）で何をするか。
+-}
+type Landing a
+    = Waiting
+    | GoFirst a
+    | NoTypes
+
+
+{-| 入口の行き先。
+
+WhyNot: 空の `types` だけを見て決めない。「まだ取得していない」と「0 件」が
+同じ空になり、画面を開いた直後に必ず 0 件の側（API を作成）へ落ちる。
+
+-}
+landingOf : { arrived : Bool, types : List a } -> Landing a
+landingOf { arrived, types } =
+    if not arrived then
+        Waiting
+
+    else
+        case List.head types of
+            Just first ->
+                GoFirst first
+
+            Nothing ->
+                NoTypes
+
+
+{-| 型が届いてから決まるルートか。**届いた時にここをやり直す**ので、
+この表が漏れると入口が待機のまま止まる。
+-}
+needsTypes : Route -> Bool
+needsTypes route =
+    case route of
+        Route.Home ->
+            True
+
+        Route.ProjectHome _ ->
+            True
+
+        _ ->
+            False
 
 
 {-| URL のプロジェクトを選ぶ。

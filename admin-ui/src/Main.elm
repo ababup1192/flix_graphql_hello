@@ -133,6 +133,11 @@ type alias Workspace =
     , project : Maybe Project
     , permissions : List Permission
     , types : List ContentTypeSummary
+
+    {- WhyNot: `types` が空かどうかで代用しない。「まだ取得していない」と「0 件」が
+       同じ空になり、入口が必ず 0 件の側へ落ちる。
+    -}
+    , typesArrived : Bool
     , origin : String
     , page : Page
     }
@@ -152,6 +157,7 @@ type Page
     | AccountPage Account.Model
     | ProjectPage ProjectPage.Model
     | Placeholder String
+    | LoadingPage
     | NotFoundPage
 
 
@@ -361,7 +367,19 @@ update msg model =
             )
 
         GotTypes result ->
-            ( updateWorkspace (\workspace -> { workspace | types = Result.withDefault [] result }) model, Effect.none )
+            let
+                withTypes : ModelWith key
+                withTypes =
+                    updateWorkspace
+                        (\workspace -> { workspace | types = Result.withDefault [] result, typesArrived = True })
+                        model
+            in
+            -- 入口は型が届いてから行き先が決まる。届いた今、もう一度決め直す
+            if Navigate.needsTypes model.route then
+                enterRoute model.route withTypes
+
+            else
+                ( withTypes, Effect.none )
 
         ProjectsMsg pageMsg ->
             withPage model
@@ -1099,6 +1117,9 @@ gotPerson person model =
                 , project = project
                 , permissions = []
                 , types = []
+
+                -- プロジェクトが選べなければ問い合わせ自体を出さない。待っても届かない
+                , typesArrived = project == Nothing
                 , origin = model.origin
                 , page = Placeholder ""
                 }
@@ -1223,12 +1244,15 @@ enterPage route model =
             in
             case route of
                 Route.Home ->
-                    -- 最初の API の一覧へ送る。API が無ければプロジェクト選択へ。
-                    case List.head workspace.types of
-                        Just first ->
+                    -- 最初の API の一覧へ送る。API が無ければプロジェクト選択へ。型が届くまでは待つ。
+                    case Navigate.landingOf { arrived = workspace.typesArrived, types = workspace.types } of
+                        Navigate.Waiting ->
+                            ( { model | route = route, phase = Ready { workspace | page = LoadingPage } }, Effect.none )
+
+                        Navigate.GoFirst first ->
                             ( { model | route = route }, Effect.ReplaceRoute (Route.toString (Route.Entries slug first.apiId [])) )
 
-                        Nothing ->
+                        Navigate.NoTypes ->
                             { model | route = route, phase = Ready { workspace | page = ProjectsPage (Projects.init workspace.person) } }
                                 |> sendAll (List.map (Api.mapCall ProjectsMsg) (Projects.load workspace.person))
 
@@ -1239,13 +1263,16 @@ enterPage route model =
                 -- **プロジェクトの入口は最初の API へ送る。**
                 -- 「画面がありません」を出しても、人は何をすればいいか分からない。
                 Route.ProjectHome _ ->
-                    case List.head workspace.types of
-                        Just firstType ->
+                    case Navigate.landingOf { arrived = workspace.typesArrived, types = workspace.types } of
+                        Navigate.Waiting ->
+                            ( { model | route = route, phase = Ready { workspace | page = LoadingPage } }, Effect.none )
+
+                        Navigate.GoFirst firstType ->
                             ( { model | route = route }
                             , Effect.ReplaceRoute (Route.toString (Route.Entries slug firstType.apiId []))
                             )
 
-                        Nothing ->
+                        Navigate.NoTypes ->
                             ( { model | route = route, phase = Ready { workspace | page = SchemaPage (Schema.init slug "new") } }, Effect.none )
 
                 Route.Entries _ apiId params ->
@@ -1625,6 +1652,9 @@ pageView workspace =
 
         Placeholder url ->
             View.placeholder url
+
+        LoadingPage ->
+            View.loading
 
         NotFoundPage ->
             View.notFound

@@ -5,7 +5,7 @@ module NavigateTest exposing (suite)
 
 import Expect
 import Model exposing (Project)
-import Navigate exposing (Asked(..), Move(..))
+import Navigate exposing (Asked(..), Landing(..), Move(..))
 import Route
 import Test exposing (Test, describe, test)
 
@@ -86,4 +86,37 @@ suite =
                 [ ForProject "nope", NoProject, Unreadable ]
                     |> List.map (\wanted -> Navigate.pick wanted [])
                     |> Expect.equal [ Nothing, Nothing, Nothing ]
+        , test "入口の行き先" <|
+            \_ ->
+                [ ( False, [] )
+                , ( False, [ "blogs", "news" ] )
+                , ( True, [] )
+                , ( True, [ "blogs", "news" ] )
+                ]
+                    |> List.map (\( arrived, types ) -> Navigate.landingOf { arrived = arrived, types = types })
+                    |> Expect.equal
+                        [ Waiting
+                        , Waiting
+                        , NoTypes
+                        , GoFirst "blogs"
+                        ]
+        , test "型が未取得なら入口は待つ" <|
+            \_ ->
+                Navigate.landingOf { arrived = False, types = [] }
+                    |> Expect.equal Waiting
+        , test "型が 0 件なら API を作成へ" <|
+            \_ ->
+                Navigate.landingOf { arrived = True, types = [] }
+                    |> Expect.equal NoTypes
+        , test "型が届いてから決まるルート" <|
+            \_ ->
+                [ Route.Home
+                , Route.ProjectHome "tech-blog"
+                , Route.Projects
+                , Route.Entries "tech-blog" "blogs" []
+                , Route.Account
+                , Route.NotFound
+                ]
+                    |> List.map Navigate.needsTypes
+                    |> Expect.equal [ True, True, False, False, False, False ]
         ]
