@@ -74,3 +74,35 @@ test.skipIf(!onMac)("macOS の Control+A は全選択ではなく行頭へ", asy
   const { from, to, $from } = (h.editor as any).editor.state.selection;
   expect({ empty: from === to, atHead: from === $from.start() + 12 }).toEqual({ empty: true, atHead: true });
 });
+
+test("画像のキャプションの中の全選択はキャプションだけ", async () => {
+  const h = (harness = await mount("image-between"));
+  h.caretInCaption();
+  await settle();
+  await userEvent.keyboard("せつめい");
+  await settle();
+  await userEvent.keyboard(selectAll);
+  await settle();
+  const view = (h.editor as any).editor;
+  const { from, to, $from } = view.state.selection;
+  expect({
+    node: $from.parent.type.name,
+    whole: from === $from.start() && to === $from.end(),
+    picked: view.state.doc.textBetween(from, to, " "),
+  }).toEqual({ node: "imageItem", whole: true, picked: "せつめい" });
+});
+
+test("引用の出典の中の全選択は出典だけ", async () => {
+  const h = (harness = await mount("quote"));
+  caretIn(h, "quoteCite");
+  await settle();
+  await userEvent.keyboard(selectAll);
+  await settle();
+  const view = (h.editor as any).editor;
+  const { from, to, $from } = view.state.selection;
+  expect({
+    node: $from.parent.type.name,
+    whole: from === $from.start() && to === $from.end(),
+    picked: view.state.doc.textBetween(from, to, " "),
+  }).toEqual({ node: "quoteCite", whole: true, picked: "出典の名前" });
+});

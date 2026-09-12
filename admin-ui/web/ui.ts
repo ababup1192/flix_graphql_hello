@@ -343,7 +343,10 @@ export function isSelectAll(event: KeyboardEvent): boolean {
 //
 // WhyNot: 段落まで広げない。段落の ⌘A は本文全体を選ぶのが当たり前で、そこを変えると
 // 「本文を全部消す」がどこからも押せなくなる。中を書き直す箱だけに掛ける。
-const OWN_SELECT = new Set(["codeBlock", "image"]);
+//
+// WhyNot: `image` と `blockquote` は入れない。textblock はキャプションの `imageItem` と
+// 出典の `quoteCite` の方で、包む側の名前を書いても一度も当たらない。
+const OWN_SELECT = new Set(["codeBlock", "imageItem", "quoteCite"]);
 
 /** コードブロックや画像のキャプションの中の ⌘A を、その中だけの選択にする。
  *
