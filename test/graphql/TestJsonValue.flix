@@ -21,6 +21,22 @@ def testJsonValueRoundTrip(): Unit \ Assert =
     let value = Value.Obj(Map#{ "n" => Value.Int(-3), "x" => Value.Float(2.5), "s" => Value.Str("日本"), "l" => Value.List(Value.Null :: Value.Bool(false) :: Nil), "o" => Value.Obj(Map#{}) });
     Assert.assertEq(expected = Ok(value), JsonValue.toJsonString(value) |> JsonValue.parse)
 
+/// 小数は書いた桁で出る。2 進の展開（0.8 → 0.800000000000000044…）を JSON に出さない。
+@Test
+def testJsonValueFloatKeepsDecimalDigits(): Unit \ Assert =
+    let table = List#{ (0.8, "0.8"), (0.1, "0.1"), (0.3, "0.3"), (0.72, "0.72"), (1.0, "1.0"), (0.0, "0.0"), (-0.25, "-0.25") };
+    Assert.assertEq(
+        expected = table |> List.map(snd),
+        table |> List.map(match (x, _) -> JsonValue.toJsonString(Value.Float(x))))
+
+/// NaN と無限は JSON の数に無いので null。
+@Test
+def testJsonValueFloatWithoutJsonNumber(): Unit \ Assert =
+    let table = List#{ Float64.nan(), Float64.positiveInfinity(), Float64.negativeInfinity() };
+    Assert.assertEq(
+        expected = table |> List.map(_ -> "null"),
+        table |> List.map(x -> JsonValue.toJsonString(Value.Float(x))))
+
 /// 壊れた JSON は Err。
 @Test
 def testJsonValueParseBroken(): Unit \ Assert =

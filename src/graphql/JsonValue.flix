@@ -6,6 +6,19 @@ mod JsonValue {
     use Util.Json.JsonError
     use Util.Json.Json.{JArray, JBool, JNull, JNumber, JObject, JString}
 
+    /// Float64 を Json の数に。
+    ///
+    /// WhyNot: `Float64.tryToBigDecimal` を使わない。2 進の展開そのままになり、0.8 が
+    /// 0.80000000000000004440892098500626… の 50 桁で応答に出る（実機で出た）。
+    /// 10 進の文字列を経由すれば書いた桁で収まる。同じ理由で Asset の見せ方も
+    /// `Asset.number` が同じ形にしている。
+    ///
+    /// 表せない値（NaN / 無限）は JSON の数に無いので null。
+    ///
+    def floatJson(x: Float64): Json =
+        if (Float64.isNan(x) or Float64.isInfinite(x)) JNull
+        else BigDecimal.fromString(ToString.toString(x)) |> Option.map(JNumber) |> Option.getWithDefault(JNull)
+
     ///
     /// Value を Json へ変換する。
     ///
@@ -13,7 +26,7 @@ mod JsonValue {
         case Value.Null        => JNull
         case Value.Bool(b)     => JBool(b)
         case Value.Int(n)      => JNumber(Int32.toBigDecimal(n))
-        case Value.Float(x)    => Float64.tryToBigDecimal(x) |> Option.map(JNumber) |> Option.getWithDefault(JNull)
+        case Value.Float(x)    => floatJson(x)
         case Value.Str(s)      => JString(s)
         case Value.List(items) => JArray(List.map(toJson, items) |> List.toVector)
         case Value.Obj(fields) => JObject(Map.map(toJson, fields))
