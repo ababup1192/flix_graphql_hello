@@ -1253,8 +1253,8 @@ enterPage route model =
                         |> sendAll (List.map (Api.mapCall EntriesMsg) (Entries.load slug apiId))
                         |> Tuple.mapSecond
                             (\effect ->
-                                -- 絞り込みの暦を今日から開くのに要る
-                                Effect.batch [ effect, Effect.Today (\_ year month day -> EntriesMsg (Entries.TodayKnown year month day)) ]
+                                -- 絞り込みの暦を今日から開くのと、更新日時を手元のタイムゾーンで出すのに要る
+                                Effect.batch [ effect, Effect.Today (\zone year month day -> EntriesMsg (Entries.TodayKnown zone year month day)) ]
                             )
 
                 Route.Board _ apiId ->

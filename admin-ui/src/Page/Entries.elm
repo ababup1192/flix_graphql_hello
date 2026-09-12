@@ -1,4 +1,4 @@
-module Page.Entries exposing (Model, Msg(..), init, load, typedAt, update, urlOf, view)
+module Page.Entries exposing (Model, Msg(..), init, load, typedAt, update, updatedSay, urlOf, view)
 
 {-| コンテンツの一覧。
 
@@ -26,6 +26,7 @@ import Loaded exposing (Loaded)
 import Model exposing (ContentTypeDetail, EntryList, EntryRow, FieldDef, Slug)
 import Queries
 import Route
+import Time
 import Ui
 import Ui.DateTime
 import Ui.Icon as Icon
@@ -45,6 +46,7 @@ type alias Model =
     {- 日付の値を選ぶ暦。開いている間だけ持つ。 -}
     , datePick : Maybe Ui.DateTime.Model
     , today : Maybe { year : Int, month : Int, day : Int }
+    , zone : Time.Zone
 
     {- 参照の値を人に見せる文字（entry id → 見出し）。
        **必要な id だけ引く**（前は参照先を 100 件先読みしていて、101 件目が絞れなかった）。
@@ -101,7 +103,7 @@ type Msg
     | DatePickMsg Ui.DateTime.Msg
     | DatePickClosed
     | EscapePressed
-    | TodayKnown Int Int Int
+    | TodayKnown Time.Zone Int Int Int
     | FilterAdded
     | FilterRemoved Int
     | FiltersCleared
@@ -121,6 +123,7 @@ init project apiId params =
     , adding = Nothing
     , datePick = Nothing
     , today = Nothing
+    , zone = Time.utc
     , labels = Dict.empty
     , candidates = []
     , candidateTotal = 0
@@ -327,8 +330,8 @@ update ctx msg model =
                 ( Nothing, Nothing ) ->
                     ( model, [] )
 
-        TodayKnown year month day ->
-            ( { model | today = Just { year = year, month = month, day = day } }, [] )
+        TodayKnown zone year month day ->
+            ( { model | zone = zone, today = Just { year = year, month = month, day = day } }, [] )
 
         FilterValueTyped typed ->
             ( { model | adding = model.adding |> Maybe.map (\draft -> { draft | value = typed }) }, [] )
@@ -1115,6 +1118,39 @@ viewPager model page =
         ]
 
 
+{-| 更新日時の見せ方。読む人の問いは「最近どれが動いたか」なので相対で出し、
+絶対の日時はホバーに回す。今日がまだ分からない間は絶対の日時だけを出す。
+-}
+updatedSay : Time.Zone -> Maybe { year : Int, month : Int, day : Int } -> String -> { shown : String, title : Maybe String }
+updatedSay zone today iso =
+    let
+        absolute : String
+        absolute =
+            Ui.DateTime.formatLocal zone iso
+    in
+    case Ui.DateTime.agoText zone today iso of
+        Just ago ->
+            { shown = ago, title = Just absolute }
+
+        Nothing ->
+            { shown = absolute, title = Nothing }
+
+
+viewUpdatedAt : Model -> EntryRow -> Html Msg
+viewUpdatedAt model row =
+    let
+        say : { shown : String, title : Maybe String }
+        say =
+            updatedSay model.zone model.today row.updatedAt
+    in
+    case say.title of
+        Just absolute ->
+            span [ class "text-[11px] text-ink-soft", Html.Attributes.title absolute ] [ text say.shown ]
+
+        Nothing ->
+            span [ class "font-mono text-[11px] text-ink-soft" ] [ text say.shown ]
+
+
 viewRow : Model -> ContentTypeDetail -> EntryRow -> Html Msg
 viewRow model detail row =
     Ui.row
@@ -1126,6 +1162,6 @@ viewRow model detail row =
             , span [ class "truncate" ] [ text (EntryLabel.byField detail.fields row) ]
             ]
         , Ui.Stage.chip row.stage
-        , span [ class "font-mono text-[11px] text-ink-soft" ] [ text (String.replace "T" " " (String.left 16 row.updatedAt)) ]
+        , viewUpdatedAt model row
         , text ""
         ]
