@@ -52,7 +52,17 @@ mod TestMicrocmsPg {
                     "profile" => Value.Obj(Map#{ "name" => Value.Str("名前 1"), "slug" => Value.Str("profiles-1") }),
                     "tags" => Value.List(Value.Obj(Map#{ "tag" => Value.Str("タグ 1") }) :: Value.Obj(Map#{ "tag" => Value.Str("タグ 2") }) :: Nil),
                     "theFirstPart" => Value.Obj(Map#{ "title" => Value.Str("タイトル 1") }),
-                    "content" => Value.Obj(Map#{ "headings" => Value.List(Value.Obj(Map#{ "level" => Value.Int(2), "text" => Value.Str("内容 1 の見出し") }) :: Nil) })
+                    "content" => Value.Obj(Map#{ "headings" => Value.List(
+                        Value.Obj(Map#{ "level" => Value.Int(2), "text" => Value.Str("内容 1 の全部盛り") }) ::
+                        Value.Obj(Map#{ "level" => Value.Int(3), "text" => Value.Str("文字に掛ける印") }) ::
+                        Value.Obj(Map#{ "level" => Value.Int(3), "text" => Value.Str("リスト") }) ::
+                        Value.Obj(Map#{ "level" => Value.Int(3), "text" => Value.Str("引用") }) ::
+                        Value.Obj(Map#{ "level" => Value.Int(3), "text" => Value.Str("コード") }) ::
+                        Value.Obj(Map#{ "level" => Value.Int(3), "text" => Value.Str("表") }) ::
+                        Value.Obj(Map#{ "level" => Value.Int(3), "text" => Value.Str("画像") }) ::
+                        Value.Obj(Map#{ "level" => Value.Int(3), "text" => Value.Str("数式") }) ::
+                        Value.Obj(Map#{ "level" => Value.Int(3), "text" => Value.Str("囲みと埋め込み") }) ::
+                        Value.Obj(Map#{ "level" => Value.Int(4), "text" => Value.Str("動画とカード") }) :: Nil) })
                 }) :: Nil) }) }), None),
                 (Value.Obj(Map#{ "insidesaleServices" => Value.Obj(Map#{ "nodes" => Value.List(Value.Obj(Map#{
                     "name" => Value.Str("名前 2"), "sortOrder" => Value.Float(2.0), "logo" => Value.Obj(Map#{ "alt" => Value.Str("ダミー画像") }),

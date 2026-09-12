@@ -160,22 +160,252 @@ mod MicrocmsImport {
         case Kind.Unsupported(_) => None
     }
 
-    /// 見出し・段落（太字とリンク）・箇条書き・画像を持つ doc。
+    ///
+    /// RichText が受け付けるノードとマークを全部 1 本に並べた doc。公開側の見た目の確認用。
+    ///
+    /// WhyNot: 古い形（attrs.assetId を持つ image / gallery / blockquote の attrs.cite）を入れない。
+    /// 読む側だけの互換で、書き出す側が作る形ではないので、ここに置くと新しく作る doc の見本にならない。
+    ///
     def richTextDoc(name: String, n: Int32, asset: AssetId): Json =
-        let text = (value, marks) -> Json.JObject(Map#{ "type" => Json.JString("text"), "text" => Json.JString(value), "marks" => Json.JArray(List.toVector(marks)) });
-        let mark = (kind, attrs) -> Json.JObject(Map#{ "type" => Json.JString(kind), "attrs" => Json.JObject(attrs) });
-        let node = (kind, attrs, content) -> Json.JObject(Map#{ "type" => Json.JString(kind), "attrs" => Json.JObject(attrs), "content" => Json.JArray(List.toVector(content)) });
-        node("doc", Map.empty(), List#{
-            node("heading", Map#{ "level" => Json.JNumber(Int32.toBigDecimal(2)) }, List#{ text("${name} ${n} の見出し", Nil) }),
+        docNode(
+            List#{ headingNode(2, Some("demo-top"), "${name} ${n} の全部盛り") }
+                ::: marksSection()
+                ::: listsSection()
+                ::: quoteSection()
+                ::: codeSection()
+                ::: tableSection()
+                ::: imageSection(asset)
+                ::: mathSection()
+                ::: mediaSection(asset))
+
+    /// 段落に掛けられるマークを一通り。
+    def marksSection(): List[Json] =
+        List#{
+            headingNode(3, None, "文字に掛ける印"),
             node("paragraph", Map.empty(), List#{
-                text("本文の段落です。", Nil),
-                text("太字", mark("bold", Map.empty()) :: Nil),
-                text("とリンク", mark("link", Map#{ "href" => Json.JString("https://example.com/") }) :: Nil) }),
+                textNode("この段落には", Nil),
+                textNode("太字", markNode("bold") :: Nil),
+                textNode("・", Nil),
+                textNode("斜体", markNode("italic") :: Nil),
+                textNode("・", Nil),
+                textNode("打ち消し", markNode("strike") :: Nil),
+                textNode("・", Nil),
+                textNode("下線", markNode("underline") :: Nil),
+                textNode("・", Nil),
+                textNode("蛍光ペン", markNode("highlight") :: Nil),
+                textNode("・", Nil),
+                textNode("Map.get", markNode("code") :: Nil),
+                textNode("を並べています。", Nil)
+            }),
+            node("paragraph", Map.empty(), List#{
+                textNode("水は H", Nil),
+                textNode("2", markNode("sub") :: Nil),
+                textNode("O、面積は 10 m", Nil),
+                textNode("2", markNode("sup") :: Nil),
+                textNode(" です。文の中の数式は ", Nil),
+                textNode("e^{i\\pi} + 1 = 0", markNode("math") :: Nil),
+                textNode(" のように書けます。", Nil)
+            }),
+            node("paragraph", Map.empty(), List#{
+                textNode("外部リンクは", Nil),
+                textNode("example.com", linkMark("https://example.com/docs") :: Nil),
+                textNode("、同じサイトの中は", Nil),
+                textNode("トップ", linkMark("/") :: Nil),
+                textNode("、ページの中は", Nil),
+                textNode("この見出し", linkMark("#demo-top") :: Nil),
+                textNode("、メールは", Nil),
+                textNode("問い合わせ先", linkMark("mailto:info@example.com") :: Nil),
+                textNode("。改行はここで入ります。", Nil),
+                leafNode("hardBreak", Map.empty()),
+                textNode("改行の次の行です。", Nil)
+            })
+        }
+
+    /// 箇条書き・番号付き・チェックリストと、その入れ子。
+    def listsSection(): List[Json] =
+        List#{
+            headingNode(3, None, "リスト"),
             node("bulletList", Map.empty(), List#{
-                node("listItem", Map.empty(), List#{ node("paragraph", Map.empty(), List#{ text("一つ目", Nil) }) }),
-                node("listItem", Map.empty(), List#{ node("paragraph", Map.empty(), List#{ text("二つ目", Nil) }) }) }),
-            node("image", Map#{ "assetId" => Json.JString(AssetId.text(asset)), "alt" => Json.JString("ダミー画像") }, Nil)
-        })
+                listItem(Map.empty(), List#{ paragraphOf("一つ目の項目") }),
+                listItem(Map.empty(), List#{
+                    paragraphOf("二つ目の項目（入れ子あり）"),
+                    node("bulletList", Map.empty(), List#{
+                        listItem(Map.empty(), List#{ paragraphOf("入れ子の項目") }),
+                        listItem(Map.empty(), List#{
+                            paragraphOf("さらに入れ子"),
+                            node("orderedList", Map.empty(), List#{
+                                listItem(Map.empty(), List#{ paragraphOf("番号付きの入れ子") })
+                            })
+                        })
+                    })
+                })
+            }),
+            node("orderedList", Map.empty(), List#{
+                listItem(Map.empty(), List#{ paragraphOf("手順 1: プロジェクトを作る") }),
+                listItem(Map.empty(), List#{ paragraphOf("手順 2: API スキーマを決める") }),
+                listItem(Map.empty(), List#{ paragraphOf("手順 3: entry を書いて公開する") })
+            }),
+            node("bulletList", Map.empty(), List#{
+                listItem(Map#{ "checked" => Json.JBool(true) }, List#{ paragraphOf("済んだタスク") }),
+                listItem(Map#{ "checked" => Json.JBool(false) }, List#{ paragraphOf("まだのタスク") })
+            })
+        }
+
+    /// 引用と出典（quoteCite）。
+    def quoteSection(): List[Json] =
+        List#{
+            headingNode(3, None, "引用"),
+            node("blockquote", Map.empty(), List#{
+                paragraphOf("ヘッドレス CMS の役割は中身で、見た目はサイトが決める。"),
+                node("quoteCite", Map.empty(), List#{
+                    textNode("設計メモ", markNode("italic") :: Nil),
+                    textNode(" / ", Nil),
+                    textNode("example.com", linkMark("https://example.com/notes") :: Nil)
+                })
+            })
+        }
+
+    /// コードブロック（言語・ファイル名・強調行・折り返し）と Mermaid。
+    def codeSection(): List[Json] =
+        List#{
+            headingNode(3, None, "コード"),
+            node("codeBlock",
+                Map#{ "language" => Json.JString("ts"), "fileName" => Json.JString("src/demo.ts"),
+                      "highlightLines" => Json.JString("2,4-5"), "wrap" => Json.JBool(true) },
+                List#{ textNode("export function greet(who: string) {\n  const message = \"こんにちは、\" + who;\n  console.log(message);\n  return message;\n}", Nil) }),
+            node("codeBlock", Map#{ "language" => Json.JString("mermaid") },
+                List#{ textNode("graph TD\n  draft[下書き] --> review[レビュー]\n  review --> published[公開]", Nil) })
+        }
+
+    ///
+    /// 表。見出し行・セルの結合・寄せ・セルの中のマークを 1 つに入れる。
+    ///
+    def tableSection(): List[Json] =
+        List#{
+            headingNode(3, None, "表"),
+            node("table", Map.empty(), List#{
+                node("tableRow", Map.empty(), List#{
+                    node("tableHeader", Map#{ "align" => Json.JString("left") }, List#{ paragraphOf("プラン") }),
+                    node("tableHeader", Map#{ "align" => Json.JString("right") }, List#{ paragraphOf("entry 数") }),
+                    node("tableHeader", Map#{ "align" => Json.JString("center") }, List#{ paragraphOf("備考") })
+                }),
+                node("tableRow", Map.empty(), List#{
+                    node("tableCell", Map#{ "align" => Json.JString("left"), "rowspan" => Json.JNumber(Int32.toBigDecimal(2)) }, List#{
+                        node("paragraph", Map.empty(), List#{
+                            textNode("Free", markNode("bold") :: Nil),
+                            textNode("（2 行分）", Nil)
+                        })
+                    }),
+                    node("tableCell", Map#{ "align" => Json.JString("right") }, List#{ paragraphOf("100") }),
+                    node("tableCell", Map#{ "align" => Json.JString("center") }, List#{
+                        node("paragraph", Map.empty(), List#{
+                            textNode("セルの中にも", Nil),
+                            textNode("リンク", linkMark("https://example.com/pricing") :: Nil),
+                            textNode("と", Nil),
+                            textNode("code", markNode("code") :: Nil),
+                            textNode("を置けます。", Nil)
+                        })
+                    })
+                }),
+                node("tableRow", Map.empty(), List#{
+                    node("tableCell", Map#{ "align" => Json.JString("right") }, List#{ paragraphOf("300") }),
+                    node("tableCell", Map#{ "align" => Json.JString("center") }, List#{
+                        node("paragraph", Map.empty(), List#{ textNode("試用中", markNode("highlight") :: Nil) })
+                    })
+                }),
+                node("tableRow", Map.empty(), List#{
+                    node("tableCell", Map#{ "align" => Json.JString("left"), "colspan" => Json.JNumber(Int32.toBigDecimal(3)) }, List#{
+                        node("paragraph", Map.empty(), List#{
+                            textNode("3 列を結合した行。", Nil),
+                            textNode("打ち消し", markNode("strike") :: Nil),
+                            textNode("も効きます。", Nil)
+                        })
+                    })
+                })
+            })
+        }
+
+    /// 画像。1 枚（キャプション・出典・リンク・縮小・配置）と、並べた 2 枚。
+    def imageSection(asset: AssetId): List[Json] =
+        List#{
+            headingNode(3, None, "画像"),
+            node("image", Map.empty(), List#{
+                node("imageItem",
+                    Map#{ "assetId" => Json.JString(AssetId.text(asset)), "alt" => Json.JString("ダミー画像"),
+                          "source" => Json.JString("社内資料"), "sourceUrl" => Json.JString("https://example.com/source"),
+                          "href" => Json.JString("https://example.com/photo"), "size" => Json.JString("small"),
+                          "align" => Json.JString("right") },
+                    List#{
+                        textNode("キャプションの中の", Nil),
+                        textNode("斜体", markNode("italic") :: Nil),
+                        textNode("と", Nil),
+                        textNode("リンク", linkMark("https://example.com/caption") :: Nil)
+                    })
+            }),
+            node("image", Map.empty(), List#{
+                node("imageItem", Map#{ "assetId" => Json.JString(AssetId.text(asset)), "alt" => Json.JString("並べた 1 枚目") },
+                    List#{ textNode("1 枚目", Nil) }),
+                node("imageItem", Map#{ "assetId" => Json.JString(AssetId.text(asset)), "alt" => Json.JString("並べた 2 枚目") },
+                    List#{ textNode("2 枚目", Nil) })
+            })
+        }
+
+    /// 区切り線とブロックの数式。
+    def mathSection(): List[Json] =
+        List#{
+            leafNode("horizontalRule", Map.empty()),
+            headingNode(3, None, "数式"),
+            leafNode("mathBlock", Map#{ "tex" => Json.JString("\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}") })
+        }
+
+    /// callout / details / video / linkCard / embed と、レベル 4 の見出し。
+    def mediaSection(asset: AssetId): List[Json] =
+        List#{
+            headingNode(3, None, "囲みと埋め込み"),
+            node("callout", Map#{ "kind" => Json.JString("note") }, List#{ paragraphOf("note の囲みです。補足を入れます。") }),
+            node("callout", Map#{ "kind" => Json.JString("tip") }, List#{ paragraphOf("tip の囲みです。こつを入れます。") }),
+            node("callout", Map#{ "kind" => Json.JString("warning") }, List#{ paragraphOf("warning の囲みです。気を付ける事を入れます。") }),
+            node("details", Map#{ "summary" => Json.JString("折りたたみの見出し") }, List#{
+                paragraphOf("開いた時に出る本文です。"),
+                node("bulletList", Map.empty(), List#{ listItem(Map.empty(), List#{ paragraphOf("中にリストも置けます") }) })
+            }),
+            headingNode(4, Some("demo-media"), "動画とカード"),
+            leafNode("video", Map#{ "assetId" => Json.JString(AssetId.text(asset)),
+                                    "poster" => Json.JString(AssetId.text(asset)),
+                                    "caption" => Json.JString("ダミー動画") }),
+            leafNode("linkCard", Map#{ "url" => Json.JString("https://example.com/blog/hello") }),
+            leafNode("embed", Map#{ "url" => Json.JString("https://www.youtube.com/watch?v=dQw4w9WgXcQ") }),
+            leafNode("embed", Map#{ "url" => Json.JString("https://vimeo.com/76979871") }),
+            leafNode("embed", Map#{ "url" => Json.JString("https://x.com/example/status/1234567890123456789") })
+        }
+
+    // ---- doc を組み立てる部品 ----
+
+    def docNode(content: List[Json]): Json = node("doc", Map.empty(), content)
+
+    def node(kind: String, nodeAttrs: Map[String, Json], content: List[Json]): Json =
+        Json.JObject(Map#{ "type" => Json.JString(kind), "attrs" => Json.JObject(nodeAttrs), "content" => Json.JArray(List.toVector(content)) })
+
+    def leafNode(kind: String, nodeAttrs: Map[String, Json]): Json =
+        Json.JObject(Map#{ "type" => Json.JString(kind), "attrs" => Json.JObject(nodeAttrs) })
+
+    def textNode(value: String, marks: List[Json]): Json =
+        Json.JObject(Map#{ "type" => Json.JString("text"), "text" => Json.JString(value), "marks" => Json.JArray(List.toVector(marks)) })
+
+    def markNode(kind: String): Json =
+        Json.JObject(Map#{ "type" => Json.JString(kind), "attrs" => Json.JObject(Map.empty()) })
+
+    def linkMark(href: String): Json =
+        Json.JObject(Map#{ "type" => Json.JString("link"), "attrs" => Json.JObject(Map#{ "href" => Json.JString(href) }) })
+
+    def headingNode(level: Int32, id: Option[String], value: String): Json =
+        let levelAttr = Map#{ "level" => Json.JNumber(Int32.toBigDecimal(level)) };
+        let headingAttrs = id |> Option.map(found -> Map.insert("id", Json.JString(found), levelAttr)) |> Option.getWithDefault(levelAttr);
+        node("heading", headingAttrs, List#{ textNode(value, Nil) })
+
+    def paragraphOf(value: String): Json = node("paragraph", Map.empty(), List#{ textNode(value, Nil) })
+
+    def listItem(itemAttrs: Map[String, Json], content: List[Json]): Json = node("listItem", itemAttrs, content)
 
     /// ダミーの画像を 1 つ置いて READY にする。中身は PNG ではなく短い文字列（器の確認なので描画はしない）。
     def placeDummyImage(): AssetId \ Db + CmsErr + IdGen + Tenant + Session + ObjectStore + Net.Http.Http =
