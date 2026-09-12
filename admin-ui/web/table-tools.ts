@@ -7,6 +7,7 @@
 
 import type { Editor } from "@tiptap/core";
 import type { Node as PmNode } from "@tiptap/pm/model";
+import { Selection } from "@tiptap/pm/state";
 import { TableMap } from "@tiptap/pm/tables";
 
 export type Align = "left" | "center" | "right";
@@ -156,6 +157,10 @@ function fitSpans(grid: Slot[][], width: number): { owner: Array<number | null>;
   return { owner, spans };
 }
 
+/** その位置が表の中か。 */
+const inside = (at: number, found: { node: PmNode; pos: number }) =>
+  at > found.pos && at < found.pos + found.node.nodeSize;
+
 /** マス目の並びから表に戻して置き換える。 */
 function writeGrid(editor: Editor, found: { node: PmNode; pos: number }, grid: Slot[][], header: boolean): boolean {
   const { state, view } = editor;
@@ -182,7 +187,15 @@ function writeGrid(editor: Editor, found: { node: PmNode; pos: number }, grid: S
     return schema.nodes.tableRow.createChecked(null, cells);
   });
   const table = found.node.type.createChecked(found.node.attrs, rows);
-  view.dispatch(state.tr.replaceWith(found.pos, found.pos + found.node.nodeSize, table).scrollIntoView());
+  const tr = state.tr.replaceWith(found.pos, found.pos + found.node.nodeSize, table);
+  // 組み直した表の中へカーソルを入れ直してから送る。
+  //
+  // WhyNot: 元の選択を送り先にしない。帯はカーソルの無い表にも出るので、大きさを変えた時に
+  // カーソルが本文の別の所に残っていると、そこまで面が飛んで編集していた表が画面から消える。
+  if (!inside(state.selection.from, found) || !inside(state.selection.to, found)) {
+    tr.setSelection(Selection.near(tr.doc.resolve(found.pos + 1)));
+  }
+  view.dispatch(tr.scrollIntoView());
   editor.commands.focus();
   return true;
 }

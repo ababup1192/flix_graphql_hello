@@ -191,6 +191,29 @@ export const FIXTURES: Fixture[] = [
     },
   },
   {
+    name: "table-in-long",
+    title: "長い本文の途中の表",
+    doc: {
+      type: "doc",
+      content: [
+        ...Array.from({ length: 30 }, (_ignore, index) => paragraph(`表の上の ${index} 行目です。`)),
+        {
+          type: "table",
+          content: [1, 2, 3].map((row) => ({
+            type: "tableRow",
+            content: [1, 2, 3].map((column) => ({
+              type: row === 1 ? "tableHeader" : "tableCell",
+              attrs: { colspan: 1, rowspan: 1, colwidth: null },
+              content: [paragraph(`${row}-${column}`)],
+            })),
+          })),
+        },
+        ...Array.from({ length: 30 }, (_ignore, index) => paragraph(`表の下の ${index} 行目です。`)),
+        paragraph(""),
+      ],
+    },
+  },
+  {
     name: "table-merged",
     title: "結合のある表",
     doc: {
