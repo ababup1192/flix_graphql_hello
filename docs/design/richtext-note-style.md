@@ -5,7 +5,7 @@ richText のエディタの書き心地と、公開側の HTML を note（note.c
 シンプルな形のまま**、doc ↔ Markdown ↔ HTML の往復を壊さずに足す。
 
 - 調査（note の機能・書き心地・評判・公開 HTML の実測、他社比較）: [richtext-note-research.md](richtext-note-research.md)
-- 往復のスパイク（何が落ちるか、テストで確認）: [richtext-roundtrip-spike.md](richtext-roundtrip-spike.md)、`test/cms/rules/TestRichTextSpike.flix`
+- 往復のスパイク（何が落ちるか、テストで確認）: [richtext-roundtrip-spike.md](richtext-roundtrip-spike.md)、`test/cms/TestRichTextRoundTrip.flix`
 - HTML と CSS のモック: [richtext-mock.html](richtext-mock.html)（ブラウザで開くだけで見られる）
 - エディタの段階と doc の制約は [admin-ui-spec.md](admin-ui-spec.md) の 1 章と 10.5 が正。この文書はそこに足す差分
 
@@ -284,7 +284,7 @@ spec 10 章の方針（段落・見出し・リスト・リンク・画像まで
 
 ## 7. 実装の順
 
-1. CMS: `image.attrs.source` / `sourceUrl`、`blockquote.attrs.cite` / `citeUrl` を `RichText.validate` のホワイトリストと `Picture` / `Block.Blockquote` に足し、HTML（3 章）と Markdown（4 章）を通す。`TestRichTextSpike.flix` の期待値を新しい挙動に書き換えて残す
+1. CMS: `image.attrs.source` / `sourceUrl`、`blockquote.attrs.cite` / `citeUrl` を `RichText.validate` のホワイトリストと `Picture` / `Block.Blockquote` に足し、HTML（3 章）と Markdown（4 章）を通す。`TestRichTextRoundTrip.flix` の期待値を新しい挙動に書き換えて残す
 2. admin-ui: 画像の 4 欄と引用の出典欄（6.4 / 6.5）。編集画面の本文の見た目をモックに寄せる（6.12）
 3. admin-ui: URL の貼り付けで linkCard / embed（6.6）、自動保存（6.8）、浮くツールバーと「+」（6.1 / 6.2）
 4. CMS: OGP の表と仕事、`toHtml` の `cards`、失敗の理由を管理 API に出す（3.3）。admin-ui はカードに title と理由を出す

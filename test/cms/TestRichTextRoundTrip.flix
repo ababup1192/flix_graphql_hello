@@ -2,9 +2,13 @@
 /// 画像の出典（image.attrs.source / sourceUrl）と引用の出典（blockquote の最後の quoteCite。旧 attrs.cite / citeUrl は読む側だけ）、
 /// 画像のリンク・縮小・配置（image.attrs.href / size / align）が、
 /// 検査・HTML・平文・Markdown の書き出しと読み・往復（doc → Markdown → doc）で通る事を確かめる。
+///
+/// 役割の境界: `TestRichText` は richText 単体（validate / toHtml / toText）を見る。こちらは Markdown との
+/// 往復と、旧形式（旧 gallery・旧 attrs.caption・旧 attrs.cite）を読む側だけ受ける後方互換を見る。
+///
 /// 設計は docs/design/richtext-note-style.md の 3 章と 4 章。
 ///
-mod TestRichTextSpike {
+mod TestRichTextRoundTrip {
 
     use Util.Json.Json
 

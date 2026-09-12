@@ -2,7 +2,8 @@
 
 - 調査日: 2026-09-11。設計は [richtext-note-style.md](richtext-note-style.md)
 - 正: `src/cms/rules/RichText.flix`（ホワイトリスト・HTML・平文）、`src/cms/rules/Markdown.flix`（doc ↔ Markdown）
-- スパイクのテスト: `test/cms/rules/TestRichTextSpike.flix`（src は変えていない）
+- スパイクのテスト: `test/cms/rules/TestRichTextSpike.flix`（src は変えていない）。
+  調査が済んだ後 `test/cms/TestRichTextRoundTrip.flix` に改名した（2026-09-12）
 - 既存テスト: `test/cms/TestRichText.flix`、`test/cms/TestMarkdown.flix`
 
 ## 1. 現状の表
@@ -128,4 +129,4 @@
   2. Markdown は image を `{key=value …}` の一般形に、blockquote は末尾の `> — [出典](URL)` 段落と cite の相互変換にする（`—` を逃がせないので、印を `-- ` にするか、`\—` を逃がせるように backslashStep を広げるかを決める）
   3. linkCard は url だけを持ち続け、OGP は別の表 + `toHtml` の引数で足す
   4. caption 内の inline marks は、要望が確かになるまで見送る（doc の形と TipTap の node view が両方変わる）
-- スパイクのテスト `test/cms/rules/TestRichTextSpike.flix` は残してある。消すか、実装後に期待値を新しい挙動へ書き換えるかは本体の判断
+- スパイクのテストは残した。実装後に期待値を新しい挙動へ書き換え、`test/cms/TestRichTextRoundTrip.flix` に改名して回帰テストにした（2026-09-12）
