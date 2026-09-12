@@ -92,6 +92,13 @@ def testHttpRenderKeepsRouteContentType(): Unit \ Assert =
         expected = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\nContent-Type: text/csv; charset=utf-8\r\n\r\na,",
         Http.render(Http.Connection.Close, { status = 200, headers = ("Content-Type", "text/csv; charset=utf-8") :: Nil, body = "a," }))
 
+/// 304 にも理由句が付く（`304 Unknown` だと curl やプロキシのログで何が起きたか読めない）。
+@Test
+def testHttpRender304HasReasonPhrase(): Unit \ Assert =
+    Assert.assertEq(
+        expected = "HTTP/1.1 304 Not Modified\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        Http.render(Http.Connection.Close, { status = 304, headers = Nil, body = "" }))
+
 /// ヘッダ値の CR / LF は落とす（Origin をそのまま返す CORS でレスポンス分割にならない）。
 @Test
 def testHttpRenderStripsLineBreaksInHeaderValue(): Unit \ Assert =

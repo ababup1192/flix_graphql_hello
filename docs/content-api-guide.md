@@ -567,7 +567,7 @@ curl -s -G --data-urlencode 'query={ blogs(first: 1) { nodes { id title } } }' \
 ```
 
 ```http
-HTTP/1.1 304 Unknown
+HTTP/1.1 304 Not Modified
 Content-Length: 0
 ETag: W/"v384-d9685e98e877ab79"
 Cache-Control: public, s-maxage=10, max-age=0, stale-while-revalidate=60

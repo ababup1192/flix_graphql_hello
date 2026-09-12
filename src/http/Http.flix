@@ -219,6 +219,7 @@ mod Http {
         case 200 => "OK"
         case 202 => "Accepted"
         case 204 => "No Content"
+        case 304 => "Not Modified"
         case 400 => "Bad Request"
         case 401 => "Unauthorized"
         case 403 => "Forbidden"
