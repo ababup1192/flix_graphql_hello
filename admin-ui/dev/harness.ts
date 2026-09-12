@@ -4,6 +4,7 @@
 import "katex/dist/katex.min.css";
 import "../src/styles.css";
 import "../web/tiptap-editor";
+import { userEvent } from "vitest/browser";
 import { fixtureOf } from "./fixtures";
 
 export type Harness = {
@@ -102,6 +103,11 @@ export async function mount(fixture: string | unknown = "empty"): Promise<Harnes
     },
   };
 }
+
+// 打鍵する文字列。**`[` と `{` は userEvent の記法の始まり**なので、
+// 素の文字として打つには 2 つ続ける（`[ ] ` の入力規則を検査から打てない）。
+export const typeText = (text: string) =>
+  text === "" ? Promise.resolve() : userEvent.keyboard(text.replace(/[[{]/g, (one) => one + one));
 
 // 1 拍おく。**打鍵で動かした選択は、その場では ProseMirror の state に入っていない事がある。**
 // 選択を見たり、選択を相手にする道具を使う前に挟む。

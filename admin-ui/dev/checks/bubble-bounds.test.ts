@@ -1,0 +1,109 @@
+// 文字を選んだ時に出る帯（`.tt-bubble`）が、エディタの枠から出ていない事。
+//
+// **出ると管理画面の上の帯（タイトル・保存済みの表示）に重なって隠す。**
+// 上の帯は Elm 側の殻で開発用の土台には無いので、同値で、直し方そのものでもある形
+// 「帯の矩形がエディタの枠に収まっている」を見る。これを満たせば上の帯にも出て行けない。
+//
+// WhyNot: 画面（viewport）に収まっているだけで良い事にしない。エディタの枠を越えた帯は、
+// 画面には収まっていても上下のフィールドに重なる（浮く面で実際に重なった。`ui.ts` の `bounds`）。
+import { expect, test, afterEach, vi } from "vitest";
+import { page, userEvent } from "vitest/browser";
+import { mount, settle, type Harness } from "../harness";
+
+let harness: Harness | null = null;
+afterEach(async () => {
+  harness?.destroy();
+  window.scrollTo(0, 0);
+  await page.viewport(1440, 900);
+});
+
+const box = (el: Element) => el.getBoundingClientRect();
+const frame = () => new Promise((done) => window.requestAnimationFrame(() => window.requestAnimationFrame(done)));
+
+// 帯が出て、置き所が決まるまで待つ。
+//
+// **選択を作るだけでは足りない。** 帯は選んでから 80ms 後に出て（`updateDelay`）、
+// Floating UI が非同期に測る。測る前の帯は本文の下に素で置かれていて、そこを測ると
+// 「枠から出ている」と読めてしまう（実際にそう読めた）。
+async function bubbleOf(h: Harness): Promise<DOMRect> {
+  await vi.waitFor(() => expect(h.editor.querySelector(".tt-bubble")).not.toBeNull());
+  await frame();
+  await frame();
+  return box(h.editor.querySelector<HTMLElement>(".tt-bubble")!);
+}
+
+// n 番目の段落に文字を打って、その 3 文字を選ぶ。
+//
+// WhyNot: `setTextSelection` だけで選ばない。本文が変わらないと BubbleMenu が
+// 置き所を測り直さず、帯が素の場所に残る（実際に残った）。
+async function pickInParagraph(h: Harness, index: number) {
+  const view = (h.editor as any).editor;
+  let at = -1;
+  let seen = 0;
+  view.state.doc.forEach((node: any, pos: number) => {
+    if (node.type.name === "paragraph" && node.content.size > 3) {
+      if (seen === index) at = pos;
+      seen += 1;
+    }
+  });
+  view.commands.focus();
+  view.commands.setTextSelection(at + 1);
+  await settle();
+  await userEvent.keyboard("たいじ");
+  h.selectBack(3);
+  await settle();
+}
+
+// キャプションの中の 3 文字を選ぶ。**キャプションの帯だけは選んだ所の真上に出る**
+// （`tiptap-editor.ts` の `getReferencedVirtualElement`）ので、上へ出て行く道がある。
+async function pickInCaption(h: Harness) {
+  h.caretInCaption();
+  await settle();
+  await userEvent.keyboard("せつめい");
+  h.selectBack(4);
+  await settle();
+}
+
+// [名前, 初期状態, 選ぶ]
+const SPOTS: Array<[string, string, (h: Harness) => Promise<void>]> = [
+  ["本文の上端に近い所", "long", (h) => pickInParagraph(h, 0)],
+  ["本文の下端に近い所", "long", (h) => pickInParagraph(h, 19)],
+  ["一番上の画像のキャプション", "image", pickInCaption],
+  ["一番上の引用の出典", "quote", (h) => pickInCite(h)],
+];
+
+async function pickInCite(h: Harness) {
+  const view = (h.editor as any).editor;
+  let at = -1;
+  view.state.doc.descendants((node: any, pos: number) => {
+    if (node.type.name === "quoteCite" && at < 0) at = pos + 1;
+  });
+  view.commands.focus();
+  view.commands.setTextSelection({ from: at, to: at + 3 });
+  await settle();
+}
+
+for (const [name, fixture, go] of SPOTS) {
+  test(`${name}を選んでも、帯がエディタの枠より上に出ない`, async () => {
+    const h = (harness = await mount(fixture));
+    await go(h);
+    const bubble = await bubbleOf(h);
+    expect(Math.round(bubble.top - box(h.editor).top)).toBeGreaterThanOrEqual(0);
+  });
+
+  test(`${name}を選んでも、帯がエディタの枠より下に出ない`, async () => {
+    const h = (harness = await mount(fixture));
+    await go(h);
+    const bubble = await bubbleOf(h);
+    expect(Math.round(box(h.editor).bottom - bubble.bottom)).toBeGreaterThanOrEqual(0);
+  });
+}
+
+// 窓が低くて選んだ行の下に帯が入らない時も、上へ逃げてエディタの枠を越えない。
+test("低い窓で上端の行を選んでも、帯がエディタの枠より上に出ない", async () => {
+  await page.viewport(1440, 200);
+  const h = (harness = await mount("long"));
+  await pickInParagraph(h, 0);
+  const bubble = await bubbleOf(h);
+  expect(Math.round(bubble.top - box(h.editor).top)).toBeGreaterThanOrEqual(0);
+});

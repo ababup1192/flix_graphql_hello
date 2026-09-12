@@ -185,6 +185,28 @@ export const FIXTURES: Fixture[] = [
     },
   },
   {
+    name: "table-between",
+    title: "前に行のある表",
+    doc: {
+      type: "doc",
+      content: [
+        ...Array.from({ length: 3 }, (_ignore, index) => paragraph(`うめ ${index}`)),
+        {
+          type: "table",
+          content: [1, 2].map((row) => ({
+            type: "tableRow",
+            content: [1, 2, 3].map((column) => ({
+              type: row === 1 ? "tableHeader" : "tableCell",
+              attrs: { colspan: 1, rowspan: 1, colwidth: null },
+              content: [paragraph(`${row}-${column}`)],
+            })),
+          })),
+        },
+        paragraph(""),
+      ],
+    },
+  },
+  {
     name: "table-wide",
     title: "列の多い表",
     doc: {
