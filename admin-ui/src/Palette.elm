@@ -1,4 +1,4 @@
-module Palette exposing (Item, Model, Msg(..), init, inputId, isOpen, pickedItem, searchCalls, update, view)
+module Palette exposing (Goto(..), Item, Model, Msg(..), init, inputId, isOpen, pickedItem, searchCalls, update, view)
 
 {-| ⌘K の検索。API・メディア・設定へ飛ぶのと、**型を跨いだコンテンツの検索**。
 
@@ -37,8 +37,20 @@ type alias Model =
 type alias Item =
     { label : String
     , hint : String
-    , route : Route
+    , goto : Goto
     }
+
+
+{-| 飛び先。
+
+WhyNot: `Route` だけで持たない。Explorer（GraphiQL）とリファレンスは Elm の外の
+ページで、`Route` に足すと「この管理画面の画面」として扱われ、URL を読み直す道が
+無くなる。外は文字列のまま持ち、親が丸ごと読み込む。
+
+-}
+type Goto
+    = Inside Route
+    | Outside String
 
 
 type Msg
@@ -105,7 +117,7 @@ entryItem : TypeMark -> EntryRow -> Item
 entryItem mark row =
     { label = EntryLabel.forRow row
     , hint = mark.name
-    , route = Route.Entry "" mark.apiId row.id
+    , goto = Inside (Route.Entry "" mark.apiId row.id)
     }
 
 
@@ -149,7 +161,10 @@ results project types model =
             String.toLower (String.trim model.query)
 
         {- 画面を探す時は別名も当てる。「PAT」で Personal Access Token に行けるように。 -}
-        matches : { label : String, hint : String, route : Route, also : List String } -> Bool
+        {- WhyNot: `route` / `url` まで型に書かない。画面と外のページで飛び先の形が違うだけで、
+           探し方は同じ（label と also を見る）。ここを共有しないと同じ判定が 2 つに割れる。
+        -}
+        matches : { r | label : String, also : List String } -> Bool
         matches place =
             String.isEmpty needle
                 || List.any (\word -> String.contains needle (String.toLower word)) (place.label :: place.also)
@@ -176,11 +191,20 @@ results project types model =
                    , { label = "Personal Access Token", hint = "画面", route = Route.AccountTokens, also = [ "pat", "token", "トークン", "cli" ] }
                    ]
 
+        {- Elm の外のページ。API を叩く人の道具で、画面の一覧とは別に持つ。 -}
+        outside : List { label : String, hint : String, url : String, also : List String }
+        outside =
+            [ { label = "Explorer", hint = "API", url = "/p/" ++ project ++ "/graphiql", also = [ "graphiql", "explorer", "query", "クエリ", "試す" ] }
+            , { label = "リファレンス", hint = "API", url = "/p/" ++ project ++ "/docs", also = [ "docs", "reference", "ドキュメント", "仕様", "where" ] }
+            ]
+
         entries : List Item
         entries =
             types |> List.concatMap (group project model)
     in
-    (places |> List.filter matches |> List.map (\place -> { label = place.label, hint = place.hint, route = place.route })) ++ entries
+    (places |> List.filter matches |> List.map (\place -> { label = place.label, hint = place.hint, goto = Inside place.route }))
+        ++ (outside |> List.filter matches |> List.map (\place -> { label = place.label, hint = place.hint, goto = Outside place.url }))
+        ++ entries
 
 
 {-| 1 つの型の候補。上位の何件かと、その後ろに「一覧で探す」。
@@ -196,7 +220,7 @@ group project model summary =
         rows =
             Dict.get summary.apiId model.hits
                 |> Maybe.withDefault []
-                |> List.map (\item -> { item | route = withProject project item.route })
+                |> List.map (\item -> { item | goto = withProject project item.goto })
 
         total : Int
         total =
@@ -210,7 +234,7 @@ group project model summary =
         rows
             ++ [ { label = summary.name ++ "の一覧で「" ++ needle ++ "」を探す"
                  , hint = String.fromInt total ++ " 件"
-                 , route = Route.Entries project summary.apiId [ ( "q", needle ) ]
+                 , goto = Inside (Route.Entries project summary.apiId [ ( "q", needle ) ])
                  }
                ]
 
@@ -249,11 +273,11 @@ pickedItem project types model =
     shown project types model |> List.drop (pickedIndex project types model) |> List.head
 
 
-withProject : Slug -> Route -> Route
-withProject project route =
-    case route of
-        Route.Entry _ apiId entryId ->
-            Route.Entry project apiId entryId
+withProject : Slug -> Goto -> Goto
+withProject project goto =
+    case goto of
+        Inside (Route.Entry _ apiId entryId) ->
+            Inside (Route.Entry project apiId entryId)
 
         other ->
             other

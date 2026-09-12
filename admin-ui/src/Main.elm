@@ -758,6 +758,22 @@ searchDebounce pageMsg page =
             Effect.none
 
 
+{-| ⌘K で選ばれた物へ飛ぶ。
+
+WhyNot: 外のページに `PushRoute` を使わない。Elm のルータが拾って「この URL の画面は
+ありません」を出し、Explorer もリファレンスも開けない。外は丸ごと読み込む。
+
+-}
+goTo : Palette.Item -> Effect Msg
+goTo item =
+    case item.goto of
+        Palette.Inside route ->
+            Effect.PushRoute (Route.toString route)
+
+        Palette.Outside url ->
+            Effect.LoadUrl url
+
+
 {-| ⌘K。選んだらそのページへ飛ぶ。入力ごとに型の数だけ検索を投げる。
 -}
 paletteUpdate : Palette.Msg -> ModelWith key -> ( ModelWith key, Effect Msg )
@@ -777,7 +793,7 @@ paletteUpdate paletteMsg model =
             ( withPalette, Effect.Focus Palette.inputId )
 
         ( Palette.Chosen item, _ ) ->
-            ( withPalette, Effect.PushRoute (Route.toString item.route) )
+            ( withPalette, goTo item )
 
         ( Palette.Confirmed, Ready workspace ) ->
             -- Enter で今選んでいる物へ飛ぶ。**選べる物が無くても閉じる**（開いたままにしない）。
@@ -788,7 +804,7 @@ paletteUpdate paletteMsg model =
             in
             case Palette.pickedItem (context workspace).project workspace.types model.palette of
                 Just item ->
-                    ( closed, Effect.PushRoute (Route.toString item.route) )
+                    ( closed, goTo item )
 
                 Nothing ->
                     ( closed, Effect.none )
