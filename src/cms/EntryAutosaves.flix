@@ -25,59 +25,66 @@ mod EntryAutosaves {
     /// WhyNot: patch として重ねない（`update` は重ねる）。画面は編集中の中身を丸ごと送るので、
     /// 重ねるとフィールドを空にした編集が預かり物に残らない。
     ///
-    pub def save(proof: Granted[WriteEntries], id: EntryId, given: EntryData): Option[Autosave] \ Db + CmsErr + Tenant + Session =
+    pub def save(proof: Granted[WriteEntries], id: EntryId, given: EntryData): Option[EntryAutosave] \ Db + CmsErr + Tenant + Session =
         let userId = Session.currentUser();
         let existing = ContentEntries.get(Session.readDraftOfWriter(proof), id);
-        let state = AutosaveRules.stateOf(existing#version, existing#version, existing#data, given);
-        if (AutosaveRules.keepable(state)) {
-            discard EntryAutosavesQueries.upsertAutosave({
-                entryId = EntryId.text(id), userId = UserId.toInt64(userId), projectId = Tenant.currentId(),
-                data = EntryRows.dataToJson(given), baseVersion = existing#version });
-            Some({ entryId = id, data = given, baseVersion = existing#version, state = state, updatedAt = existing#updatedAt })
-        } else {
-            clearOwn(userId, id);
-            None
+        let stored = { data = given, baseVersion = existing#version, updatedAt = existing#updatedAt };
+        match attach(existing, stored) {
+            case Some(autosave) => {
+                discard EntryAutosavesQueries.upsertAutosave({
+                    entryId = EntryId.text(id), userId = UserId.toInt64(userId), projectId = Tenant.currentId(),
+                    data = EntryRows.dataToJson(given), baseVersion = existing#version });
+                Some(autosave)
+            }
+            case None => { clearOwn(userId, id); None }
         }
 
     ///
-    /// 読み込み済みの entry に付く自分の預かり物。下書きと同じ中身になっていれば None。
-    /// 人でない主体（API キー・匿名・プレビュー・system）は置き場を持たないので常に None。
+    /// 預かり物を下書きと突き合わせて、画面に出す形にする。同じ中身なら None。純粋。
     ///
-    pub def of(_proof: Granted[WriteEntries], entry: Entry): Option[Autosave] \ DbRead + Tenant + Session =
+    pub def attach(entry: Entry, stored: StoredAutosave): Option[EntryAutosave] =
+        let state = AutosaveRules.stateOf(entry#version, stored#baseVersion, entry#data, stored#data);
+        if (AutosaveRules.keepable(state))
+            Some({ entryId = entry#id, data = stored#data, baseVersion = stored#baseVersion, state = state, updatedAt = stored#updatedAt })
+        else None
+
+    ///
+    /// 自分の預かり物（下書きと突き合わせる前の生の物）。人でない主体（API キー・匿名・プレビュー・system）は
+    /// 置き場を持たないので常に None（forbidden にはしない。entry を読むだけで落ちるため）。
+    ///
+    pub def stored(_proof: Granted[WriteEntries], id: EntryId): Option[StoredAutosave] \ DbRead + Tenant + Session =
         match Session.currentUserForRead() {
             case None         => None
             case Some(userId) =>
-                EntryAutosavesQueries.findAutosave({ entryId = EntryId.text(entry#id), userId = UserId.toInt64(userId), projectId = Tenant.currentId() })
-                    |> Option.map(AutosaveRows.toAutosave(entry))
-                    |> Option.filter(autosave -> AutosaveRules.keepable(autosave#state))
+                EntryAutosavesQueries.findAutosave({ entryId = EntryId.text(id), userId = UserId.toInt64(userId), projectId = Tenant.currentId() })
+                    |> Option.map(AutosaveRows.toStored)
         }
 
     ///
     /// 複数の entry の預かり物を 1 本の SELECT で（管理 API の一覧の先読み）。
-    /// 返るのは置き場に残る（下書きと違う）物だけで、無い entry はキーごと落ちる。
+    /// 渡した id は預かり物が無くても None で載る（写しが「引いた」と「まだ引いていない」を区別できるように）。
     ///
-    pub def ofMany(_proof: Granted[WriteEntries], entries: List[Entry]): Map[EntryId, Autosave] \ DbRead + Tenant + Session =
+    pub def storedOf(_proof: Granted[WriteEntries], ids: List[EntryId]): Map[EntryId, Option[StoredAutosave]] \ DbRead + Tenant + Session =
+        let empty = ids |> List.map(id -> (id, None)) |> List.toMap;
         match Session.currentUserForRead() {
-            case None         => Map.empty()
-            case Some(userId) => if (List.isEmpty(entries)) Map.empty() else fetchMany(userId, entries)
+            case None         => empty
+            case Some(userId) => if (List.isEmpty(ids)) empty else Map.union(fetchMany(userId, ids), empty)
         }
 
-    /// ofMany の本体。行を entry で引き当てて状態を付ける。
-    def fetchMany(userId: UserId, entries: List[Entry]): Map[EntryId, Autosave] \ DbRead + Tenant =
-        let byId = entries |> List.map(entry -> (entry#id, entry)) |> List.toMap;
+    /// storedOf の本体。行を id で引き当てる。
+    def fetchMany(userId: UserId, ids: List[EntryId]): Map[EntryId, Option[StoredAutosave]] \ DbRead + Tenant =
         EntryAutosavesQueries.findAutosavesOf({
-                entryIds = entries |> List.map(entry -> EntryId.text(entry#id)),
+                entryIds = ids |> List.map(EntryId.text),
                 userId = UserId.toInt64(userId), projectId = Tenant.currentId() })
-            |> List.filterMap(row -> ofRow(byId, row))
-            |> List.filter(match (_, autosave) -> AutosaveRules.keepable(autosave#state))
+            |> List.filterMap(rowEntry)
             |> List.toMap
 
-    /// 1 行を (entry id, 預かり物) に。渡した entry に無い行は落とす（RLS と WHERE が守るので起きない）。
-    def ofRow(byId: Map[EntryId, Entry], row: { entryId = String, userId = Int64, data = Util.Json.Json, baseVersion = Int32, updatedAt = Timestamp.Timestamp }): Option[(EntryId, Autosave)] \ DbErr =
-        // WhyNot: forM のラムダに畳み込まないのは、effect（DbErr）を使う式をラムダに直に書くと JVM の VerifyError になるため
-        match EntryId.parse(row#entryId) |> Option.flatMap(found -> Map.get(found, byId)) {
-            case None        => None
-            case Some(entry) => Some((entry#id, AutosaveRows.toAutosave(entry, row)))
+    /// 1 行を (entry id, 預かり物)。id の規則に合わない行は落とす（PK が entries.id なので起きない）。
+    def rowEntry(row: { entryId = String, userId = Int64, data = Util.Json.Json, baseVersion = Int32, updatedAt = Timestamp.Timestamp }): Option[(EntryId, Option[StoredAutosave])] \ DbErr =
+        // WhyNot: Option.map のラムダに畳み込まないのは、effect（DbErr）を使う式をラムダに直に書くと JVM の VerifyError になるため
+        match EntryId.parse(row#entryId) {
+            case None     => None
+            case Some(id) => Some((id, Some(AutosaveRows.toStored(row))))
         }
 
     ///
@@ -93,9 +100,9 @@ mod EntryAutosaves {
     ///
     /// その entry の全員分を捨てる。戻す先が無くなった時（ゴミ箱へ入れた時）に `ContentEntries.delete` が呼ぶ。
     ///
-    /// WhyNot: 明示的な保存・公開・取り下げでは全員分を捨てない。どれも他の人の預かり物を消す操作ではなく、
+    /// WhyNot: 明示的な保存・公開・取り下げでは全員分を捨てない。どれも他の人の預かり物を無効にする操作ではなく、
     /// 消すとその人の打鍵が黙って失われる。下書きが進んだ事は `AutosaveState.Outdated` で相手に見せる。
-    /// 保存した本人の預かり物だけは、保存した中身と同じになるので次の自動保存が `SameAsDraft` で捨てる。
+    /// 保存した本人の預かり物は、保存した中身と同じになるので次の自動保存が `SameAsDraft` で捨てる。
     ///
     pub def purge(_proof: Granted[WriteEntries], id: EntryId): Unit \ DbWrite + Tenant =
         discard EntryAutosavesQueries.deleteAutosavesOfEntry({ entryId = EntryId.text(id), projectId = Tenant.currentId() })

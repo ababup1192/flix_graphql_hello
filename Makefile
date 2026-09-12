@@ -1,4 +1,4 @@
-.PHONY: run check test test-unit test-pg test-pg-ci import-microcms import-blog-example db-up db-down query generate scaffold gen gen-check migrate migrate-status migrate-new fatjar image
+.PHONY: run check test test-unit test-pg test-pg-ci import-microcms import-blog-example seed seed-demo seed-blog-example seed-empty db-up db-down query generate scaffold gen gen-check migrate migrate-status migrate-new fatjar image
 
 # **テストの DB は開発の DB と分ける。** 同じ物を使うと、テストが終わりに消す時に
 # 手元のデータ（見本のコンテンツ、発行した鍵、招待）まで消える（実際に消えた）。
@@ -34,6 +34,31 @@ BLOG_EXAMPLE_PROJECT = blog-example
 
 import-blog-example:
 	$(PG_ENV) CMS_DEFAULT_PROJECT=$(BLOG_EXAMPLE_PROJECT) CMS_MODE=import-microcms CMS_IMPORT_DIR=import/blog-example/schema bin/flix run
+
+# ---- 手で触るためのテストデータを作り直す（seed-*）----
+#
+# 取り込みは「作る」だけなので、二度目は apiId の重複で落ちる。取り込みのコードを直しても
+# 既にあるデータには反映されない。seed-* は **消してから取り込む** ので何度でも走らせられる。
+# PG は make db-up、migrations は当たっている事が前提。
+#
+# WhyNot: default を作り直す口を置かない。既定プロジェクトは手で作った物（鍵・招待・手で足した型）が
+# 混ざる場所で、消す口を Makefile に置くと事故る。作り直すのは seed-* が名乗るプロジェクトだけ。
+DEMO_PROJECT = demo
+EMPTY_PROJECT = empty-example
+
+seed: seed-demo seed-blog-example seed-empty  ## テストデータのプロジェクトを全部作り直す
+
+seed-demo:  ## demo を作り直す（import/microcms/schema。全部盛りの richText 付き）
+	scripts/reset-project.sh $(DEMO_PROJECT) "デモ" $(DEV_DB)
+	$(PG_ENV) CMS_DEFAULT_PROJECT=$(DEMO_PROJECT) CMS_MODE=import-microcms CMS_IMPORT_DIR=import/microcms/schema bin/flix run
+
+seed-blog-example:  ## blog-example を作り直す（import/blog-example/schema）
+	scripts/reset-project.sh $(BLOG_EXAMPLE_PROJECT) "ブログの作例" $(DEV_DB)
+	$(PG_ENV) CMS_DEFAULT_PROJECT=$(BLOG_EXAMPLE_PROJECT) CMS_MODE=import-microcms CMS_IMPORT_DIR=import/blog-example/schema bin/flix run
+
+# 「プロジェクトの入口」（content type が 1 件も無い時の画面）を手で見るための空のプロジェクト
+seed-empty:  ## content type が 0 件のプロジェクトを作り直す
+	scripts/reset-project.sh $(EMPTY_PROJECT) "空のプロジェクト" $(DEV_DB)
 
 check:
 	bin/flix check

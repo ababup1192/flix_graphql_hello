@@ -42,6 +42,7 @@ mod AdminSchema {
             schemaImpact  = SchemaImpactResolvers.resolvers(),
             entry        = EntryResolvers.resolvers(),
             entryVersion = EntryVersionResolvers.resolvers(),
+            entryAutosave = EntryAutosaveResolvers.resolvers(),
             fieldChange  = FieldChangeResolvers.resolvers(),
             diffLine     = DiffLineResolvers.resolvers(),
             entryPage    = EntryPageResolvers.resolvers(),

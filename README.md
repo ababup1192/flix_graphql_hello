@@ -38,7 +38,15 @@ make query     # 起動中のサーバへ /health と管理 API・コンテン�
 
 make import-microcms      # import/microcms/schema/（microCMS の API スキーマ）を既定プロジェクトへ
 make import-blog-example  # import/blog-example/schema/（blogs / authors / tags）を blog-example プロジェクトへ
+
+make seed      # 手で触るためのテストデータを作り直す（demo / blog-example / empty-example。何度でも走らせられる）
 ```
+
+`make seed`（`seed-demo` / `seed-blog-example` / `seed-empty` で 1 つずつ）は、対象のプロジェクトを
+`scripts/reset-project.sh` で空にしてから取り込み直す。**取り込みのコードを直したら `make seed-demo` で当て直す**
+（`make import-*` は作るだけなので、二度目は apiId の重複で落ちる）。消すのは取り込みが作る物だけで、
+`default` と手で作ったプロジェクト、API キー・メンバー・監査ログには触らない。
+管理画面の見本データ（`npm run seed`）はサーバを上げてから `cd admin-ui && CMS_PROJECT=demo npm run seed` で別に入れる。
 
 取り込みはサーバを立てずに走る一発処理。`import/microcms/schema/` は実在の 9 型（relation / relationList / repeater / unsupported が揃っていて、取り込みの実力を測る材料）で、
 作例サイト用の blogs / authors / tags は apiId が衝突するので `import/blog-example/` に分けて別プロジェクトに流す。

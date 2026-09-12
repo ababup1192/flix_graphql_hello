@@ -48,7 +48,8 @@ mod TestApiSurface {
                 "AuditEvent: id actorKind actorId actor action targetKind targetId detail createdAt" ::
                 "ContentType: id apiId kind name singular plural previewUrl linkPath icon fields createdAt updatedAt" ::
                 "DiffLine: kind text" ::
-                "Entry: id typeId version stage fields publishedAt createdAt updatedAt path versions diff" ::
+                "Entry: id typeId version stage fields publishedAt createdAt updatedAt path versions autosave diff" ::
+                "EntryAutosave: baseVersion fields state updatedAt" ::
                 "EntryEdge: cursor node" ::
                 "EntryPage: nodes edges pageInfo totalCount" ::
                 "EntryVersion: id version reason author fields createdAt" ::
@@ -62,7 +63,7 @@ mod TestApiSurface {
                 "LinkCard: url title description imageUrl siteName fetchedAt error" ::
                 "Me: id email name roles permissions organizations projects" ::
                 "Member: userId email name role" ::
-                "Mutation: createContentType updateContentType deleteContentType addField updateField removeField reorderFields createEntry updateEntry deleteEntry publishEntry publishMany unpublishEntry saveVersion restoreVersion createUploadUrl confirmAsset updateAsset deleteAsset createPreviewToken schedulePublish scheduleUnpublish cancelSchedule updateProjectVisibility inviteMember cancelInvitation changeMemberRole removeMember createApiKey revokeApiKey createWebhook updateWebhook deleteWebhook redeliverWebhook recordAuditExport fetchLinkCard" ::
+                "Mutation: createContentType updateContentType deleteContentType addField updateField removeField reorderFields createEntry updateEntry deleteEntry publishEntry publishMany unpublishEntry saveVersion restoreVersion autosaveEntry discardAutosave createUploadUrl confirmAsset updateAsset deleteAsset createPreviewToken schedulePublish scheduleUnpublish cancelSchedule updateProjectVisibility inviteMember cancelInvitation changeMemberRole removeMember createApiKey revokeApiKey createWebhook updateWebhook deleteWebhook redeliverWebhook recordAuditExport fetchLinkCard" ::
                 "Organization: id name" ::
                 "OrganizationMembership: organization role" ::
                 "PageInfo: hasNextPage endCursor" ::

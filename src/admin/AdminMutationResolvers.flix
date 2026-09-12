@@ -78,10 +78,17 @@ mod AdminMutationResolvers {
 
     /// Mutation.updateEntry
     pub def updateEntry(): GeneratedAdmin.MutationUpdateEntryResolver[AdminEff] =
-        (_context, id, fields, expectedVersion) -> Ok(updateEntryOf(id, fields, expectedVersion))
+        (_context, id, fields, expectedVersion, saveVersion) -> Ok(updateEntryOf(id, fields, expectedVersion, saveVersion |> Option.getWithDefault(false)))
 
-    def updateEntryOf(id: Id, fields: Value, expectedVersion: Int32): Entry \ Db + CmsErr + Tenant + Session =
-        ContentEntries.update(Session.grant(), AdminMapping.entryId("id", id), AdminMapping.entryData("fields", fields), expectedVersion)
+    ///
+    /// 下書きを直す。saveVersion なら同じ Tx で版も積む（保存だけ通って版が積まれない形を作らない）。
+    /// 版は直した後の中身で積むので、`ContentEntries.update` の後に呼ぶ。
+    ///
+    def updateEntryOf(id: Id, fields: Value, expectedVersion: Int32, saveVersion: Bool): Entry \ Db + CmsErr + Tenant + Session =
+        let entryId = AdminMapping.entryId("id", id);
+        let updated = ContentEntries.update(Session.grant(), entryId, AdminMapping.entryData("fields", fields), expectedVersion);
+        if (saveVersion) discard ContentEntries.saveVersion(Session.grant(), entryId, Session.displayName()) else ();
+        updated
 
     /// Mutation.deleteEntry。消した id を返す
     pub def deleteEntry(): GeneratedAdmin.MutationDeleteEntryResolver[AdminEff] =
@@ -128,6 +135,21 @@ mod AdminMutationResolvers {
 
     def restoreVersionOf(id: Id, versionId: Id, expectedVersion: Int32): Entry \ Db + CmsErr + Tenant + Session =
         ContentEntries.restoreVersion(Session.grant(), AdminMapping.entryId("id", id), AdminMapping.versionId("versionId", versionId), expectedVersion)
+
+    /// Mutation.autosaveEntry
+    pub def autosaveEntry(): GeneratedAdmin.MutationAutosaveEntryResolver[AdminEff] =
+        (_context, id, fields) -> Ok(autosaveEntryOf(id, fields))
+
+    /// 編集中の中身を自分の置き場に預かる。ラムダの中で effect を使わないための切り出し（VerifyError）。
+    def autosaveEntryOf(id: Id, fields: Value): Option[EntryAutosave] \ Db + CmsErr + Tenant + Session =
+        EntryAutosaves.save(Session.grant(), AdminMapping.entryId("id", id), AdminMapping.entryData("fields", fields))
+
+    /// Mutation.discardAutosave。捨てた entry の id を返す
+    pub def discardAutosave(): GeneratedAdmin.MutationDiscardAutosaveResolver[AdminEff] =
+        (_context, id) -> { discardAutosaveOf(id); Ok(id) }
+
+    def discardAutosaveOf(id: Id): Unit \ DbWrite + CmsErr + Tenant + Session =
+        EntryAutosaves.clear(Session.grant(), AdminMapping.entryId("id", id))
 
     /// Mutation.createUploadUrl
     pub def createUploadUrl(): GeneratedAdmin.MutationCreateUploadUrlResolver[AdminEff] =
@@ -302,6 +324,8 @@ mod AdminMutationResolvers {
             unpublishEntry    = unpublishEntry(),
             saveVersion       = saveVersion(),
             restoreVersion    = restoreVersion(),
+        autosaveEntry     = autosaveEntry(),
+        discardAutosave   = discardAutosave(),
             createUploadUrl   = createUploadUrl(),
             confirmAsset      = confirmAsset(),
             updateAsset       = updateAsset(),

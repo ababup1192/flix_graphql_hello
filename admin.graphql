@@ -203,8 +203,10 @@ type Mutation {
 
   """下書きを作る。id を渡せば（移行用）それを使い、無ければ振る。fields は apiId → 値"""
   createEntry(typeId: ID!, fields: JSON!, id: ID): Entry!
-  """下書きを直す。fields のキーだけ上書きし、null で消す。expectedVersion が今の version と違えば CONFLICT"""
-  updateEntry(id: ID!, fields: JSON!, expectedVersion: Int!): Entry!
+  """下書きを直す。fields のキーだけ上書きし、null で消す。expectedVersion が今の version と違えば CONFLICT。
+  saveVersion なら同じ Tx で今の下書きをバージョンとしても積む（saveVersion mutation を続けて呼ぶのと同じ中身だが、
+  保存だけ通って版が積まれない形にならない）"""
+  updateEntry(id: ID!, fields: JSON!, expectedVersion: Int!, saveVersion: Boolean = false): Entry!
   """ゴミ箱へ（soft delete）。公開中なら公開も取り下げる"""
   deleteEntry(id: ID!): ID!
   """下書きを公開する。required と unique と参照先の公開はここで検査する。公開中なら公開側を下書きで上書きする。
@@ -219,6 +221,14 @@ type Mutation {
   saveVersion(id: ID!): EntryVersion!
   """バージョンの中身を下書きに戻す。expectedVersion は updateEntry と同じ"""
   restoreVersion(id: ID!, versionId: ID!, expectedVersion: Int!): Entry!
+
+  """編集中の中身を自分だけの置き場に預かる（自動保存）。下書き（entry_contents）には書かないので、
+  version も stage も CHANGED も動かず、他の人からは何も変わって見えない。
+  fields は patch ではなく編集中の中身そのもの。型の定義で削らず、下書きの検査も通さない（打鍵を落とさないため）。
+  下書きと同じ中身なら置き場を空にして null を返す。預かり物を読めるのは置いた本人だけ"""
+  autosaveEntry(id: ID!, fields: JSON!): EntryAutosave
+  """自分の預かり物を捨てる。無くても成功。返すのは entry の id"""
+  discardAutosave(id: ID!): ID!
 
   """asset の置き先（署名付き PUT URL）を発行する。ブラウザが Content-Type / Content-Length を宣言どおりにして PUT し、
   終わったら confirmAsset を呼ぶ。URL は expiresInSeconds で切れる"""
@@ -686,6 +696,9 @@ type Entry {
   path: String
   """バージョン。新しい順。公開時と saveVersion で積む"""
   versions: [EntryVersion!]!
+  """自分の自動保存。無ければ（下書きと同じ中身の時も）null。他の人の物は見えず、
+  人でない主体（API キー・プレビュー）には常に null"""
+  autosave: EntryAutosave
   """2 つのバージョンの中身の差分。from → to の向き。同じなら空。定義の position 順で、定義に無いキーは最後"""
   diff(from: VersionRef!, to: VersionRef!): [FieldChange!]!
 }
@@ -743,6 +756,23 @@ type DiffLine {
 enum VersionReason {
   PUBLISH
   SAVE
+}
+
+"""自動保存と下書きの関係"""
+enum AutosaveState {
+  """預かった時から下書きが進んでいない。そのまま戻せる"""
+  RESTORABLE
+  """預かった後に下書きが進んだ（他の人か他のタブが保存した）。戻すと相手の保存を潰す"""
+  OUTDATED
+}
+
+"""編集中の中身の預かり物。置いた本人だけが読める"""
+type EntryAutosave {
+  """預かった時の entry の version。戻す時はこれを updateEntry の expectedVersion に渡す"""
+  baseVersion: Int!
+  fields: JSON!
+  state: AutosaveState!
+  updatedAt: String!
 }
 
 """entry のバージョン"""

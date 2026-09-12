@@ -10,13 +10,18 @@
 /// - state: 下書きと突き合わせた状態
 /// - updatedAt: 最後に預かった時刻
 ///
-pub type alias Autosave = {
+pub type alias EntryAutosave = {
     entryId = EntryId,
     data = EntryData,
     baseVersion = Int32,
     state = AutosaveState,
     updatedAt = Timestamp.Timestamp
 }
+
+///
+/// 置き場に入っているそのままの預かり物（下書きと突き合わせる前）。一覧の先読みの写しが持つ。
+///
+pub type alias StoredAutosave = { data = EntryData, baseVersion = Int32, updatedAt = Timestamp.Timestamp }
 
 ///
 /// 自動保存と下書きの関係。判定は `AutosaveRules.stateOf`。

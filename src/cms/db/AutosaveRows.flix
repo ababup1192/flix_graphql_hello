@@ -4,16 +4,9 @@
 mod AutosaveRows {
 
     ///
-    /// 行と、同じ entry の下書きから Autosave を組む。
+    /// 行から預かり物へ。下書きとの突き合わせ（state）は読んだ側が `EntryAutosaves.attach` でする。
     ///
-    pub def toAutosave(entry: Entry, row: { entryId = String, data = Util.Json.Json, baseVersion = Int32, updatedAt = Timestamp.Timestamp | r }): Autosave \ DbErr =
-        let data = EntryRows.dataFromJson(row#data);
-        {
-            entryId     = entry#id,
-            data        = data,
-            baseVersion = row#baseVersion,
-            state       = AutosaveRules.stateOf(entry#version, row#baseVersion, entry#data, data),
-            updatedAt   = row#updatedAt
-        }
+    pub def toStored(row: { data = Util.Json.Json, baseVersion = Int32, updatedAt = Timestamp.Timestamp | r }): StoredAutosave \ DbErr =
+        { data = EntryRows.dataFromJson(row#data), baseVersion = row#baseVersion, updatedAt = row#updatedAt }
 
 }

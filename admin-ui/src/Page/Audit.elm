@@ -389,9 +389,12 @@ view args model =
         [ Ui.pageHeader { title = "監査ログ", icon = Nothing, meta = [], actions = [] }
         , Ui.note
             [ text ("無期限に残ります · 書き換え不可 · 時刻は" ++ zoneNote model) ]
+        , Ui.note
+            [ text "コンテンツの編集と公開はここではなく、コンテンツごとの「バージョン履歴」に残ります。" ]
         , if args.canManage then
             div [ class "flex flex-col gap-3" ]
                 [ viewFilters model
+                , viewVersionsHint args.types model
                 , viewCount model
                 , Ui.errors model.errors
                 , viewMissing model
@@ -419,11 +422,18 @@ kindOptions =
     ( "", "すべて" ) :: List.map (\kind -> ( ActorKind.toString kind, ActorKind.toString kind )) ActorKind.list
 
 
+{-| コンテンツの出来事の前方一致。絞り込みの選択肢と、バージョン履歴への断りが同じ値を引く。
+-}
+entryPrefix : String
+entryPrefix =
+    "entry."
+
+
 actionOptions : List ( String, String )
 actionOptions =
     ( "", "すべて" )
         :: List.map (\prefix -> ( prefix, prefix ))
-            [ "member.", "api_key.", "type.", "field.", "webhook.", "asset.", "entry.", "project." ]
+            [ "member.", "api_key.", "type.", "field.", "webhook.", "asset.", entryPrefix, "project." ]
 
 
 viewFilters : Model -> Html Msg
@@ -479,6 +489,35 @@ viewExportItem model label format =
                )
         )
         [ text label ]
+
+
+{-| コンテンツで絞った時の断りと、バージョン履歴への道。
+
+手で押した公開はここに積まない（版が author を持っていて、二重に持つと片方だけ残る形が
+作れてしまう。`src/cms/ContentEntries.flix` の WhyNot）。断りが無いと、コンテンツで絞った
+利用者には**記録が漏れている**ように見える。
+
+-}
+viewVersionsHint : List ContentTypeSummary -> Model -> Html Msg
+viewVersionsHint types model =
+    if not (String.startsWith entryPrefix model.action) then
+        text ""
+
+    else
+        Ui.callout Ui.toneNeutral
+            []
+            [ Ui.note
+                [ text "ここに出るのは公開終了・削除・予約公開です。編集と手で押した公開は、コンテンツを開いて「バージョン履歴」から見られます。" ]
+            , div [ class "flex flex-wrap items-center gap-3 pt-2 text-xs" ]
+                (List.map
+                    (\one ->
+                        Ui.link
+                            [ href (Route.toString (Route.Entries model.project one.apiId [])) ]
+                            [ text one.name ]
+                    )
+                    types
+                )
+            ]
 
 
 {-| 今の絞り込みに当たる件数。上限を超える時はその旨を薄く添える。

@@ -16,6 +16,7 @@ mod EntryResolvers {
             updatedAt   = (_context, source) -> Ok(Timestamp.toIso8601(source#updatedAt)),
             path        = (_context, source) -> Ok(pathOf(source)),
             +versions   = (_context, source) -> Ok(versionsOf(source#id)),
+            +autosave   = (_context, source) -> Ok(autosaveOf(source)),
             +diff       = (_context, source, fromRef, toRef) -> Ok(diffOf(source, fromRef, toRef))
             | GeneratedAdmin.entryDefaults()
         }
@@ -44,6 +45,27 @@ mod EntryResolvers {
                     Preloaded.keepVersions(fetched);
                     Map.getWithDefault(id, Nil, fetched)
                 } else ContentEntries.versions(Session.grant(), id)
+        }
+
+    ///
+    /// Entry.autosave。自分の預かり物を下書きと突き合わせる。引き方は versions と同じで、
+    /// 一覧なら最初の行でページの分を 1 本でまとめて引いて写しに入れる。
+    /// 突き合わせ（state）は行ごとに source（その行の下書き）とするので、写しには生の預かり物を置く。
+    ///
+    def autosaveOf(source: Entry): Option[EntryAutosave] \ DbRead + CmsErr + Tenant + Session + Preloaded =
+        storedOf(source#id) |> Option.flatMap(EntryAutosaves.attach(source))
+
+    /// 預かり物（生）。写しにあればそれ。無ければページの分をまとめて引くか、1 件で引く。
+    def storedOf(id: EntryId): Option[StoredAutosave] \ DbRead + CmsErr + Tenant + Session + Preloaded =
+        match Preloaded.autosave(id) {
+            case Some(found) => found
+            case None        =>
+                let page = Preloaded.entryIds();
+                if (Set.memberOf(id, page)) {
+                    let fetched = EntryAutosaves.storedOf(Session.grant(), Set.toList(page));
+                    Preloaded.keepAutosaves(fetched);
+                    Map.getWithDefault(id, None, fetched)
+                } else EntryAutosaves.stored(Session.grant(), id)
         }
 
     ///
@@ -110,6 +132,22 @@ mod EntryVersionResolvers {
             fields    = (_context, source) -> Ok(AdminMapping.entryDataValue(source#data)),
             createdAt = (_context, source) -> Ok(Timestamp.toIso8601(source#createdAt))
             | GeneratedAdmin.entryVersionDefaults()
+        }
+
+}
+
+///
+/// 管理 API の type EntryAutosave のリゾルバ。source はドメインの EntryAutosave。
+///
+mod EntryAutosaveResolvers {
+
+    /// type EntryAutosave のリゾルバ一式
+    pub def resolvers(): GeneratedAdmin.EntryAutosaveResolvers[AdminEff] =
+        {
+            fields    = (_context, source) -> Ok(AdminMapping.entryDataValue(source#data)),
+            state     = (_context, source) -> Ok(AdminMapping.autosaveStateToGql(source#state)),
+            updatedAt = (_context, source) -> Ok(Timestamp.toIso8601(source#updatedAt))
+            | GeneratedAdmin.entryAutosaveDefaults()
         }
 
 }

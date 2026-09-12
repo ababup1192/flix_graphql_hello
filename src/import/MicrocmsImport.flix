@@ -199,7 +199,7 @@ mod MicrocmsImport {
                 ::: tableSection()
                 ::: imageSection(assets)
                 ::: mathSection()
-                ::: mediaSection(assets))
+                ::: mediaSection())
 
     /// 段落に掛けられるマークを一通り。
     def marksSection(): List[Json] =
@@ -387,7 +387,7 @@ mod MicrocmsImport {
         }
 
     /// callout / details / video / linkCard / embed と、レベル 4 の見出し。
-    def mediaSection(assets: DemoAssets): List[Json] =
+    def mediaSection(): List[Json] =
         List#{
             headingNode(3, None, "囲みと埋め込み"),
             node("callout", Map#{ "kind" => Json.JString("note") }, List#{ paragraphOf("note の囲みです。補足を入れます。") }),
@@ -397,13 +397,9 @@ mod MicrocmsImport {
                 paragraphOf("開いた時に出る本文です。"),
                 node("bulletList", Map.empty(), List#{ listItem(Map.empty(), List#{ paragraphOf("中にリストも置けます") }) })
             }),
-            headingNode(4, Some("demo-media"), "動画とカード"),
-            // WhyNot: ここだけ動画でなく画像の asset を指す。video はエディタに入口が無く、
-            // 取り込みは素通しで受ける形を見せるだけなので、リポジトリに動画ファイルを置かない。
-            // poster は絵として出るが、video 自体はブラウザで再生できない
-            leafNode("video", Map#{ "assetId" => Json.JString(AssetId.text(assets#wide)),
-                                    "poster" => Json.JString(AssetId.text(assets#wide)),
-                                    "caption" => Json.JString("動画の代わりに画像を指した video") }),
+            headingNode(4, Some("demo-media"), "カードと埋め込み"),
+            // WhyNot: video のブロックを置かない。リポジトリに mp4 を置かない決めなので、
+            // 置けば必ず再生できない絵になる（画像の asset を src に指す形しか作れない）
             leafNode("linkCard", Map#{ "url" => Json.JString("https://example.com/blog/hello") }),
             leafNode("embed", Map#{ "url" => Json.JString("https://www.youtube.com/watch?v=dQw4w9WgXcQ") }),
             leafNode("embed", Map#{ "url" => Json.JString("https://vimeo.com/76979871") }),

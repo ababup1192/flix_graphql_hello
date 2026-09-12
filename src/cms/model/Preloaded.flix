@@ -25,6 +25,14 @@ pub eff Preloaded {
     ///
     def keepVersions(found: Map[EntryId, List[EntryVersion]]): Unit
     ///
+    /// 写しにある預かり物（Some(None) は「引いたが無かった」、None は「まだ引いていない」）。
+    ///
+    def autosave(id: EntryId): Option[Option[StoredAutosave]]
+    ///
+    /// 預かり物を写しに入れる。
+    ///
+    def keepAutosaves(found: Map[EntryId, Option[StoredAutosave]]): Unit
+    ///
     /// 写しにある content type。
     ///
     def contentType(id: TypeId): Option[ContentType]
@@ -41,14 +49,15 @@ mod Preloaded {
     ///
     /// - entryIds: 一覧が返したページの entry id
     /// - versions: entry id → 版（新しい順）
+    /// - autosaves: entry id → その人の預かり物（引いて無ければ None）
     /// - types: content type の id → 定義（フィールド付き）
     ///
-    pub type alias Store = { entryIds = Set[EntryId], versions = Map[EntryId, List[EntryVersion]], types = Map[TypeId, ContentType] }
+    pub type alias Store = { entryIds = Set[EntryId], versions = Map[EntryId, List[EntryVersion]], autosaves = Map[EntryId, Option[StoredAutosave]], types = Map[TypeId, ContentType] }
 
     ///
     /// 空の写し。
     ///
-    pub def empty(): Store = { entryIds = Set.empty(), versions = Map.empty(), types = Map.empty() }
+    pub def empty(): Store = { entryIds = Set.empty(), versions = Map.empty(), autosaves = Map.empty(), types = Map.empty() }
 
     ///
     /// 写しを Context の Ref で持つハンドラ。None なら覚えず、写しは常に無い（1 件ずつ引く道だけになる）。
@@ -59,6 +68,8 @@ mod Preloaded {
             def entryIds(resume) = resume(read(store) |> Option.map(found -> found#entryIds) |> Option.getWithDefault(Set.empty()))
             def versions(id, resume) = resume(read(store) |> Option.flatMap(found -> Map.get(id, found#versions)))
             def keepVersions(fetched, resume) = { update(store, found -> { versions = Map.union(fetched, found#versions) | found }); resume(()) }
+            def autosave(id, resume) = resume(read(store) |> Option.flatMap(found -> Map.get(id, found#autosaves)))
+            def keepAutosaves(fetched, resume) = { update(store, found -> { autosaves = Map.union(fetched, found#autosaves) | found }); resume(()) }
             def contentType(id, resume) = resume(read(store) |> Option.flatMap(found -> Map.get(id, found#types)))
             def keepContentType(owner, resume) = { update(store, found -> { types = Map.insert(owner#id, owner, found#types) | found }); resume(()) }
         }

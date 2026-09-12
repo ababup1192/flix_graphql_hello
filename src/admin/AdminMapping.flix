@@ -331,6 +331,16 @@ mod AdminMapping {
     }
 
     ///
+    /// 自動保存の状態。SameAsDraft は `EntryAutosaves.attach` が None にして返さないので、
+    /// GraphQL の enum には 2 つしか出ない（下書きと同じ物は「自動保存がある」ではない）。
+    ///
+    pub def autosaveStateToGql(state: AutosaveState): GeneratedAdmin.AutosaveState = match state {
+        case AutosaveState.Restorable  => GeneratedAdmin.AutosaveState.Restorable
+        case AutosaveState.Outdated    => GeneratedAdmin.AutosaveState.Outdated
+        case AutosaveState.SameAsDraft => bug!("下書きと同じ中身の自動保存はここへ来ない（EntryAutosaves.attach が落とす）")
+    }
+
+    ///
     /// GraphQL の ID を版の id に読む。
     ///
     pub def versionId(argument: String, id: Id): VersionId \ CmsErr =
