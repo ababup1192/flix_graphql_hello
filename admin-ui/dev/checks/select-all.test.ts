@@ -106,3 +106,22 @@ test("引用の出典の中の全選択は出典だけ", async () => {
     picked: view.state.doc.textBetween(from, to, " "),
   }).toEqual({ node: "quoteCite", whole: true, picked: "出典の名前" });
 });
+
+test("表のセルの中の全選択はそのセルだけ", async () => {
+  const h = (harness = await mount("table"));
+  const view = (h.editor as any).editor;
+  let cell = -1;
+  view.state.doc.descendants((node: any, pos: number) => {
+    if (cell < 0 && (node.type.name === "tableCell" || node.type.name === "tableHeader")) cell = pos;
+  });
+  view.commands.focus();
+  view.commands.setTextSelection(cell + 2);
+  await settle();
+  await userEvent.keyboard(selectAll);
+  await settle();
+  const { from, to, $from } = view.state.selection;
+  expect({
+    inCell: $from.node($from.depth - 1).type.name,
+    whole: from === $from.start() && to === $from.end(),
+  }).toEqual({ inCell: "tableHeader", whole: true });
+});

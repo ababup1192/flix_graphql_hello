@@ -348,6 +348,12 @@ export function isSelectAll(event: KeyboardEvent): boolean {
 // 出典の `quoteCite` の方で、包む側の名前を書いても一度も当たらない。
 const OWN_SELECT = new Set(["codeBlock", "imageItem", "quoteCite"]);
 
+// 中の段落まで閉じる node。**セルの textblock は `paragraph`** なので、名前では当たらない。
+//
+// WhyNot: 段落の名前を OWN_SELECT に足さない。本文の段落まで巻き込んで、本文全体の ⌘A が
+// どこからも押せなくなる。包む側を見る形にする。
+const OWN_SELECT_PARENT = new Set(["tableCell", "tableHeader"]);
+
 /** コードブロックや画像のキャプションの中の ⌘A を、その中だけの選択にする。
  *
  * WhyNot: 「2 回続けて押したら本文全体」の段階を付けない。1 回目と 2 回目で結果が変わると、
@@ -357,7 +363,11 @@ export function selectAllInBlock(view: EditorView, event: KeyboardEvent): boolea
   if (!isSelectAll(event)) return false;
   const { state } = view;
   const { $from } = state.selection;
-  if (!$from.parent.isTextblock || !OWN_SELECT.has($from.parent.type.name)) return false;
+  if (!$from.parent.isTextblock) return false;
+  const own =
+    OWN_SELECT.has($from.parent.type.name) ||
+    ($from.depth > 0 && OWN_SELECT_PARENT.has($from.node($from.depth - 1).type.name));
+  if (!own) return false;
   view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, $from.start(), $from.end())));
   return true;
 }
