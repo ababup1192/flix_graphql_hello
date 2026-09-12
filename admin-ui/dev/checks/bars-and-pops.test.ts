@@ -54,9 +54,6 @@ for (const [name, selector, node] of [
   ["数式", ".tt-mathblock .tt-block-bar", "mathBlock"],
   ["リンクカード", ".tt-link-card .tt-block-bar", "linkCard"],
 ] as const) {
-  // WhyNot: 打った後の doc までは見ない。node ごと選んで出る帯（数式・リンクカード）では
-  // 選んだままなので、次の打鍵は「選んだ物を打った文字で置き換える」という本文の側の道に乗る。
-  // ここで見るのは**帯が打てる場所になっていない事**。
   test(`${name}の帯の余白を押してもキャレットが出ず、打っても帯に入らない`, async () => {
     const h = (harness = await mount("parts"));
     if (node) pickNode(h, node);
@@ -75,6 +72,48 @@ for (const [name, selector, node] of [
       caret: false,
       bar: false,
     });
+  });
+}
+
+// 選んだ塊の帯の余白を押した後に打っても、塊が打った文字に置き換わらない。
+//
+// **帯の余白を押した時点で焦点が帯へ移る**（`ui.ts` の `bar`）ので、次の打鍵は本文に届かない。
+// 消すのは Backspace / Delete と帯の削除だけ。
+const WITH_BAR = [
+  ["数式", ".tt-mathblock .tt-block-bar", "mathBlock"],
+  ["リンクカード", ".tt-link-card .tt-block-bar", "linkCard"],
+  ["画像", ".tt-image .tt-block-bar", "imageItem"],
+] as const;
+
+const WITH_BAR_DOC = {
+  type: "doc",
+  content: [
+    { type: "paragraph", content: [{ type: "text", text: "まえの行" }] },
+    { type: "mathBlock", attrs: { tex: "E = mc^2" } },
+    { type: "linkCard", attrs: { url: "https://example.com/parts" } },
+    { type: "image", content: [{ type: "imageItem", attrs: { assetId: "asset-1" } }] },
+    {
+      type: "codeBlock",
+      attrs: { language: "javascript", fileName: null, highlightLines: null },
+      content: [{ type: "text", text: "const a = 1" }],
+    },
+    { type: "paragraph" },
+  ],
+};
+
+for (const [name, selector, node] of WITH_BAR) {
+  test(`${name}の帯の余白を押した後に打っても${name}が消えない`, async () => {
+    const h = (harness = await mount(WITH_BAR_DOC));
+    pickNode(h, node);
+    await vi.waitFor(() => expect(gapOf(at(h, selector))).not.toBeNull());
+    const bar = at(h, selector);
+    const gap = gapOf(bar)!;
+    const area = box(bar);
+    await userEvent.click(bar, { position: { x: Math.round(gap.x - area.left), y: Math.round(area.height / 2) } });
+    await settle();
+    await userEvent.keyboard("zzzz");
+    await settle();
+    expect({ node: h.names().includes(node), text: h.text().includes("zzzz") }).toEqual({ node: true, text: false });
   });
 }
 

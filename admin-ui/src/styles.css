@@ -644,7 +644,13 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
   border-radius: 6px;
   /* 箱のどこを押しても TeX の欄が開くので、枠の辺りも編集の合図を出す */
   cursor: text;
+  /* WhyNot: 箱を選べるままにしない。選べると、node ごと選んだ状態でブラウザが箱を
+     「打ち替えられる所」と見なし、帯の余白を押した後の 1 打鍵で数式が文字に化ける
+     （リンクカードと `.tt-card` は最初からこれが掛かっていて起きない）。 */
+  user-select: none;
 }
+/* TeX の欄だけは普通に選べる。 */
+.tt-mathblock textarea { user-select: text; }
 .tt-mathblock-out {
   padding: 14px 12px;
   background: var(--color-panel);

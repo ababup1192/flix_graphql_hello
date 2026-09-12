@@ -22,6 +22,19 @@ const POP_MIN = 120;
 /** 画面の端との隙間。 */
 const EDGE = 8;
 
+/** 押した所が、この帯（面）自身が持つ欄・ボタンか。**遡るのは `dom` まで**。
+ *
+ * WhyNot: `target.closest(...)` で済ませない。帯は本文の中に置かれるので、遡ると必ず
+ * `contenteditable="true"` の本文に当たる。どこを押しても「中の欄を押した」と読まれ、
+ * 下の `blockCaret` が 1 度も働かない（帯のどれを押しても焦点が本文に残ったままだった）。
+ */
+const OWN_CONTROL = "input, textarea, select, button, a, [contenteditable='true']";
+function hasOwnControl(dom: HTMLElement, target: Element): boolean {
+  for (let node: Element | null = target; node && node !== dom; node = node.parentElement)
+    if (node.matches(OWN_CONTROL)) return true;
+  return false;
+}
+
 /** 自分の中の欄とボタン以外を押した時、キャレットを置かせない。
  *
  * WhyNot: `contenteditable="false"` だけで済ませない。それは「打てない」だけで、欄と欄の間の
@@ -31,7 +44,7 @@ const EDGE = 8;
 function blockCaret(dom: HTMLElement) {
   dom.addEventListener("mousedown", (event) => {
     const target = event.target;
-    if (target instanceof Element && target.closest("input, textarea, select, button, a, [contenteditable='true']")) return;
+    if (target instanceof Element && hasOwnControl(dom, target)) return;
     event.preventDefault();
     // WhyNot: 押し始めを止めるだけで終わらせない。本文の焦点と選択がそのまま残るので、
     // 帯の余白を押した後に打った字が、さっきまでカーソルが居た所へ入る（帯には出ないが doc に入る）。
