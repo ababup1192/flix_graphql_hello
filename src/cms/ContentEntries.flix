@@ -179,6 +179,8 @@ mod ContentEntries {
     /// 予約からの公開。公開の本体は `publish` と同じで、版の author は "scheduler"。監査に entry.published を積む（主体は system、予約の時刻付き）。
     ///
     /// WhyNot: 手での公開（`publish`）では積まない。版が author を持っていて、監査に二重に持つと片方だけ残る形が作れてしまう。
+    /// この判断は版が append-only（`029_entry_versions_append_only.sql`。書き換え・削除ができず、content type を消しても残る）
+    /// である事が前提。版の policy を緩めるなら、この判断も一緒に見直す。
     /// 予約の実行は版の author が "scheduler" になり誰の予約かが版から読めないので、こちらだけ積む。
     ///
     pub def publishScheduled(proof: Granted[PublishEntries], id: EntryId, scheduledFor: Timestamp.Timestamp, withDependencies: Bool): Entry \ Db + CmsErr + IdGen + Tenant + Session =

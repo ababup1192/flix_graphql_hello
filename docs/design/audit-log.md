@@ -22,6 +22,11 @@
 監査としてはそちらの方が強い。二重に持つと片方だけ残る形が作れてしまう。
 取り下げと論理削除は版を作らないので積む。予約公開の実行は版の author が "scheduler" になり誰の予約かが版から読めないので積む（主体は system）。
 
+**この判断が成り立つのは、版が `audit_events` と同じ append-only だから**（`029_entry_versions_append_only.sql`）。
+それまでは版は書き換え・削除ができ、content type を消すと外部キーの CASCADE で道連れに消えていたので、
+「手での公開の記録は版が持っている」は保証になっていなかった。今は RLS の policy を SELECT と INSERT の 2 本に分け
+UPDATE / DELETE がどの policy にも当たらないようにし、entry への外部キーも外して content type を消しても版が残るようにしてある。
+
 **WhyNot: `asset.confirmed` を再送で積まない。** confirm は冪等で同じ asset に何度も来る。積むのは pending → ready に変わった 1 回だけ。
 
 ### 積まない物
