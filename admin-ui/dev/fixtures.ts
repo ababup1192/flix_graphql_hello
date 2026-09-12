@@ -191,6 +191,43 @@ export const FIXTURES: Fixture[] = [
     },
   },
   {
+    name: "table-merged",
+    title: "結合のある表",
+    doc: {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [1, 2, 3].map((column) => ({
+                type: "tableHeader",
+                attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                content: [paragraph(`1-${column}`)],
+              })),
+            },
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", attrs: { colspan: 1, rowspan: 2, colwidth: null }, content: [paragraph("2-1")] },
+                { type: "tableCell", attrs: { colspan: 1, rowspan: 1, colwidth: null }, content: [paragraph("2-2")] },
+                { type: "tableCell", attrs: { colspan: 1, rowspan: 1, colwidth: null }, content: [paragraph("2-3")] },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", attrs: { colspan: 2, rowspan: 1, colwidth: null }, content: [paragraph("3-2")] },
+              ],
+            },
+          ],
+        },
+        paragraph(""),
+      ],
+    },
+  },
+  {
     name: "image-between",
     title: "前後に行のある画像",
     doc: {

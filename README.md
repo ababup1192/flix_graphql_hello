@@ -206,7 +206,7 @@ make fatjar    # 実行可能な jar（artifact/）
 make ui-gen    # admin.graphql / account.graphql → admin-ui/generated/（elm-graphql）
 make ui-dev    # 管理画面の dev サーバ（CMS は別のターミナルで make run）
 make ui-check  # 文言の見張り（wording-check.mjs）・手組みの見張り（editor-check.mjs）・elm-format の検査・
-               # elm-review・elm-test・tsc・エディタの検査（Vitest のブラウザモード 379 件）
+               # elm-review・elm-test・tsc・エディタの検査（Vitest のブラウザモード 414 件）
 ```
 
 エディタの検査は **`admin-ui/dev/`** の開発用の画面（`dev/editor.html`。CMS のサーバも DB もログインも要らず、手元からしか開けない）と

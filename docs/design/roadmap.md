@@ -9,7 +9,7 @@
 
 | # | 機能 | 誰に | 時間 | 中身 |
 |---|---|---|---|---|
-| 9 | 管理画面（Elm、`admin-ui/`） | 編集者 | 目で見る往復が律速 | プロジェクト切り替え・型の編集（消す前・締める前の影響と見本、消したフィールドの復元）・entry の一覧とボード・⌘K・エディタ（TipTap。表の行列の入れ替え、上付き / 下付き / 蛍光ペン、チェックリスト、本文のリンクの行き先）・バージョン履歴と差分・メディア・メンバー・API キーと PAT（GitHub と同じ発行の形）・Webhook・監査ログ（絞り込み、CSV / JSON Lines、行の固定 URL）・API プレビュー・dry-run と impact の表示は入った（ログイン画面は Cloudflare Access が持つので作らない）。文言は 7.1 の表に揃え `wording-check.mjs` が見張り、反応は 7.2 の 4 つ（`Ui.Reply` / `Ui.Confirm` / Esc）。エディタは linkCard / 埋め込み / 数式 / コード / 表（セル内の装飾。**セルの結合は画面に入口が無く、取り込んだ物を読めるだけ**）/ 囲み / 折りたたみまで入口が揃った（2026-09-12）。残りは **`+` と `/` が本文の直下でしか出ない**事（囲みと折りたたみの中でブロックを入れられない）、**まとめて公開の導線**（`publishPlan` / `publishMany` / `deleteEntry` / `createPreviewToken` を画面から呼んでいない）、`Route.Organization` の中身（組織の切り替え）、GraphiQL の埋め込み。`video` はエディタに入口を作らない（YouTube の埋め込みで足り、CMS 側は素通しで受ける）。ワークフローの画面は #22a 待ち。書き心地の元は [richtext-note-style.md](richtext-note-style.md)、今日の残りは [2026-09-12-handover.md](2026-09-12-handover.md) の 5 章。仕様は [admin-ui-spec.md](admin-ui-spec.md)、段取りは [admin-ui-phases.md](admin-ui-phases.md) |
+| 9 | 管理画面（Elm、`admin-ui/`） | 編集者 | 目で見る往復が律速 | プロジェクト切り替え・型の編集（消す前・締める前の影響と見本、消したフィールドの復元）・entry の一覧とボード・⌘K・エディタ（TipTap。表の行列の入れ替え、上付き / 下付き / 蛍光ペン、チェックリスト、本文のリンクの行き先）・バージョン履歴と差分・メディア・メンバー・API キーと PAT（GitHub と同じ発行の形）・Webhook・監査ログ（絞り込み、CSV / JSON Lines、行の固定 URL）・API プレビュー・dry-run と impact の表示は入った（ログイン画面は Cloudflare Access が持つので作らない）。文言は 7.1 の表に揃え `wording-check.mjs` が見張り、反応は 7.2 の 4 つ（`Ui.Reply` / `Ui.Confirm` / Esc）。エディタは linkCard / 埋め込み / 数式 / コード / 表（セル内の装飾、セルの結合と解除、組み直しても残る結合）/ 囲み / 折りたたみまで入口が揃った（2026-09-12）。残りは **`+` と `/` が本文の直下でしか出ない**事（囲みと折りたたみの中でブロックを入れられない）、**まとめて公開の導線**（`publishPlan` / `publishMany` / `deleteEntry` / `createPreviewToken` を画面から呼んでいない）、`Route.Organization` の中身（組織の切り替え）、GraphiQL の埋め込み。`video` はエディタに入口を作らない（YouTube の埋め込みで足り、CMS 側は素通しで受ける）。ワークフローの画面は #22a 待ち。書き心地の元は [richtext-note-style.md](richtext-note-style.md)、今日の残りは [2026-09-12-handover.md](2026-09-12-handover.md) の 5 章。仕様は [admin-ui-spec.md](admin-ui-spec.md)、段取りは [admin-ui-phases.md](admin-ui-phases.md) |
 | 10 | 公開サイトの載せ替え | 自社 | 半日 | elm-pages を GraphQL に。`headings` で目次、`html` で本文。Cloudflare Pages の再ビルドは Webhook |
 
 ここまでで **(A) 達成**。microCMS を解約できる。
@@ -58,11 +58,15 @@
 
 ### 直した物（2026-09-12）
 
-`RichText.flix` と `Markdown.flix` の通しレビューと、エディタの検査を 177 → 379 件に厚くする過程で出た分。
+`RichText.flix` と `Markdown.flix` の通しレビューと、エディタの検査を 177 → 414 件に厚くする過程で出た分。
 本文や doc が壊れる 14 件の一覧は [2026-09-12-handover.md](2026-09-12-handover.md) の 2 章。
 
 | 見つけた物 | どう直したか |
 |---|---|
+| エディタからセルを結合できなかった（CMS 側は往復するのに画面に入口が無い） | 表の帯に結合と解除を足した。押せるかは自前で数えず `can().mergeCells()` / `can().splitCell()` に聞く（L 字の選択のような結合できない形で必ず食い違うため） |
+| 行や列を入れ替えると結合がほどけた | 組み直しで結合を保つようにした。覆う先が枠内に収まる結合だけ残し、はみ出す物を 1 マスに割る |
+| コードブロックの言語が別名（`ts` / `js` / `py`）だと色が 1 つも付かなかった | 別名でも文法を引けるようにし、**doc にある名前のまま** lowlight に登録する（`CodeBlockLowlight` は node の値で文法を探すので、正の id で登録しただけでは付かない）。doc の値は書き換えない |
+| 検査が 3 回に 1 回ほど落ちた（数式の欄が開かない） | 足場の `focus("end")` が積む rAF が、`setTimeout(…, 0)` で欄に移した焦点を奪い返していた。足場を DOM の焦点と `setTextSelection` に |
 | `validate` に深さとノード数の上限が無く、深い doc は sqlfx のパーサ（深さ 64 で Err）が先に止めて「どの field のどこが」を返せなかった | 入口に深さ 20 / ノード 10000 の上限。閾値をパーサの 1/3 に置いて、必ず Violation の側で先に止まるようにした |
 | `table` / `tableRow` / `bulletList` / `orderedList` の子の種類を誰も見ておらず、`thead` の中に `h1` を吐いていた | 子の検査を足した |
 | 見出し id が明示（`h-2`）と自動採番でぶつかり、HTML に同じ id が 2 つ出ていた | 採番の前に既にある id を集め、空いている番号まで送る |
@@ -133,7 +137,7 @@ MCP の asset・予約公開・主体ごとの tools/list は #24（MCP v2）、
 - **障害注入**: 復帰秒数と OOM / SIGTERM の挙動は [trials/](trials/)
 - **Pg テストの土台**: reset を DROP + migration 28 本の再適用から TRUNCATE に変えて、テスト本体が 68.6s → 53.0s。reset 1 回は psql で 50ms。migration 直後の `public` を `test_baseline` schema に控えて戻す形（素の TRUNCATE では migration 008 / 010 が入れる既定の組織とプロジェクト、sequence の位置が消える）
 - **entry 11 万件**: 公開のたびの unique の確認 43.5 ms → 0.142 ms（部分索引）、`OFFSET 10000` が 36.8 ms、`OFFSET 50000` が 99.9 ms
-- **エディタの検査**: Playwright の通し実行 175 件（1 回 10 分・10 万トークン）を廃止し、Vitest のブラウザモードで 379 件。`npm run check` と CI に載っている
+- **エディタの検査**: Playwright の通し実行 175 件（1 回 10 分・10 万トークン）を廃止し、Vitest のブラウザモードで 414 件。`npm run check` と CI に載っている
 
 ### 分かった事
 

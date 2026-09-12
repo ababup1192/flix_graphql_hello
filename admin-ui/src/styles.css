@@ -1076,6 +1076,11 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 }
 .tt-tablebar-button:hover { background: var(--color-well); color: var(--color-ink); }
 .tt-tablebar-button.is-on { background: var(--color-well); color: var(--color-ink); }
+/* 寄せと、升の結合の切れ目。 */
+.tt-tablebar-divider { width: 1px; height: 14px; margin: 0 4px; background: var(--color-edge); }
+/* **押せない物は消さずに灰色で残す。** 消すと並びが状況で詰まって、隣の「表を消す」を押し間違える。 */
+.tt-tablebar-button.is-off { opacity: 0.35; cursor: default; }
+.tt-tablebar-button.is-off:hover { background: transparent; color: var(--color-ink-soft); }
 .tt-tablebar-remove:hover { color: var(--color-bad); }
 
 /* 行と列の掴み。**表の端。見た目は出さず、カーソルの形だけで知らせる。**

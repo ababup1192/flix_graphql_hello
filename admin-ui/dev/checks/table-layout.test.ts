@@ -42,14 +42,17 @@ test("表の上に出る帯は 1 つ", async () => {
   expect(h.editor.querySelectorAll(".tt-tablebar")).toHaveLength(1);
 });
 
-test("帯は 大きさ / 寄せ 3 つ / 表を消す の順に並ぶ", async () => {
+// 結合と解除の押せる・押せないと、押した結果は `table-merge.test.ts`。
+test("帯は 大きさ / 寄せ 3 つ / 結合 / 解除 / 表を消す の順に並ぶ", async () => {
   const h = (harness = await mount("table"));
   await tableTools(h);
-  expect(all(h, ".tt-tablebar-button").map((one) => one.title)).toEqual([
+  expect(all(h, ".tt-tablebar-button").map((one) => one.title.replace(/（.*$/, ""))).toEqual([
     "大きさを変える",
     "左に寄せる",
     "中央に寄せる",
     "右に寄せる",
+    "セルを結合する",
+    "結合を解く",
     "表を消す",
   ]);
 });

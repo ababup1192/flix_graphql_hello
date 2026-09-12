@@ -83,20 +83,38 @@ export function columnAlign(editor: Editor): Align | null {
   return null;
 }
 
-/** 表をマス目の並びにする。結合したセルは元のマスにだけ置き、残りは空にする。 */
-function gridOf(node: PmNode): { grid: Array<Array<PmNode | null>>; header: boolean } {
+/**
+ * マス目 1 つ分。`cell` はそのマスから始まるセル、`covered` は左か上のセルに覆われているマス。
+ *
+ * WhyNot: 覆われているマスを「空のセル」と同じ null で置かない。組み直しで結合が割れた時に
+ * そこを埋めるべきか、隣のセルの一部として消すべきかが読めなくなる。
+ */
+type Slot = { kind: "cell"; node: PmNode | null; colspan: number; rowspan: number } | { kind: "covered" };
+
+type CellSlot = Extract<Slot, { kind: "cell" }>;
+
+const emptySlot = (): CellSlot => ({ kind: "cell", node: null, colspan: 1, rowspan: 1 });
+
+/** 表をマス目の並びにする。結合したセルは元のマスに置き、覆われたマスは `covered`。 */
+function gridOf(node: PmNode): { grid: Slot[][]; header: boolean } {
   const map = TableMap.get(node);
   const used = new Set<number>();
-  const grid: Array<Array<PmNode | null>> = [];
+  const grid: Slot[][] = [];
   for (let row = 0; row < map.height; row += 1) {
-    const line: Array<PmNode | null> = [];
+    const line: Slot[] = [];
     for (let col = 0; col < map.width; col += 1) {
       const at = map.map[row * map.width + col];
-      if (at !== undefined && !used.has(at)) {
+      const cell = at !== undefined && !used.has(at) ? node.nodeAt(at) : null;
+      if (at !== undefined && cell) {
         used.add(at);
-        line.push(node.nodeAt(at));
+        line.push({
+          kind: "cell",
+          node: cell,
+          colspan: Math.max(1, cell.attrs.colspan ?? 1),
+          rowspan: Math.max(1, cell.attrs.rowspan ?? 1),
+        });
       } else {
-        line.push(null);
+        line.push({ kind: "covered" });
       }
     }
     grid.push(line);
@@ -104,22 +122,63 @@ function gridOf(node: PmNode): { grid: Array<Array<PmNode | null>>; header: bool
   return { grid, header: node.firstChild?.firstChild?.type.name === "tableHeader" };
 }
 
+/**
+ * それぞれのセルが結合を保てるか決める。保つ物には覆うマスを割り当て、保てない物は 1 マスにする。
+ *
+ * WhyNot: 1 つでも保てない結合があったら全部割る、にしない。組み直しは表の形を変えるので
+ * 端の結合だけがはみ出る事が多く、それで表の真ん中の結合まで割れると中身の読み方が変わる。
+ */
+function fitSpans(grid: Slot[][], width: number): { owner: Array<number | null>; spans: Map<number, [number, number]> } {
+  const height = grid.length;
+  const owner: Array<number | null> = new Array(height * width).fill(null);
+  const spans = new Map<number, [number, number]>();
+  const isCell = (row: number, col: number) => grid[row]?.[col]?.kind === "cell";
+  for (let row = 0; row < height; row += 1) {
+    for (let col = 0; col < width; col += 1) {
+      const slot = grid[row][col];
+      if (!slot || slot.kind !== "cell") continue;
+      const at = row * width + col;
+      const fits =
+        row + slot.rowspan <= height &&
+        col + slot.colspan <= width &&
+        [...Array(slot.rowspan).keys()].every((dy) =>
+          [...Array(slot.colspan).keys()].every(
+            (dx) => (dy === 0 && dx === 0) || (!isCell(row + dy, col + dx) && owner[(row + dy) * width + col + dx] === null)
+          )
+        );
+      const [rowspan, colspan] = fits ? [slot.rowspan, slot.colspan] : [1, 1];
+      spans.set(at, [rowspan, colspan]);
+      for (let dy = 0; dy < rowspan; dy += 1) {
+        for (let dx = 0; dx < colspan; dx += 1) owner[(row + dy) * width + col + dx] = at;
+      }
+    }
+  }
+  return { owner, spans };
+}
+
 /** マス目の並びから表に戻して置き換える。 */
-function writeGrid(
-  editor: Editor,
-  found: { node: PmNode; pos: number },
-  grid: Array<Array<PmNode | null>>,
-  header: boolean
-): boolean {
+function writeGrid(editor: Editor, found: { node: PmNode; pos: number }, grid: Slot[][], header: boolean): boolean {
   const { state, view } = editor;
   const schema = state.schema;
+  const width = grid.reduce((most, line) => Math.max(most, line.length), 0);
+  const { owner, spans } = fitSpans(grid, width);
   const rows = grid.map((line, row) => {
     const type = row === 0 && header ? schema.nodes.tableHeader : schema.nodes.tableCell;
-    const cells = line.flatMap((old) => {
-      const attrs = { colspan: 1, rowspan: 1, colwidth: null, align: old?.attrs.align ?? null };
-      const made = old && old.content.size > 0 ? type.createChecked(attrs, old.content) : type.createAndFill(attrs);
-      return made ? [made] : [];
-    });
+    const cells: PmNode[] = [];
+    for (let col = 0; col < width; col += 1) {
+      const at = row * width + col;
+      const slot = line[col];
+      // 覆う相手を失ったマスは空のセルで埋める。埋めないと行の幅が足りず表の形が壊れる。
+      const made = slot?.kind === "cell" ? slot : owner[at] === null ? emptySlot() : null;
+      if (!made) continue;
+      const [rowspan, colspan] = slot?.kind === "cell" ? spans.get(at)! : [1, 1];
+      const attrs = { colspan, rowspan, colwidth: null, align: made.node?.attrs.align ?? null };
+      const cell =
+        made.node && made.node.content.size > 0
+          ? type.createChecked(attrs, made.node.content)
+          : type.createAndFill(attrs);
+      if (cell) cells.push(cell);
+    }
     return schema.nodes.tableRow.createChecked(null, cells);
   });
   const table = found.node.type.createChecked(found.node.attrs, rows);
@@ -166,8 +225,9 @@ export function moveColumn(editor: Editor, from: number, to: number): boolean {
  * WhyNot: 行と列の足し引きの命令を並べて呼ばない。今のセルの位置に依存するので、
  * 8 行 8 列から 2 行 2 列にするような時に命令の順で結果が変わる。表を組み直す方が読める。
  *
- * WhyNot: 結合したセルを保たない。エディタは結合を作れないが、API や取り込みが入れた表は
- * 1 マスずつに割れる。**保つと組み直しの筋がもう 1 本増える**ので、割る方に倒す。
+ * WhyNot: 結合したセルを全部割らない。**新しい大きさに覆う先が収まる結合はそのまま残し、
+ * はみ出す結合だけを 1 マスに割る。** 大きさを変えるのは表の外枠の話なので、枠の中に収まって
+ * いる結合まで割ると、直したつもりのない所の中身の読み方が変わる。
  */
 export function resizeTable(editor: Editor, rows: number, cols: number): boolean {
   const found = tableAt(editor);
@@ -175,10 +235,10 @@ export function resizeTable(editor: Editor, rows: number, cols: number): boolean
   const map = TableMap.get(found.node);
   if (map.height === rows && map.width === cols) return false;
   const { grid, header } = gridOf(found.node);
-  const next: Array<Array<PmNode | null>> = [];
+  const next: Slot[][] = [];
   for (let row = 0; row < rows; row += 1) {
-    const line: Array<PmNode | null> = [];
-    for (let col = 0; col < cols; col += 1) line.push(grid[row]?.[col] ?? null);
+    const line: Slot[] = [];
+    for (let col = 0; col < cols; col += 1) line.push(grid[row]?.[col] ?? emptySlot());
     next.push(line);
   }
   return writeGrid(editor, found, next, header);

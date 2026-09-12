@@ -148,7 +148,19 @@ export const LANGUAGES: Language[] = [
   { id: "awk", label: "AWK", aliases: [], extensions: ["awk"], load: () => import("highlight.js/lib/languages/awk") },
 ];
 
-const byId = new Map(LANGUAGES.map((language) => [language.id, language]));
+// 名前 → 言語。id と別名の両方を引く。
+//
+// WhyNot: doc の値を id へ正規化しない。`ts` と書いた人の文字をこちらで書き換えると、
+// Markdown の往復で中身が変わる。**解くのは引く側**で、doc はそのまま残す。
+//
+// 先に書いてある言語が勝つ（`asm` は x86asm、armasm ではない）。id は別名より強い。
+const byName = new Map<string, Language>();
+for (const language of LANGUAGES) {
+  for (const alias of language.aliases) {
+    if (!byName.has(alias)) byName.set(alias, language);
+  }
+}
+for (const language of LANGUAGES) byName.set(language.id, language);
 
 // 拡張子 → 言語の id。**先に書いてある言語が勝つ**（`ts` は TypeScript、`m` は Objective-C）。
 //
@@ -175,7 +187,7 @@ export function extensionOf(fileName: string): string {
 
 export function labelOf(id: string): string {
   if (!id) return "";
-  return byId.get(id)?.label ?? id;
+  return byName.get(id)?.label ?? id;
 }
 
 // 候補の 1 行。`id` は doc に入る正の名前で、行に出る素の名前でもある。
@@ -217,10 +229,12 @@ type Lowlight = {
 const loading = new Map<string, Promise<void>>();
 
 // 文法を読み込んで lowlight に登録する。**同じ言語は 1 回だけ読む。**
+// **doc にある名前でそのまま登録する。** `CodeBlockLowlight` は node の `language` の値で
+// 文法を探すので、`ts` の doc に対して正の id `typescript` で登録しても色は付かない。
 export function ensure(lowlight: Lowlight, id: string): Promise<void> {
   if (!id) return Promise.resolve();
   if (lowlight.registered(id)) return Promise.resolve();
-  const language = byId.get(id);
+  const language = byName.get(id);
   if (!language) return Promise.resolve();
   const already = loading.get(id);
   if (already) return already;

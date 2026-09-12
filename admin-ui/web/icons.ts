@@ -22,6 +22,11 @@ export const ICONS = {
   alignLeft: '<path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h13"/>',
   alignCenter: '<path d="M4 6h16"/><path d="M7 12h10"/><path d="M6 18h12"/>',
   alignRight: '<path d="M4 6h16"/><path d="M10 12h10"/><path d="M7 18h13"/>',
+  // 升の結合と解除。WhyNot: 2 つを鏡合わせにしない（内向きの矢 / 外向きの矢）。16px では
+  // 矢の向きだけの違いが読めず、隣り合う 2 つが同じ印に見える。結合は「真ん中の線が切れて
+  // 矢が中へ入る」、解除は「点線が 1 本通る」で、形そのものを変える。
+  merge: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v3"/><path d="M12 17v3"/><path d="M9 12h6"/><path d="M13 10l2 2-2 2"/>',
+  split: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16" stroke-dasharray="3 2.5"/>',
   sub: '<path d="M4 5l8 10"/><path d="M12 5l-8 10"/><path d="M20 20h-4c0-2 4-2 4-4a2 2 0 0 0-4 0"/>',
   sup: '<path d="M4 9l8 10"/><path d="M12 9l-8 10"/><path d="M20 8h-4c0-2 4-2 4-4a2 2 0 0 0-4 0"/>',
   highlight: '<path d="M4 20h16"/><path d="M6 16l8-8 3 3-8 8z"/><path d="M12 6l3-3 3 3-3 3z"/>',

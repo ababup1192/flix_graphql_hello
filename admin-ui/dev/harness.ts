@@ -46,11 +46,8 @@ export async function mount(fixture: string | unknown = "empty"): Promise<Harnes
   editor.setAttribute("doc", JSON.stringify(doc));
   document.body.appendChild(editor);
   await new Promise((done) => window.setTimeout(done, 0));
-  // **DOM の焦点も自分で当てる。** `commands.focus()` は ProseMirror の選択を
-  // 直すだけで、打鍵は document の焦点がある所へ行く。
   const view = inner(editor);
-  view?.view?.dom?.focus();
-  view?.commands.focus("end");
+  if (view) caretToEnd(view);
   return {
     editor,
     doc: () => inner(editor).getJSON(),
@@ -120,7 +117,19 @@ export const press = (el: Element, init: MouseEventInit = {}) =>
 
 // 本文の終わりにカーソルを置く。
 export function toEnd(harness: Harness) {
-  inner(harness.editor).commands.focus("end");
+  caretToEnd(inner(harness.editor));
+}
+
+// **DOM の焦点も自分で当てる。** `commands.focus()` は ProseMirror の選択を直すだけで、
+// 打鍵は document の焦点がある所へ行く。
+//
+// WhyNot: `commands.focus("end")` を使わない。TipTap の focus は `requestAnimationFrame` で
+// 後から `view.focus()` を掛け直すので、その一拍の間に node view が自分の欄へ焦点を移すと
+// （`$$` + Enter の数式）、遅れて来た本文への焦点が奪い返し、欄が blur で閉じる。
+// 選択だけを直せば掛け直しは起きない。
+function caretToEnd(view: any) {
+  view.view?.dom?.focus();
+  view.commands.setTextSelection(view.state.doc.content.size);
 }
 
 // 本文の 1 行を「文字[マーク]」の並びで読む。**打った結果をそのまま並べる**ので、

@@ -1318,6 +1318,20 @@ class TiptapEditor extends HTMLElement {
       left.appendChild(button);
     }
 
+    left.appendChild(this.barDivider());
+    // **押せるかは TipTap の can() に聞く。** L 字の選択のように「見た目は複数でも結合できない形」が
+    // あり、選んだ升の数を自分で数えると食い違う。
+    left.appendChild(
+      this.cellButton(ICONS.merge, "セルを結合する", "2 つ以上選ぶと押せます", !!this.editor?.can().mergeCells(), () =>
+        this.editor?.chain().focus().mergeCells().run(),
+      ),
+    );
+    left.appendChild(
+      this.cellButton(ICONS.split, "結合を解く", "結合したセルで押せます", !!this.editor?.can().splitCell(), () =>
+        this.editor?.chain().focus().splitCell().run(),
+      ),
+    );
+
     const remove = this.barButton(ICONS.trash, "表を消す", () => {
       this.editor?.chain().focus().deleteTable().run();
       this.paintTableTools();
@@ -1326,6 +1340,28 @@ class TiptapEditor extends HTMLElement {
 
     bar.append(left, remove);
     return bar;
+  }
+
+  //
+  // 押せない時も消さずに灰色で残すボタン。
+  //
+  // WhyNot: 押せない物を帯から外さない。並びが状況で詰まって、隣の「表を消す」を
+  // 押し間違える。
+  //
+  private cellButton(icon: string, label: string, hint: string, can: boolean, run: () => void): HTMLElement {
+    const button = this.barButton(icon, can ? label : `${label}（${hint}）`, () => {
+      if (!can) return;
+      run();
+      this.paintTableTools();
+    });
+    button.classList.toggle("is-off", !can);
+    return button;
+  }
+
+  private barDivider(): HTMLElement {
+    const line = document.createElement("span");
+    line.className = "tt-tablebar-divider";
+    return line;
   }
 
   private barButton(icon: string, title: string, run: (button: HTMLElement) => void): HTMLElement {
