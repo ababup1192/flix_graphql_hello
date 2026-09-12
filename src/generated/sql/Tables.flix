@@ -585,8 +585,6 @@ mod EntryVersionsTable {
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
     ///
     pub enum Constraint with Eq, Order, ToString {
-        /// entry_versions_entry_id_fkey (foreign key)
-        case EntryIdFkey
         /// entry_versions_reason_check (check)
         case ReasonCheck
         /// entry_versions_project_id_fkey (foreign key)
@@ -605,13 +603,11 @@ mod EntryVersionsTable {
     /// 翻訳しない制約を元の DbErr に戻す。`onConstraint` に渡す関数の中で使う。
     ///
     pub def raiseConstraint(constraint: Constraint): a \ DbErr = match constraint {
-        case Constraint.EntryIdFkey => DbErr.foreignKeyViolation("entry_versions_entry_id_fkey")
         case Constraint.ReasonCheck => DbErr.checkViolation("entry_versions_reason_check")
         case Constraint.ProjectIdFkey => DbErr.foreignKeyViolation("entry_versions_project_id_fkey")
     }
 
     def constraintOf(name: String): Option[Constraint] = match name {
-        case "entry_versions_entry_id_fkey" => Some(Constraint.EntryIdFkey)
         case "entry_versions_reason_check" => Some(Constraint.ReasonCheck)
         case "entry_versions_project_id_fkey" => Some(Constraint.ProjectIdFkey)
         case _ => None

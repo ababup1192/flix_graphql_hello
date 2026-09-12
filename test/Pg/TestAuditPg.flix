@@ -389,4 +389,43 @@ mod TestAuditPg {
                         List#{ (Value.Str("json"), Value.Obj(Map#{ "format" => Value.Str("json"), "since" => Value.Str("2000-01-01T00:00:00Z"), "until" => Value.Str("2100-01-01T00:00:00Z"), "count" => Value.Int(1) })) }),
             outcome)
 
+    /// entry_versions の行数（RLS の印が付いた Tx から数える）。
+    def versionRows(): Int64 \ DbRead + RawSql + DbErr =
+        Sql.fetchOneAs(Decoder.int64("total"), "SELECT count(*)::bigint AS total FROM entry_versions", Nil) |> Option.getWithDefault(-1i64)
+
+    ///
+    /// 積んだ版は書き換えられない（UPDATE と DELETE の policy が無い）。
+    ///
+    @Test
+    def testPgVersionsAreAppendOnly(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withPool(pool -> {
+            PgTestSupport.seed(() -> {
+                let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+                discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+                let entry = ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("こんにちは"))}));
+                discard ContentEntries.saveVersion(Session.grant(), entry#id, "tester")
+            });
+            let updated = PgTestSupport.mutate(pool, () -> RawSql.runWithAllow(() -> Sql.execute("UPDATE entry_versions SET author = 'nobody'", Nil)));
+            let deleted = PgTestSupport.mutate(pool, () -> RawSql.runWithAllow(() -> Sql.execute("DELETE FROM entry_versions", Nil)));
+            let remaining = PgTestSupport.mutateOrBug(pool, () -> RawSql.runWithAllow(versionRows));
+            (updated, deleted, remaining)
+        });
+        Assert.assertEq(expected = (Ok(0), Ok(0), 1i64), outcome)
+
+    ///
+    /// content type を消しても版は残る（ゴミ箱の entry を物理削除しても、外部キーの CASCADE で道連れにならない）。
+    ///
+    @Test
+    def testPgVersionsSurviveTypeDelete(): Unit \ {IO, Assert} =
+        let outcome = PgTestSupport.withDb(() -> {
+            let blogs = ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
+            discard ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("title", FieldKind.Text, FieldConfig.empty()));
+            let entry = ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(List#{("title", Json.JString("こんにちは"))}));
+            discard ContentEntries.saveVersion(Session.grant(), entry#id, "tester");
+            ContentEntries.delete(Session.grant(), Some(Session.grant()), entry#id);
+            ContentTypes.delete(Session.grant(), blogs#id);
+            RawSql.runWithAllow(versionRows)
+        });
+        Assert.assertEq(expected = 1i64, outcome)
+
 }
