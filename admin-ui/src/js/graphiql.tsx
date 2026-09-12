@@ -108,12 +108,22 @@ function Band() {
   );
 }
 
+// 引き出しやリファレンスの「Explorer で開く」は `?query=` で query を渡す。
+//
+// WhyNot: `defaultQuery` に入れない。あれは保存済みのタブが無い時しか効かないので、
+// 一度 GraphiQL を開いた人には渡した query が出ない（実機でそうなった）。
+//
+// WhyNot: `query` prop にしない。GraphiQL 5 で廃止されていて、渡すと画面が
+// 真っ白になる（「The `query` prop has been removed. Use `initialQuery`」）。
+const handedQuery = new URLSearchParams(window.location.search).get("query");
+
 function App({ defaultQuery }: { defaultQuery: string }) {
   return (
     <>
       <Band />
       <GraphiQL
         fetcher={fetcher}
+        {...(handedQuery ? { initialQuery: handedQuery } : {})}
         defaultQuery={defaultQuery}
         visiblePlugin="Documentation Explorer"
         forcedTheme={themeOf()}
