@@ -2,6 +2,7 @@ import "./graphiql-workers";
 import { createRoot } from "react-dom/client";
 import { GraphiQL } from "graphiql";
 import { createGraphiQLFetcher } from "@graphiql/toolkit";
+import { explorerPlugin } from "@graphiql/plugin-explorer";
 import {
   buildClientSchema,
   getIntrospectionQuery,
@@ -14,6 +15,7 @@ import {
   type IntrospectionQuery,
 } from "graphql";
 import "graphiql/style.css";
+import "@graphiql/plugin-explorer/style.css";
 
 // プロジェクト slug は `?project=` で受ける。`/p/{slug}/graphiql` から書き換えるのは
 // 配信側（vite dev の middleware / 本番の Caddy）の仕事で、この入口は URL の形を知らない。
@@ -117,15 +119,22 @@ function Band() {
 // 真っ白になる（「The `query` prop has been removed. Use `initialQuery`」）。
 const handedQuery = new URLSearchParams(window.location.search).get("query");
 
+// チェックを入れて query を組む画面。`plugins` は組み込みのドキュメントと履歴に**足す**。
+//
+// WhyNot: App の中で作らない。プラグインは値で、描画のたびに作り直すと GraphiQL が
+// 別のプラグインとして数え直し、開いている物が閉じる。
+const explorer = explorerPlugin();
+
 function App({ defaultQuery }: { defaultQuery: string }) {
   return (
     <>
       <Band />
       <GraphiQL
         fetcher={fetcher}
+        plugins={[explorer]}
         {...(handedQuery ? { initialQuery: handedQuery } : {})}
         defaultQuery={defaultQuery}
-        visiblePlugin="Documentation Explorer"
+        visiblePlugin="GraphiQL Explorer"
         forcedTheme={themeOf()}
         defaultEditorToolsVisibility="variables"
         shouldPersistHeaders
