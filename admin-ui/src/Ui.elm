@@ -736,7 +736,8 @@ thumb : String -> { url : String, mime : String } -> Html msg
 thumb size asset =
     Html.div [ A.class ("flex w-full items-center justify-center bg-well " ++ size) ]
         [ if String.startsWith "image/" asset.mime then
-            Html.img [ A.src asset.url, A.class ("h-full w-full object-cover " ++ size) ] []
+            -- 読めなかった時の断りは `web/asset-thumb.ts` が出す（ブラウザ既定の壊れた画像の印を出さない）
+            Html.node "asset-thumb" [ A.attribute "src" asset.url, A.class size ] []
 
           else
             Html.span [ A.class "px-2 text-center text-[10px] text-ink-faint" ] [ Html.text asset.mime ]

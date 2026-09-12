@@ -162,6 +162,26 @@ code, pre, .font-mono {
   }
 }
 
+/* メディアの縮小画像（`web/asset-thumb.ts`）。読めた時は画像が枠いっぱい、
+   読めなかった時は同じ大きさの面に断りの 1 行。 */
+asset-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+asset-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+asset-thumb img[hidden], asset-thumb .asset-thumb-note[hidden] { display: none; }
+.asset-thumb-note {
+  padding: 0 0.5rem;
+  color: var(--color-ink-faint);
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: center;
+}
+
 /* リッチエディタ。見た目は管理画面のテーマに従う（公開サイトの見た目ではない）。 */
 tiptap-editor {
   display: block;

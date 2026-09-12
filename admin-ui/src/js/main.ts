@@ -3,6 +3,7 @@ import { send, type Envelope } from "./api";
 import "katex/dist/katex.min.css";
 import "../styles.css";
 import "../../web/tiptap-editor";
+import "../../web/asset-thumb";
 
 const root = document.getElementById("app");
 const app = Elm.Main.init({ node: root, flags: null });
