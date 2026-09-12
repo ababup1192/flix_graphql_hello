@@ -35,6 +35,7 @@ import Queries
 import Route
 import Time
 import Ui
+import Ui.Bytes
 import Ui.DateTime
 import Ui.Icon as Icon
 import Ui.Modal as Modal
@@ -3327,7 +3328,7 @@ viewAssetCard model assetId actions =
             Just asset ->
                 [ Ui.thumb "h-20" { url = asset.url, mime = asset.mime }
                 , span [ class "truncate text-[11px] text-ink", Html.Attributes.title asset.fileName ] [ text asset.fileName ]
-                , span [ class "text-[10px] text-ink-faint" ] [ text (sizeText asset.size) ]
+                , span [ class "text-[10px] text-ink-faint" ] [ text (Ui.Bytes.human asset.size) ]
                 ]
                     ++ actions
 
@@ -3338,20 +3339,6 @@ viewAssetCard model assetId actions =
                 ]
                     ++ actions
         )
-
-
-{-| ファイルの大きさ。**人が読む単位に丸める**（バイトの桁は読めない）。
--}
-sizeText : Int -> String
-sizeText size =
-    if size >= 1024 * 1024 then
-        String.fromInt (size // (1024 * 1024)) ++ " MB"
-
-    else if size >= 1024 then
-        String.fromInt (size // 1024) ++ " KB"
-
-    else
-        String.fromInt size ++ " B"
 
 
 assetOf : Model -> String -> Maybe Model.AssetRow

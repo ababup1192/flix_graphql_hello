@@ -17,6 +17,7 @@ import Loaded exposing (Loaded)
 import Model exposing (AssetList, AssetRow, Slug, Upload)
 import Queries
 import Ui
+import Ui.Bytes
 import Ui.Confirm
 import Ui.Reply as Reply exposing (Reply)
 
@@ -423,18 +424,9 @@ viewThumb model asset =
                 Ui.chip Ui.toneWarn "アップロード中"
 
               else
-                span [ class "text-[10px] text-ink-faint" ] [ text (sizeText asset.size) ]
+                span [ class "text-[10px] text-ink-faint" ] [ text (Ui.Bytes.human asset.size) ]
             ]
         ]
-
-
-sizeText : Int -> String
-sizeText bytes =
-    if bytes > 1024 * 1024 then
-        String.fromInt (bytes // (1024 * 1024)) ++ " MB"
-
-    else
-        String.fromInt (bytes // 1024) ++ " KB"
 
 
 {-| 選んだ 1 枚。**画面に貼り付いて付いてくる**（`sticky`）。
@@ -465,7 +457,7 @@ viewPanel model asset =
             []
             [ div [ class "flex flex-col gap-1 text-xs text-ink-soft" ]
                 [ span [ class "font-mono break-all text-ink" ] [ text asset.fileName ]
-                , span [] [ text (asset.mime ++ " · " ++ sizeText asset.size) ]
+                , span [] [ text (asset.mime ++ " · " ++ Ui.Bytes.human asset.size) ]
                 , span [ class "font-mono break-all text-[10px] text-ink-faint" ] [ text asset.url ]
                 ]
             ]

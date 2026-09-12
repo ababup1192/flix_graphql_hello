@@ -26,6 +26,7 @@ import Json.Decode as D
 import Json.Encode as E
 import Model exposing (AuditRow)
 import Time
+import Ui.Bytes
 import Ui.DateTime as DateTime
 
 
@@ -235,7 +236,7 @@ webhook path row did =
 asset : List String -> AuditRow -> String -> Sentence
 asset path row did =
     [ Text "メディア ", Strong row.targetId ]
-        ++ verb (joinSome "、" [ string (path ++ [ "mime" ]) row.detail, int (path ++ [ "size" ]) row.detail |> Maybe.map bytes ]) did
+        ++ verb (joinSome "、" [ string (path ++ [ "mime" ]) row.detail, int (path ++ [ "size" ]) row.detail |> Maybe.map Ui.Bytes.human ]) did
 
 
 {-| 括弧の補足と述語。補足が無ければ対象との間に空白を、あれば全角の括弧のまま続ける。
@@ -301,18 +302,6 @@ splitField targetId =
 
         [] ->
             ( targetId, "" )
-
-
-bytes : Int -> String
-bytes size =
-    if size >= 1024 * 1024 then
-        String.fromFloat (toFloat (size * 10 // (1024 * 1024)) / 10) ++ " MB"
-
-    else if size >= 1024 then
-        String.fromInt (size // 1024) ++ " KB"
-
-    else
-        String.fromInt size ++ " B"
 
 
 
@@ -556,7 +545,7 @@ assetFacts : List String -> D.Value -> Sheet
 assetFacts path detail =
     facts
         [ ( "mime", string (path ++ [ "mime" ]) detail )
-        , ( "大きさ", int (path ++ [ "size" ]) detail |> Maybe.map bytes )
+        , ( "大きさ", int (path ++ [ "size" ]) detail |> Maybe.map Ui.Bytes.human )
         , ( "寸法", Maybe.map2 (\w h -> String.fromInt w ++ " × " ++ String.fromInt h) (int (path ++ [ "width" ]) detail) (int (path ++ [ "height" ]) detail) )
         ]
 
