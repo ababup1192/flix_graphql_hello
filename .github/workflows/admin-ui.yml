@@ -46,3 +46,121 @@ jobs:
             echo "dist に dev のヘッダが残っています"
             exit 1
           fi
+
+  # 実画面を巡回して JS の例外と 4xx/5xx を検出する（admin-ui/scripts/smoke.mjs）。
+  # 実 PostgreSQL / MinIO / CMS サーバ / vite の dev サーバを全部上げてから走らせる。
+  #
+  # WhyNot: 最初は結果を警告に留める（smoke のステップだけ continue-on-error）。
+  # CI の headless chromium で初めて回すので、ローカルでは出ない揺れ（タイミング、
+  # フォント描画）が無いかを様子見してから、通常の失敗（赤）に昇格させる。
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Flix のコンパイラ
+        run: curl -sSL -o /tmp/flix.jar https://github.com/flix/flix/releases/download/v0.75.3/flix.jar
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin-ui/package-lock.json
+      - name: 管理画面の依存
+        working-directory: admin-ui
+        run: npm ci
+      - name: Playwright の chromium
+        working-directory: admin-ui
+        run: npx playwright install --with-deps chromium
+      - name: PostgreSQL と MinIO
+        run: docker compose up -d --wait postgres minio && docker compose up minio-init
+      # CMS_MIGRATE=apply で起動時に migrations/ を当てる（`make migrate` は
+      # flix_db の checkout を手元前提にしているので CI では使えない）。
+      # CMS_MODE=import-microcms で default プロジェクトに blogs 等を写し、
+      # ダミーの entry を publish 済みで積んでから終わる（smoke が読む画面の元データ）。
+      - name: microCMS の見本を default プロジェクトへ
+        env:
+          FLIX_JAR: /tmp/flix.jar
+          CMS_DSN: jdbc:postgresql://127.0.0.1:5432/cms
+          CMS_DB_USER: cms
+          CMS_DB_PASSWORD: cms
+          ASSET_ENDPOINT: http://127.0.0.1:9000
+          ASSET_BUCKET: cms
+          ASSET_ACCESS_KEY: cms
+          ASSET_SECRET_KEY: cms-secret
+          ASSET_REGION: us-east-1
+          ASSET_PUBLIC_URL: http://127.0.0.1:9000/cms
+          CMS_AUTH: dev
+          CMS_BOOTSTRAP_OWNER: dev@localhost
+          CMS_API_KEY_PEPPER: dev-pepper
+          CMS_MIGRATE: apply
+          CMS_MODE: import-microcms
+        run: bin/flix run
+      - name: CMS サーバを起動（バックグラウンド）
+        env:
+          FLIX_JAR: /tmp/flix.jar
+          CMS_DSN: jdbc:postgresql://127.0.0.1:5432/cms
+          CMS_DB_USER: cms
+          CMS_DB_PASSWORD: cms
+          ASSET_ENDPOINT: http://127.0.0.1:9000
+          ASSET_BUCKET: cms
+          ASSET_ACCESS_KEY: cms
+          ASSET_SECRET_KEY: cms-secret
+          ASSET_REGION: us-east-1
+          ASSET_PUBLIC_URL: http://127.0.0.1:9000/cms
+          CMS_AUTH: dev
+          CMS_BOOTSTRAP_OWNER: dev@localhost
+          CMS_API_KEY_PEPPER: dev-pepper
+          CMS_MIGRATE: apply
+        run: |
+          nohup bin/flix run > /tmp/cms-server.log 2>&1 &
+      - name: CMS の起動待ち（/health）
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8080/health > /dev/null; then
+              echo "CMS 起動 OK"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "CMS が 120 秒待っても起動しませんでした。ログ:"
+          cat /tmp/cms-server.log
+          exit 1
+      - name: vite の dev サーバを起動（バックグラウンド）
+        working-directory: admin-ui
+        run: |
+          nohup npm run dev > /tmp/vite-dev.log 2>&1 &
+      - name: vite の起動待ち
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:5173/ > /dev/null; then
+              echo "vite 起動 OK"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "vite が 30 秒待っても起動しませんでした。ログ:"
+          cat /tmp/vite-dev.log
+          exit 1
+      - name: npm run smoke
+        id: smoke
+        continue-on-error: true
+        working-directory: admin-ui
+        env:
+          UI_BASE: http://127.0.0.1:5173
+        run: npm run smoke
+      - name: smoke が失敗（今は警告扱い）
+        if: steps.smoke.outcome == 'failure'
+        run: echo "::warning::npm run smoke が失敗しました。ログを確認してください（当面は非ブロッキング）"
+      - name: サーバのログ（失敗時のみ）
+        if: steps.smoke.outcome == 'failure'
+        run: |
+          echo "---- cms-server.log ----"
+          cat /tmp/cms-server.log || true
+          echo "---- vite-dev.log ----"
+          cat /tmp/vite-dev.log || true
+      - name: 片付け
+        if: always()
+        run: docker compose down -v
