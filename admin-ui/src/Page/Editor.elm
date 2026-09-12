@@ -1,4 +1,4 @@
-module Page.Editor exposing (Model, Msg(..), SaveState(..), autosaveDelay, autosaveTick, entryIdOf, init, load, previewOf, richInputId, takeRichUpload, title, unsaved, update, view)
+module Page.Editor exposing (Model, Msg(..), SaveState(..), autosaveDelay, autosaveTick, entryIdOf, init, latestPublished, load, previewOf, richInputId, takeRichUpload, title, unsaved, update, view, wasDeleted)
 
 {-| コンテンツの編集。
 
@@ -124,6 +124,7 @@ type alias Model =
 
     {- 公開・取り下げが断られた理由。確認の中に出す。 -}
     , actionError : Maybe String
+    , deleted : Bool
     , pendingPublish : Bool
 
     {- このコンテンツを参照している物。**削除と取り下げを止める理由**でもある。 -}
@@ -187,6 +188,8 @@ type Asking
     | AskingPublish
     | AskingUnpublish
     | AskingRestore Model.EntryVersion
+    | AskingDiscard Model.EntryVersion
+    | AskingDelete
 
 
 type Msg
@@ -259,7 +262,11 @@ type Msg
     | HistoryToggled Bool
     | ExpandToggled (Maybe String)
     | RestoreOpened Model.EntryVersion
+    | DiscardOpened Model.EntryVersion
     | RestoreWanted
+    | DeleteOpened
+    | DeleteWanted
+    | GotDeleted (Result Api.Problem String)
     | GotVersionSaved (Result Api.Problem String)
     | GotRestored (Result Api.Problem EntryRow)
     | SchedulesToggled Bool
@@ -307,6 +314,7 @@ init project apiId entryId =
     , refLabels = Dict.empty
     , asking = NotAsking
     , actionError = Nothing
+    , deleted = False
     , pendingPublish = False
     , referrers = Loaded.Loading
     , referrersOpen = False
@@ -452,6 +460,30 @@ update ctx msg model =
         RestoreOpened version ->
             ( { model | asking = AskingRestore version, actionError = Nothing }, [] )
 
+        DiscardOpened version ->
+            ( { model | asking = AskingDiscard version, actionError = Nothing }, [] )
+
+        DeleteOpened ->
+            ( { model | asking = AskingDelete, actionError = Nothing }, [] )
+
+        DeleteWanted ->
+            case model.entryId of
+                Just entryId ->
+                    ( { model | publishing = True, actionError = Nothing }
+                    , [ Api.call (\id -> Queries.deleteEntry id ctx.project entryId) GotDeleted ]
+                    )
+
+                Nothing ->
+                    ( model, [] )
+
+        GotDeleted (Ok _) ->
+            -- WhyNot: ここで一覧へは飛ばない。Editor は呼び出ししか返せないので、
+            -- 消えた事だけを持ち、URL の差し替えは `Main` に任せる。
+            ( { model | publishing = False, asking = NotAsking, actionError = Nothing, deleted = True, save = Saved, touched = False }, [] )
+
+        GotDeleted (Err problem) ->
+            ( { model | publishing = False, actionError = Just (Api.problemToText problem).message }, [] )
+
         RestoreWanted ->
             -- **戻す前に、今の下書きを版として積む。** 積まないと、戻した瞬間に
             -- 今書いていた物がどこにも残らない（戻すのを取り消せない）。
@@ -465,8 +497,8 @@ update ctx msg model =
                     ( model, [] )
 
         GotVersionSaved (Ok _) ->
-            case ( model.entryId, model.asking ) of
-                ( Just entryId, AskingRestore version ) ->
+            case ( model.entryId, restoreTarget model.asking ) of
+                ( Just entryId, Just version ) ->
                     ( model
                     , [ Api.call
                             (\id ->
@@ -1168,6 +1200,40 @@ entryIdOf model =
     model.entryId
 
 
+{-| この画面で entry を消したか。`Main` が一覧へ差し替える判断に使う。
+-}
+wasDeleted : Model -> Bool
+wasDeleted model =
+    model.deleted
+
+
+{-| 「戻す」と「下書きを捨てる」が同じ道（`saveVersion` → `restoreVersion`）を通るので、
+どちらの確認から来ても戻す先のバージョンを取り出す。
+-}
+restoreTarget : Asking -> Maybe Model.EntryVersion
+restoreTarget asking =
+    case asking of
+        AskingRestore version ->
+            Just version
+
+        AskingDiscard version ->
+            Just version
+
+        _ ->
+            Nothing
+
+
+{-| 履歴のうち、公開で積まれた最新のバージョン。「下書きを捨てる」が戻す先。
+-}
+latestPublished : List Model.EntryVersion -> Maybe Model.EntryVersion
+latestPublished versions =
+    versions
+        |> List.filter (\version -> version.reason == "PUBLISH")
+        |> List.sortBy .version
+        |> List.reverse
+        |> List.head
+
+
 {-| まだ書いていない入力があるか。
 
 上の帯の出しわけと、画面を離れる時の警告（`Main` が port で外に出す）が同じ判断を使う。
@@ -1747,6 +1813,12 @@ viewForm args model detail =
             AskingRestore version ->
                 viewRestoreDialog model version
 
+            AskingDiscard _ ->
+                viewDiscardDialog model
+
+            AskingDelete ->
+                viewDeleteDialog model
+
             NotAsking ->
                 text ""
         ]
@@ -1920,6 +1992,54 @@ viewRestoreDialog model version =
         ]
 
 
+{-| 下書きを捨てる確認。
+
+WhyNot: `viewRestoreDialog` を使い回さない。「v7 の内容に戻しますか」では
+「下書きを捨てる」を押した人に何が起きるか読めない。
+
+-}
+viewDiscardDialog : Model -> Html Msg
+viewDiscardDialog model =
+    Modal.dialog
+        { title = "下書きを捨てて、公開中の内容に戻しますか"
+        , onClose = PublishClosed
+        , error = model.actionError
+        , footer =
+            Modal.actions
+                { confirm = "下書きを捨てる"
+                , danger = True
+                , onConfirm = RestoreWanted
+                , onCancel = PublishClosed
+                , busy = model.publishing
+                }
+        }
+        [ span [ class "truncate text-[13px] font-medium text-ink", Html.Attributes.title (title model) ] [ text (title model) ]
+        , Ui.note [ text "今の下書きはバージョンとして残るので、履歴から元に戻せます。公開中の内容は変わりません。" ]
+        ]
+
+
+{-| 削除の確認。
+-}
+viewDeleteDialog : Model -> Html Msg
+viewDeleteDialog model =
+    Modal.dialog
+        { title = "このコンテンツを削除しますか"
+        , onClose = PublishClosed
+        , error = model.actionError
+        , footer =
+            Modal.actions
+                { confirm = "削除"
+                , danger = True
+                , onConfirm = DeleteWanted
+                , onCancel = PublishClosed
+                , busy = model.publishing
+                }
+        }
+        [ span [ class "truncate text-[13px] font-medium text-ink", Html.Attributes.title (title model) ] [ text (title model) ]
+        , Ui.note [ text "公開中なら公開も終わり、公開サイトから見えなくなります。一覧からも消えます。この画面から元に戻す道はまだ無いので、間違えた時は管理者に相談してください。" ]
+        ]
+
+
 {-| 取り下げの確認。**何が起きるかを言葉で出してから実行する**（ボードと同じ文言）。
 -}
 viewUnpublishDialog : Model -> Html Msg
@@ -1974,6 +2094,12 @@ viewRail args model =
 
                       else
                         Ui.note [ text "公開は上の帯のボタンから。" ]
+                    , case ( model.stage, Loaded.toMaybe model.history |> Maybe.andThen latestPublished ) of
+                        ( "CHANGED", Just version ) ->
+                            Ui.dangerLink (DiscardOpened version) "下書きを捨てる"
+
+                        _ ->
+                            text ""
                     , if model.stage == "DRAFT" then
                         text ""
 
@@ -1983,6 +2109,13 @@ viewRail args model =
         , viewReferrers args model
         , viewSchedules model
         , viewHistory model
+        , case model.entryId of
+            Nothing ->
+                text ""
+
+            Just _ ->
+                -- 他の操作から離す。公開に関わる列の続きに見えると、履歴の「戻す」の隣で押される。
+                div [ class "border-t border-edge pt-4" ] [ Ui.dangerLink DeleteOpened "削除" ]
         ]
 
 

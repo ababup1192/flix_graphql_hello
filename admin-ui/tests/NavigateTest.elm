@@ -151,4 +151,16 @@ suite =
                 ]
                     |> List.map (\( route, entryId ) -> Navigate.createdRoute { route = route, entryId = entryId })
                     |> Expect.equal [ Nothing, Nothing, Nothing ]
+        , test "entry を消したら、その API の一覧へ差し替える" <|
+            \_ ->
+                Navigate.deletedRoute { route = Route.Entry "tech-blog" "blogs" "e1", deleted = True }
+                    |> Expect.equal (Just (Route.Entries "tech-blog" "blogs" []))
+        , test "消していない・entry 以外の画面では差し替えない" <|
+            \_ ->
+                [ ( Route.Entry "tech-blog" "blogs" "e1", False )
+                , ( Route.Entries "tech-blog" "blogs" [], True )
+                , ( Route.NewEntry "tech-blog" "blogs", True )
+                ]
+                    |> List.map (\( route, deleted ) -> Navigate.deletedRoute { route = route, deleted = deleted })
+                    |> Expect.equal [ Nothing, Nothing, Nothing ]
         ]

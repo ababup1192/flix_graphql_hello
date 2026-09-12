@@ -27,6 +27,7 @@ module Queries exposing
     , createWebhook
     , deleteAsset
     , deleteContentType
+    , deleteEntry
     , deleteWebhook
     , entries
     , entry
@@ -1137,6 +1138,12 @@ unpublishEntry : String -> Slug -> String -> ( Api.Request, D.Decoder EntryRow )
 unpublishEntry id project entryId =
     Api.mutation { id = id, kind = "unpublishEntry", project = project }
         (AdminMutation.unpublishEntry { id = entryId } entryRow)
+
+
+deleteEntry : String -> Slug -> String -> ( Api.Request, D.Decoder String )
+deleteEntry id project entryId =
+    Api.mutation { id = id, kind = "deleteEntry", project = project }
+        (AdminMutation.deleteEntry { id = entryId })
 
 
 {-| 今の下書きを版として積む。**戻す前に呼ぶ**ので、戻した物も戻せる。

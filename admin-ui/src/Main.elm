@@ -830,6 +830,10 @@ editorUpdate pageMsg model =
                         created : Maybe Route
                         created =
                             Navigate.createdRoute { route = model.route, entryId = Editor.entryIdOf next }
+
+                        gone : Maybe Route
+                        gone =
+                            Navigate.deletedRoute { route = model.route, deleted = Editor.wasDeleted next }
                     in
                     ( { sent | route = created |> Maybe.withDefault sent.route }
                     , Effect.batch
@@ -837,7 +841,12 @@ editorUpdate pageMsg model =
 
                         -- WhyNot: pushUrl にしない。戻るボタンで空の新規画面に戻り、書いた物が消えたように見える。
                         , created |> Maybe.map (Route.toString >> Effect.ReplaceRoute) |> Maybe.withDefault Effect.none
-                        , Effect.SetUnsaved (Editor.unsaved next)
+
+                        -- WhyNot: pushUrl にしない。戻るボタンで消した entry の画面に戻り、存在しない物を開いているように見える。
+                        , gone |> Maybe.map (Route.toString >> Effect.ReplaceRoute) |> Maybe.withDefault Effect.none
+
+                        -- WhyNot: 消した後に未保存の警告を出さない。消えた物に「保存していません」は意味が無い。
+                        , Effect.SetUnsaved (Editor.unsaved next && gone == Nothing)
                         , scheduleToday pageMsg next
                         , autosaveDebounce page next
                         , stampSavedAt pageMsg

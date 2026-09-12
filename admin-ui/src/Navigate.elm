@@ -1,4 +1,4 @@
-module Navigate exposing (Asked(..), Landing(..), Move(..), askedOf, createdRoute, landingOf, moveFor, needsTypes, pick)
+module Navigate exposing (Asked(..), Landing(..), Move(..), askedOf, createdRoute, deletedRoute, landingOf, moveFor, needsTypes, pick)
 
 {-| URL のプロジェクトをどう扱うか、の判断だけを持つ。
 
@@ -129,6 +129,18 @@ createdRoute { route, entryId } =
     case ( route, entryId ) of
         ( Route.NewEntry slug apiId, Just id ) ->
             Just (Route.Entry slug apiId id)
+
+        _ ->
+            Nothing
+
+
+{-| entry を消した時に、URL を差し替える先（その API の一覧）。
+-}
+deletedRoute : { route : Route, deleted : Bool } -> Maybe Route
+deletedRoute { route, deleted } =
+    case ( route, deleted ) of
+        ( Route.Entry slug apiId _, True ) ->
+            Just (Route.Entries slug apiId [])
 
         _ ->
             Nothing
