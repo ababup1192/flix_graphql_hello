@@ -78,6 +78,14 @@ mod RichText {
     pub def cellAligns(): List[String] = "left" :: "center" :: "right" :: Nil
 
     ///
+    /// 表のセルの結合（attrs.colspan / rowspan）に許す最大。1 は結合していないのと同じで、attrs に書かない。
+    ///
+    /// WhyNot: 上限を置かないと、書き出す側が結合に覆われる分だけ空のセルを並べるので、
+    /// 大きな値 1 つで Markdown と HTML がいくらでも膨らむ。
+    ///
+    pub def maxCellSpan(): Int32 = 1000
+
+    ///
     /// image の attrs.size に許す値。無ければ本文の幅いっぱい。html では figure（無ければ img）の data-size。
     ///
     /// WhyNot: 段階を 1 つしか持たない。幅の数値や 3 段階にすると、見た目の決めが本文に埋まり、
@@ -279,11 +287,21 @@ mod RichText {
         case _                    => Violation.Violation(path, "ノードはオブジェクトにしてください") :: Nil
     }
 
-    def checkTableCell(path: String, fields: Map[String, Json]): List[Violation] = match Map.get("align", attrs(fields)) {
+    def checkTableCell(path: String, fields: Map[String, Json]): List[Violation] =
+        checkCellAlign(path, fields) ::: checkCellSpan("colspan", path, fields) ::: checkCellSpan("rowspan", path, fields)
+
+    def checkCellAlign(path: String, fields: Map[String, Json]): List[Violation] = match Map.get("align", attrs(fields)) {
         case None    => Nil
         case Some(found) =>
             if (EntryValue.asString(found) |> Option.exists(align -> List.memberOf(align, cellAligns()))) Nil
             else Violation.Violation(path, "セルの attrs.align は ${List.join(" / ", cellAligns())} にしてください") :: Nil
+    }
+
+    def checkCellSpan(name: String, path: String, fields: Map[String, Json]): List[Violation] = match Map.get(name, attrs(fields)) {
+        case None        => Nil
+        case Some(found) =>
+            if (EntryValue.asInt32(found) |> Option.exists(count -> count >= 1 and count <= maxCellSpan())) Nil
+            else Violation.Violation(path, "セルの attrs.${name} は 1 以上 ${maxCellSpan()} 以下の整数にしてください") :: Nil
     }
 
     ///

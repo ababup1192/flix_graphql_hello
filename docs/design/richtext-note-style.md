@@ -161,6 +161,7 @@ OGP の持ち方は **doc に写さず、url → (title, description, imageUrl, 
 | linkCard | 今まで通り URL だけの段落 | 今まで通り | 段落中の URL は `https\://` で書き出されるので混ざらない |
 | image のリンク | 標準のリンク付き画像 `[![alt](asset:ID){…}](https://…)`（キャプションはその次の行） | `[` で始まれば image を読み、直後の `](URL)` が http(s) なら href。他は段落の文字 | GFM の読み手にもリンク付き画像として見える |
 | image の縮小・配置 | `{width=W height=H size=small align=left source="…" sourceUrl=…}`（順は固定。align は left / right） | `{...}` の key=value。small / left / right 以外の値は捨てる | 既存の `{...}` の一般解析に乗る |
+| 表のセルの結合 | セルの中身の後ろに `{colspan=2 rowspan=3}`（**2 以上の時だけ**）。結合に覆われる所には空のセルを置いて、行ごとの列の数を合わせる（`\| 見出し {colspan=2} \| \|`） | `{...}` の key=value。colspan / rowspan が 1 つも無ければセルの文字として残す。値が 0 以下・数でない・`RichText.maxCellSpan()` 超えなら 1。覆われる所のセルは中身があっても落とす | GFM に結合の書き方が無い。`{...}` の key=value は image と codeBlock で使っている形で、記法を増やさない。覆われたセルを doc に持たないのは ProseMirror の表の模型と同じ |
 | codeBlock のフェンス | 常に `` ` ``。数は**中身に並ぶ `` ` `` の最大 + 1**（最小は 3）なので、中身の ` ``` ` や ` ```` ` をそのまま書き出せる | CommonMark に合わせ `` ``` `` でも `~~~` でも、3 個以上ならいくつでも開く。閉じられるのは**同じ記号で開いた数以上**の行だけ。閉じないまま終われば末尾まで | 読む側だけ CommonMark に合わせる。書き出しを 2 通り（`` ` `` と `~`）にすると同じ doc に 2 通りの Markdown が対応し、手で書いた物の diff が揺れる |
 | codeBlock の折り返し | 今の `{…}` の中に `wrap` を足す。`` ```ts:a.ts {1,3-5 wrap} ``、折り返しだけなら `` ``` {wrap} `` | `{…}` の中身を空白で区切り、`wrap` の語があれば折り返し。残りの先頭 1 つを強調する行として見る | `{…}` を 2 つ並べる（`{1,3-5} {wrap}`）案より方言が少ない。Docusaurus も情報行の `{…}` の後ろに語を並べる形 |
 

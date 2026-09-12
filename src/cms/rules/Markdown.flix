@@ -9,6 +9,7 @@
 /// 複数枚の image は 1 行に空白区切りで並べる（古い `{columns=N}` は読んで捨てる。列数は枚数から決まる）、embed と linkCard は URL だけの段落（提供元が判れば embed）、
 /// codeBlock は ```` ```言語:ファイル名 {1,3-5} ````、details は `<details><summary>…</summary>` から `</details>` の行まで、
 /// entry へのリンクは `[text](entry:ID)`、underline は `<u>…</u>`、下付きは `~x~`、上付きは `^x^`、蛍光ペンは `==x==`。入れ子は 2 空白、番号は 1 から振り直す。
+/// 表のセルの結合は中身の後ろに `{colspan=2 rowspan=3}`（2 以上の時だけ。結合に覆われる所には空のセルを置いて列の数を合わせる）、
 /// 数式は `$…$`（math マーク。TeX はそのまま）と `$$` の行で囲む mathBlock、text の `$` は `\$`。タスクリストは `- [ ]` `- [x]`（orderedList でも `1. [ ]`）。
 /// video は `@[video](asset:ID "caption"){poster=asset:ID}`。Mermaid は language が mermaid の codeBlock で、Markdown では普通のフェンス。
 /// 読む時は少し広く受け（`*` の箇条書き、`1)`、`***`、`__` と `*`、行末 2 空白、summary の無い `<details>`、`- [X]`）、
@@ -132,10 +133,15 @@ mod Markdown {
     /// summary の無い details に入れる summary。
     def defaultSummary(): String = "詳細"
 
-    /// 表のセル。(tableHeader か, 寄せ, 中身)。
+    /// 表のセル。(tableHeader か, 寄せ, 結合, 中身)。
     /// **寄せは列の属性**（区切り行が列に 1 つしか持てない）。JSON はセルごとに同じ値を持つ。
     enum Cell {
-        case Cell(Bool, Option[String], List[Block])
+        case Cell(Bool, Option[String], Span, List[Block])
+    }
+
+    /// セルの結合。(colspan, rowspan)。結合していないセルは (1, 1)。
+    enum Span with Eq {
+        case Span(Int32, Int32)
     }
 
     /// callout の種類。
@@ -271,10 +277,24 @@ mod Markdown {
         objectFields(node) |> Option.filter(fields -> typeOf(fields) == Some("tableRow")) |> Option.map(fields -> children(fields) |> List.filterMap(cellOf))
 
     def cellOf(node: Json): Option[Cell] = objectFields(node) |> Option.flatMap(fields -> match typeOf(fields) {
-        case Some("tableHeader") => Some(Cell.Cell(true, alignOf(fields), blocksOf(children(fields))))
-        case Some("tableCell")   => Some(Cell.Cell(false, alignOf(fields), blocksOf(children(fields))))
+        case Some("tableHeader") => Some(Cell.Cell(true, alignOf(fields), spanOf(fields), blocksOf(children(fields))))
+        case Some("tableCell")   => Some(Cell.Cell(false, alignOf(fields), spanOf(fields), blocksOf(children(fields))))
         case _                   => None
     })
+
+    def spanOf(fields: Map[String, Json]): Span =
+        Span.Span(spanValue("colspan", fields), spanValue("rowspan", fields))
+
+    /// 範囲の外（0 以下・上限超え・数でない）は 1。
+    def spanValue(name: String, fields: Map[String, Json]): Int32 =
+        Map.get(name, attrs(fields)) |> Option.flatMap(EntryValue.asInt32) |> clampSpan
+
+    def clampSpan(count: Option[Int32]): Int32 =
+        count |> Option.filter(found -> found >= 1 and found <= RichText.maxCellSpan()) |> Option.getWithDefault(1)
+
+    def colspanOf(cell: Cell): Int32 =
+        let Cell.Cell(_, _, Span.Span(colspan, _), _) = cell;
+        colspan
 
     def alignOf(fields: Map[String, Json]): Option[String] =
         Map.get("align", attrs(fields)) |> Option.flatMap(EntryValue.asString)
@@ -373,9 +393,13 @@ mod Markdown {
         let ListItem.ListItem(checked, blocks) = item;
         objectNode("listItem", checked |> Option.map(found -> ("checked", Json.JBool(found))) |> Option.toList, blocks |> List.map(blockJson))
 
+    /// 結合は 2 以上の時だけ attrs に出す（1 は結合していないのと同じ）。
     def cellJson(cell: Cell): Json =
-        let Cell.Cell(isHeader, align, blocks) = cell;
-        let attrs = align |> Option.map(found -> ("align", Json.JString(found))) |> Option.toList;
+        let Cell.Cell(isHeader, align, Span.Span(colspan, rowspan), blocks) = cell;
+        let attrs =
+            (align |> Option.map(found -> ("align", Json.JString(found))) |> Option.toList)
+                ::: (if (colspan > 1) ("colspan", intJson(colspan)) :: Nil else Nil)
+                ::: (if (rowspan > 1) ("rowspan", intJson(rowspan)) :: Nil else Nil);
         objectNode(if (isHeader) "tableHeader" else "tableCell", attrs, blocks |> List.map(blockJson))
 
     def inlineJson(inline: Inline): Json = match inline {
@@ -539,17 +563,49 @@ mod Markdown {
     /// **寄せは 1 行目のセルから取る**（区切り行は列に 1 つしか持てない）。
     def renderTable(rows: List[List[Cell]]): String =
         let headRow = rows |> List.head |> Option.getWithDefault(Nil);
-        let columns = if (List.isEmpty(headRow)) 1 else List.length(headRow);
-        let marks = if (List.isEmpty(headRow)) List.repeat(columns, "---") else headRow |> List.map(alignMark);
+        let headMarks = headRow |> List.flatMap(cell -> alignMark(cell) :: List.repeat(colspanOf(cell) - 1, "---"));
+        let marks = if (List.isEmpty(headMarks)) "---" :: Nil else headMarks;
         let separator = "| ${marks |> List.join(" | ")} |";
-        match rows |> List.map(renderRow) {
+        match gridRows(Map.empty(), rows) |> List.map(renderRow) {
             case first :: rest => (first :: separator :: rest) |> List.join("\n")
             case Nil           => separator
         }
 
+    ///
+    /// 行ごとのセルの文字。**結合に覆われる所に空のセルを置く**（列の数を行ごとに合わせる）。
+    /// covered は「上の行の rowspan がこの行で覆う列 → 残りの行数」。
+    ///
+    def gridRows(covered: Map[Int32, Int32], rows: List[List[Cell]]): List[List[String]] = match rows {
+        case Nil          => Nil
+        case row :: rest  =>
+            let (next, texts) = gridRow(0, covered, row, Nil, Map.empty());
+            texts :: gridRows(next, rest)
+    }
+
+    def gridRow(column: Int32, covered: Map[Int32, Int32], cells: List[Cell], acc: List[String], next: Map[Int32, Int32]): (Map[Int32, Int32], List[String]) =
+        match Map.get(column, covered) {
+            case Some(rest) => gridRow(column + 1, covered, cells, "" :: acc, keepCovered(column, rest - 1, next))
+            case None       => match cells {
+                case Nil          => (next, List.reverse(acc))
+                case cell :: tail =>
+                    let Cell.Cell(_, _, Span.Span(colspan, rowspan), _) = cell;
+                    gridRow(column + colspan, covered, tail,
+                        List.repeat(colspan - 1, "") ::: (renderCell(cell) :: acc),
+                        coverBelow(column, colspan, rowspan, next))
+            }
+        }
+
+    /// この行の rowspan が下の行で覆う列。
+    def coverBelow(column: Int32, colspan: Int32, rowspan: Int32, next: Map[Int32, Int32]): Map[Int32, Int32] =
+        if (rowspan <= 1) next
+        else List.range(column, column + colspan) |> List.foldLeft(found -> at -> Map.insert(at, rowspan - 1, found), next)
+
+    def keepCovered(column: Int32, rest: Int32, next: Map[Int32, Int32]): Map[Int32, Int32] =
+        if (rest <= 0) next else Map.insert(column, rest, next)
+
     /// 区切り行の 1 列分。`:` の位置が寄せ。
     def alignMark(cell: Cell): String =
-        let Cell.Cell(_, align, _) = cell;
+        let Cell.Cell(_, align, _, _) = cell;
         match align {
             case Some("left")   => ":---"
             case Some("center") => ":---:"
@@ -557,12 +613,20 @@ mod Markdown {
             case _              => "---"
         }
 
-    def renderRow(cells: List[Cell]): String = "| ${cells |> List.map(renderCell) |> List.join(" | ")} |"
+    def renderRow(texts: List[String]): String = "| ${texts |> List.join(" | ")} |"
 
-    /// セルは 1 行。段落と見出しの中身だけを空白で繋ぎ、改行は <br> に。
+    /// セルは 1 行。段落と見出しの中身だけを空白で繋ぎ、改行は <br> に。結合は中身の後ろに `{colspan=N rowspan=N}`。
     def renderCell(cell: Cell): String =
-        let Cell.Cell(_, _, blocks) = cell;
-        blocks |> List.filterMap(cellInlines) |> List.map(renderInlines("<br>")) |> List.join(" ") |> String.replace(src = "\n", dst = " ")
+        let Cell.Cell(_, _, span, blocks) = cell;
+        (blocks |> List.filterMap(cellInlines) |> List.map(renderInlines("<br>")) |> List.join(" ") |> String.replace(src = "\n", dst = " ")) ++ spanSuffix(span)
+
+    /// 結合の後ろ書き。**2 以上の時だけ出す**（1 は結合していないのと同じで、全セルに意味の無い印が並ぶ）。
+    def spanSuffix(span: Span): String =
+        let Span.Span(colspan, rowspan) = span;
+        match (if (colspan > 1) "colspan=${colspan}" :: Nil else Nil) ::: (if (rowspan > 1) "rowspan=${rowspan}" :: Nil else Nil) {
+            case Nil   => ""
+            case pairs => " {${pairs |> List.join(" ")}}"
+        }
 
     def cellInlines(block: Block): Option[List[Inline]] = match block {
         case Block.Paragraph(inlines)     => Some(inlines)
@@ -963,11 +1027,52 @@ mod Markdown {
             case header :: Nil => cellsOf(true, Nil, header) :: Nil
             case Nil           => Nil
         };
-        (Some(Block.Table(rows)), after)
+        (Some(Block.Table(dropCoveredCells(Map.empty(), rows))), after)
 
     def cellsOf(isHeader: Bool, aligns: List[Option[String]], line: String): List[Cell] =
         splitCells(line) |> List.zipWithIndex
-            |> List.map(match (index, text) -> Cell.Cell(isHeader, List.nth(index, aligns) |> Option.flatten, cellBlocks(text)))
+            |> List.map(match (index, text) -> {
+                let (span, body) = takeCellSpan(text);
+                Cell.Cell(isHeader, List.nth(index, aligns) |> Option.flatten, span, cellBlocks(body))
+            })
+
+    ///
+    /// 結合に覆われる所に置いた空のセルを落とす。列の数は行ごとに合っている前提で、
+    /// 覆われる所のセルは中身があっても落とす（ProseMirror の表は覆われたセルを持たない）。
+    ///
+    def dropCoveredCells(covered: Map[Int32, Int32], rows: List[List[Cell]]): List[List[Cell]] = match rows {
+        case Nil         => Nil
+        case row :: rest =>
+            let (next, kept) = uncoverRow(0, covered, row, Nil, Map.empty());
+            kept :: dropCoveredCells(next, rest)
+    }
+
+    def uncoverRow(column: Int32, covered: Map[Int32, Int32], cells: List[Cell], acc: List[Cell], next: Map[Int32, Int32]): (Map[Int32, Int32], List[Cell]) =
+        match Map.get(column, covered) {
+            case Some(rest) => uncoverRow(column + 1, covered, List.drop(1, cells), acc, keepCovered(column, rest - 1, next))
+            case None       => match cells {
+                case Nil          => (next, List.reverse(acc))
+                case cell :: tail =>
+                    let Cell.Cell(_, _, Span.Span(colspan, rowspan), _) = cell;
+                    uncoverRow(column + colspan, covered, List.drop(colspan - 1, tail), cell :: acc,
+                        coverBelow(column, colspan, rowspan, next))
+            }
+        }
+
+    ///
+    /// セルの後ろの `{colspan=2 rowspan=3}`。知らない key は捨てる。値が範囲の外なら 1。
+    /// colspan も rowspan も無い `{…}` はセルの文字として残す（本文の `{…}` を消さない）。
+    ///
+    def takeCellSpan(text: String): (Span, String) =
+        match captures("^([\\s\\S]*?)\\s*\\{((?:[^}\"]|\"(?:[^\"\\\\]|\\\\.)*\")*)\\}$", text) {
+            case body :: pairsText :: Nil => match parseKeyValues(pairsText) {
+                case Some(pairs) if List.exists(match (key, _) -> key == "colspan" or key == "rowspan", pairs) =>
+                    let value = key -> List.findMap(match (found, v) -> if (found == key) Some(v) else None, pairs);
+                    (Span.Span(clampSpan(value("colspan") |> Option.flatMap(Int32.fromString)), clampSpan(value("rowspan") |> Option.flatMap(Int32.fromString))), body)
+                case _ => (Span.Span(1, 1), text)
+            }
+            case _ => (Span.Span(1, 1), text)
+        }
 
     /// 区切り行から列ごとの寄せ。`:---` 左、`:---:` 中央、`---:` 右、`---` 指定なし。
     def alignsOf(separator: String): List[Option[String]] =

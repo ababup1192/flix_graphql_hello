@@ -50,6 +50,17 @@ mod TestMarkdown {
 
     def tableCell(inlines: List[Json]): Json = CmsTestKit.richNode("tableCell", Nil, List#{ paragraph(inlines) })
 
+    /// 結合したセル。colspan / rowspan は 2 以上の時だけ attrs に出る。
+    def spanHeader(colspan: Int32, rowspan: Int32, inlines: List[Json]): Json =
+        CmsTestKit.richNode("tableHeader", spanAttrs(colspan, rowspan), List#{ paragraph(inlines) })
+
+    def spanCell(colspan: Int32, rowspan: Int32, inlines: List[Json]): Json =
+        CmsTestKit.richNode("tableCell", spanAttrs(colspan, rowspan), List#{ paragraph(inlines) })
+
+    def spanAttrs(colspan: Int32, rowspan: Int32): List[(String, Json)] =
+        (if (colspan > 1) List#{ ("colspan", CmsTestKit.intJson(colspan)) } else Nil)
+            ::: (if (rowspan > 1) List#{ ("rowspan", CmsTestKit.intJson(rowspan)) } else Nil)
+
     def alignedHeader(align: String, inlines: List[Json]): Json =
         CmsTestKit.richNode("tableHeader", List#{ ("align", Json.JString(align)) }, List#{ paragraph(inlines) })
 
@@ -134,6 +145,21 @@ mod TestMarkdown {
             tableRow(List#{ alignedHeader("left", List#{ plain("名") }), alignedHeader("center", List#{ plain("印") }), alignedHeader("right", List#{ plain("額") }) }),
             tableRow(List#{ alignedCell("left", List#{ plain("a") }), alignedCell("center", List#{ plain("b") }), alignedCell("right", List#{ plain("c") }) }) }) }),
          "| 名 | 印 | 額 |\n| :--- | :---: | ---: |\n| a | b | c |"),
+        // table のセルの結合: 中身の後ろに {colspan=N rowspan=N}。覆われる所には空のセルを置く
+        (doc(List#{ table(List#{
+            tableRow(List#{ spanHeader(2, 1, List#{ plain("見出し") }) }),
+            tableRow(List#{ tableCell(List#{ plain("a") }), tableCell(List#{ plain("b") }) }) }) }),
+         "| 見出し {colspan=2} |  |\n| --- | --- |\n| a | b |"),
+        (doc(List#{ table(List#{
+            tableRow(List#{ tableHeader(List#{ plain("h1") }), tableHeader(List#{ plain("h2") }) }),
+            tableRow(List#{ spanCell(1, 2, List#{ plain("A") }), tableCell(List#{ plain("b") }) }),
+            tableRow(List#{ tableCell(List#{ plain("c") }) }) }) }),
+         "| h1 | h2 |\n| --- | --- |\n| A {rowspan=2} | b |\n|  | c |"),
+        (doc(List#{ table(List#{
+            tableRow(List#{ spanHeader(2, 2, List#{ plain("角") }), tableHeader(List#{ plain("h") }) }),
+            tableRow(List#{ tableCell(List#{ plain("x") }) }),
+            tableRow(List#{ tableCell(List#{ plain("a") }), tableCell(List#{ plain("b") }), tableCell(List#{ plain("c") }) }) }) }),
+         "| 角 {colspan=2 rowspan=2} |  | h |\n| --- | --- | --- |\n|  |  | x |\n| a | b | c |"),
         // 上付き・下付き・蛍光ペン。**マークダウンに広く通っている書き方に寄せる。**
         (doc(List#{ paragraph(List#{ plain("H"), marked("sub", "2"), plain("O") }) }), "H~2~O"),
         (doc(List#{ paragraph(List#{ plain("m"), marked("sup", "2") }) }), "m^2^"),
@@ -267,6 +293,24 @@ mod TestMarkdown {
         Assert.assertEq(
             expected = dialectPairs() |> List.map(match (document, markdown) -> (markdown, document)),
             dialectPairs() |> List.map(match (_, markdown) -> (markdown, Markdown.fromMarkdown(markdown))))
+
+    ///
+    /// 結合の値が壊れている時は 1 として読む（`{…}` 自体は colspan / rowspan があれば落とす）。
+    /// colspan / rowspan を持たない `{…}` はセルの文字として残す。
+    ///
+    def brokenSpanPairs(): List[(String, Json)] = List#{
+        ("| a {colspan=0} | b |\n| --- | --- |", doc(List#{ table(List#{ tableRow(List#{ tableHeader(List#{ plain("a") }), tableHeader(List#{ plain("b") }) }) }) })),
+        ("| a {colspan=abc} | b |\n| --- | --- |", doc(List#{ table(List#{ tableRow(List#{ tableHeader(List#{ plain("a") }), tableHeader(List#{ plain("b") }) }) }) })),
+        ("| a {rowspan=99999} | b |\n| --- | --- |", doc(List#{ table(List#{ tableRow(List#{ tableHeader(List#{ plain("a") }), tableHeader(List#{ plain("b") }) }) }) })),
+        ("| a {colspan=2 foo=1} | b |\n| --- | --- |", doc(List#{ table(List#{ tableRow(List#{ spanHeader(2, 1, List#{ plain("a") }) }) }) })),
+        ("| a {foo=1} | b |\n| --- | --- |", doc(List#{ table(List#{ tableRow(List#{ tableHeader(List#{ plain("a {foo=1}") }), tableHeader(List#{ plain("b") }) }) }) }))
+    }
+
+    @Test
+    def testFromMarkdownBrokenSpan(): Unit \ Assert =
+        Assert.assertEq(
+            expected = brokenSpanPairs() |> List.map(snd),
+            brokenSpanPairs() |> List.map(fst) |> List.map(Markdown.fromMarkdown))
 
     /// 読む時だけ受ける形（* の箇条書き・1) の番号・*** の罫線・[!Note]・__ と *・行末 2 空白・CRLF）。
     @Test

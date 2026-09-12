@@ -40,7 +40,7 @@ note 風の書き心地（画像・引用の出典、外部リンクのカード
 | 見出し | h1〜h5 | h1〜h4 | h1〜h4（`maxHeadingLevel`） | h5 は CMS 側の口が要る |
 | 太字 / 斜体 / 打ち消し / インラインコード | ある | ある | ある | 済 |
 | **下線** | ある | **入れた** | `underline` にある | 済 |
-| **表** | ある（結合と分割も） | **入れた**（結合は無し） | `table` / `tableRow` / `tableCell` / `tableHeader` | 済。**結合は CMS 側の口が要る**（`toHtml` が colspan / rowspan を出さない） |
+| **表** | ある（結合と分割も） | **入れた**（結合は無し） | `table` / `tableRow` / `tableCell` / `tableHeader` | 済。結合は `attrs.colspan` / `rowspan`（`toHtml` が属性に、Markdown が `{colspan=2 rowspan=3}` に出す） |
 | **文字色** | ある（プリセット + ピッカー） | 無し | **無い** | **CMS 側に口が要る** |
 | 背景色 | v2 で廃止 | 無し | 無い | 追わない |
 | **文字寄せ** | ある（左 / 中央 / 右） | 無し | **無い** | **CMS 側に口が要る** |
