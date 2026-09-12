@@ -1,4 +1,4 @@
-module Page.Projects exposing (Model, Msg, init, load, notFound, update, view)
+module Page.Projects exposing (Model, Msg, currentPerson, init, load, notFound, update, view)
 
 {-| プロジェクトを選ぶ画面。組織ごとに並べ、そこから組織とプロジェクトを作る。
 
@@ -50,6 +50,13 @@ type Msg
 init : Person -> Model
 init person =
     { person = person, newProject = Nothing, newOrg = Nothing, errors = [], busy = False, orgProjects = Dict.empty, notFoundSlug = Nothing }
+
+
+{-| この画面で作った組織とプロジェクトを含む、今の自分。親が枠へ写す。
+-}
+currentPerson : Model -> Person
+currentPerson model =
+    model.person
 
 
 {-| URL のプロジェクトが見つからなかった事をこの画面で伝える。

@@ -1,4 +1,4 @@
-module View exposing (broken, loading, notFound, notMember, placeholder, signedOut)
+module View exposing (broken, loading, notFound, placeholder, signedOut)
 
 {-| 入口の状態と、中に入った後の枠。
 
@@ -8,8 +8,8 @@ WhyNot: elm-css を使わない。既存の Elm 資産（flix\_ge\_studio）が 
 
 -}
 
-import Html exposing (Html, a, div, span, text)
-import Html.Attributes exposing (class, href)
+import Html exposing (Html, div, span, text)
+import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
 
 
@@ -22,25 +22,6 @@ loading =
         , div [ class "flex w-full max-w-md flex-col gap-2" ]
             [ skeleton "w-3/5", skeleton "w-4/5", skeleton "w-2/5" ]
         , span [ class "text-xs text-ink-faint" ] [ text "読み込んでいます" ]
-        ]
-
-
-{-| ログインは通ったが、どのプロジェクトにも参加していない人。
--}
-notMember : { email : String, onReload : msg } -> Html msg
-notMember args =
-    centered
-        [ logo
-        , heading "まだどのプロジェクトにも参加していません"
-        , paragraph
-            [ text "ログインは "
-            , span [ class "font-semibold text-ink" ] [ text args.email ]
-            , text " で通っています。管理者に招待してもらってください。招待されたらこのページを開き直すだけで入れます。"
-            ]
-        , div [ class "flex gap-2" ]
-            [ button "再読み込み" args.onReload
-            , linkButton "別のアカウントでログイン" "/cdn-cgi/access/logout"
-            ]
         ]
 
 
@@ -141,14 +122,5 @@ button label msg =
     Html.button
         [ class "rounded-md bg-ink px-4 py-2 text-[13px] font-semibold text-panel"
         , onClick msg
-        ]
-        [ text label ]
-
-
-linkButton : String -> String -> Html msg
-linkButton label url =
-    a
-        [ class "rounded-md border border-edge bg-panel px-4 py-2 text-[13px] font-semibold text-ink"
-        , href url
         ]
         [ text label ]

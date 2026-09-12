@@ -120,7 +120,6 @@ type alias ModelWith key =
 -}
 type Phase
     = Loading
-    | NotMember { email : String }
     | SignedOut
     | Broken { message : String, requestId : Maybe String }
     | Ready Workspace
@@ -396,7 +395,15 @@ update msg model =
                 (\workspace ->
                     case workspace.page of
                         ProjectsPage page ->
-                            Projects.update pageMsg page |> mapPage ProjectsPage ProjectsMsg workspace
+                            let
+                                ( next, calls ) =
+                                    Projects.update pageMsg page
+                            in
+                            -- WhyNot: 作った組織とプロジェクトを画面の中だけに留めない。枠の `person` が古いままだと、
+                            -- 作った直後のカードを押した時に「知らないプロジェクト」と判定されてこの画面へ戻される。
+                            ( { workspace | person = Projects.currentPerson next, page = ProjectsPage next }
+                            , List.map (Api.mapCall ProjectsMsg) calls
+                            )
 
                         _ ->
                             ( workspace, [] )
@@ -649,8 +656,12 @@ update msg model =
                 (\workspace ->
                     case workspace.page of
                         SchemaPage page ->
-                            Schema.update (context workspace) pageMsg page
-                                |> mapPage SchemaPage SchemaMsg workspace
+                            let
+                                ( next, calls ) =
+                                    Schema.update (context workspace) pageMsg page
+                                        |> mapPage SchemaPage SchemaMsg workspace
+                            in
+                            ( next, calls ++ typesAfterSchema pageMsg workspace )
 
                         _ ->
                             ( workspace, [] )
@@ -1006,6 +1017,23 @@ pageUnsaved model =
             False
 
 
+{-| API を作った後、サイドバーの一覧を取り直す。
+
+WhyNot: Schema の返事から 1 件を足す形にしない。並びは apiId 順で、足す位置をここで
+再現すると順序の決まりが 2 か所に生まれる。取り直せば 1 往復で必ず揃う。
+取り直さないと、作った API はページを丸ごと読み直すまでサイドバーに出ない（実際に出なかった）。
+
+-}
+typesAfterSchema : Schema.Msg -> Workspace -> List (Api.Call Msg)
+typesAfterSchema pageMsg workspace =
+    case ( pageMsg, workspace.project ) of
+        ( Schema.GotNewType (Ok _), Just chosen ) ->
+            [ Api.call (\id -> Queries.contentTypes id chosen.slug) GotTypes ]
+
+        _ ->
+            []
+
+
 {-| ページが投げたい物を、親が id を振って送る形に直す。
 
 ページは通信の id を持たない（持たせると採番を配る事になる）。
@@ -1115,54 +1143,56 @@ failureOf problem =
             Broken (Api.problemToText problem)
 
 
-{-| me が返ってきた。プロジェクトに入っていない人はそこで止める。
+{-| me が返ってきた。
+
+WhyNot: プロジェクトを 1 つも持たない人をここで止めない。止めると「招待してもらってください」の
+壁だけが出て、組織を作る道（`Projects` の画面）に構造的に辿り着けない。CMS\_SIGNUP=open が
+既定なのに、新しく来た人が UI から始められなかった。プロジェクトが無ければ `project` は
+`Nothing` になり、入口は `Projects` の画面（組織を作成）へ落ちる。
+
 -}
 gotPerson : Person -> ModelWith key -> ( ModelWith key, Effect Msg )
 gotPerson person model =
-    if List.isEmpty person.projects then
-        ( { model | phase = NotMember { email = person.email } }, Effect.none )
+    let
+        project : Maybe Project
+        project =
+            pickProject model.route person
 
-    else
-        let
-            project : Maybe Project
-            project =
-                pickProject model.route person
+        workspace : Workspace
+        workspace =
+            { person = person
+            , project = project
+            , permissions = []
+            , types = []
 
-            workspace : Workspace
-            workspace =
-                { person = person
-                , project = project
-                , permissions = []
-                , types = []
+            -- プロジェクトが選べなければ問い合わせ自体を出さない。待っても届かない
+            , typesArrived = project == Nothing
+            , origin = model.origin
+            , publicOrigin = ""
+            , page = Placeholder ""
+            }
 
-                -- プロジェクトが選べなければ問い合わせ自体を出さない。待っても届かない
-                , typesArrived = project == Nothing
-                , origin = model.origin
-                , publicOrigin = ""
-                , page = Placeholder ""
-                }
+        ( withViewer, viewerEffect ) =
+            case project of
+                Just chosen ->
+                    { model | phase = Ready workspace }
+                        |> send (Api.call (\id -> Queries.viewer id chosen.slug) GotViewer)
 
-            ( withViewer, viewerEffect ) =
-                case project of
-                    Just chosen ->
-                        { model | phase = Ready workspace }
-                            |> send (Api.call (\id -> Queries.viewer id chosen.slug) GotViewer)
+                Nothing ->
+                    ( { model | phase = Ready workspace }, Effect.none )
 
-                    Nothing ->
-                        ( { model | phase = Ready workspace }, Effect.none )
+        ( withTypes, typesEffect ) =
+            case project of
+                Just chosen ->
+                    withViewer |> send (Api.call (\id -> Queries.contentTypes id chosen.slug) GotTypes)
 
-            ( withTypes, typesEffect ) =
-                case project of
-                    Just chosen ->
-                        withViewer |> send (Api.call (\id -> Queries.contentTypes id chosen.slug) GotTypes)
+                Nothing ->
+                    ( withViewer, Effect.none )
 
-                    Nothing ->
-                        ( withViewer, Effect.none )
-
-            ( final, routeEffect ) =
-                enterRoute model.route withTypes
-        in
-        ( final, Effect.batch [ viewerEffect, typesEffect, routeEffect ] )
+        ( final, routeEffect ) =
+            enterRoute model.route withTypes
+    in
+    ( final, Effect.batch [ viewerEffect, typesEffect, routeEffect ] )
 
 
 {-| URL のプロジェクトを優先し、URL に無ければ最初の 1 つ。
@@ -1496,9 +1526,6 @@ view model =
         [ case model.phase of
             Loading ->
                 View.loading
-
-            NotMember { email } ->
-                View.notMember { email = email, onReload = ReloadClicked }
 
             SignedOut ->
                 View.signedOut { onReload = ReloadClicked }
