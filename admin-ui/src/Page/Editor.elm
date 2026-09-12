@@ -1965,7 +1965,7 @@ viewRail args model =
                         Ui.note [ text "公開中の内容と同じです。書き換えると公開できます。" ]
 
                       else
-                        Ui.note [ text "公開は上の帯の「公開する」から。" ]
+                        Ui.note [ text "公開は上の帯のボタンから。" ]
                     , if model.stage == "DRAFT" then
                         text ""
 
