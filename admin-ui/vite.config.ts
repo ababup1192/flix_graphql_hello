@@ -99,6 +99,13 @@ export default defineConfig({
   // vite が解く印で、事前バンドル（rolldown）はそれを普通のパスとして開こうとして
   // 「No such file or directory」で止まる（実際に dev サーバが起動しなくなった）。
 
+  // WhyNot: 事前バンドルに任せきりにしない。monaco-graphql の worker は
+  // CommonJS の `nullthrows` を default import していて、worker の中では
+  // 「does not provide an export named 'default'」で落ちる（dev だけ。補完が
+  // 「Loading...」で止まったのがこれ。editor / json の worker は無事だった）。
+  // 名指しで事前バンドルに入れると ESM の形で配られ、worker からも読める。
+  optimizeDeps: { include: ["nullthrows", "picomatch-browser"] },
+
   server: {
     port: 5173,
     strictPort: true,
