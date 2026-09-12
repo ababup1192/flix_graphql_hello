@@ -431,9 +431,20 @@ entryPrefix =
 
 actionOptions : List ( String, String )
 actionOptions =
-    ( "", "すべて" )
-        :: List.map (\prefix -> ( prefix, prefix ))
-            [ "member.", "api_key.", "type.", "field.", "webhook.", "asset.", entryPrefix, "project." ]
+    {- WhyNot: 前方一致の値をそのまま見せない。`asset.` のような識別子は、
+       画面の他の場所で使っている語（メディア・API・フィールド）と結び付かず、
+       どれを選べば目的の行が出るのか読んだ人に分からない。
+    -}
+    [ ( "", "すべて" )
+    , ( "member.", "メンバー" )
+    , ( "api_key.", "API キー" )
+    , ( "type.", "API" )
+    , ( "field.", "フィールド" )
+    , ( "webhook.", "Webhook" )
+    , ( "asset.", "メディア" )
+    , ( entryPrefix, "コンテンツ" )
+    , ( "project.", "プロジェクト" )
+    ]
 
 
 viewFilters : Model -> Html Msg
@@ -619,11 +630,19 @@ viewRow surround model row =
         zone : Time.Zone
         zone =
             Maybe.withDefault Time.utc model.zone
+
+        thisYear : Int
+        thisYear =
+            {- WhyNot: 今日が分かるまで今年を決め打ちしない。0 にしておくと
+               どの行とも一致せず、年の付いた長い方が出る。短い方に倒すと、
+               去年の行が今年の行の顔で並ぶ。
+            -}
+            model.today |> Maybe.map .year |> Maybe.withDefault 0
     in
     div [ Html.Attributes.id (rowDomId row.id) ]
         [ Ui.rowOf columns
             [ span [ class "font-mono text-[12px] whitespace-nowrap", title row.createdAt ]
-                [ text (DateTime.formatLocalShort zone row.createdAt ++ " " ++ DateTime.zoneAbbr zone row.createdAt) ]
+                [ text (DateTime.formatLocalShort zone thisYear row.createdAt ++ " " ++ DateTime.zoneAbbr zone row.createdAt) ]
             , div [ class "flex min-w-0 items-center gap-2" ]
                 [ Ui.chip (kindTone row.actorKind) row.actorKind
                 , span [ class "truncate", title row.actor ] [ text row.actor ]

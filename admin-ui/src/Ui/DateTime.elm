@@ -343,11 +343,27 @@ daysFromToday zone today iso =
             Nothing
 
 
-{-| 一覧の狭い列に出す形（`MM-DD HH:MM`）。年は展開した所の ISO 8601 で分かる。
+{-| 一覧の狭い列に出す形。今年なら `MM-DD HH:MM`、それ以外の年なら `YYYY-MM-DD HH:MM`。
+
+WhyNot: いつでも年を落とさない。監査ログは無期限に残るので、去年の行と今年の行が
+同じ `09-12` で並び、どちらが新しいのか列だけでは決められなくなる。
+
+WhyNot: いつでも年を出さない。ほとんどの行は今年で、全部に `2026-` が付くと
+狭い列が広がるだけで、行どうしの区別には何も足さない。
+
 -}
-formatLocalShort : Time.Zone -> String -> String
-formatLocalShort zone iso =
-    String.dropLeft 5 (formatLocal zone iso)
+formatLocalShort : Time.Zone -> Int -> String -> String
+formatLocalShort zone thisYear iso =
+    let
+        full : String
+        full =
+            formatLocal zone iso
+    in
+    if String.left 4 full == pad 4 thisYear then
+        String.dropLeft 5 full
+
+    else
+        full
 
 
 {-| 手元のタイムゾーンの略号。+09:00 は JST、0 は UTC、他は `UTC+hh:mm` の形。

@@ -42,6 +42,16 @@ suite =
                 , ( "2026-09-11T05:12", "2026-09-11 14:12" )
                 ]
             )
+        , describe "formatLocalShort: 今年は年を落とし、他の年は年を残す"
+            (List.map
+                (\( iso, expected ) -> test iso (\_ -> Ui.DateTime.formatLocalShort jst 2026 iso |> Expect.equal expected))
+                [ ( "2026-09-11T05:12:08Z", "09-11 14:12" )
+                , ( "2025-09-11T05:12:08Z", "2025-09-11 14:12" )
+                , ( "2025-12-31T15:30:00Z", "01-01 00:30" )
+                ]
+            )
+        , test "今日がまだ来ていなければ年を出す" <|
+            \_ -> Ui.DateTime.formatLocalShort jst 0 "2026-09-11T05:12:08Z" |> Expect.equal "2026-09-11 14:12"
         , describe "utcSeconds: UTC の ISO 8601 を秒で切る"
             (List.map
                 (\( iso, expected ) -> test iso (\_ -> Ui.DateTime.utcSeconds iso |> Expect.equal expected))
