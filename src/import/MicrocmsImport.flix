@@ -15,6 +15,29 @@ mod MicrocmsImport {
     pub type alias Types = Map[String, TypeId]
 
     ///
+    /// 取り込みのデモが置く画像 1 枚。
+    ///
+    /// - fileName: asset のファイル名（`import/images/` のファイル名をそのまま）
+    /// - mime: 置く時の Content-Type
+    /// - bytes: ファイルの中身
+    /// - width / height: 実物の寸法（confirm に渡す）
+    /// - alt: 役割が分かる説明
+    ///
+    pub type alias DemoImage = { fileName = String, mime = String, bytes = Vector[Int8], width = Int32, height = Int32, alt = String }
+
+    ///
+    /// 役割ごとのデモ画像。
+    ///
+    /// - wide: 本文の中に置く横長
+    /// - sideA / sideB: 並べて置く 2 枚（違う絵）
+    /// - tall: size / align の効きを見る縦長
+    ///
+    pub type alias DemoImages = { wide = DemoImage, sideA = DemoImage, sideB = DemoImage, tall = DemoImage }
+
+    /// 置き終わった後の asset の id。役割は DemoImages と同じ。
+    pub type alias DemoAssets = { wide = AssetId, sideA = AssetId, sideB = AssetId, tall = AssetId }
+
+    ///
     /// 全 API の型を作り、フィールドを足す。参照は全部の型を作った後に足す（相互参照と自己参照のため）。
     /// 写せないフィールドがあれば何もせず invalid（1 つずつ path に "schema"、文言に API 名.フィールド名: 種類）。
     ///
@@ -32,7 +55,7 @@ mod MicrocmsImport {
         let singular = Naming.deriveSingular(api#apiId);
         let singularQuery = String.toLowerCase(String.takeLeft(1, TypeName.text(singular))) + String.dropLeft(1, TypeName.text(singular));
         let plural = if (singularQuery == ApiId.text(api#apiId)) ApiId.parse("${ApiId.text(api#apiId)}List") else None;
-        { apiId = api#apiId, kind = TypeKind.Collection, name = api#endpoint, singular = Some(singular), plural = plural, previewUrl = None, linkPath = linkPathOf(api), icon = None }
+        { apiId = api#apiId, kind = TypeKind.Collection, name = api#endpoint, singular = Some(singular), plural = plural, previewUrl = None, linkPath = linkPathOf(api), icon = MicrocmsIcons.iconOf(api#apiId) }
 
     ///
     /// slug を持つ API のパスの形。`/<apiId>/{slug}` にして、外向きの URL に entry id を出さない。
@@ -115,36 +138,36 @@ mod MicrocmsImport {
     // ---- ダミーの entry ----
 
     ///
-    /// 各 API に count 件のダミー entry を作り、参照を張って、全部公開する。ダミーの画像を 1 つ置いて全 media に使う。
+    /// 各 API に count 件のダミー entry を作り、参照を張って、全部公開する。役割の違う画像 4 枚を置いて使う。
     /// 戻りは endpoint → 作った entry の id。
     ///
-    pub def seedDummy(apis: List[Api], types: Types, count: Int32): Map[String, List[EntryId]] \ Db + CmsErr + IdGen + Tenant + Session + ObjectStore + Net.Http.Http =
-        let asset = placeDummyImage();
+    pub def seedDummy(apis: List[Api], types: Types, count: Int32, images: DemoImages): Map[String, List[EntryId]] \ Db + CmsErr + IdGen + Tenant + Session + ObjectStore + Net.Http.Http =
+        let assets = placeDemoImages(images);
         let created = apis |> List.map(api -> {
             let typeId = Map.get(api#endpoint, types) |> Option.getWithDefault(TypeId.TypeId(0i64));
-            (api#endpoint, List.range(1, count + 1) |> List.map(n -> ContentEntries.create(Session.grant(), typeId, None, valuesOf(api, asset, Map.empty(), n, false))#id))
+            (api#endpoint, List.range(1, count + 1) |> List.map(n -> ContentEntries.create(Session.grant(), typeId, None, valuesOf(api, assets, Map.empty(), n, false))#id))
         }) |> List.toMap;
         // 参照は全部の entry ができてから張る（相互参照・自己参照のため）
         List.forEach(api -> Map.get(api#endpoint, created) |> Option.getWithDefault(Nil) |> List.forEachWithIndex((index, id) -> {
             let entry = ContentEntries.get(Session.grant(), id);
-            discard ContentEntries.update(Session.grant(), id, valuesOf(api, asset, created, index + 1, true), entry#version)
+            discard ContentEntries.update(Session.grant(), id, valuesOf(api, assets, created, index + 1, true), entry#version)
         }), apis);
         List.forEach(api -> Map.get(api#endpoint, created) |> Option.getWithDefault(Nil) |> List.forEach(id -> discard ContentEntries.publish(Session.grant(), id, "microcms-import", true)), apis);
         created
 
     /// フィールドの値。withReferences が false なら参照のフィールドを入れない（1 回目の作成用）。
-    def valuesOf(api: Api, asset: AssetId, created: Map[String, List[EntryId]], n: Int32, withReferences: Bool): EntryData =
+    def valuesOf(api: Api, assets: DemoAssets, created: Map[String, List[EntryId]], n: Int32, withReferences: Bool): EntryData =
         api#fields
-            |> List.filterMap(field -> valueOf(api, asset, created, n, withReferences, field) |> Option.map(value -> (apiIdOf(field#fieldId), value)))
+            |> List.filterMap(field -> valueOf(api, assets, created, n, withReferences, field) |> Option.map(value -> (apiIdOf(field#fieldId), value)))
             |> List.toMap
 
-    def valueOf(api: Api, asset: AssetId, created: Map[String, List[EntryId]], n: Int32, withReferences: Bool, field: Field): Option[Json] = match field#kind {
+    def valueOf(api: Api, assets: DemoAssets, created: Map[String, List[EntryId]], n: Int32, withReferences: Bool, field: Field): Option[Json] = match field#kind {
         // slug は URL に出るので、名前（"名前 1"）ではなく apiId と番号から作る
         case Kind.Text if isSlugField(field) => Some(Json.JString("${ApiId.text(api#apiId)}-${n}"))
         case Kind.Text       => Some(Json.JString("${field#name} ${n}"))
         case Kind.TextArea   => Some(Json.JString("${field#name} ${n} の 1 行目\n2 行目"))
-        case Kind.RichEditor => Some(richTextDoc(field#name, n, asset))
-        case Kind.Media      => Some(Json.JString(AssetId.text(asset)))
+        case Kind.RichEditor => Some(richTextDoc(field#name, n, assets))
+        case Kind.Media      => Some(Json.JString(AssetId.text(assets#wide)))
         case Kind.Boolean    => Some(Json.JBool(Int32.remainder(n, 2) == 0))
         case Kind.Number     => Some(Json.JNumber(Int32.toBigDecimal(n)))
         case Kind.Date       => Some(Json.JString("2026-09-${String.padLeft(2, '0', "${Int32.remainder(n - 1, 28) + 1}")}T00:00:00Z"))
@@ -155,7 +178,7 @@ mod MicrocmsImport {
         case Kind.Repeater(variants) =>
             let blocks = variants |> List.filterMap(variantId -> List.find(custom -> custom#fieldId == variantId, api#customFields)) |> List.map(custom ->
                 Json.JObject(Map.insert("blockType", Json.JString(ApiId.text(apiIdOf(custom#fieldId))),
-                    custom#fields |> List.map(childRenamed(custom#fieldId)) |> List.filterMap(child -> valueOf(api, asset, created, n, withReferences, child) |> Option.map(value -> (ApiId.text(apiIdOf(child#fieldId)), value))) |> List.toMap)));
+                    custom#fields |> List.map(childRenamed(custom#fieldId)) |> List.filterMap(child -> valueOf(api, assets, created, n, withReferences, child) |> Option.map(value -> (ApiId.text(apiIdOf(child#fieldId)), value))) |> List.toMap)));
             Some(Json.JArray(List.toVector(blocks)))
         case Kind.Unsupported(_) => None
     }
@@ -166,7 +189,7 @@ mod MicrocmsImport {
     /// WhyNot: 古い形（attrs.assetId を持つ image / gallery / blockquote の attrs.cite）を入れない。
     /// 読む側だけの互換で、書き出す側が作る形ではないので、ここに置くと新しく作る doc の見本にならない。
     ///
-    def richTextDoc(name: String, n: Int32, asset: AssetId): Json =
+    def richTextDoc(name: String, n: Int32, assets: DemoAssets): Json =
         docNode(
             List#{ headingNode(2, Some("demo-top"), "${name} ${n} の全部盛り") }
                 ::: marksSection()
@@ -174,9 +197,9 @@ mod MicrocmsImport {
                 ::: quoteSection()
                 ::: codeSection()
                 ::: tableSection()
-                ::: imageSection(asset)
+                ::: imageSection(assets)
                 ::: mathSection()
-                ::: mediaSection(asset))
+                ::: mediaSection(assets))
 
     /// 段落に掛けられるマークを一通り。
     def marksSection(): List[Json] =
@@ -325,16 +348,15 @@ mod MicrocmsImport {
             })
         }
 
-    /// 画像。1 枚（キャプション・出典・リンク・縮小・配置）と、並べた 2 枚。
-    def imageSection(asset: AssetId): List[Json] =
+    /// 画像。本文の中の横長 1 枚（キャプション・出典・リンク）、並べた 2 枚、縮小して右に寄せた縦長 1 枚。
+    def imageSection(assets: DemoAssets): List[Json] =
         List#{
             headingNode(3, None, "画像"),
             node("image", Map.empty(), List#{
                 node("imageItem",
-                    Map#{ "assetId" => Json.JString(AssetId.text(asset)), "alt" => Json.JString("ダミー画像"),
+                    Map#{ "assetId" => Json.JString(AssetId.text(assets#wide)), "alt" => Json.JString("1 枚目・横長。本文の中に置く画像"),
                           "source" => Json.JString("社内資料"), "sourceUrl" => Json.JString("https://example.com/source"),
-                          "href" => Json.JString("https://example.com/photo"), "size" => Json.JString("small"),
-                          "align" => Json.JString("right") },
+                          "href" => Json.JString("https://example.com/photo") },
                     List#{
                         textNode("キャプションの中の", Nil),
                         textNode("斜体", markNode("italic") :: Nil),
@@ -343,10 +365,16 @@ mod MicrocmsImport {
                     })
             }),
             node("image", Map.empty(), List#{
-                node("imageItem", Map#{ "assetId" => Json.JString(AssetId.text(asset)), "alt" => Json.JString("並べた 1 枚目") },
-                    List#{ textNode("1 枚目", Nil) }),
-                node("imageItem", Map#{ "assetId" => Json.JString(AssetId.text(asset)), "alt" => Json.JString("並べた 2 枚目") },
-                    List#{ textNode("2 枚目", Nil) })
+                node("imageItem", Map#{ "assetId" => Json.JString(AssetId.text(assets#sideA)), "alt" => Json.JString("2 枚目・並べた左側の画像") },
+                    List#{ textNode("並べた 1 枚目", Nil) }),
+                node("imageItem", Map#{ "assetId" => Json.JString(AssetId.text(assets#sideB)), "alt" => Json.JString("3 枚目・並べた右側の画像") },
+                    List#{ textNode("並べた 2 枚目", Nil) })
+            }),
+            node("image", Map.empty(), List#{
+                node("imageItem",
+                    Map#{ "assetId" => Json.JString(AssetId.text(assets#tall)), "alt" => Json.JString("4 枚目・縦長。小さく右に寄せた画像"),
+                          "size" => Json.JString("small"), "align" => Json.JString("right") },
+                    List#{ textNode("小さく右に寄せた縦長", Nil) })
             })
         }
 
@@ -359,7 +387,7 @@ mod MicrocmsImport {
         }
 
     /// callout / details / video / linkCard / embed と、レベル 4 の見出し。
-    def mediaSection(asset: AssetId): List[Json] =
+    def mediaSection(assets: DemoAssets): List[Json] =
         List#{
             headingNode(3, None, "囲みと埋め込み"),
             node("callout", Map#{ "kind" => Json.JString("note") }, List#{ paragraphOf("note の囲みです。補足を入れます。") }),
@@ -370,9 +398,12 @@ mod MicrocmsImport {
                 node("bulletList", Map.empty(), List#{ listItem(Map.empty(), List#{ paragraphOf("中にリストも置けます") }) })
             }),
             headingNode(4, Some("demo-media"), "動画とカード"),
-            leafNode("video", Map#{ "assetId" => Json.JString(AssetId.text(asset)),
-                                    "poster" => Json.JString(AssetId.text(asset)),
-                                    "caption" => Json.JString("ダミー動画") }),
+            // WhyNot: ここだけ動画でなく画像の asset を指す。video はエディタに入口が無く、
+            // 取り込みは素通しで受ける形を見せるだけなので、リポジトリに動画ファイルを置かない。
+            // poster は絵として出るが、video 自体はブラウザで再生できない
+            leafNode("video", Map#{ "assetId" => Json.JString(AssetId.text(assets#wide)),
+                                    "poster" => Json.JString(AssetId.text(assets#wide)),
+                                    "caption" => Json.JString("動画の代わりに画像を指した video") }),
             leafNode("linkCard", Map#{ "url" => Json.JString("https://example.com/blog/hello") }),
             leafNode("embed", Map#{ "url" => Json.JString("https://www.youtube.com/watch?v=dQw4w9WgXcQ") }),
             leafNode("embed", Map#{ "url" => Json.JString("https://vimeo.com/76979871") }),
@@ -407,15 +438,45 @@ mod MicrocmsImport {
 
     def listItem(itemAttrs: Map[String, Json], content: List[Json]): Json = node("listItem", itemAttrs, content)
 
-    /// ダミーの画像を 1 つ置いて READY にする。中身は PNG ではなく短い文字列（器の確認なので描画はしない）。
-    def placeDummyImage(): AssetId \ Db + CmsErr + IdGen + Tenant + Session + ObjectStore + Net.Http.Http =
-        let body = "dummy";
-        let upload = Assets.createUpload(Session.grant(), { fileName = "dummy.png", mime = "image/png", size = Int32.toInt64(String.length(body)) });
-        match Net.Http.send(HttpRequest.put(upload#uploadUrl, body) |> HttpRequest.withContentType("image/png")) {
+    ///
+    /// dir（既定は `import/images`）から役割ごとの PNG を読む。寸法はファイルの実物と合わせて手で書いてある。
+    /// 1 枚でも読めなければ理由の文字列。
+    ///
+    /// WhyNot: PNG の中から寸法を読み取らない。ここで要るのは 4 枚の決め打ちの絵の寸法だけで、
+    /// 画像フォーマットの解析を持つと取り込み以外の物まで置けるように見える。
+    ///
+    pub def loadDemoImages(dir: String): Result[String, DemoImages] \ Fs.FileRead =
+        forM (
+            wide  <- loadDemoImage(dir, "demo-wide.png", 1200, 630, "1 枚目・横長。本文の中に置く画像");
+            sideA <- loadDemoImage(dir, "demo-side-a.png", 800, 600, "2 枚目・並べた左側の画像");
+            sideB <- loadDemoImage(dir, "demo-side-b.png", 800, 600, "3 枚目・並べた右側の画像");
+            tall  <- loadDemoImage(dir, "demo-tall.png", 600, 900, "4 枚目・縦長。小さく右に寄せた画像")
+        ) yield { wide = wide, sideA = sideA, sideB = sideB, tall = tall }
+
+    def loadDemoImage(dir: String, fileName: String, width: Int32, height: Int32, alt: String): Result[String, DemoImage] \ Fs.FileRead =
+        Fs.FileRead.readBytes("${dir}/${fileName}")
+            |> Result.mapErr(error -> "${dir}/${fileName} を読めません: ${error}")
+            |> Result.map(bytes -> { fileName = fileName, mime = "image/png", bytes = bytes, width = width, height = height, alt = alt })
+
+    /// 4 枚を置いて READY にする。
+    def placeDemoImages(images: DemoImages): DemoAssets \ Db + CmsErr + IdGen + Tenant + Session + ObjectStore + Net.Http.Http =
+        { wide = placeDemoImage(images#wide), sideA = placeDemoImage(images#sideA),
+          sideB = placeDemoImage(images#sideB), tall = placeDemoImage(images#tall) }
+
+    ///
+    /// 1 枚を署名付き URL へ置き、実物の寸法と alt で READY にする。
+    ///
+    /// WhyNot: `HttpRequest.put(url, body)` の文字列のボディに渡さない。文字列は UTF-8 で符号化されるので、
+    /// PNG のバイト列は置いた時点で壊れ、配信 URL を開いても絵にならない。
+    ///
+    def placeDemoImage(image: DemoImage): AssetId \ Db + CmsErr + IdGen + Tenant + Session + ObjectStore + Net.Http.Http =
+        let size = Int32.toInt64(Vector.length(image#bytes));
+        let upload = Assets.createUpload(Session.grant(), { fileName = image#fileName, mime = image#mime, size = size });
+        match Net.Http.send(HttpRequest.put(upload#uploadUrl, "") |> HttpRequest.withBodyBytes(image#bytes) |> HttpRequest.withContentType(image#mime)) {
             case Ok(response) if HttpResponse.isSuccess(response) => ()
-            case Ok(response) => CmsErr.invalid(Violation.Violation("asset", "ダミー画像を置けません（HTTP ${HttpResponse.status(response)}）") :: Nil)
-            case Err(error)   => CmsErr.invalid(Violation.Violation("asset", "ダミー画像を置けません: ${error}") :: Nil)
+            case Ok(response) => CmsErr.invalid(Violation.Violation("asset", "${image#fileName} を置けません（HTTP ${HttpResponse.status(response)}）") :: Nil)
+            case Err(error)   => CmsErr.invalid(Violation.Violation("asset", "${image#fileName} を置けません: ${error}") :: Nil)
         };
-        Assets.confirm(Session.grant(), upload#asset#id, { width = Some(1), height = Some(1), alt = Some("ダミー画像") })#id
+        Assets.confirm(Session.grant(), upload#asset#id, { width = Some(image#width), height = Some(image#height), alt = Some(image#alt) })#id
 
 }

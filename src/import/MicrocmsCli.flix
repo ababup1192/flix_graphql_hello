@@ -8,13 +8,15 @@ mod MicrocmsCli {
     ///
     /// 読んで写して積む。失敗は理由の文字列。
     ///
-    pub def execute(dir: String, pool: Pool, deps: Deps, projectId: ProjectId, count: Int32): Result[String, String] \ {IO, Fs.FileRead} =
+    pub def execute(dir: String, imageDir: String, pool: Pool, deps: Deps, projectId: ProjectId, count: Int32): Result[String, String] \ {IO, Fs.FileRead} =
         forM (
             apis <- readApis(dir);
+            // 画像は Tx の外で読む（Tx の中にファイルの読みを持ち込まない）
+            images <- MicrocmsImport.loadDemoImages(imageDir);
             outcome <- AppEnv.runWith(deps, Log.Fields.empty(), projectId, () ->
                     DbRunner.transact(pool, Some(projectId), Actor.System, () -> {
                         let types = MicrocmsImport.importSchema(apis);
-                        let created = MicrocmsImport.seedDummy(apis, types, count);
+                        let created = MicrocmsImport.seedDummy(apis, types, count, images);
                         (Map.size(types), created |> Map.valuesOf |> List.map(List.length) |> List.sum)
                     }))
                 |> Result.mapErr(ApplicationFailure.describe)

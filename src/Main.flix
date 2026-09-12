@@ -15,7 +15,7 @@ import java.lang.Throwable
 /// CMS_CORS_ORIGINS（カンマ区切り。省略時は CORS 無し）、CMS_BASE_DOMAIN（`{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。省略時は /p/ だけ）、
 /// CMS_DEFAULT_PROJECT（プロジェクト slug 無しの時のプロジェクト slug。省略時は default、空ならプロジェクト slug 無しは 404）、CMS_SIGNUP（open / closed）、
 /// CMS_JOBS（on / off。off ならプロセス内のワーカーを回さない。外部トリガーか別 worker で回す）、CMS_JOBS_TOKEN（POST /jobs/tick を許す値。無ければ閉じる）、CMS_JOBS_DRAIN_SECONDS（自己回復の停止で実行中の仕事を待つ秒数。既定 15）、CMS_SCHEDULER_CHUNK_SIZE / CMS_SCHEDULER_TICK_BUDGET_SECONDS（予約公開の 1 回の tick で拾う件数と、繰り返す上限の秒数。既定 100 / 10）、CMS_CDN_PURGE_URL / CMS_CDN_PURGE_TOKEN（両方あれば、版が進んだプロジェクトの CDN の purge を tick で送る）、CMS_SHUTDOWN_TIMEOUT_SECONDS（SIGTERM で HTTP の接続と仕事を待つ秒数。既定 20。超えたら終了コード 2）、CMS_SELF_HEAL（on / off。プールが壊れたまま戻らない時に自分で終わる。既定 on）、CMS_SELF_HEAL_MIN_UNHEALTHY_SECONDS（既定 90）、CMS_SELF_HEAL_WARMUP_SECONDS（起動から見送る秒数。既定 300）、CMS_SELF_HEAL_JITTER_SECONDS（複数台が同時に終わらないための上乗せの上限。既定 10）、CMS_CACHE_S_MAXAGE / CMS_CACHE_MAX_AGE / CMS_CACHE_STALE_WHILE_REVALIDATE（コンテンツ API の GET で身元無しの応答に付ける Cache-Control の秒数。既定 10 / 0 / 60、s-maxage と max-age が両方 0 なら no-store）、
-/// CMS_MODE=import-microcms（サーバを立てず、CMS_IMPORT_DIR の microCMS のスキーマを写してダミーの entry を CMS_IMPORT_COUNT 件ずつ積んで終わる）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
+/// CMS_MODE=import-microcms（サーバを立てず、CMS_IMPORT_DIR の microCMS のスキーマを写し、CMS_IMPORT_IMAGE_DIR の画像を置いて、ダミーの entry を CMS_IMPORT_COUNT 件ずつ積んで終わる）、CMS_MIGRATE（apply なら起動時に migrations/ を当てる。
 /// 省略時は check で、未適用があれば起動しない）、CMS_VERSION（/health とログの version に出す版。省略時は dev）、CMS_MAX_CONNECTIONS（HTTP の同時接続の上限。超えた接続は 503。既定 256）、
 /// CMS_LOG_LEVEL（trace / debug / info / warn / error / fatal。これより軽い行は出さない。既定 info）
 ///
@@ -75,7 +75,7 @@ def start(version: String, sink: Log.Sink): Unit \ {IO, Fs.FileRead, Sys.Exit, S
 /// - selfHeal: CMS_SELF_HEAL_*（off なら None）
 /// - maxConnections: CMS_MAX_CONNECTIONS（HTTP の同時接続の上限）
 /// - shutdownTimeoutMs: CMS_SHUTDOWN_TIMEOUT_SECONDS をミリ秒で
-/// - importDir / importCount: CMS_IMPORT_DIR / CMS_IMPORT_COUNT（一発処理だけが使う）
+/// - importDir / importImageDir / importCount: CMS_IMPORT_DIR / CMS_IMPORT_IMAGE_DIR / CMS_IMPORT_COUNT（一発処理だけが使う）
 ///
 type alias EnvConfig = {
     version = String, mode = Option[String], migrate = Option[String],
@@ -85,7 +85,7 @@ type alias EnvConfig = {
     server = ServerConfig, baseDomain = Option[String],
     jobsOn = Bool, jobsDrainSeconds = Int64, scheduler = Scheduler.Config, purge = Option[PurgeTarget], selfHeal = Option[SelfHeal.Settings],
     maxConnections = Int32, shutdownTimeoutMs = Int64,
-    importDir = String, importCount = Int32 }
+    importDir = String, importImageDir = String, importCount = Int32 }
 
 ///
 /// 環境変数を全部読む段。形が悪い物（CMS_DSN 無し、ASSET_* や CMS_AUTH の不足）は Err で起動を止める。
@@ -119,6 +119,7 @@ def readConfig(version: String): Result[String, EnvConfig] \ {IO, Sys.Env} =
           maxConnections = Sys.Env.getVar("CMS_MAX_CONNECTIONS") |> Option.flatMap(Int32.fromString) |> Option.filter(n -> n > 0) |> Option.getWithDefault(256),
           shutdownTimeoutMs = Shutdown.timeoutSeconds(Sys.Env.getVar("CMS_SHUTDOWN_TIMEOUT_SECONDS")) * 1000i64,
           importDir = Sys.Env.getVar("CMS_IMPORT_DIR") |> Option.getWithDefault("import/microcms/schema"),
+          importImageDir = Sys.Env.getVar("CMS_IMPORT_IMAGE_DIR") |> Option.getWithDefault("import/images"),
           importCount = Sys.Env.getVar("CMS_IMPORT_COUNT") |> Option.flatMap(Int32.fromString) |> Option.getWithDefault(3) }
     }
 
@@ -165,7 +166,7 @@ def boot(config: EnvConfig, sink: Log.Sink): Result[String, Started] \ {IO, Fs.F
 /// CMS_MODE=import-microcms。microCMS のスキーマを写してダミーを積み、終わる。
 ///
 def importMicrocms(config: EnvConfig, started: Started): Unit \ {IO, Fs.FileRead, Sys.Exit, Log} =
-    match MicrocmsCli.execute(config#importDir, started#pool, started#deps, started#defaultProject |> Option.getWithDefault(ProjectId.default()), config#importCount) {
+    match MicrocmsCli.execute(config#importDir, config#importImageDir, started#pool, started#deps, started#defaultProject |> Option.getWithDefault(ProjectId.default()), config#importCount) {
         // WhyNot: まとめを Log にしないのは、これはコマンドの出力（人が読む複数行の表）で、ログの行ではないため
         case Ok(summary)  => { println(summary); Pool.close(started#pool) }
         case Err(message) => { Log.Fields.empty() |> Log.Fields.str("error.message", message) |> Log.fatal("import failed"); Pool.close(started#pool); Sys.Exit.exit(1) }

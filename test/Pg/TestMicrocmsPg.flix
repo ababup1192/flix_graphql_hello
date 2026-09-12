@@ -22,9 +22,10 @@ mod TestMicrocmsPg {
     @Test
     def testPgMicrocmsImportAndRead(): Unit \ {IO, Assert, Fs.FileRead} =
         let loaded = apis();
+        let images = match MicrocmsImport.loadDemoImages("import/images") { case Ok(found) => found case Err(message) => bug!(message) };
         let seed = () -> {
             let types = MicrocmsImport.importSchema(loaded);
-            let created = Net.Http.runWithIO(() -> MicrocmsImport.seedDummy(loaded, types, 2));
+            let created = Net.Http.runWithIO(() -> MicrocmsImport.seedDummy(loaded, types, 2, images));
             (Map.size(types), created |> Map.valuesOf |> List.map(List.length) |> List.sum)
         };
         let (blog, services, blocks, summary, profileSlug) = PgTestSupport.withContentApiAndPool(seed, (pool, ask) -> {
@@ -48,7 +49,7 @@ mod TestMicrocmsPg {
             expected = (
                 (Value.Obj(Map#{ "blogs" => Value.Obj(Map#{ "totalCount" => Value.Int(1), "nodes" => Value.List(Value.Obj(Map#{
                     "title" => Value.Str("タイトル 1"), "memberOnly" => Value.Bool(false),
-                    "thumbnail" => Value.Obj(Map#{ "alt" => Value.Str("ダミー画像") }),
+                    "thumbnail" => Value.Obj(Map#{ "alt" => Value.Str("1 枚目・横長。本文の中に置く画像") }),
                     "profile" => Value.Obj(Map#{ "name" => Value.Str("名前 1"), "slug" => Value.Str("profiles-1") }),
                     "tags" => Value.List(Value.Obj(Map#{ "tag" => Value.Str("タグ 1") }) :: Value.Obj(Map#{ "tag" => Value.Str("タグ 2") }) :: Nil),
                     "theFirstPart" => Value.Obj(Map#{ "title" => Value.Str("タイトル 1") }),
@@ -65,7 +66,7 @@ mod TestMicrocmsPg {
                         Value.Obj(Map#{ "level" => Value.Int(4), "text" => Value.Str("動画とカード") }) :: Nil) })
                 }) :: Nil) }) }), None),
                 (Value.Obj(Map#{ "insidesaleServices" => Value.Obj(Map#{ "nodes" => Value.List(Value.Obj(Map#{
-                    "name" => Value.Str("名前 2"), "sortOrder" => Value.Float(2.0), "logo" => Value.Obj(Map#{ "alt" => Value.Str("ダミー画像") }),
+                    "name" => Value.Str("名前 2"), "sortOrder" => Value.Float(2.0), "logo" => Value.Obj(Map#{ "alt" => Value.Str("1 枚目・横長。本文の中に置く画像") }),
                     "blogs" => Value.List(Value.Obj(Map#{ "title" => Value.Str("タイトル 1") }) :: Value.Obj(Map#{ "title" => Value.Str("タイトル 2") }) :: Nil)
                 }) :: Nil) }) }), None),
                 Some("[{\"blockType\":\"implementationCase\",\"companyName\":\"企業名 2\",\"detail\":\"詳細 2 の 1 行目\\n2 行目\",\"reference\":\"引用元URL 2\",\"summary\":\"概要 2\"}]"),
