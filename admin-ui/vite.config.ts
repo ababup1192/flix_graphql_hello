@@ -94,6 +94,11 @@ export default defineConfig({
       input: { index: "index.html", graphiql: "graphiql.html", docs: "docs.html" },
     },
   },
+
+  // WhyNot: GraphiQL を事前バンドルに任せない。中の `monaco-editor/...?worker` は
+  // vite が解く印で、事前バンドル（rolldown）はそれを普通のパスとして開こうとして
+  // 「No such file or directory」で止まる（実際に dev サーバが起動しなくなった）。
+
   server: {
     port: 5173,
     strictPort: true,

@@ -1,4 +1,4 @@
-import "graphiql/setup-workers/vite";
+import "./graphiql-workers";
 import { createRoot } from "react-dom/client";
 import { GraphiQL } from "graphiql";
 import { createGraphiQLFetcher } from "@graphiql/toolkit";
@@ -17,7 +17,17 @@ import "graphiql/style.css";
 
 // プロジェクト slug は `?project=` で受ける。`/p/{slug}/graphiql` から書き換えるのは
 // 配信側（vite dev の middleware / 本番の Caddy）の仕事で、この入口は URL の形を知らない。
-const project = new URLSearchParams(window.location.search).get("project") ?? "";
+// WhyNot: `?project=` だけを見ない。rewrite はサーバ側で起きるので、ブラウザの URL は
+// `/p/{slug}/graphiql` のままで search が空になる（実機で slug が空になり、
+// `/p//graphql` を叩いて「Error fetching schema」になった）。
+function projectOf(location: Location): string {
+  const fromQuery = new URLSearchParams(location.search).get("project");
+  if (fromQuery) return fromQuery;
+  const matched = /^\/p\/([^/]+)\/graphiql\/?$/.exec(location.pathname);
+  return matched ? decodeURIComponent(matched[1]) : "";
+}
+
+const project = projectOf(window.location);
 const endpoint = `/p/${encodeURIComponent(project)}/graphql`;
 
 // WhyNot: 鍵を付けない。管理画面のホストは Access の内側で、cookie がそのまま身元になる
