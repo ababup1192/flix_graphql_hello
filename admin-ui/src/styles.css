@@ -68,6 +68,24 @@
   --z-tooltip: 70;
 }
 
+/* ブラウザが自分で描く物（スクロールバー・フォーム部品・入力の候補）の明暗。
+
+   WhyNot: prefers-color-scheme だけに任せない。テーマは system / light / dark の 3 状態で、
+   属性で dark を選んだ時に OS が light のままだと、スクロールバーだけ白く残る。 */
+:root {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+  }
+}
+
 /* ダークは同じトークンを塗り替えるだけ。状態の色の意味は変えない。 */
 :root[data-theme="dark"] {
   --color-app: #010409;
