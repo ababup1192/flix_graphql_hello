@@ -18,12 +18,13 @@ slug="${1:?プロジェクト slug を渡してください}"
 name="${2:-$slug}"
 db="${3:-cms}"
 
-docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -q -U cms -d "$db" \
+docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -q -o /dev/null -U cms -d "$db" \
     -v slug="$slug" -v name="$name" <<'SQL'
 BEGIN;
 
-INSERT INTO projects (slug, name, org_id, visibility)
-VALUES (:'slug', :'name', 1, 'public')
+-- 外向きの id は乱数（アプリの IdGen と同じ形）。作り直しても付け替えない
+INSERT INTO projects (slug, name, org_id, visibility, public_id)
+VALUES (:'slug', :'name', 1, 'public', substr(md5(random()::text || clock_timestamp()::text), 1, 12))
 ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name;
 
 SELECT id AS project_id FROM projects WHERE slug = :'slug' \gset
@@ -32,7 +33,9 @@ SELECT set_config('app.project_id', :'project_id', true);
 
 -- entries を消すと entry_contents / entry_versions / entry_links / entry_unique_values / entry_autosaves が続いて消える
 DELETE FROM entries WHERE project_id = :project_id;
--- content_types を消すと content_fields が続いて消える
+-- content_fields を先に消す。型が互いを指す（REFERENCE の target_type_id）ので、
+-- content_types だけを消すと同じ文の中で外部キーに引っ掛かる
+DELETE FROM content_fields WHERE project_id = :project_id;
 DELETE FROM content_types WHERE project_id = :project_id;
 DELETE FROM assets WHERE project_id = :project_id;
 DELETE FROM link_cards WHERE project_id = :project_id;
@@ -44,4 +47,4 @@ DELETE FROM cdn_purges WHERE project_id = :project_id;
 COMMIT;
 SQL
 
-echo "プロジェクト '$slug' を空にしました（$db）"
+echo "プロジェクト '${slug}' を空にしました（${db}）"
