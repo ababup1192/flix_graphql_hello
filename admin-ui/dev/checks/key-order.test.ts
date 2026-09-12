@@ -70,6 +70,8 @@ const EXTENSION_ORDER = [
   "code",
   "blockquote",
   "quoteCite",
+  "callout",
+  "details",
   "codeBlock",
   "image",
   "imageItem",

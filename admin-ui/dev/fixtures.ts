@@ -96,6 +96,24 @@ export const FIXTURES: Fixture[] = [
     },
   },
   {
+    name: "callout",
+    title: "囲み 3 種と折りたたみ",
+    doc: {
+      type: "doc",
+      content: [
+        { type: "callout", attrs: { kind: "note" }, content: [paragraph("ノートの囲みです。")] },
+        { type: "callout", attrs: { kind: "tip" }, content: [paragraph("ヒントの囲みです。")] },
+        { type: "callout", attrs: { kind: "warning" }, content: [paragraph("警告の囲みです。")] },
+        {
+          type: "details",
+          attrs: { summary: "ここを押すと開きます" },
+          content: [paragraph("折りたたみの中身です。")],
+        },
+        paragraph(""),
+      ],
+    },
+  },
+  {
     name: "code",
     title: "コード",
     doc: {

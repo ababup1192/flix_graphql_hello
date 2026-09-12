@@ -44,6 +44,14 @@ export const ICONS = {
   bold: '<path d="M7 4h7a4 4 0 0 1 0 8H7z"/><path d="M7 12h8a4 4 0 0 1 0 8H7z"/>',
   strike: '<path d="M4 12h16"/><path d="M17 6.5c-.6-1.8-2.5-2.5-5-2.5-3 0-5 1.5-5 3.5 0 1.3.8 2.2 2.4 2.7"/><path d="M7 17.5c.6 1.8 2.5 2.5 5 2.5 3 0 5-1.5 5-3.5 0-1.3-.8-2.2-2.4-2.7"/>',
   redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13"/>',
+  // 囲みの種別（callout-node.ts）。GitHub alerts と同じ 3 つ。
+  // WhyNot: 3 つとも同じ形にして色だけ変えない。16px の帯では色の差が読めず、
+  // どれが押されているか分からない（色覚の差でも消える）。形で分ける。
+  note: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>',
+  tip: '<path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5.9 1.1 1 1.8h5c.1-.7.4-1.3 1-1.8A6 6 0 0 0 12 3z"/>',
+  warning: '<path d="M12 4 2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17h.01"/>',
+  // 折りたたみ。開く印の三角と、その下に畳まれている行。
+  details: '<path d="M4 7l3 3 3-3"/><path d="M14 10h6"/><path d="M4 16h16"/>',
 };
 
 export function svg(paths: string, size = 16): string {

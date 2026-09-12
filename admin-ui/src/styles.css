@@ -298,6 +298,101 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
 .tt-body img { max-width: 100%; border-radius: 4px; }
 .tt-body ul[data-type="taskList"] { list-style: none; padding-left: 0.2rem; }
 .tt-body ul[data-type="taskList"] li { display: flex; gap: 0.5rem; align-items: flex-start; }
+/* 囲み（callout）。種別ごとに色を変え、左に太い縦線を引く（GitHub alerts と同じ読み方）。
+   WhyNot: 色だけで種別を出さない。帯のアイコンと縦線の形が無いと、色覚の差と白黒印刷で
+   3 つが同じ箱になる。
+   WhyNot: 帯を箱の外に出さない。外に出すと箱と帯の間で本文が切れ、どの囲みの帯か読めない。
+   帯は箱の中の上に置き、箱の角の丸みに合わせる。 */
+.tt-callout {
+  --tt-callout-line: var(--color-accent);
+  --tt-callout-bg: var(--color-accent-bg);
+  margin: var(--tt-block-gap) 0;
+  border-left: 3px solid var(--tt-callout-line);
+  border-radius: 4px;
+  background: var(--tt-callout-bg);
+  overflow: hidden;
+}
+.tt-callout[data-kind="tip"] {
+  --tt-callout-line: var(--color-ok);
+  --tt-callout-bg: var(--color-ok-bg);
+}
+.tt-callout[data-kind="warning"] {
+  --tt-callout-line: var(--color-warn);
+  --tt-callout-bg: var(--color-warn-bg);
+}
+.tt-callout-bar { display: flex; gap: 2px; padding: 4px 6px 0; }
+.tt-callout-kind {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-ink-faint);
+  cursor: pointer;
+}
+.tt-callout-kind:hover { background: var(--color-well); }
+.tt-callout-kind.is-on { background: var(--color-panel); color: var(--tt-callout-line); }
+.tt-callout-body { padding: 0.2rem 1rem 0.9rem; color: var(--color-ink); }
+.tt-callout-body > * + * { margin-top: 0.7rem; }
+
+/* 折りたたみ（details）。見出しの帯と、その下の中身。畳まれる事は見出しの前の三角と
+   本文の左の破線で見せる。
+   WhyNot: 畳んだ状態を doc に持たない。CMS が見るのは attrs.summary だけで、開閉の
+   置き場が無い。保存すると失われる物を doc に書くと、次に開いた時に黙って戻る。 */
+.tt-details {
+  margin: var(--tt-block-gap) 0;
+  border: 1px solid var(--color-edge);
+  border-radius: 6px;
+  background: var(--color-raised);
+  overflow: hidden;
+}
+.tt-details-bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--color-well); }
+/* 開閉の三角。公開側の `<details>` と同じで、見出しの左に置く。
+   WhyNot: 帯の右端のボタンにしない。公開側の `<details>` は見出しの左の三角を押す物で、
+   編集中だけ押す所が変わると、畳んだ時の見え方と操作が結び付かない。 */
+.tt-details-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-ink-faint);
+  cursor: pointer;
+}
+.tt-details-toggle:hover { background: var(--color-edge); }
+/* 畳んである間は中身を消す。
+   WhyNot: visibility: hidden にしない。場所を空けたままだと、畳んだのに高さが変わらず
+   「畳めていない」と読める。選択の行き場は node view と closedPlugin が外へ出すので、
+   display: none にしても見えない所にキャレットが残らない。 */
+.tt-details.is-closed .tt-details-body { display: none; }
+.tt-details.is-closed .tt-details-bar { border-bottom: 0; }
+.tt-details-summary {
+  flex: 1 1 0;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  /* WhyNot: focus に枠を出さない。引用の出典・画像のキャプションと同じで、
+     エディタの中の欄は文字の色だけで焦点を示す。 */
+  outline: none;
+}
+.tt-details-body {
+  margin: 0.6rem 0.9rem 0.9rem;
+  padding-left: 0.9rem;
+  border-left: 1px dashed var(--color-edge);
+  color: var(--color-ink);
+}
+.tt-details-body > * + * { margin-top: 0.7rem; }
+
 .tt-passthrough {
   border: 1px dashed var(--color-edge);
   border-radius: 6px;

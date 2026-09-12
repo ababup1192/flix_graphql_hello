@@ -14,6 +14,8 @@
 // 升目（`tiptap-editor.ts` の `tableMenu`）に渡す。
 
 import type { Editor } from "@tiptap/core";
+import { newCallout } from "./callout-node";
+import { newDetails } from "./details-node";
 import { field, iconButton, popover, type Popover } from "./ui";
 import { placeUrl, soleUrl } from "./url-cards";
 
@@ -42,6 +44,8 @@ const ICONS: Record<string, string> = {
   embed: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
   math: '<path d="M17 5H7l6 7-6 7h10"/>',
+  callout: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>',
+  details: '<path d="M4 7l3 3 3-3"/><path d="M14 10h6"/><path d="M4 16h16"/>',
   taskList: '<path d="M11 6h10"/><path d="M11 12h10"/><path d="M11 18h10"/><path d="M3 6l1.5 1.5L7 5"/><path d="M3 12l1.5 1.5L7 11"/><path d="M3 18l1.5 1.5L7 17"/>',
 };
 
@@ -90,6 +94,8 @@ export class BlockMenu {
       { label: "画像", keys: ["がぞう", "image", "img"], icon: ICONS.image, run: () => args.onImage() },
       { label: "区切り線", keys: ["くぎりせん", "hr", "rule", "divider"], icon: ICONS.rule, run: () => chain().setHorizontalRule().run() },
       { label: "引用", keys: ["いんよう", "quote"], icon: ICONS.quote, run: () => chain().toggleBlockquote().run() },
+      { label: "囲み", keys: ["かこみ", "callout", "note", "tip", "warning", "ちゅうい"], icon: ICONS.callout, run: () => chain().insertContent(newCallout()).run() },
+      { label: "折りたたみ", keys: ["おりたたみ", "details", "toggle", "accordion"], icon: ICONS.details, run: () => chain().insertContent(newDetails()).run() },
       { label: "コード", keys: ["こーど", "code"], icon: ICONS.code, run: () => chain().toggleCodeBlock().run() },
       { label: "表", keys: ["ひょう", "table", "てーぶる"], icon: ICONS.table, run: () => args.onTable() },
       { label: "数式", keys: ["すうしき", "math", "tex", "katex", "formula"], icon: ICONS.math, run: () => this.insertMath() },

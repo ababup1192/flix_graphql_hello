@@ -42,6 +42,8 @@ import { type Align, alignColumn, columnAlign, resizeTable, tableSize } from "./
 import { MathBlock, MathMark } from "./math";
 import { AssetStore, imageDropExtension, imageItemNode, imageNode, imageOf, insertionOf, insideImage, liftCaption, liftImageItems, trimCaption, UploadingImage } from "./image-node";
 import { QuoteNode, insideQuoteCite, liftQuoteCite } from "./quote-node";
+import { CalloutNode } from "./callout-node";
+import { DetailsNode } from "./details-node";
 import { ICONS, svg } from "./icons";
 import { CardStore, linkCardNode } from "./link-card-node";
 import { EmbedNode } from "./embed-node";
@@ -334,6 +336,9 @@ class TiptapEditor extends HTMLElement {
       }),
       // blockquote は出典（cite / citeUrl）を持つ物に差し替える（`web/quote-node.ts`）。
       QuoteNode,
+      // 囲みと折りたたみ。**Passthrough より前に置く**（後ろだと灰色枠が先に名前を取る）。
+      CalloutNode,
+      DetailsNode,
       CodeBlockLowlight.extend({
         addNodeView: () => codeBlockView(lowlight),
         // CMS の codeBlock は language の他に fileName と highlightLines を受ける

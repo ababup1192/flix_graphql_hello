@@ -8,6 +8,7 @@
 // 部品が見た目まで持つと、既にある帯を差し替えた瞬間に全部の帯の見た目が変わる。
 
 import { TextSelection } from "@tiptap/pm/state";
+import type { ResolvedPos } from "@tiptap/pm/model";
 import type { EditorView } from "@tiptap/pm/view";
 import { dismissOn } from "./dismiss";
 
@@ -354,6 +355,20 @@ const OWN_SELECT = new Set(["codeBlock", "imageItem", "quoteCite"]);
 // どこからも押せなくなる。包む側を見る形にする。
 const OWN_SELECT_PARENT = new Set(["tableCell", "tableHeader"]);
 
+// 中身ごと閉じる node。**囲みと折りたたみは中に段落も箇条書きも入る**ので、
+// 包む側を何段でも遡って見る（`OWN_SELECT_PARENT` は 1 段しか見ない）。
+//
+// WhyNot: 引用を入れない。引用は本文の流れの一部で、⌘A が中だけに閉じると
+// 「引用から始まる本文を全部消す」がどこからも押せない。箱として閉じている物だけ。
+const OWN_SELECT_BOX = new Set(["callout", "details"]);
+
+// 囲み・折りたたみの中に居るなら、その中身の範囲。
+function boxRange($from: ResolvedPos): { from: number; to: number } | null {
+  for (let depth = $from.depth - 1; depth > 0; depth -= 1)
+    if (OWN_SELECT_BOX.has($from.node(depth).type.name)) return { from: $from.start(depth), to: $from.end(depth) };
+  return null;
+}
+
 /** コードブロックや画像のキャプションの中の ⌘A を、その中だけの選択にする。
  *
  * WhyNot: 「2 回続けて押したら本文全体」の段階を付けない。1 回目と 2 回目で結果が変わると、
@@ -364,6 +379,11 @@ export function selectAllInBlock(view: EditorView, event: KeyboardEvent): boolea
   const { state } = view;
   const { $from } = state.selection;
   if (!$from.parent.isTextblock) return false;
+  const box = boxRange($from);
+  if (box) {
+    view.dispatch(state.tr.setSelection(TextSelection.between(state.doc.resolve(box.from), state.doc.resolve(box.to))));
+    return true;
+  }
   const own =
     OWN_SELECT.has($from.parent.type.name) ||
     ($from.depth > 0 && OWN_SELECT_PARENT.has($from.node($from.depth - 1).type.name));

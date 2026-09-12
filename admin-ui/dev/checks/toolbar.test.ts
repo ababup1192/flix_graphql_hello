@@ -86,5 +86,5 @@ test("ブロックを入れる口は「+」の一覧に揃っている", async (
   h.editor.querySelector<HTMLElement>(".tt-plus")!.click();
   await settle();
   const items = [...h.editor.querySelectorAll(".tt-blocks .tt-blocks-item")].map((one) => one.textContent?.trim());
-  expect(items).toEqual(["画像", "区切り線", "引用", "コード", "表", "数式", "チェックリスト", "埋め込み"]);
+  expect(items).toEqual(["画像", "区切り線", "引用", "囲み", "折りたたみ", "コード", "表", "数式", "チェックリスト", "埋め込み"]);
 });
