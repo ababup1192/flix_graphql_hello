@@ -1,4 +1,4 @@
-module Page.Members exposing (Model, Msg(..), init, load, update, view)
+module Page.Members exposing (Model, Msg(..), init, load, roleOf, roleOptions, update, view)
 
 {-| プロジェクト設定 › メンバー。招待・権限の変更・削除・招待の取り消し。
 
@@ -111,7 +111,7 @@ update ctx msg model =
             ( { model | inviteEmail = String.toLower (String.trim email), inviteReply = Reply.touched model.inviteReply }, [] )
 
         InviteRoleChosen chosen ->
-            ( { model | inviteRole = roleOf chosen, inviteReply = Reply.touched model.inviteReply }, [] )
+            ( { model | inviteRole = roleOf chosen |> Maybe.withDefault model.inviteRole, inviteReply = Reply.touched model.inviteReply }, [] )
 
         InviteSubmitted ->
             ( { model | inviteReply = Reply.sending }
@@ -134,9 +134,14 @@ update ctx msg model =
             ( { model | invited = Nothing }, [] )
 
         RoleChanged userId chosen ->
-            ( { model | roleReply = Just ( userId, Reply.sending ) }
-            , [ Api.call (\id -> Queries.changeMemberRole id ctx.project { userId = userId, role = roleOf chosen }) GotRoleChange ]
-            )
+            case roleOf chosen of
+                Just role ->
+                    ( { model | roleReply = Just ( userId, Reply.sending ) }
+                    , [ Api.call (\id -> Queries.changeMemberRole id ctx.project { userId = userId, role = role }) GotRoleChange ]
+                    )
+
+                Nothing ->
+                    ( model, [] )
 
         GotRoleChange (Ok member) ->
             ( { model
@@ -230,20 +235,29 @@ ifSame row updated =
         row
 
 
-roleOf : String -> Role
+{-| 選んだ役割の綴りから。
+
+WhyNot: 知らない綴りを投稿者に落とさない。`roleOptions` の綴りが 1 文字ずれただけで、
+管理者を選んだつもりの人が黙って別の役割で招かれる。
+
+-}
+roleOf : String -> Maybe Role
 roleOf value =
     case value of
         "OWNER" ->
-            Role.Owner
+            Just Role.Owner
 
         "EDITOR" ->
-            Role.Editor
+            Just Role.Editor
+
+        "WRITER" ->
+            Just Role.Writer
 
         "VIEWER" ->
-            Role.Viewer
+            Just Role.Viewer
 
         _ ->
-            Role.Writer
+            Nothing
 
 
 roleOptions : List ( String, String )
