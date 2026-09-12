@@ -42,11 +42,13 @@ mod TestApiSurface {
         Assert.assertEq(
             expected =
                 "ApiKey: id name keyHint scope role createdAt expiresAt lastUsedAt revokedAt" ::
-                "Asset: id url fileName mime size width height alt status createdAt usedBy" ::
+                // Asset に見せ方（focalPoint / crop）を足した。FocalPoint / CropRect はその中身の型
+                "Asset: id url fileName mime size width height alt status createdAt usedBy focalPoint crop" ::
                 "AssetEdge: cursor node" ::
                 "AssetPage: nodes edges pageInfo totalCount" ::
                 "AuditEvent: id actorKind actorId actor action targetKind targetId detail createdAt" ::
                 "ContentType: id apiId kind name singular plural previewUrl linkPath icon fields createdAt updatedAt" ::
+                "CropRect: left top width height" ::
                 "DiffLine: kind text" ::
                 "Entry: id typeId version stage fields publishedAt createdAt updatedAt path versions autosave diff" ::
                 "EntryAutosave: baseVersion fields state updatedAt" ::
@@ -56,6 +58,7 @@ mod TestApiSurface {
                 "FieldChange: path kind before after children lines" ::
                 "FieldConfig: maxLength sourceField min max integer options" ::
                 "FieldDef: id apiId name kind many required unique localized targetTypeId parentFieldId children config position" ::
+                "FocalPoint: x y" ::
                 "Impact: breaks cascades" ::
                 "Invitation: id email role createdAt" ::
                 "IssuedApiKey: id name scope role expiresAt key" ::

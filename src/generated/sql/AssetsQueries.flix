@@ -7,7 +7,7 @@ mod AssetsQueries {
     ///
     /// 生成元 assets.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = -1741522449
+    pub def sourceHash(): Int32 = 1452682322
 
     ///
     /// insertAsset: INSERT INTO assets (id, project_id, key, file_name, mime, size, status) VALUES ($1, $2, $3, $4, $5, $6, 'pending')
@@ -20,7 +20,7 @@ mod AssetsQueries {
     ///
     /// findAsset の 1 行。
     ///
-    pub type alias FindAssetRow = { id = String, key = String, fileName = String, mime = String, size = Int64, width = Int32, height = Int32, alt = String, status = String, createdAt = Timestamp.Timestamp }
+    pub type alias FindAssetRow = { id = String, key = String, fileName = String, mime = String, size = Int64, width = Int32, height = Int32, alt = String, status = String, createdAt = Timestamp.Timestamp, presentation = Option[Util.Json.Json] }
 
     def findAssetDecoder(): Decoder[FindAssetRow] =
         forA (
@@ -33,21 +33,22 @@ mod AssetsQueries {
             height <- Decoder.int32("height");
             alt <- Decoder.str("alt");
             status <- Decoder.str("status");
-            createdAt <- Decoder.timestamp("created_at")
-        ) yield { id = id, key = key, fileName = fileName, mime = mime, size = size, width = width, height = height, alt = alt, status = status, createdAt = createdAt }
+            createdAt <- Decoder.timestamp("created_at");
+            presentation <- Decoder.opt(Decoder.json("presentation"))
+        ) yield { id = id, key = key, fileName = fileName, mime = mime, size = size, width = width, height = height, alt = alt, status = status, createdAt = createdAt, presentation = presentation }
 
     ///
-    /// findAsset: SELECT id, key, file_name, mime, size, width, height, alt, status, created_at FROM assets WHERE id = $1 AND project_id = $2
+    /// findAsset: SELECT id, key, file_name, mime, size, width, height, alt, status, created_at, presentation FROM assets WHERE id = $1 AND project_id = $2
     ///
     pub def findAsset(args: { id = String, projectId = Int64 }): Option[FindAssetRow] \ DbRead =
-        let sql = "SELECT id, key, file_name, mime, size, width, height, alt, status, created_at\n    FROM assets WHERE id = $1 AND project_id = $2";
+        let sql = "SELECT id, key, file_name, mime, size, width, height, alt, status, created_at, presentation\n    FROM assets WHERE id = $1 AND project_id = $2";
         let params = List#{SqlValue.Str(args#id), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findAssetDecoder(), sql, params))
 
     ///
     /// findAssets の 1 行。
     ///
-    pub type alias FindAssetsRow = { id = String, key = String, fileName = String, mime = String, size = Int64, width = Int32, height = Int32, alt = String, status = String, createdAt = Timestamp.Timestamp }
+    pub type alias FindAssetsRow = { id = String, key = String, fileName = String, mime = String, size = Int64, width = Int32, height = Int32, alt = String, status = String, createdAt = Timestamp.Timestamp, presentation = Option[Util.Json.Json] }
 
     def findAssetsDecoder(): Decoder[FindAssetsRow] =
         forA (
@@ -60,21 +61,22 @@ mod AssetsQueries {
             height <- Decoder.int32("height");
             alt <- Decoder.str("alt");
             status <- Decoder.str("status");
-            createdAt <- Decoder.timestamp("created_at")
-        ) yield { id = id, key = key, fileName = fileName, mime = mime, size = size, width = width, height = height, alt = alt, status = status, createdAt = createdAt }
+            createdAt <- Decoder.timestamp("created_at");
+            presentation <- Decoder.opt(Decoder.json("presentation"))
+        ) yield { id = id, key = key, fileName = fileName, mime = mime, size = size, width = width, height = height, alt = alt, status = status, createdAt = createdAt, presentation = presentation }
 
     ///
-    /// findAssets: SELECT id, key, file_name, mime, size, width, height, alt, status, created_at FROM assets WHERE id = ANY($1) AND project_id = $2
+    /// findAssets: SELECT id, key, file_name, mime, size, width, height, alt, status, created_at, presentation FROM assets WHERE id = ANY($1) AND project_id = $2
     ///
     pub def findAssets(args: { ids = List[String], projectId = Int64 }): List[FindAssetsRow] \ DbRead =
-        let sql = "SELECT id, key, file_name, mime, size, width, height, alt, status, created_at\n    FROM assets WHERE id = ANY($1) AND project_id = $2";
+        let sql = "SELECT id, key, file_name, mime, size, width, height, alt, status, created_at, presentation\n    FROM assets WHERE id = ANY($1) AND project_id = $2";
         let params = List#{SqlValue.StrArray(args#ids), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.fetchAs(findAssetsDecoder(), sql, params))
 
     ///
     /// listAssets の 1 行。
     ///
-    pub type alias ListAssetsRow = { id = String, key = String, fileName = String, mime = String, size = Int64, width = Int32, height = Int32, alt = String, status = String, createdAt = Timestamp.Timestamp }
+    pub type alias ListAssetsRow = { id = String, key = String, fileName = String, mime = String, size = Int64, width = Int32, height = Int32, alt = String, status = String, createdAt = Timestamp.Timestamp, presentation = Option[Util.Json.Json] }
 
     def listAssetsDecoder(): Decoder[ListAssetsRow] =
         forA (
@@ -87,21 +89,22 @@ mod AssetsQueries {
             height <- Decoder.int32("height");
             alt <- Decoder.str("alt");
             status <- Decoder.str("status");
-            createdAt <- Decoder.timestamp("created_at")
-        ) yield { id = id, key = key, fileName = fileName, mime = mime, size = size, width = width, height = height, alt = alt, status = status, createdAt = createdAt }
+            createdAt <- Decoder.timestamp("created_at");
+            presentation <- Decoder.opt(Decoder.json("presentation"))
+        ) yield { id = id, key = key, fileName = fileName, mime = mime, size = size, width = width, height = height, alt = alt, status = status, createdAt = createdAt, presentation = presentation }
 
     ///
-    /// listAssets: SELECT id, key, file_name, mime, size, width, height, alt, status, created_at FROM assets WHERE project_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3
+    /// listAssets: SELECT id, key, file_name, mime, size, width, height, alt, status, created_at, presentation FROM assets WHERE project_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3
     ///
     pub def listAssets(args: { projectId = Int64, limit = Int64, offset = Int64 }): List[ListAssetsRow] \ DbRead =
-        let sql = "SELECT id, key, file_name, mime, size, width, height, alt, status, created_at\n    FROM assets WHERE project_id = $1\n    ORDER BY created_at DESC, id DESC\n    LIMIT $2 OFFSET $3";
+        let sql = "SELECT id, key, file_name, mime, size, width, height, alt, status, created_at, presentation\n    FROM assets WHERE project_id = $1\n    ORDER BY created_at DESC, id DESC\n    LIMIT $2 OFFSET $3";
         let params = List#{SqlValue.Int64(args#projectId), SqlValue.Int64(args#limit), SqlValue.Int64(args#offset)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listAssetsDecoder(), sql, params))
 
     ///
     /// listAssetsAfter の 1 行。
     ///
-    pub type alias ListAssetsAfterRow = { id = String, key = String, fileName = String, mime = String, size = Int64, width = Int32, height = Int32, alt = String, status = String, createdAt = Timestamp.Timestamp }
+    pub type alias ListAssetsAfterRow = { id = String, key = String, fileName = String, mime = String, size = Int64, width = Int32, height = Int32, alt = String, status = String, createdAt = Timestamp.Timestamp, presentation = Option[Util.Json.Json] }
 
     def listAssetsAfterDecoder(): Decoder[ListAssetsAfterRow] =
         forA (
@@ -114,14 +117,15 @@ mod AssetsQueries {
             height <- Decoder.int32("height");
             alt <- Decoder.str("alt");
             status <- Decoder.str("status");
-            createdAt <- Decoder.timestamp("created_at")
-        ) yield { id = id, key = key, fileName = fileName, mime = mime, size = size, width = width, height = height, alt = alt, status = status, createdAt = createdAt }
+            createdAt <- Decoder.timestamp("created_at");
+            presentation <- Decoder.opt(Decoder.json("presentation"))
+        ) yield { id = id, key = key, fileName = fileName, mime = mime, size = size, width = width, height = height, alt = alt, status = status, createdAt = createdAt, presentation = presentation }
 
     ///
-    /// listAssetsAfter: SELECT id, key, file_name, mime, size, width, height, alt, status, created_at FROM assets WHERE project_id = $1 AND (created_at, id) < ($2, $3) ORDER BY created_at DESC, id DESC LIMIT $4
+    /// listAssetsAfter: SELECT id, key, file_name, mime, size, width, height, alt, status, created_at, presentation FROM assets WHERE project_id = $1 AND (created_at, id) < ($2, $3) ORDER BY created_at DESC, id DESC LIMIT $4
     ///
     pub def listAssetsAfter(args: { projectId = Int64, createdAt = Timestamp.Timestamp, id = String, limit = Int64 }): List[ListAssetsAfterRow] \ DbRead =
-        let sql = "SELECT id, key, file_name, mime, size, width, height, alt, status, created_at\n    FROM assets WHERE project_id = $1 AND (created_at, id) < ($2, $3)\n    ORDER BY created_at DESC, id DESC\n    LIMIT $4";
+        let sql = "SELECT id, key, file_name, mime, size, width, height, alt, status, created_at, presentation\n    FROM assets WHERE project_id = $1 AND (created_at, id) < ($2, $3)\n    ORDER BY created_at DESC, id DESC\n    LIMIT $4";
         let params = List#{SqlValue.Int64(args#projectId), SqlValue.ofTimestamp(args#createdAt), SqlValue.Str(args#id), SqlValue.Int64(args#limit)};
         RawSql.runWithAllow(() -> Sql.fetchAs(listAssetsAfterDecoder(), sql, params))
 
@@ -152,11 +156,11 @@ mod AssetsQueries {
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///
-    /// updateAssetAlt: UPDATE assets SET alt = $1 WHERE id = $2 AND project_id = $3
+    /// updateAsset: UPDATE assets SET alt = $1, presentation = $2 WHERE id = $3 AND project_id = $4
     ///
-    pub def updateAssetAlt(args: { id = String, projectId = Int64, alt = String }): Int32 \ DbWrite =
-        let sql = "UPDATE assets SET alt = $1 WHERE id = $2 AND project_id = $3";
-        let params = List#{SqlValue.Str(args#alt), SqlValue.Str(args#id), SqlValue.Int64(args#projectId)};
+    pub def updateAsset(args: { id = String, projectId = Int64, alt = String, presentation = Option[Util.Json.Json] }): Int32 \ DbWrite =
+        let sql = "UPDATE assets SET alt = $1, presentation = $2 WHERE id = $3 AND project_id = $4";
+        let params = List#{SqlValue.Str(args#alt), SqlValue.ofOption(SqlValue.NullType.Json, SqlValue.ofJson, args#presentation), SqlValue.Str(args#id), SqlValue.Int64(args#projectId)};
         RawSql.runWithAllow(() -> Sql.execute(sql, params))
 
     ///

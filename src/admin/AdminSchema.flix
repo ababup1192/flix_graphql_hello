@@ -32,6 +32,8 @@ mod AdminSchema {
             assetEdge    = AssetEdgeResolvers.resolvers(),
             pageInfo     = PageInfoResolvers.resolvers(),
             upload       = UploadResolvers.resolvers(),
+            focalPoint   = GeneratedAdmin.focalPointDefaults(),
+            cropRect     = GeneratedAdmin.cropRectDefaults(),
             violation     = ViolationResolvers.resolvers(),
             publishReport = PublishReportResolvers.resolvers(),
             publishPlanStep = PublishPlanStepResolvers.resolvers(),

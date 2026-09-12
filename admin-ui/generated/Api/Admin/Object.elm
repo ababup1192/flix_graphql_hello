@@ -29,6 +29,10 @@ type ContentType
     = ContentType
 
 
+type CropRect
+    = CropRect
+
+
 type DiffLine
     = DiffLine
 
@@ -63,6 +67,10 @@ type FieldConfig
 
 type FieldDef
     = FieldDef
+
+
+type FocalPoint
+    = FocalPoint
 
 
 type Impact

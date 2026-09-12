@@ -265,6 +265,27 @@ mod AdminMapping {
         case None        => { width = None, height = None, alt = None }
     }
 
+    ///
+    /// AssetPatch をドメインの直し方に。focalPoint / crop は省けば Keep、clear* なら Clear。値と clear* を同時に渡すのは invalid。
+    ///
+    /// WhyNot: 「null を渡すと消す」にしない。schemagen は nullable の input を Option にし、省いた物と null を区別できない。
+    ///
+    pub def assetChanges(patch: GeneratedAdmin.AssetPatch): AssetChanges \ CmsErr =
+        {
+            alt = Some(patch#alt),
+            presentation = {
+                focalPoint = patchOf("clearFocalPoint", patch#clearFocalPoint |> Option.getWithDefault(false), patch#focalPoint),
+                crop       = patchOf("clearCrop", patch#clearCrop |> Option.getWithDefault(false), patch#crop)
+            }
+        }
+
+    def patchOf(clearArgument: String, clear: Bool, value: Option[a]): Patch[a] \ CmsErr = match (clear, value) {
+        case (true, Some(_))  => CmsErr.invalid(Violation.Violation(clearArgument, "値と同時には渡せません") :: Nil)
+        case (true, None)     => Patch.Clear
+        case (false, Some(v)) => Patch.Set(v)
+        case (false, None)    => Patch.Keep
+    }
+
     pub def number(argument: String, id: Id): Int64 \ CmsErr =
         let Id.Id(text) = id;
         match Int64.fromString(text) {

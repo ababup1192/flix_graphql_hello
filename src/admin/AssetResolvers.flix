@@ -12,6 +12,8 @@ mod AssetResolvers {
             size      = (_context, source) -> Ok(AdminMapping.sizeToGql(source#size)),
             status    = (_context, source) -> Ok(AdminMapping.assetStatusToGql(source#status)),
             createdAt = (_context, source) -> Ok(Timestamp.toIso8601(source#createdAt)),
+            +focalPoint = (_context, source) -> Ok(source#presentation#focalPoint),
+            +crop       = (_context, source) -> Ok(source#presentation#crop),
             +usedBy   = (_context, source) -> Ok(usedBy(source#id))
             | GeneratedAdmin.assetDefaults()
         }

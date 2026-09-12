@@ -14,7 +14,7 @@
 | フィールド | `field.added` / `field.updated` / `field.removed` / `fields.reordered` | 変更前の姿 |
 | プロジェクト | `project.visibility_changed` | `{before, after}` |
 | Webhook | `webhook.created` / `webhook.updated` / `webhook.deleted` / `webhook.redelivered` | 姿（`AuditSnapshot.ofWebhook`。url はマスク）。直した・消した物は `before` |
-| asset | `asset.confirmed` / `asset.deleted` | `{mime, size, width, height}`。消した物は `before` |
+| asset | `asset.confirmed` / `asset.deleted` / `asset.updated` | `{mime, size, width, height}`。消した物は `before`。`asset.updated` は見せ方（focalPoint / crop）の変更だけで、`{before, after}` にそれぞれ `{focalPoint, crop}`（割合の数値。個人情報を含まない）。alt だけの変更は積まない |
 | entry | `entry.unpublished` / `entry.deleted` / `entry.published`（予約の実行だけ） | `{typeApiId, version}`。予約は `scheduledFor` も |
 | 監査 | `audit.exported`（CSV / JSON Lines の書き出し。targetId は形式） | `{format, actorKind, action, since, until, count}`（絞り込みは渡した物だけ） |
 

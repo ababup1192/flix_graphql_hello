@@ -429,7 +429,7 @@ type alias UpdateAssetRequiredArguments =
     }
 
 
-{-| alt を変える。ファイルの差し替えは新しい asset を作る
+{-| alt と見せ方（focalPoint / crop）を変える。ファイルの差し替えは新しい asset を作る
 -}
 updateAsset :
     UpdateAssetRequiredArguments

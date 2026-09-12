@@ -65,19 +65,38 @@ encodeAssetConfirmInput input____ =
 
 buildAssetPatch :
     AssetPatchRequiredFields
+    -> (AssetPatchOptionalFields -> AssetPatchOptionalFields)
     -> AssetPatch
-buildAssetPatch required____ =
-    { alt = required____.alt }
+buildAssetPatch required____ fillOptionals____ =
+    let
+        optionals____ =
+            fillOptionals____
+                { focalPoint = Absent, crop = Absent, clearFocalPoint = Absent, clearCrop = Absent }
+    in
+    { alt = required____.alt, focalPoint = optionals____.focalPoint, crop = optionals____.crop, clearFocalPoint = optionals____.clearFocalPoint, clearCrop = optionals____.clearCrop }
 
 
 type alias AssetPatchRequiredFields =
     { alt : String }
 
 
+type alias AssetPatchOptionalFields =
+    { focalPoint : OptionalArgument FocalPointInput
+    , crop : OptionalArgument CropRectInput
+    , clearFocalPoint : OptionalArgument Bool
+    , clearCrop : OptionalArgument Bool
+    }
+
+
 {-| Type for the AssetPatch input object.
 -}
 type alias AssetPatch =
-    { alt : String }
+    { alt : String
+    , focalPoint : OptionalArgument FocalPointInput
+    , crop : OptionalArgument CropRectInput
+    , clearFocalPoint : OptionalArgument Bool
+    , clearCrop : OptionalArgument Bool
+    }
 
 
 {-| Encode a AssetPatch into a value that can be used as an argument.
@@ -85,7 +104,7 @@ type alias AssetPatch =
 encodeAssetPatch : AssetPatch -> Value
 encodeAssetPatch input____ =
     Encode.maybeObject
-        [ ( "alt", Encode.string input____.alt |> Just ) ]
+        [ ( "alt", Encode.string input____.alt |> Just ), ( "focalPoint", encodeFocalPointInput |> Encode.optional input____.focalPoint ), ( "crop", encodeCropRectInput |> Encode.optional input____.crop ), ( "clearFocalPoint", Encode.bool |> Encode.optional input____.clearFocalPoint ), ( "clearCrop", Encode.bool |> Encode.optional input____.clearCrop ) ]
 
 
 buildAuditExportInput :
@@ -226,6 +245,39 @@ encodeContentTypePatch : ContentTypePatch -> Value
 encodeContentTypePatch input____ =
     Encode.maybeObject
         [ ( "name", Encode.string |> Encode.optional input____.name ), ( "singular", Encode.string |> Encode.optional input____.singular ), ( "plural", Encode.string |> Encode.optional input____.plural ), ( "previewUrl", Encode.string |> Encode.optional input____.previewUrl ), ( "linkPath", Encode.string |> Encode.optional input____.linkPath ), ( "icon", Encode.string |> Encode.optional input____.icon ) ]
+
+
+buildCropRectInput :
+    CropRectInputRequiredFields
+    -> CropRectInput
+buildCropRectInput required____ =
+    { left = required____.left, top = required____.top, width = required____.width, height = required____.height }
+
+
+type alias CropRectInputRequiredFields =
+    { left : Float
+    , top : Float
+    , width : Float
+    , height : Float
+    }
+
+
+{-| Type for the CropRectInput input object.
+-}
+type alias CropRectInput =
+    { left : Float
+    , top : Float
+    , width : Float
+    , height : Float
+    }
+
+
+{-| Encode a CropRectInput into a value that can be used as an argument.
+-}
+encodeCropRectInput : CropRectInput -> Value
+encodeCropRectInput input____ =
+    Encode.maybeObject
+        [ ( "left", Encode.float input____.left |> Just ), ( "top", Encode.float input____.top |> Just ), ( "width", Encode.float input____.width |> Just ), ( "height", Encode.float input____.height |> Just ) ]
 
 
 buildDateTimeFilter :
@@ -512,6 +564,35 @@ encodeFieldPatch : FieldPatch -> Value
 encodeFieldPatch input____ =
     Encode.maybeObject
         [ ( "name", Encode.string |> Encode.optional input____.name ), ( "required", Encode.bool |> Encode.optional input____.required ), ( "unique", Encode.bool |> Encode.optional input____.unique ), ( "localized", Encode.bool |> Encode.optional input____.localized ), ( "config", encodeFieldConfigInput |> Encode.optional input____.config ) ]
+
+
+buildFocalPointInput :
+    FocalPointInputRequiredFields
+    -> FocalPointInput
+buildFocalPointInput required____ =
+    { x = required____.x, y = required____.y }
+
+
+type alias FocalPointInputRequiredFields =
+    { x : Float
+    , y : Float
+    }
+
+
+{-| Type for the FocalPointInput input object.
+-}
+type alias FocalPointInput =
+    { x : Float
+    , y : Float
+    }
+
+
+{-| Encode a FocalPointInput into a value that can be used as an argument.
+-}
+encodeFocalPointInput : FocalPointInput -> Value
+encodeFocalPointInput input____ =
+    Encode.maybeObject
+        [ ( "x", Encode.float input____.x |> Just ), ( "y", Encode.float input____.y |> Just ) ]
 
 
 buildSchemaChangeInput :

@@ -80,7 +80,7 @@ mod TestCursor {
     /// asset の位置も往復する（作成が新しい順で固定）。
     @Test
     def testCursorAssetRoundTrip(): Unit \ Assert =
-        let asset = { id = AssetId.AssetId("a1"), key = "1/a1/x.png", fileName = "x.png", mime = "image/png", size = 5i64, width = None, height = None, alt = "", status = AssetStatus.Ready, createdAt = createdAt() };
+        let asset = { id = AssetId.AssetId("a1"), key = "1/a1/x.png", fileName = "x.png", mime = "image/png", size = 5i64, width = None, height = None, alt = "", status = AssetStatus.Ready, createdAt = createdAt(), presentation = AssetPresentation.empty() };
         Assert.assertEq(
             expected = Ok(Cursor.Cursor((SortKey.ByCreatedAt, Direction.Desc, micros(createdAt())) :: Nil, "a1")),
             Cursor.decode(Cursor.assetOrderBy(), Cursor.encode(Cursor.ofAsset(asset))))

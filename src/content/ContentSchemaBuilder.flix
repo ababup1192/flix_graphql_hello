@@ -237,7 +237,7 @@ mod ContentSchemaBuilder {
         Assets.findMany(id :: Nil) |> List.find(asset -> asset#status == AssetStatus.Ready)
 
     ///
-    /// `Asset { id url fileName mime size width height alt }`。全型で共通の 1 つ。
+    /// `Asset { id url fileName mime size width height alt focalPoint crop }`。全型で共通の 1 つ。
     ///
     def assetType(): ObjectType[Asset, ContentEff] =
         Schema.objectType("Asset", () ->
@@ -248,8 +248,26 @@ mod ContentSchemaBuilder {
             (Schema.field0("size", Out.int32(), (_context, asset) -> Ok(EntryPage.countToInt32(asset#size))) |> Field.withDescription("バイト数")) ::
             (Schema.field0("width", Out.option(Out.int32()), (_context, asset) -> Ok(asset#width)) |> Field.withDescription("画像の幅（px）。画像でなければ null")) ::
             (Schema.field0("height", Out.option(Out.int32()), (_context, asset) -> Ok(asset#height)) |> Field.withDescription("画像の高さ（px）。画像でなければ null")) ::
-            (Schema.field0("alt", Out.string(), (_context, asset) -> Ok(asset#alt)) |> Field.withDescription("代替テキスト。未設定なら空文字")) :: Nil)
-            |> ObjectType.withDescription("画像やファイル。url で配信する")
+            (Schema.field0("alt", Out.string(), (_context, asset) -> Ok(asset#alt)) |> Field.withDescription("代替テキスト。未設定なら空文字")) ::
+            (Schema.field0("focalPoint", Out.option(Out.obj(focalPointType())), (_context, asset) -> Ok(asset#presentation#focalPoint)) |> Field.withDescription("主役の位置。0〜1 の割合（左上が 0,0）。未設定なら null（中央として扱う）。object-position や切り出しの中心に使う")) ::
+            (Schema.field0("crop", Out.option(Out.obj(cropRectType())), (_context, asset) -> Ok(asset#presentation#crop)) |> Field.withDescription("切り抜き枠。0〜1 の割合（左上が 0,0）。未設定なら null（全体として扱う）。画像 CDN の切り出しや CSS の clip に使う")) :: Nil)
+            |> ObjectType.withDescription("画像やファイル。url で配信する。focalPoint / crop は割合の数値で、画像そのものは加工していない")
+
+    /// `FocalPoint { x y }`。
+    def focalPointType(): ObjectType[FocalPoint, ContentEff] =
+        Schema.objectType("FocalPoint", () ->
+            (Schema.field0("x", Out.float64(), (_context, point) -> Ok(point#x)) |> Field.withDescription("横。0 が左端、1 が右端")) ::
+            (Schema.field0("y", Out.float64(), (_context, point) -> Ok(point#y)) |> Field.withDescription("縦。0 が上端、1 が下端")) :: Nil)
+            |> ObjectType.withDescription("注目点。画像の中で主役になる位置。0〜1 の割合で、左上が (0, 0)")
+
+    /// `CropRect { left top width height }`。
+    def cropRectType(): ObjectType[CropRect, ContentEff] =
+        Schema.objectType("CropRect", () ->
+            (Schema.field0("left", Out.float64(), (_context, crop) -> Ok(crop#left)) |> Field.withDescription("枠の左端。0〜1 の割合")) ::
+            (Schema.field0("top", Out.float64(), (_context, crop) -> Ok(crop#top)) |> Field.withDescription("枠の上端。0〜1 の割合")) ::
+            (Schema.field0("width", Out.float64(), (_context, crop) -> Ok(crop#width)) |> Field.withDescription("枠の幅。0 より大きく、left + width は 1 以下")) ::
+            (Schema.field0("height", Out.float64(), (_context, crop) -> Ok(crop#height)) |> Field.withDescription("枠の高さ。0 より大きく、top + height は 1 以下")) :: Nil)
+            |> ObjectType.withDescription("切り抜き枠。画像の中で見せる矩形。0〜1 の割合で、左上が (0, 0)")
 
     ///
     /// `RichText { json html text links }`。source は (doc, その doc を持つ entry)。

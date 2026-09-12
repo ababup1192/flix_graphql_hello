@@ -90,7 +90,7 @@ mod TestAssetsPg {
     def testPgAssetInContentApi(): Unit \ {IO, Assert} =
         let (fetched, everyField) = PgTestSupport.withContentApi(() -> discard seedPublished(), ask ->
             (ask("{ blog(id: \"b1\") { cover { url width } body { html text headings { level text id } } } }"),
-             ask("{ _types blogs { totalCount nodes { id } edges { cursor node { id } } pageInfo { hasNextPage endCursor } } blog(id: \"b1\") { id stage publishedAt createdAt updatedAt cover { id fileName mime size height alt } body { json wordCount readingTimeMinutes excerpt(length: 10) } } }")));
+             ask("{ _types blogs { totalCount nodes { id } edges { cursor node { id } } pageInfo { hasNextPage endCursor } } blog(id: \"b1\") { id stage publishedAt createdAt updatedAt cover { id fileName mime size height alt focalPoint { x y } crop { left top width height } } body { json wordCount readingTimeMinutes excerpt(length: 10) } } }")));
         Assert.assertEq(
             expected = ((Value.Obj(Map#{ "blog" => Value.Obj(Map#{
                 "cover" => Value.Obj(Map#{ "url" => Value.Str("http://127.0.0.1:9000/cms/1/asset010/cover.png"), "width" => Value.Int(640) }),

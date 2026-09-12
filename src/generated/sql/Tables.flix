@@ -97,6 +97,7 @@ mod AssetsTable {
     pub def alt(): Fragment.Col[AssetsTable, String, Fragment.NotNull] = Fragment.Col.Col("alt", SqlValue.Str)
     pub def status(): Fragment.Col[AssetsTable, String, Fragment.NotNull] = Fragment.Col.Col("status", SqlValue.Str)
     pub def createdAt(): Fragment.Col[AssetsTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("created_at", SqlValue.ofTimestamp)
+    pub def presentation(): Fragment.Col[AssetsTable, Util.Json.Json, Fragment.Nullable] = Fragment.Col.Col("presentation", SqlValue.ofJson)
 
     ///
     /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。

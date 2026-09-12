@@ -83,3 +83,21 @@ usedBy :
     -> SelectionSet (List decodesTo) Api.Admin.Object.Asset
 usedBy object____ =
     Object.selectionForCompositeField "usedBy" [] object____ (Basics.identity >> Decode.list)
+
+
+{-| 主役の位置。0〜1 の割合（左上が 0,0）。未設定なら null（中央として扱う）
+-}
+focalPoint :
+    SelectionSet decodesTo Api.Admin.Object.FocalPoint
+    -> SelectionSet (Maybe decodesTo) Api.Admin.Object.Asset
+focalPoint object____ =
+    Object.selectionForCompositeField "focalPoint" [] object____ (Basics.identity >> Decode.nullable)
+
+
+{-| 切り抜き枠。0〜1 の割合（左上が 0,0）。未設定なら null（全体として扱う）
+-}
+crop :
+    SelectionSet decodesTo Api.Admin.Object.CropRect
+    -> SelectionSet (Maybe decodesTo) Api.Admin.Object.Asset
+crop object____ =
+    Object.selectionForCompositeField "crop" [] object____ (Basics.identity >> Decode.nullable)

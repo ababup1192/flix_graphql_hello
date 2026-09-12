@@ -238,7 +238,7 @@ type Mutation {
   createUploadUrl(input: UploadInput!): Upload!
   """置いた事をストレージで確かめて READY にする。画像なら寸法を渡す。置かれていなければエラー"""
   confirmAsset(id: ID!, input: AssetConfirmInput): Asset!
-  """alt を変える。ファイルの差し替えは新しい asset を作る"""
+  """alt と見せ方（focalPoint / crop）を変える。ファイルの差し替えは新しい asset を作る"""
   updateAsset(id: ID!, input: AssetPatch!): Asset!
   """消す。entry（下書き・公開・richText の画像を含む）が使っていればエラー"""
   deleteAsset(id: ID!): ID!
@@ -623,6 +623,24 @@ type Asset {
   createdAt: String!
   """この asset を使っている entry（下書き・公開・本文の image）"""
   usedBy: [Entry!]!
+  """主役の位置。0〜1 の割合（左上が 0,0）。未設定なら null（中央として扱う）"""
+  focalPoint: FocalPoint
+  """切り抜き枠。0〜1 の割合（左上が 0,0）。未設定なら null（全体として扱う）"""
+  crop: CropRect
+}
+
+"""注目点。画像の中で主役になる位置。0〜1 の割合で、左上が (0, 0)"""
+type FocalPoint {
+  x: Float!
+  y: Float!
+}
+
+"""切り抜き枠。画像の中で見せる矩形。0〜1 の割合で、左上が (0, 0)。left + width と top + height は 1 以下"""
+type CropRect {
+  left: Float!
+  top: Float!
+  width: Float!
+  height: Float!
 }
 
 """asset の一覧の 1 ページ。nodes か edges のどちらかを読む。次のページは pageInfo.endCursor を after に渡す"""
@@ -669,8 +687,29 @@ input AssetConfirmInput {
   alt: String
 }
 
+"""alt は必ず渡す。focalPoint / crop は省くと変えない。消すのは clearFocalPoint / clearCrop（値と同時には渡せない）"""
 input AssetPatch {
   alt: String!
+  """主役の位置。0〜1 の割合（左上が 0,0）"""
+  focalPoint: FocalPointInput
+  """切り抜き枠。0〜1 の割合（左上が 0,0）。left + width と top + height は 1 以下、width / height は 0 より大きい"""
+  crop: CropRectInput
+  """注目点を消す（中央に戻す）"""
+  clearFocalPoint: Boolean = false
+  """切り抜き枠を消す（全体に戻す）"""
+  clearCrop: Boolean = false
+}
+
+input FocalPointInput {
+  x: Float!
+  y: Float!
+}
+
+input CropRectInput {
+  left: Float!
+  top: Float!
+  width: Float!
+  height: Float!
 }
 
 """entry の状態"""

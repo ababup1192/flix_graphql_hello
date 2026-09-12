@@ -1306,7 +1306,7 @@ confirmAsset id project assetId =
 updateAsset : String -> Slug -> { assetId : String, alt : String } -> ( Api.Request, D.Decoder Model.AssetRow )
 updateAsset id project args =
     Api.mutation { id = id, kind = "updateAsset", project = project }
-        (AdminMutation.updateAsset { id = args.assetId, input = { alt = args.alt } } assetRow)
+        (AdminMutation.updateAsset { id = args.assetId, input = Input.buildAssetPatch { alt = args.alt } identity } assetRow)
 
 
 deleteAsset : String -> Slug -> String -> ( Api.Request, D.Decoder String )

@@ -195,9 +195,9 @@ mod TestAdminMutationsPg {
             (outcome, Ref.get(errors)))
 
     ///
-    /// asset の mutation。署名付き URL を発行し（fileName は安全な形 "photo-x.png" に直る）、MinIO へ本当に PUT し、confirm で READY になり、alt を直し、一覧と 1 件で読め、消せる。
+    /// asset の mutation。署名付き URL を発行し（fileName は安全な形 "photo-x.png" に直る）、MinIO へ本当に PUT し、confirm で READY になり、alt と見せ方（focalPoint / crop）を直し、clearCrop で枠だけ消え、一覧と 1 件で読め、消せる。
     ///
-    ///   createUploadUrl ─ PUT ─ confirmAsset ─ updateAsset ─ assets / asset ─ deleteAsset
+    ///   createUploadUrl ─ PUT ─ confirmAsset ─ updateAsset ×2 ─ assets / asset ─ deleteAsset
     ///
     @Test
     def testPgAdminAssetMutations(): Unit \ {IO, Assert} =
@@ -208,7 +208,8 @@ mod TestAdminMutationsPg {
             let assetId = GraphqlTestKit.stringAt(List#{"createUploadUrl", "asset", "id"}, upload);
             let putStatus = PgTestSupport.putTo(GraphqlTestKit.stringAt(List#{"createUploadUrl", "uploadUrl"}, upload), "image/png", "hello");
             let confirmed = ask("mutation { confirmAsset(id: \"${assetId}\", input: { width: 10, height: 20, alt: \"写真\" }) { status size width height alt url createdAt usedBy { id } } }");
-            let altChanged = ask("mutation { updateAsset(id: \"${assetId}\", input: { alt: \"表紙\" }) { id alt } }");
+            let altChanged = ask("mutation { updateAsset(id: \"${assetId}\", input: { alt: \"表紙\", focalPoint: { x: 0.5, y: 0.25 }, crop: { left: 0, top: 0.5, width: 1, height: 0.5 } }) { id alt focalPoint { x y } crop { left top width height } } }");
+            let cropCleared = ask("mutation { updateAsset(id: \"${assetId}\", input: { alt: \"表紙\", clearCrop: true }) { focalPoint { x } crop { left } } }");
             let listed = ask("{ assets { totalCount nodes { id } } asset(id: \"${assetId}\") { alt status } }");
             let deleted = ask("mutation { deleteAsset(id: \"${assetId}\") }");
             let afterDelete = ask("{ assets { totalCount edges { cursor node { id } } pageInfo { hasNextPage endCursor } } asset(id: \"${assetId}\") { id } }");
@@ -217,7 +218,10 @@ mod TestAdminMutationsPg {
              putStatus,
              (GraphqlTestKit.valueAt(List#{"confirmAsset", "status"}, confirmed), GraphqlTestKit.valueAt(List#{"confirmAsset", "size"}, confirmed), GraphqlTestKit.valueAt(List#{"confirmAsset", "width"}, confirmed), GraphqlTestKit.valueAt(List#{"confirmAsset", "height"}, confirmed), GraphqlTestKit.valueAt(List#{"confirmAsset", "alt"}, confirmed), GraphqlTestKit.valueAt(List#{"confirmAsset", "usedBy"}, confirmed)),
              GraphqlTestKit.stringAt(List#{"confirmAsset", "url"}, confirmed) == "http://127.0.0.1:9000/cms/1/${assetId}/photo-x.png",
-             fst(altChanged) == Value.Obj(Map#{ "updateAsset" => Value.Obj(Map#{ "id" => Value.Str(assetId), "alt" => Value.Str("表紙") }) }),
+             fst(altChanged) == Value.Obj(Map#{ "updateAsset" => Value.Obj(Map#{ "id" => Value.Str(assetId), "alt" => Value.Str("表紙"),
+                 "focalPoint" => Value.Obj(Map#{ "x" => Value.Float(0.5), "y" => Value.Float(0.25) }),
+                 "crop" => Value.Obj(Map#{ "left" => Value.Float(0.0), "top" => Value.Float(0.5), "width" => Value.Float(1.0), "height" => Value.Float(0.5) }) }) }),
+             fst(cropCleared) == Value.Obj(Map#{ "updateAsset" => Value.Obj(Map#{ "focalPoint" => Value.Obj(Map#{ "x" => Value.Float(0.5) }), "crop" => Value.Null }) }),
              fst(listed) == Value.Obj(Map#{ "assets" => Value.Obj(Map#{ "totalCount" => Value.Int(1), "nodes" => Value.List(Value.Obj(Map#{ "id" => Value.Str(assetId) }) :: Nil) }), "asset" => Value.Obj(Map#{ "alt" => Value.Str("表紙"), "status" => Value.Str("READY") }) }),
              GraphqlTestKit.stringAt(List#{"deleteAsset"}, deleted) == assetId,
              fst(afterDelete))
@@ -228,6 +232,7 @@ mod TestAdminMutationsPg {
                 (Value.Str("PENDING"), Value.Str("photo-x.png"), Value.Str("image/png"), Value.Int(5), Value.Null, Value.Int(600)),
                 Ok(200),
                 (Value.Str("READY"), Value.Int(5), Value.Int(10), Value.Int(20), Value.Str("写真"), Value.List(Nil)),
+                true,
                 true,
                 true,
                 true,

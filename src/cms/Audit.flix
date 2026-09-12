@@ -39,6 +39,8 @@ pub enum AuditChange with Eq {
     /// asset を ready にした / 消した（id, 姿。消した物は変更前の姿。AuditSnapshot.ofAsset）
     case AssetConfirmed(AssetId, Util.Json.Json)
     case AssetDeleted(AssetId, Util.Json.Json)
+    /// asset の見せ方（注目点・切り抜き枠）を変えた（id, 変更前と後。AuditSnapshot.ofPresentationChange）。alt だけの変更は積まない
+    case AssetUpdated(AssetId, Util.Json.Json)
     /// entry の公開を取り下げた / ゴミ箱に入れた（id, 型の apiId, その時点の版）
     case EntryUnpublished(EntryId, ApiId, Int32)
     case EntryDeleted(EntryId, ApiId, Int32)
@@ -112,6 +114,7 @@ mod Audit {
         case AuditChange.WebhookRedelivered(deliveryId)                   => row(actor, "webhook.redelivered", "webhook_delivery", deliveryId, empty())
         case AuditChange.AssetConfirmed(id, snapshot)                     => row(actor, "asset.confirmed", "asset", AssetId.text(id), snapshot)
         case AuditChange.AssetDeleted(id, was)                            => row(actor, "asset.deleted", "asset", AssetId.text(id), before(was))
+        case AuditChange.AssetUpdated(id, detail)                         => row(actor, "asset.updated", "asset", AssetId.text(id), detail)
         case AuditChange.EntryUnpublished(id, apiId, version)             => row(actor, "entry.unpublished", "entry", EntryId.text(id), entryDetail(apiId, version, Nil))
         case AuditChange.EntryDeleted(id, apiId, version)                 => row(actor, "entry.deleted", "entry", EntryId.text(id), entryDetail(apiId, version, Nil))
         case AuditChange.EntryPublishedBySchedule(id, apiId, version, at) => row(actor, "entry.published", "entry", EntryId.text(id), entryDetail(apiId, version, ("scheduledFor", Json.JString(Timestamp.toIso8601(at))) :: Nil))

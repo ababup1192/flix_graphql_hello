@@ -167,10 +167,10 @@ mod AdminMutationResolvers {
 
     /// Mutation.updateAsset
     pub def updateAsset(): GeneratedAdmin.MutationUpdateAssetResolver[AdminEff] =
-        (_context, id, patch) -> Ok(updateAssetAlt(id, patch#alt))
+        (_context, id, patch) -> Ok(updateAssetOf(id, patch))
 
-    def updateAssetAlt(id: Id, alt: String): Asset \ Db + CmsErr + Tenant + Session =
-        Assets.updateAlt(Session.grant(), AdminMapping.assetId("id", id), alt)
+    def updateAssetOf(id: Id, patch: GeneratedAdmin.AssetPatch): Asset \ Db + CmsErr + IdGen + Tenant + Session =
+        Assets.update(Session.grant(), AdminMapping.assetId("id", id), AdminMapping.assetChanges(patch))
 
     /// Mutation.deleteAsset。消した id を返す
     pub def deleteAsset(): GeneratedAdmin.MutationDeleteAssetResolver[AdminEff] =

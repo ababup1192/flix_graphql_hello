@@ -1,0 +1,12 @@
+-- assets.presentation: 注目点（focalPoint）と切り抜き枠（crop）。画像は触らず、0〜1 の割合だけを持つ
+-- （Sanity の hotspot & crop と同じ考え）。配信側が表示サイズに合わせて計算する。
+--
+-- 形は { "focalPoint": { "x", "y" }, "crop": { "left", "top", "width", "height" } }。どちらも省ける。
+-- 何も指定していない asset は NULL（中央・全体として扱う）。
+--
+-- WhyNot: 列を 6 本に分けない。注目点と枠は必ず組で読み書きし、片方だけの状態を「無い」と「0」で
+-- 区別する列（width の 0 = 不明のような約束）を増やしたくない。絞り込みや索引の対象にもならない。
+--
+-- WhyNot: 範囲の CHECK を置かない。left + width <= 1 のような組の条件は AssetPresentationRules が
+-- 業務エラー（path 付き）で返す。DB で落とすと利用者に「どの値が」を返せない。
+ALTER TABLE assets ADD COLUMN presentation JSONB;

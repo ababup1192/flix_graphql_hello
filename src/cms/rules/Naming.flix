@@ -15,7 +15,7 @@ mod Naming {
     /// コンテンツ API が自分で持つので、singular に使えない型名。
     ///
     pub def reservedTypeNames(): List[String] =
-        "Query" :: "Mutation" :: "Subscription" :: "Entry" :: "Asset" :: "Stage" :: "RichText" :: "Heading" :: "PageInfo" :: "DateTime" :: "JSON" :: "Int" :: "Float" :: "String" :: "Boolean" :: "ID" :: Nil
+        "Query" :: "Mutation" :: "Subscription" :: "Entry" :: "Asset" :: "FocalPoint" :: "CropRect" :: "Stage" :: "RichText" :: "Heading" :: "PageInfo" :: "DateTime" :: "JSON" :: "Int" :: "Float" :: "String" :: "Boolean" :: "ID" :: Nil
 
     ///
     /// 型ごとに生える型の接尾辞。singular がこれで終わると、別の型から生えた名前と衝突しうる。

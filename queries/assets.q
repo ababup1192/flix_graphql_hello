@@ -6,18 +6,18 @@ query insertAsset(id: String, projectId: Int64, key: String, fileName: String, m
 }
 
 query findAsset(id: String, projectId: Int64) -> one {
-    SELECT id, key, file_name, mime, size, width, height, alt, status, created_at
+    SELECT id, key, file_name, mime, size, width, height, alt, status, created_at, presentation
     FROM assets WHERE id = :id AND project_id = :projectId
 }
 
 query findAssets(ids: List[String], projectId: Int64) -> many {
-    SELECT id, key, file_name, mime, size, width, height, alt, status, created_at
+    SELECT id, key, file_name, mime, size, width, height, alt, status, created_at, presentation
     FROM assets WHERE id = ANY(:ids) AND project_id = :projectId
 }
 
 // 一覧。新しい順。pending も出す（アップロード途中の物を管理画面で見せる）
 query listAssets(projectId: Int64, limit: Int64, offset: Int64) -> many {
-    SELECT id, key, file_name, mime, size, width, height, alt, status, created_at
+    SELECT id, key, file_name, mime, size, width, height, alt, status, created_at, presentation
     FROM assets WHERE project_id = :projectId
     ORDER BY created_at DESC, id DESC
     LIMIT :limit OFFSET :offset
@@ -25,7 +25,7 @@ query listAssets(projectId: Int64, limit: Int64, offset: Int64) -> many {
 
 // cursor の続き。作成が新しい順なので (created_at, id) がその位置より前（古い）の物
 query listAssetsAfter(projectId: Int64, createdAt: Timestamp, id: String, limit: Int64) -> many {
-    SELECT id, key, file_name, mime, size, width, height, alt, status, created_at
+    SELECT id, key, file_name, mime, size, width, height, alt, status, created_at, presentation
     FROM assets WHERE project_id = :projectId AND (created_at, id) < (:createdAt, :id)
     ORDER BY created_at DESC, id DESC
     LIMIT :limit
@@ -41,8 +41,9 @@ query markAssetReady(id: String, projectId: Int64, size: Int64, width: Int32, he
     WHERE id = :id AND project_id = :projectId
 }
 
-query updateAssetAlt(id: String, projectId: Int64, alt: String) -> exec {
-    UPDATE assets SET alt = :alt WHERE id = :id AND project_id = :projectId
+// alt と見せ方（注目点・切り抜き枠。何も無ければ NULL）を置き換える
+query updateAsset(id: String, projectId: Int64, alt: String, presentation: Option[Json]) -> exec {
+    UPDATE assets SET alt = :alt, presentation = :presentation WHERE id = :id AND project_id = :projectId
 }
 
 query deleteAsset(id: String, projectId: Int64) -> exec {

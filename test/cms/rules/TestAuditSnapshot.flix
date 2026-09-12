@@ -13,7 +13,7 @@ mod TestAuditSnapshot {
 
     def asset(): Asset =
         { id = AssetId.AssetId("a1b2c3d4e5f6"), key = "1/a1b2c3d4e5f6/取引先の見積.pdf", fileName = "取引先の見積.pdf", mime = "application/pdf", size = 1024i64,
-          width = None, height = None, alt = "山田さんの見積", status = AssetStatus.Ready, createdAt = Timestamp.fromEpochMillis(0i64) }
+          width = None, height = None, alt = "山田さんの見積", status = AssetStatus.Ready, createdAt = Timestamp.fromEpochMillis(0i64), presentation = AssetPresentation.empty() }
 
     /// Json のキー（オブジェクトでなければ空）。
     def keys(json: Json): List[String] = match json {

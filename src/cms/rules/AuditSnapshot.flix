@@ -35,6 +35,13 @@ mod AuditSnapshot {
             "height" => dimension(asset#height)
         })
 
+    ///
+    /// 見せ方（注目点・切り抜き枠）の変更。`{ before, after }` で、それぞれ `AssetPresentation.toJson`（何も無ければ空のオブジェクト）。
+    /// 割合の数値だけで個人情報を含まないので、そのまま持つ。
+    ///
+    pub def ofPresentationChange(was: AssetPresentation, now: AssetPresentation): Json =
+        Json.JObject(Map#{ "before" => AssetPresentation.toJson(was), "after" => AssetPresentation.toJson(now) })
+
     /// 寸法。無ければ null。
     def dimension(value: Option[Int32]): Json = match value {
         case Some(n) => Json.JNumber(Int32.toBigDecimal(n))

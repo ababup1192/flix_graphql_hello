@@ -1,5 +1,5 @@
 ///
-/// asset のユースケース。署名付き URL の発行 → ブラウザが置く → confirm で ready、と、alt の変更・削除・一覧。
+/// asset のユースケース。署名付き URL の発行 → ブラウザが置く → confirm で ready、と、alt・見せ方の変更・削除・一覧。
 /// 中身はストレージ（ObjectStore）にあり、DB は場所と属性だけ。読み書きは今のプロジェクトに閉じる。
 /// pub の入口は権限の証明（`Granted[ReadDraft]` / `Granted[ManageAssets]`。`Session.grant()` で作る）を最初の引数で受け、自分では判定しない。
 ///
@@ -38,11 +38,21 @@ mod Assets {
         }
 
     ///
-    /// alt を変える。ファイルの差し替えは新しい asset を作る。
+    /// alt と見せ方（注目点・切り抜き枠）を変える。ファイルの差し替えは新しい asset を作る。
+    /// 見せ方は今の値に直し方を当ててから範囲を検査する（Keep の項目は今の値のまま通る）。
     ///
-    pub def updateAlt(_proof: Granted[ManageAssets], id: AssetId, alt: String): Asset \ Db + CmsErr + Tenant =
-        discard get(id);
-        discard AssetsQueries.updateAssetAlt({ id = AssetId.text(id), projectId = Tenant.currentId(), alt = alt });
+    pub def update(_proof: Granted[ManageAssets], id: AssetId, changes: AssetChanges): Asset \ Db + CmsErr + IdGen + Tenant + Session =
+        let asset = get(id);
+        let presentation = AssetPresentationRules.apply(changes#presentation, asset#presentation);
+        CmsErr.raiseIfAny(AssetPresentationRules.validate(presentation));
+        discard AssetsQueries.updateAsset({
+            id = AssetId.text(id), projectId = Tenant.currentId(),
+            alt = changes#alt |> Option.getWithDefault(asset#alt), presentation = AssetRows.presentationToDb(presentation)
+        });
+        // WhyNot: alt だけの変更を積まない。alt は本文に準ずる（docs/design/audit-log.md の「積まない物」）
+        if (AssetPresentation.toJson(presentation) != AssetPresentation.toJson(asset#presentation))
+            Audit.record(AuditChange.AssetUpdated(id, AuditSnapshot.ofPresentationChange(asset#presentation, presentation)))
+        else ();
         get(id)
 
     ///
