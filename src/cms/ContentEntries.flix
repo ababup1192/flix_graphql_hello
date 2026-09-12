@@ -157,6 +157,8 @@ mod ContentEntries {
         if (existing#stage == Stage.Published) discard unpublish(unpublishing |> CmsErr.orForbidden(Permission.PublishEntries), id) else ();
         discard EntriesQueries.deleteLinks({ fromEntryId = EntryId.text(id), stage = EntryRows.stageToDb(Stage.Draft), projectId = Tenant.currentId() });
         discard EntriesQueries.softDeleteEntry({ id = EntryId.text(id), projectId = Tenant.currentId() });
+        // 戻す先が無くなったので、預かっていた編集中の中身を全員分捨てる（論理削除なので外部キーの CASCADE は効かない）
+        EntryAutosaves.purge(proof, id);
         let owner = ContentTypes.get(Session.readDraftOfWriter(proof), existing#typeId);
         Publishing.notify(PublishingEvent.EntryDeleted(id, owner#apiId, EntryValue.slugOf(owner, existing#data)));
         Audit.record(AuditChange.EntryDeleted(id, owner#apiId, existing#version))

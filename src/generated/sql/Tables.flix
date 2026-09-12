@@ -447,6 +447,62 @@ mod EntriesTable {
 }
 
 ///
+/// entry_autosaves テーブル。enum は断片 DSL の型に付ける印、関数は列。
+///
+mod EntryAutosavesTable {
+
+    use SqlValue.SqlValue
+
+    pub enum EntryAutosavesTable {
+        case EntryAutosavesTable
+    }
+
+    pub def entryId(): Fragment.Col[EntryAutosavesTable, String, Fragment.NotNull] = Fragment.Col.Col("entry_id", SqlValue.Str)
+    pub def userId(): Fragment.Col[EntryAutosavesTable, Int64, Fragment.NotNull] = Fragment.Col.Col("user_id", SqlValue.Int64)
+    pub def projectId(): Fragment.Col[EntryAutosavesTable, Int64, Fragment.NotNull] = Fragment.Col.Col("project_id", SqlValue.Int64)
+    pub def data(): Fragment.Col[EntryAutosavesTable, Util.Json.Json, Fragment.NotNull] = Fragment.Col.Col("data", SqlValue.ofJson)
+    pub def baseVersion(): Fragment.Col[EntryAutosavesTable, Int32, Fragment.NotNull] = Fragment.Col.Col("base_version", SqlValue.Int32)
+    pub def updatedAt(): Fragment.Col[EntryAutosavesTable, Timestamp.Timestamp, Fragment.NotNull] = Fragment.Col.Col("updated_at", SqlValue.ofTimestamp)
+
+    ///
+    /// DDL の名前付き制約。違反の翻訳は `onConstraint` に渡す関数で書く。case が足りなければコンパイルエラー。
+    ///
+    pub enum Constraint with Eq, Order, ToString {
+        /// entry_autosaves_entry_id_fkey (foreign key)
+        case EntryIdFkey
+        /// entry_autosaves_user_id_fkey (foreign key)
+        case UserIdFkey
+        /// entry_autosaves_project_id_fkey (foreign key)
+        case ProjectIdFkey
+    }
+
+    ///
+    /// このテーブルへの書き込みを、制約違反を `translate` で翻訳しながら実行する。
+    /// translate は thunk と同じ型の値を返すか、業務エラーのエフェクトを投げる。翻訳しない case は `raiseConstraint`。
+    /// enum に無い名前の違反と、制約違反以外の DbErr はそのまま上へ。Tx の外で呼ぶ（違反で abort した Tx に COMMIT を出さない）。
+    ///
+    pub def onConstraint(translate: Constraint -> a \ ef1, thunk: Unit -> a \ ef2): a \ ef1 + ef2 + {TransientDbErr, DbErr} =
+        DbError.onConstraintWith(constraintOf, translate, thunk)
+
+    ///
+    /// 翻訳しない制約を元の DbErr に戻す。`onConstraint` に渡す関数の中で使う。
+    ///
+    pub def raiseConstraint(constraint: Constraint): a \ DbErr = match constraint {
+        case Constraint.EntryIdFkey => DbErr.foreignKeyViolation("entry_autosaves_entry_id_fkey")
+        case Constraint.UserIdFkey => DbErr.foreignKeyViolation("entry_autosaves_user_id_fkey")
+        case Constraint.ProjectIdFkey => DbErr.foreignKeyViolation("entry_autosaves_project_id_fkey")
+    }
+
+    def constraintOf(name: String): Option[Constraint] = match name {
+        case "entry_autosaves_entry_id_fkey" => Some(Constraint.EntryIdFkey)
+        case "entry_autosaves_user_id_fkey" => Some(Constraint.UserIdFkey)
+        case "entry_autosaves_project_id_fkey" => Some(Constraint.ProjectIdFkey)
+        case _ => None
+    }
+
+}
+
+///
 /// entry_contents テーブル。enum は断片 DSL の型に付ける印、関数は列。
 ///
 mod EntryContentsTable {
