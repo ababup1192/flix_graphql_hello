@@ -24,6 +24,7 @@ import Json.Decode as D
 import Json.Encode as E
 import LinkPick
 import Model exposing (ContentTypeSummary, Person, Project, Slug)
+import Navigate
 import Page.Account as Account
 import Page.Audit as Audit
 import Page.Board as Board
@@ -1124,20 +1125,11 @@ gotPerson person model =
         ( final, Effect.batch [ viewerEffect, typesEffect, routeEffect ] )
 
 
-{-| URL のプロジェクトを優先し、無ければ最初の 1 つ。
+{-| URL のプロジェクトを優先し、URL に無ければ最初の 1 つ。
 -}
 pickProject : Route -> Person -> Maybe Project
 pickProject route person =
-    case Route.projectOf route of
-        Just slug ->
-            person.projects
-                |> List.filter (\project -> project.slug == slug)
-                |> List.head
-                |> Maybe.withDefault (List.head person.projects |> Maybe.withDefault emptyProject)
-                |> Just
-
-        Nothing ->
-            List.head person.projects
+    Navigate.pick (Route.projectOf route) person.projects
 
 
 emptyProject : Project
@@ -1189,26 +1181,37 @@ staysOnPage model to =
 
 enterNewRoute : Route -> ModelWith key -> ( ModelWith key, Effect Msg )
 enterNewRoute route model =
-    if movesProject model route then
-        -- **別のプロジェクトへは読み込み直す。** 中で切り替えると、今のプロジェクトの
-        -- 型や権限を持ったまま別のプロジェクトの URL を開く事になり、
-        -- 問い合わせが古いプロジェクトへ飛ぶ。
-        ( model, Effect.LoadUrl (Route.toString route) )
+    case model.phase of
+        Ready workspace ->
+            case moveFor workspace route of
+                Navigate.Stay ->
+                    enterPage route model
 
-    else
-        enterPage route model
+                Navigate.Reload ->
+                    -- **別のプロジェクトへは読み込み直す。** 中で切り替えると、今のプロジェクトの
+                    -- 型や権限を持ったまま別のプロジェクトの URL を開く事になり、
+                    -- 問い合わせが古いプロジェクトへ飛ぶ。
+                    ( model, Effect.LoadUrl (Route.toString route) )
 
-
-{-| 今いるプロジェクトと違うプロジェクトの URL か。
--}
-movesProject : ModelWith key -> Route -> Bool
-movesProject model route =
-    case ( model.phase, Route.projectOf route ) of
-        ( Ready workspace, Just wanted ) ->
-            (workspace.project |> Maybe.map .slug) /= Just wanted
+                Navigate.Unknown slug ->
+                    -- WhyNot: URL は書き換えない。書き換えると読み込み直しでこの画面を作り直し、
+                    -- 見つからなかった事の知らせが消える。
+                    { model | route = Route.Projects, phase = Ready { workspace | page = ProjectsPage (Projects.init workspace.person |> Projects.notFound slug) } }
+                        |> sendAll (List.map (Api.mapCall ProjectsMsg) (Projects.load workspace.person))
 
         _ ->
-            False
+            enterPage route model
+
+
+{-| URL のプロジェクトに対して何をするか。
+-}
+moveFor : Workspace -> Route -> Navigate.Move
+moveFor workspace route =
+    Navigate.moveFor
+        { wanted = Route.projectOf route
+        , current = workspace.project |> Maybe.map .slug
+        , known = workspace.person.projects |> List.map .slug
+        }
 
 
 enterPage : Route -> ModelWith key -> ( ModelWith key, Effect Msg )

@@ -1,4 +1,4 @@
-module Page.Projects exposing (Model, Msg, init, load, update, view)
+module Page.Projects exposing (Model, Msg, init, load, notFound, update, view)
 
 {-| プロジェクトを選ぶ画面。組織ごとに並べ、そこから組織とプロジェクトを作る。
 
@@ -27,6 +27,9 @@ type alias Model =
 
     {- 組織 id → その組織のプロジェクト id。組織側から引いた物。 -}
     , orgProjects : Dict String (List String)
+
+    {- URL で開こうとして見つからなかったプロジェクトの slug。 -}
+    , notFoundSlug : Maybe String
     }
 
 
@@ -46,7 +49,14 @@ type Msg
 
 init : Person -> Model
 init person =
-    { person = person, newProject = Nothing, newOrg = Nothing, errors = [], busy = False, orgProjects = Dict.empty }
+    { person = person, newProject = Nothing, newOrg = Nothing, errors = [], busy = False, orgProjects = Dict.empty, notFoundSlug = Nothing }
+
+
+{-| URL のプロジェクトが見つからなかった事をこの画面で伝える。
+-}
+notFound : String -> Model -> Model
+notFound slug model =
+    { model | notFoundSlug = Just slug }
 
 
 {-| 開いた時に、組織ごとのプロジェクトを引く。
@@ -161,6 +171,13 @@ view : Model -> Html Msg
 view model =
     div [ class "mx-auto flex w-full max-w-4xl flex-col gap-8 py-10" ]
         [ Ui.heading "プロジェクトを選ぶ"
+        , case model.notFoundSlug of
+            Just slug ->
+                Ui.messageCard "プロジェクトが見つかりません"
+                    [ span [ class "text-xs text-ink-faint" ] [ text (slug ++ " を開く権限が無いか、プロジェクトが削除されたか、プロジェクト slug が変更されています。") ] ]
+
+            Nothing ->
+                text ""
         , div [ class "flex flex-col gap-8" ] (List.map (viewOrg model) (organizationsOf model))
         , if List.isEmpty model.person.organizations then
             viewOrgForm model
