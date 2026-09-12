@@ -1,4 +1,4 @@
-.PHONY: run check test test-unit test-pg test-pg-ci import-microcms db-up db-down query generate scaffold gen gen-check migrate migrate-status migrate-new fatjar image
+.PHONY: run check test test-unit test-pg test-pg-ci import-microcms import-blog-example db-up db-down query generate scaffold gen gen-check migrate migrate-status migrate-new fatjar image
 
 # **テストの DB は開発の DB と分ける。** 同じ物を使うと、テストが終わりに消す時に
 # 手元のデータ（見本のコンテンツ、発行した鍵、招待）まで消える（実際に消えた）。
@@ -26,6 +26,14 @@ run:
 # microCMS の API スキーマ（import/microcms/schema/*.json）を既定プロジェクトに写し、ダミーの entry を積んで公開する。PG は make db-up で
 import-microcms:
 	$(PG_ENV) CMS_MODE=import-microcms CMS_IMPORT_DIR=import/microcms/schema bin/flix run
+
+# サンプルブログ（別リポジトリの flix-cms-example）が前提にしている blogs / authors / tags を
+# 専用のプロジェクトに写し、ダミーの entry を積んで公開する。PG は make db-up で。
+# プロジェクト（BLOG_EXAMPLE_PROJECT）は先に作っておく（Account API の createProject）。
+BLOG_EXAMPLE_PROJECT = blog-example
+
+import-blog-example:
+	$(PG_ENV) CMS_DEFAULT_PROJECT=$(BLOG_EXAMPLE_PROJECT) CMS_MODE=import-microcms CMS_IMPORT_DIR=import/blog-example/schema bin/flix run
 
 check:
 	bin/flix check

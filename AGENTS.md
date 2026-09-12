@@ -51,6 +51,7 @@ make generate  # admin.graphql / account.graphql → src/generated/graphql/、sc
 make gen       # migrations/ + queries/*.q → src/generated/sql/（sqlfx の生成器。flix_db 側で動く）
 make fatjar    # 実行可能な jar（artifact/）
 make import-microcms  # import/microcms/schema/*.json（microCMS の API スキーマ）を既定プロジェクトに写し、ダミーの entry を積んで公開
+make import-blog-example  # import/blog-example/schema/*.json（作例 flix-cms-example 用の blogs / authors / tags）を blog-example プロジェクトに写す
 make image     # Docker イメージ（手元用。CI は ghcr.io に amd64 / arm64）
 ```
 
