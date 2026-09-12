@@ -407,6 +407,12 @@ class TiptapEditor extends HTMLElement {
         options: {
           placement: "bottom",
           offset: 6,
+          // **選んだ所が画面から出たら帯も消す。**
+          //
+          // WhyNot: 既定のままにしない。tippy は基準の要素が見えなくなると帯を隠していたが、
+          // Floating UI は明示しないと隠さず、画面の端に貼り付いたまま残る。本文を送ると
+          // 帯が上の帯（保存・公開）とタイトルに重なった（実際に重なった）。
+          hide: true,
         },
         // WhyNot: キャプションでは placement を top にしない。placement は configure で固定なので、
         // 基準の矩形をキャプションの上に持ち上げて、bottom のまま「キャプションの真上」に置く。
