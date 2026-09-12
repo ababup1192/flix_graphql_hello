@@ -47,6 +47,7 @@ import { CardStore, linkCardNode } from "./link-card-node";
 import { EmbedNode } from "./embed-node";
 import { UrlPaste } from "./url-cards";
 import { BlockMenu } from "./block-menu";
+import type { ResolvedPos } from "@tiptap/pm/model";
 import BubbleMenu from "@tiptap/extension-bubble-menu";
 import { NodeSelection } from "@tiptap/pm/state";
 import { createLowlight } from "lowlight";
@@ -406,7 +407,7 @@ class TiptapEditor extends HTMLElement {
       // 文字を選んだ時に選択の下に浮く帯。文字に掛ける物 6 つ +「…」（`bubbleTools`・`moreTools`）。
       // 画像のキャプションの中ではカーソルがある間ずっとその真上に、引用の出典では選んだ時に
       // その真下に、3 つ（太字 / 打ち消し / リンク）。
-      // 表のセルとコードブロックの中では出さない（既に帯と言語の面がある）。
+      // 表のセルの中でも出す（doc がマークを許している）。コードブロックの中では出さない。
       BubbleMenu.configure({
         element: this.buildBubble(),
         updateDelay: 80,
@@ -475,15 +476,33 @@ class TiptapEditor extends HTMLElement {
           // 出典はカーソルを置いただけでは出さない（空の出典に帯が被る）。選んだ時だけ 3 つ。
           if (from === to) return false;
           if (insideQuoteCite(state)) return true;
-          // 選択の端のどちらかが表かコードブロックの中なら出さない（セルから外へ伸びた選択も含む）。
-          const inBlocked = ($pos: { depth: number; node: (depth: number) => { type: { name: string } } }) => {
-            for (let depth = $pos.depth; depth > 0; depth -= 1) {
-              const name = $pos.node(depth).type.name;
-              if (name === "table" || name === "codeBlock") return true;
-            }
+          // 選択の端のどちらかがコードブロックの中なら出さない。
+          //
+          // WhyNot: 表のセルの中でも出さない、にしない。doc はセルの中のマークを許していて
+          // （`RichText.checkCellChildren` が断るのはブロックだけ）Markdown も往復するのに、
+          // 画面から付ける手段だけが無かった。比較表の「詳細はこちら」のリンクが張れない。
+          //
+          // WhyNot: コードブロックは出さないまま。中身はプレーンテキストでマークが付かない。
+          const inCode = ($pos: ResolvedPos) => {
+            for (let depth = $pos.depth; depth > 0; depth -= 1) if ($pos.node(depth).type.name === "codeBlock") return true;
             return false;
           };
-          if (inBlocked(state.selection.$from) || inBlocked(state.selection.$to)) return false;
+          if (inCode(state.selection.$from) || inCode(state.selection.$to)) return false;
+          // **セルを跨いだ選択では出さない。** 掛けられるのは 1 つのセルの中の文字だけで、
+          // 跨いだ所に帯を出すと押せてしまう（表の帯と役目も重なる）。
+          //
+          // WhyNot: 位置の比較だけで済ませない。セルを跨ぐ選択は prosemirror-tables が
+          // CellSelection に作り替えるので、$from と $to が同じセルを指す事がある。
+          // 目印の `$anchorCell` で先に断る。
+          if ("$anchorCell" in state.selection) return false;
+          const cellOf = ($pos: ResolvedPos) => {
+            for (let depth = $pos.depth; depth > 0; depth -= 1) {
+              const name = $pos.node(depth).type.name;
+              if (name === "tableCell" || name === "tableHeader") return $pos.before(depth);
+            }
+            return null;
+          };
+          if (cellOf(state.selection.$from) !== cellOf(state.selection.$to)) return false;
           return state.doc.textBetween(from, to).trim().length > 0;
         },
       }),
