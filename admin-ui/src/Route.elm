@@ -33,7 +33,10 @@ type Route
     | Entry String String String
     | Media String
     | Settings String SettingsTab
-    | NotFound
+      {- WhyNot: プロジェクトを捨てない。読めない URL でも `/p/{slug}/` の形なら
+         その人が居たプロジェクトは分かり、上のバーとサイドバーを残せる。
+      -}
+    | NotFound (Maybe String)
 
 
 type SettingsTab
@@ -68,7 +71,23 @@ fromString path =
 
 fromUrl : Url -> Route
 fromUrl url =
-    P.parse (parser url) url |> Maybe.withDefault NotFound
+    P.parse (parser url) url |> Maybe.withDefault (NotFound (projectInPath url))
+
+
+{-| 読めなかった URL から、せめてプロジェクトの slug だけ拾う。
+-}
+projectInPath : Url -> Maybe String
+projectInPath url =
+    case String.split "/" url.path of
+        "" :: "p" :: slug :: _ ->
+            if String.isEmpty slug then
+                Nothing
+
+            else
+                Url.percentDecode slug
+
+        _ ->
+            Nothing
 
 
 parser : Url -> Parser (Route -> a) a
@@ -89,7 +108,8 @@ parser url =
         , P.map Entry (P.s "p" </> P.string </> P.s "c" </> P.string </> P.string)
         , P.map Media (P.s "p" </> P.string </> P.s "assets")
         , P.map (\p -> Settings p Members) (P.s "p" </> P.string </> P.s "settings")
-        , P.map (\p tab -> settingsTabOf (queryOf auditParams url) tab |> Maybe.map (Settings p) |> Maybe.withDefault NotFound) (P.s "p" </> P.string </> P.s "settings" </> P.string)
+        , P.map (\p tab -> settingsTabOf (queryOf auditParams url) tab |> Maybe.map (Settings p) |> Maybe.withDefault (NotFound (Just p))) (P.s "p" </> P.string </> P.s "settings" </> P.string)
+        , P.map (NotFound << Just) (P.s "p" </> P.string </> P.s "not-found")
         ]
 
 
@@ -204,7 +224,10 @@ toString route =
         Settings project tab ->
             B.absolute [ "p", project, "settings", settingsTabText tab ] (List.map (\( k, v ) -> B.string k v) (settingsQuery tab))
 
-        NotFound ->
+        NotFound (Just project) ->
+            B.absolute [ "p", project, "not-found" ] []
+
+        NotFound Nothing ->
             B.absolute [ "not-found" ] []
 
 

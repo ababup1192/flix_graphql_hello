@@ -24,7 +24,8 @@ suite =
                 , Route.Settings "shop" Route.Members
                 , Route.Projects
                 , Route.Account
-                , Route.NotFound
+                , Route.NotFound (Just "demo")
+                , Route.NotFound Nothing
                 ]
                     |> List.map Navigate.askedOf
                     |> Expect.equal
@@ -32,7 +33,8 @@ suite =
                         , ForProject "shop"
                         , NoProject
                         , NoProject
-                        , Unreadable
+                        , Unreadable (Just "demo")
+                        , Unreadable Nothing
                         ]
         , test "URL のプロジェクトごとの行き先" <|
             \_ ->
@@ -43,8 +45,10 @@ suite =
                 , ( ForProject "nope", Just "tech-blog" )
                 , ( ForProject "nope", Nothing )
                 , ( ForProject "tech-blog", Nothing )
-                , ( Unreadable, Just "tech-blog" )
-                , ( Unreadable, Nothing )
+                , ( Unreadable Nothing, Just "tech-blog" )
+                , ( Unreadable Nothing, Nothing )
+                , ( Unreadable (Just "shop"), Just "tech-blog" )
+                , ( Unreadable (Just "shop"), Nothing )
                 ]
                     |> List.map
                         (\( wanted, current ) ->
@@ -59,6 +63,8 @@ suite =
                         , Reload
                         , Stay
                         , Stay
+                        , Stay
+                        , Stay
                         ]
         , test "入っていないプロジェクトの URL では読み込み直さない" <|
             \_ ->
@@ -66,7 +72,13 @@ suite =
                     |> Expect.notEqual Reload
         , test "読めなかった URL では読み込み直さない" <|
             \_ ->
-                Navigate.moveFor { wanted = Unreadable, current = Just "tech-blog", known = [ "tech-blog", "shop" ] }
+                Navigate.moveFor { wanted = Unreadable Nothing, current = Just "tech-blog", known = [ "tech-blog", "shop" ] }
+                    |> Expect.equal Stay
+
+        -- slug を持つ読めない URL でも、新規ロード（current = Nothing）で Reload を返さない
+        , test "読めなかった URL は slug を持っていても読み込み直さない" <|
+            \_ ->
+                Navigate.moveFor { wanted = Unreadable (Just "tech-blog"), current = Nothing, known = [ "tech-blog", "shop" ] }
                     |> Expect.equal Stay
         , test "URL のプロジェクトを選ぶ。入っていなければ選ばない" <|
             \_ ->
@@ -77,15 +89,23 @@ suite =
                         , Nothing
                         , Just (project "tech-blog")
                         ]
-        , test "読めなかった URL ではプロジェクトを選ばない" <|
+        , test "プロジェクトの外の読めなかった URL ではプロジェクトを選ばない" <|
             \_ ->
-                Navigate.pick Unreadable [ project "tech-blog", project "shop" ]
+                Navigate.pick (Unreadable Nothing) [ project "tech-blog", project "shop" ]
+                    |> Expect.equal Nothing
+        , test "プロジェクトの下の読めなかった URL では、その slug のプロジェクトを選ぶ" <|
+            \_ ->
+                Navigate.pick (Unreadable (Just "shop")) [ project "tech-blog", project "shop" ]
+                    |> Expect.equal (Just (project "shop"))
+        , test "知らない slug の読めなかった URL では別のプロジェクトに落とさない" <|
+            \_ ->
+                Navigate.pick (Unreadable (Just "nope")) [ project "tech-blog", project "shop" ]
                     |> Expect.equal Nothing
         , test "プロジェクトが 1 つも無ければ選ばない" <|
             \_ ->
-                [ ForProject "nope", NoProject, Unreadable ]
+                [ ForProject "nope", NoProject, Unreadable Nothing, Unreadable (Just "tech-blog") ]
                     |> List.map (\wanted -> Navigate.pick wanted [])
-                    |> Expect.equal [ Nothing, Nothing, Nothing ]
+                    |> Expect.equal [ Nothing, Nothing, Nothing, Nothing ]
         , test "入口の行き先" <|
             \_ ->
                 [ ( False, [] )
@@ -115,7 +135,7 @@ suite =
                 , Route.Projects
                 , Route.Entries "tech-blog" "blogs" []
                 , Route.Account
-                , Route.NotFound
+                , Route.NotFound (Just "tech-blog")
                 ]
                     |> List.map Navigate.needsTypes
                     |> Expect.equal [ True, True, False, False, False, False ]

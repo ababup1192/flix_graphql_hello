@@ -87,17 +87,44 @@ suite =
                 [ "keys", "member", "audits", "Members" ]
                     |> List.map (\named -> Url.fromString ("https://x/p/tech-blog/settings/" ++ named) |> Maybe.map Route.fromUrl)
                     |> Expect.equal
-                        [ Just NotFound
-                        , Just NotFound
-                        , Just NotFound
-                        , Just NotFound
+                        [ Just (NotFound (Just "tech-blog"))
+                        , Just (NotFound (Just "tech-blog"))
+                        , Just (NotFound (Just "tech-blog"))
+                        , Just (NotFound (Just "tech-blog"))
                         ]
-        , test "知らない URL は NotFound" <|
+        , test "プロジェクトの下の知らない URL は、そのプロジェクトの NotFound" <|
             \_ ->
-                "https://x/nope/nope"
-                    |> Url.fromString
-                    |> Maybe.map Route.fromUrl
-                    |> Expect.equal (Just NotFound)
+                [ "https://x/p/demo/media"
+                , "https://x/p/demo/c/blogs/nope/nope"
+                , "https://x/p/demo/assets/extra"
+                ]
+                    |> List.map (\text -> Url.fromString text |> Maybe.map Route.fromUrl)
+                    |> Expect.equal
+                        [ Just (NotFound (Just "demo"))
+                        , Just (NotFound (Just "demo"))
+                        , Just (NotFound (Just "demo"))
+                        ]
+        , test "プロジェクトの外の知らない URL は、プロジェクトを持たない NotFound" <|
+            \_ ->
+                [ "https://x/nonsense"
+                , "https://x/nope/nope"
+                , "https://x/account/nope"
+                , "https://x/p"
+                , "https://x/p/"
+                ]
+                    |> List.map (\text -> Url.fromString text |> Maybe.map Route.fromUrl)
+                    |> Expect.equal
+                        [ Just (NotFound Nothing)
+                        , Just (NotFound Nothing)
+                        , Just (NotFound Nothing)
+                        , Just (NotFound Nothing)
+                        , Just (NotFound Nothing)
+                        ]
+        , test "NotFound を文字列に戻す" <|
+            \_ ->
+                [ NotFound (Just "demo"), NotFound Nothing ]
+                    |> List.map Route.toString
+                    |> Expect.equal [ "/p/demo/not-found", "/not-found" ]
         , test "プロジェクトの slug をルートから取れる" <|
             \_ ->
                 [ Entries "a" "blogs" [], Media "b", Settings "c" Members, Route.Account ]
@@ -133,7 +160,7 @@ samples =
     , Entry "a" "blogs" "e1"
     , Media "a"
     , Settings "a" Members
-    , NotFound
+    , NotFound (Just "a")
     ]
 
 
@@ -185,7 +212,7 @@ index route =
         Settings _ _ ->
             13
 
-        NotFound ->
+        NotFound _ ->
             14
 
 
@@ -198,7 +225,8 @@ routeFuzzer =
         , Fuzz.constant Projects
         , Fuzz.constant Account
         , Fuzz.constant AccountTokens
-        , Fuzz.constant NotFound
+        , Fuzz.constant (NotFound Nothing)
+        , Fuzz.map (NotFound << Just) name
         , Fuzz.map Organization name
         , Fuzz.map ProjectHome name
         , Fuzz.map3 Entries name name (params [ "q", "where", "f", "order", "page", "cols", "after", "view" ])

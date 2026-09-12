@@ -20,7 +20,10 @@ WhyNot: `Maybe Slug` で持たない。「プロジェクトを持たないル�
 type Asked
     = ForProject Slug
     | NoProject
-    | Unreadable
+      {- WhyNot: slug を捨てない。読めない URL でもプロジェクトの下なら、
+         上のバーとサイドバーはそのプロジェクトのまま出せる。
+      -}
+    | Unreadable (Maybe Slug)
 
 
 {-| URL のプロジェクトに対して何をするか。
@@ -34,8 +37,8 @@ type Move
 askedOf : Route -> Asked
 askedOf route =
     case route of
-        Route.NotFound ->
-            Unreadable
+        Route.NotFound slug ->
+            Unreadable slug
 
         _ ->
             case Route.projectOf route of
@@ -52,9 +55,14 @@ moveFor { wanted, current, known } =
         NoProject ->
             Stay
 
-        Unreadable ->
+        Unreadable _ ->
             -- WhyNot: 読み込み直さない。読めなかった URL には行き先が無く、
             -- 読み込み直しても同じ所に戻る。404 はその場で出す。
+            --
+            -- WhyNot: slug を持っていても `ForProject` と同じ扱いにしない。
+            -- 新規ロードでは `current` が `Nothing` なので `Reload` になり、
+            -- 読み込み直した先で同じ判断を通って永久に読み込み直す。
+            -- slug を使うのは選ぶ（`pick`）時だけ。
             Stay
 
         ForProject slug ->
@@ -127,7 +135,13 @@ pick wanted projects =
         NoProject ->
             List.head projects
 
-        Unreadable ->
+        Unreadable (Just slug) ->
+            -- WhyNot: 枠ごと失わせない。URL がプロジェクトを名指ししているのに
+            -- 選ばないと、打ち間違いだけで自分の居たプロジェクトが消える。
+            -- 見つからない時に別のプロジェクトへ落とさないのは `ForProject` と同じ。
+            projects |> List.filter (\project -> project.slug == slug) |> List.head
+
+        Unreadable Nothing ->
             -- WhyNot: 先頭へ落とさない。本文が 404 のまま上のバーとサイドバーだけ
             -- 別のプロジェクトを指し、リンクを押すと本当にそこへ入ってしまう。
             Nothing

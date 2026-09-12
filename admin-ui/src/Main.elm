@@ -1356,7 +1356,7 @@ enterPage route model =
                     , Effect.Today (\zone year month day -> AuditMsg (Audit.ZoneKnown zone year month day))
                     )
 
-                Route.NotFound ->
+                Route.NotFound _ ->
                     ( { model | route = route, phase = Ready { workspace | page = NotFoundPage } }, Effect.none )
 
                 _ ->
