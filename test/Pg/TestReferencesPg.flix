@@ -31,11 +31,11 @@ mod TestReferencesPg {
             let badValue = CmsTestKit.failureMessage(() -> ContentEntries.create(Session.grant(), blogs, None, CmsTestKit.entryData(List#{("title", Json.JString("x")), ("category", Json.JString("OTHER")), ("profile", Json.JString("not valid!"))})));
             (noTarget, missingType, badOptions, badValue)
         }));
-        Assert.assertEq(expected = Ok(Ok((
+        Assert.assertEq(expected = (
             Err("targetTypeId: REFERENCE には参照先の型が要ります"),
             Err("targetTypeId: 型 '999' がありません"),
             Err("config.options: 選択肢は UPPER_SNAKE（[A-Z][A-Z0-9_]*）にしてください"),
-            Err("fields.category: 選択肢（KNOWLEDGE, NEWS）にありません; fields.profile: entry の id（英数字と _ - を 1 〜 64 文字）にしてください")))), result)
+            Err("fields.category: 選択肢（KNOWLEDGE, NEWS）にありません; fields.profile: entry の id（英数字と _ - を 1 〜 64 文字）にしてください")), result)
 
     /// 参照先になっている型は消せない（FK の 500 ではなく invalid で止める）。参照しているフィールドを消せば消せる。
     @Test
@@ -48,7 +48,7 @@ mod TestReferencesPg {
             ContentTypes.delete(Session.grant(), profiles);
             (blocked, ContentTypes.find(Session.grant(), profiles) |> Option.isEmpty)
         });
-        Assert.assertEq(expected = Ok(Ok((Err("id: 他の型の REFERENCE のフィールド 1 本が参照先にしています。先にそのフィールドを消してください"), true))), result)
+        Assert.assertEq(expected = (Err("id: 他の型の REFERENCE のフィールド 1 本が参照先にしています。先にそのフィールドを消してください"), true), result)
 
     /// 参照先が未公開なら publish は止まり、withDependencies で一緒に公開できる。公開中に参照されている物は取り下げられない。
     ///
@@ -70,12 +70,12 @@ mod TestReferencesPg {
             let freed = ContentEntries.unpublish(Session.grant(), profile#id);
             (blocked, published#stage, deps, stuck, freed#stage)
         }));
-        Assert.assertEq(expected = Ok(Ok((
+        Assert.assertEq(expected = (
             Err("references: 参照先 'p1' が未公開です（withDependencies: true で一緒に公開できます）; references: 参照先 't1' が未公開です（withDependencies: true で一緒に公開できます）; references: 参照先 't2' が未公開です（withDependencies: true で一緒に公開できます）"),
             Stage.Published,
             List#{Stage.Published, Stage.Published, Stage.Published},
             Err("references: 公開中の entry 'b1' が参照しています。先にそちらを取り下げるか、参照を外してください"),
-            Stage.Draft))), result)
+            Stage.Draft), result)
 
     /// コンテンツ API で参照が展開され、select は出力も絞り込みも enum、配列の参照は _contains で絞れる。規則外の id の参照は 0 件。参照の展開は同じ stage で行う。
     @Test
@@ -127,5 +127,5 @@ mod TestReferencesPg {
              CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), CmsTestKit.entryId("b1"), "tester", true)))
         }));
         let message = "references: 参照先 'p1' はありません（消されています）。参照を外してください";
-        Assert.assertEq(expected = Ok(Ok((Err(message), Err(message)))), result)
+        Assert.assertEq(expected = (Err(message), Err(message)), result)
 }

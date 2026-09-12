@@ -25,8 +25,8 @@ mod TestContentTypesPg {
             (TypeName.text(loaded#singular), ApiId.text(loaded#plural), loaded#kind, loaded#previewUrl,
              loaded#fields |> List.map(field -> (ApiId.text(field#apiId), field#position, field#config#maxLength, field#config#sourceField |> Option.map(ApiId.text))))
         });
-        Assert.assertEq(expected = Ok(Ok(("Blog", "blogs", TypeKind.Collection, Some("https://staging.example.com/blog/{id}"),
-            List#{("title", 0, Some(120), None), ("body", 1, None, None), ("slug", 2, None, Some("title"))}))), result)
+        Assert.assertEq(expected = ("Blog", "blogs", TypeKind.Collection, Some("https://staging.example.com/blog/{id}"),
+            List#{("title", 0, Some(120), None), ("body", 1, None, None), ("slug", 2, None, Some("title"))}), result)
 
     /// 並べ替えは position を書き換え、型を消すとフィールドも消える（ON DELETE CASCADE）。
     @Test
@@ -39,7 +39,7 @@ mod TestContentTypesPg {
             ContentTypes.delete(Session.grant(), blogs#id);
             (reordered, ContentTypes.find(Session.grant(), blogs#id) |> Option.isEmpty, ContentFieldsQueries.listAllFields(1i64) |> List.length)
         });
-        Assert.assertEq(expected = Ok(Ok((List#{"body", "title"}, true, 0))), result)
+        Assert.assertEq(expected = (List#{"body", "title"}, true, 0), result)
 
     /// update は触った項目だけ変え、singular の衝突は invalid になる。
     @Test
@@ -51,7 +51,7 @@ mod TestContentTypesPg {
             let collision = CmsTestKit.runWithResult(() -> ContentTypes.update(Session.grant(), blogs#id, { name = None, singular = Some(CmsTestKit.typeName("Tag")), plural = None, previewUrl = None, linkPath = None, icon = None }));
             (renamed#name, TypeName.text(renamed#singular), collision |> Result.map(found -> TypeName.text(found#singular)))
         });
-        Assert.assertEq(expected = Ok(Ok(("ブログ記事", "Blog", Err(CmsFailure.Invalid(List#{Violation.Violation("singular", "'Tag' は既に他の型が使っています")}))))), result)
+        Assert.assertEq(expected = ("ブログ記事", "Blog", Err(CmsFailure.Invalid(List#{Violation.Violation("singular", "'Tag' は既に他の型が使っています")}))), result)
 
     /// 同じ apiId の型は DB の一意制約でも止まる（検証をすり抜けた同時作成の最後の砦）。
     @Test
@@ -61,7 +61,7 @@ mod TestContentTypesPg {
             DbError.runWithKind(() -> ContentTypesQueries.insertContentType({ projectId = 1i64, apiId = "blogs", kind = "collection", name = "x", singular = "X", plural = "xs", previewUrl = "", linkPath = "", icon = "list" }))
                 |> Result.map(Option.map(row -> row#id))
         });
-        Assert.assertEq(expected = Ok(Ok(Err(DbError.DbErrorKind.UniqueViolation("content_types_project_api_id_key")))), kind)
+        Assert.assertEq(expected = Err(DbError.DbErrorKind.UniqueViolation("content_types_project_api_id_key")), kind)
 
     /// 管理 API のエンジンを通しても同じ。SDL・リゾルバ・Runner・GraphQL とドメインの写しをここで 1 回だけ確かめる。
     @Test
@@ -98,13 +98,13 @@ mod TestContentTypesPg {
             discard ContentEntries.create(Session.grant(), settings#id, None, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("a"))}));
             CmsTestKit.failureMessage(() -> ContentEntries.create(Session.grant(), settings#id, None, CmsTestKit.entryData(List#{("title", Util.Json.Json.JString("b"))})))
         }));
-        Assert.assertEq(expected = Ok(Ok(Err("typeId: SINGLETON の型には entry を 1 件しか作れません"))), result)
+        Assert.assertEq(expected = Err("typeId: SINGLETON の型には entry を 1 件しか作れません"), result)
 
     /// apiId だけ渡して singular と plural が同じになる（status → Status / status）時、怒られるのは渡していない plural ではなく apiId。
     @Test
     def testPgDerivedNamesBlameApiId(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> CmsTestKit.failureMessage(() -> ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("status", "状態"))));
-        Assert.assertEq(expected = Ok(Ok(Err("apiId: apiId から導いた plural が使えません（singular と同じ名前は使えません（コンテンツ API の 1 件と一覧のクエリ名が衝突します））。singular か plural を指定してください"))), result)
+        Assert.assertEq(expected = Err("apiId: apiId から導いた plural が使えません（singular と同じ名前は使えません（コンテンツ API の 1 件と一覧のクエリ名が衝突します））。singular か plural を指定してください"), result)
 
     /// 他の型が生やす型名（BlogCategory）と同じ singular の型は作れず、既にある型名と重なる名前のフィールド（where → BlogWhere）も足せない。
     /// 作れてしまうと graphql-java がスキーマを組めず、コンテンツ API 全体が止まる。
@@ -118,10 +118,10 @@ mod TestContentTypesPg {
             let plainField = CmsTestKit.messageOr(field -> ApiId.text(field#apiId), () -> ContentTypes.addField(Session.grant(), blogs#id, CmsTestKit.fieldDraft("where", FieldKind.Text, FieldConfig.empty())));
             (typeClash, fieldClash, plainField)
         });
-        Assert.assertEq(expected = Ok(Ok((
+        Assert.assertEq(expected = (
             Err("singular: 'BlogCategory' は他の型がコンテンツ API に生やす型名と重なります"),
             Err("apiId: 'BlogWhere' はコンテンツ API に既にある型名と重なります"),
-            Ok("where")))), result)
+            Ok("where")), result)
 
     /// フィールドを消した後も、古い値が残った entry は更新も公開もできる。消えたフィールドの値は次の保存で落ちる。
     @Test
@@ -136,5 +136,5 @@ mod TestContentTypesPg {
             let published = ContentEntries.publish(Session.grant(), updated#id, "tester", false);
             (Map.keysOf(updated#data) |> Set.toList |> List.map(ApiId.text), published#stage)
         }));
-        Assert.assertEq(expected = Ok(Ok((List#{"title"}, Stage.Published))), result)
+        Assert.assertEq(expected = (List#{"title"}, Stage.Published), result)
 }

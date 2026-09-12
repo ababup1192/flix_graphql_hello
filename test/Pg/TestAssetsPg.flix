@@ -30,13 +30,13 @@ mod TestAssetsPg {
              ObjectStore.head(upload#asset#key))
         }));
         Assert.assertEq(
-            expected = Ok(Ok((
+            expected = (
                 AssetStatus.Pending, "1/asset001/photo-x.png", 600,
                 Err("id: 'asset001' はまだアップロードが終わっていません"), Ok(200),
                 (AssetStatus.Ready, 5i64, Some(10), Some(20), "写真"),
                 (1, 1i64),
                 true,
-                Ok(None)))),
+                Ok(None)),
             result)
 
     /// 見本の本文。段落 1 つと asset010 の image。
@@ -75,10 +75,10 @@ mod TestAssetsPg {
     def testPgAssetInEntry(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(seedPublished);
         Assert.assertEq(
-            expected = Ok(Ok((
+            expected = (
                 Err("assets: asset 'asset010' がありません（消されているか、アップロードが終わっていません）"),
                 Ok(200),
-                Err("id: entry 'b1' が使っています。先に外してください")))),
+                Err("id: entry 'b1' が使っています。先に外してください")),
             result)
 
     /// コンテンツ API は cover を Asset（url / width）に、body を RichText（html / text）に展開する。html の image は配信 URL。
@@ -105,7 +105,7 @@ mod TestAssetsPg {
             let upload = Assets.createUpload(Session.grant(), { fileName = "doc.pdf", mime = "application/pdf", size = 5i64 });
             PgTestSupport.putTo(upload#uploadUrl, "image/png", "hello")
         }));
-        Assert.assertEq(expected = Ok(Ok(Ok(403))), result)
+        Assert.assertEq(expected = Ok(403), result)
 
     /// 別のプロジェクトの asset は見えないし、confirm も消す事もできない。
     @Test
@@ -117,6 +117,6 @@ mod TestAssetsPg {
                 (Assets.find(Session.grant(), upload#asset#id) |> Option.isEmpty,
                  CmsTestKit.failureMessage(() -> Assets.delete(Session.grant(), upload#asset#id))))
         }));
-        Assert.assertEq(expected = Ok(Ok((true, Err("asset 'asset003' が見つかりません")))), result)
+        Assert.assertEq(expected = (true, Err("asset 'asset003' が見つかりません")), result)
 
 }

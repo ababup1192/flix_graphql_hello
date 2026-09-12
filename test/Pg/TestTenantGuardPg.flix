@@ -41,7 +41,7 @@ mod TestTenantGuardPg {
     @Test
     def testPgEntryTablesCarryProjectId(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> scan("${referencesEntries()} AND ${withoutProjectId()}"));
-        Assert.assertEq(expected = Ok(Ok(Nil)), result)
+        Assert.assertEq(expected = Nil, result)
 
     ///
     /// project_id を持つ表には FORCE ROW LEVEL SECURITY が付いている。例外は crossProjectTables だけ。
@@ -51,6 +51,6 @@ mod TestTenantGuardPg {
     @Test
     def testPgProjectTablesForceRls(): Unit \ {IO, Assert} =
         let result = PgTestSupport.withDb(() -> scan("${unforcedTables()} AND NOT ${withoutProjectId()}"));
-        Assert.assertEq(expected = Ok(Ok(List.sort(crossProjectTables()))), result)
+        Assert.assertEq(expected = List.sort(crossProjectTables()), result)
 
 }

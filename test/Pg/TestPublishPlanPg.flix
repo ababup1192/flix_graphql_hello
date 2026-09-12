@@ -59,12 +59,12 @@ mod TestPublishPlanPg {
              Webhooks.deliveries(Session.grant(), webhookId, 20, None) |> List.length)
         });
         Assert.assertEq(
-            expected = Ok(Ok((
+            expected = (
                 List#{ ("b3", PlanReason.Dependency, 0), ("b2", PlanReason.Dependency, 0), ("p1", PlanReason.Dependency, 0), ("b1", PlanReason.Requested, 0) },
                 Nil,
                 List#{ "b3", "b2", "p1", "b1" },
                 List#{ ("p1", Stage.Published), ("b1", Stage.Published), ("b2", Stage.Published), ("b3", Stage.Published) },
-                4))),
+                4),
             result)
 
     /// 要求した物に違反（b1 の required）があれば、計画は違反を見せ、publishMany は entry id 付きの path で invalid になり、
@@ -78,11 +78,11 @@ mod TestPublishPlanPg {
             (stepsOf(plan), failed, stages(), Webhooks.deliveries(Session.grant(), webhookId, 20, None) |> List.length)
         });
         Assert.assertEq(
-            expected = Ok(Ok((
+            expected = (
                 List#{ ("b3", PlanReason.Dependency, 0), ("b2", PlanReason.Requested, 0), ("p1", PlanReason.Dependency, 0), ("b1", PlanReason.Requested, 1) },
                 Err("b1.fields.title: 公開には値が要ります"),
                 List#{ ("p1", Stage.Draft), ("b1", Stage.Draft), ("b2", Stage.Draft), ("b3", Stage.Draft) },
-                0))),
+                0),
             result)
 
     /// withDependencies: false では計画の外の未公開の参照先が違反になり、publishMany も同じ文言で止まる。
@@ -99,13 +99,13 @@ mod TestPublishPlanPg {
             (outside#violations, blocked, stepsOf(together), together#violations, stepsOf(cycle), cycle#violations)
         });
         Assert.assertEq(
-            expected = Ok(Ok((
+            expected = (
                 Violation.Violation("b2.references", "参照先 'b3' が未公開です（withDependencies: true で一緒に公開できます）") :: Nil,
                 Err("b2.references: 参照先 'b3' が未公開です（withDependencies: true で一緒に公開できます）"),
                 List#{ ("b3", PlanReason.Requested, 0), ("b2", PlanReason.Requested, 0) },
                 Nil,
                 List#{ ("b3", PlanReason.Dependency, 0), ("b2", PlanReason.Requested, 0) },
-                Violation.Violation("references", "参照が循環しています: b2 → b3 → b2") :: Nil))),
+                Violation.Violation("references", "参照が循環しています: b2 → b3 → b2") :: Nil),
             result)
 
     /// 管理 API を通した形。publishPlan は SDL の型で返り、publishMany は 1 つの mutation（1 つの Tx）で通らなければ errors で止まり、

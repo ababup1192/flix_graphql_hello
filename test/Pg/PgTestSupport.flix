@@ -18,14 +18,62 @@ mod PgTestSupport {
         } with Sys.Env.runWithIO
 
     ///
-    /// テーブルを消して migrations/ を当て直す。migrate 自体もここで毎回通る。
+    /// migrations/ がまだ当たっていなければ当て、当てた直後の状態（migration が入れる既定のプロジェクトと組織の行、
+    /// sequence の位置）を test_baseline schema に控える。
     ///
-    /// WhyNot: DROP TABLE の lock_timeout を接続の既定（CMS_DB_TIMEOUT_SECONDS）に任せないのは、前のテストが接続を漏らして
-    /// Tx が開いたままだと DROP がロック待ちで止まり、どのテストが漏らしたか分からないまま何十分も待つため。数秒で FAIL にする。
-    def resetSchema(): Unit \ DbWrite + RawSql + IO =
-        discard Sql.execute("SET lock_timeout = '5s'", Nil);
-        discard Sql.execute("DROP TABLE IF EXISTS link_cards, audit_events, cdn_purges, scheduled_actions, webhook_deliveries, webhooks, personal_access_tokens, api_keys, invitations, memberships, org_members, users, organizations, assets, entry_links, entry_versions, entry_unique_values, entry_contents, entries, content_fields, content_types, projects, sqlfx_migrations CASCADE", Nil);
-        discard Sql.execute("RESET lock_timeout", Nil);
+    /// WhyNot: テストごとに当て直さないのは、全表の DROP と 28 本の DDL が 1 テストあたり数百 ms かかり、
+    /// その重さが「1 つの @Test に操作を詰め込んで最後に 1 回だけ比べる」書き方を生むため。中身は TRUNCATE で消す。
+    ///
+    def ensureMigrated(): Unit \ DbRead + DbWrite + RawSql + IO =
+        let files = run { Migrate.listSqlFiles("migrations") } with Fs.DirList.runWithIO;
+        if (appliedCount() == List.length(files) and hasBaseline())
+            ()
+        else {
+            dropAllTables();
+            applyMigrations();
+            captureBaseline()
+        }
+
+    ///
+    /// public の表を全部落とす。控えを取るのは migration を当てた直後でなければならないので、
+    /// 前の走りの行が残っている状態から作り直す時はここを通る。
+    ///
+    def dropAllTables(): Unit \ DbWrite + RawSql =
+        discard Sql.execute(
+            "DO $drop$ DECLARE names text; BEGIN "
+                + "SELECT string_agg(format('public.%I', tablename), ', ') INTO names FROM pg_tables WHERE schemaname = 'public'; "
+                + "IF names IS NOT NULL THEN EXECUTE 'DROP TABLE ' || names || ' CASCADE'; END IF; "
+                + "END $drop$", Nil)
+
+    ///
+    /// sqlfx_migrations に入っている本数。表がまだ無ければ 0。
+    ///
+    def appliedCount(): Int32 \ DbRead + RawSql =
+        if (relationExists("public.sqlfx_migrations"))
+            Sql.fetchOneAs(Decoder.int64("total"), "SELECT count(*)::bigint AS total FROM sqlfx_migrations", Nil)
+                |> Option.getWithDefault(0i64)
+                |> Int64.tryToInt32
+                |> Option.getWithDefault(0)
+        else
+            0
+
+    ///
+    /// この名前の表・view があるか。
+    ///
+    def relationExists(name: String): Bool \ DbRead + RawSql =
+        Sql.fetchOneAs(Decoder.bool("found"), "SELECT to_regclass($1) IS NOT NULL AS found", SqlValue.Str(name) :: Nil)
+            |> Option.getWithDefault(false)
+
+    ///
+    /// 初期状態の控えが最後まで取れているか。sequence_positions は控えの最後に作るので、これがあれば全部揃っている。
+    ///
+    def hasBaseline(): Bool \ DbRead + RawSql =
+        relationExists("test_baseline.sequence_positions")
+
+    ///
+    /// migrations/ を当てる。失敗するのはテストの前提が壊れているので止める。
+    ///
+    def applyMigrations(): Unit \ DbWrite + IO =
         let applied = run {
             Migrate.runWithResult(() -> Migrate.apply(Migrate.defaultConfig(config()), "migrations"))
         } with Fs.ReadFile.runWithFileRead
@@ -37,10 +85,59 @@ mod PgTestSupport {
         }
 
     ///
-    /// テーブルを作り直し、接続を開いて body を走らせ、必ず閉じる。DB の失敗は DbFailure、業務エラーは CmsFailure に落とす。
-    /// テストは全部同じテーブルを作り直すので、直列に走る前提。
+    /// 今の public の中身を test_baseline schema に丸ごと控える。対象は pg_tables から引くので、
+    /// migration が表や初期の行を足しても書き足す所は無い。
     ///
-    pub def withDb(body: Unit -> a \ ef): Result[DbFailure, Result[CmsErr.CmsFailure, a]] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr, IdGen, Tenant, Session, ObjectStore, Time.Clock.Clock}) + IO =
+    def captureBaseline(): Unit \ DbWrite + RawSql =
+        discard Sql.execute("DROP SCHEMA IF EXISTS test_baseline CASCADE", Nil);
+        discard Sql.execute("CREATE SCHEMA test_baseline", Nil);
+        discard Sql.execute(
+            "DO $capture$ DECLARE target text; BEGIN "
+                + "FOR target IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'sqlfx_migrations' LOOP "
+                + "EXECUTE format('CREATE TABLE test_baseline.%I AS SELECT * FROM public.%I', target, target); "
+                + "END LOOP; "
+                + "CREATE TABLE test_baseline.sequence_positions (name text, last_value bigint, is_called boolean); "
+                + "FOR target IN SELECT sequencename FROM pg_sequences WHERE schemaname = 'public' LOOP "
+                + "EXECUTE format('INSERT INTO test_baseline.sequence_positions SELECT %L, last_value, is_called FROM public.%I', target, target); "
+                + "END LOOP; END $capture$", Nil)
+
+    ///
+    /// 表の中身を消して、migration を当てた直後の状態に戻す。表そのものは作り直さない。
+    ///
+    /// 対象の表は pg_tables から引き、sqlfx_migrations だけ除く（手書きの一覧だと、表が増えた時に書き忘れても
+    /// 誰も教えてくれず、その表だけ前のテストの行が残る）。控えの行を戻す間は FK の検査を止めるので、戻す順は問わない。
+    ///
+    /// WhyNot: lock_timeout を接続の既定（CMS_DB_TIMEOUT_SECONDS）に任せないのは、前のテストが接続を漏らして
+    /// Tx が開いたままだと TRUNCATE がロック待ちで止まり、どのテストが漏らしたか分からないまま何十分も待つため。数秒で FAIL にする。
+    ///
+    def resetSchema(): Unit \ DbRead + DbWrite + RawSql + IO =
+        discard Sql.execute("SET lock_timeout = '5s'", Nil);
+        ensureMigrated();
+        discard Sql.execute(
+            "DO $reset$ DECLARE target text; names text; BEGIN "
+                + "PERFORM set_config('session_replication_role', 'replica', true); "
+                + "SELECT string_agg(format('public.%I', tablename), ', ') INTO names "
+                + "FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'sqlfx_migrations'; "
+                + "IF names IS NOT NULL THEN EXECUTE 'TRUNCATE TABLE ' || names || ' RESTART IDENTITY CASCADE'; END IF; "
+                + "FOR target IN SELECT tablename FROM pg_tables WHERE schemaname = 'test_baseline' AND tablename <> 'sequence_positions' LOOP "
+                + "EXECUTE format('INSERT INTO public.%I SELECT * FROM test_baseline.%I', target, target); "
+                + "END LOOP; "
+                + "PERFORM setval('public.' || quote_ident(name), last_value, is_called) FROM test_baseline.sequence_positions; "
+                + "END $reset$", Nil);
+        discard Sql.execute("RESET lock_timeout", Nil)
+
+    ///
+    /// 表の中身を戻し、接続を開いて body を走らせ、必ず閉じる。DB の失敗も業務エラーも、テストの前提が壊れているので止める。
+    /// テストは全部同じ表を使い回すので、直列に走る前提。
+    ///
+    pub def withDb(body: Unit -> a \ ef): a \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr, IdGen, Tenant, Session, ObjectStore, Time.Clock.Clock}) + IO =
+        withDbResult(body) |> seededOrBug
+
+    ///
+    /// withDb と同じだが、DB の失敗を DbFailure、業務エラーを CmsFailure として値で返す。
+    /// 失敗そのものを見たい時（RLS や timeout を withDb 越しに見たい時）の逃げ道。
+    ///
+    pub def withDbResult(body: Unit -> a \ ef): Result[DbFailure, Result[CmsErr.CmsFailure, a]] \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr, IdGen, Tenant, Session, ObjectStore, Time.Clock.Clock}) + IO =
         DbError.runWithFailure(() -> RawSql.runWithAllow(() -> Jdbc.withConnection(config(), _ -> {
             resetSchema();
             TenantTx.stampConnection(ProjectId.default());
@@ -72,10 +169,10 @@ mod PgTestSupport {
         Net.Http.runWithIO(() -> Time.Clock.runWithIO(() -> ObjectStore.runWith(storage(), body)))
 
     ///
-    /// テーブルを作り直して seed を当てる。失敗するのはテストの前提が壊れているので止める。
+    /// 表の中身を戻して seed を当てる。withDb と同じ物を、seed を置く所で読める名前にした物。
     ///
     pub def seed(thunk: Unit -> b \ ef): b \ (ef - {SqlRead, SqlWrite, TransientDbErr, DbErr, RawSql, CmsErr, IdGen, Tenant, Session, ObjectStore, Time.Clock.Clock}) + IO =
-        withDb(thunk) |> seededOrBug
+        withDb(thunk)
 
     ///
     /// プール越しに 1 つの Tx で System として書く（withDb の外から、コンテンツ API のエンジンと同じ接続先を触る）。Runner と同じ transact を通る。
@@ -342,9 +439,9 @@ mod PgTestSupport {
     }
 
     def seededOrBug(result: Result[DbFailure, Result[CmsErr.CmsFailure, b]]): b = match result {
-        case Ok(Ok(seeded))  => seeded
-        case Ok(Err(failure)) => bug!("seed: ${CmsErr.toMessage(failure)}")
-        case Err(failure)    => bug!("seed: ${failure}")
+        case Ok(Ok(found))    => found
+        case Ok(Err(failure)) => bug!("withDb: ${CmsErr.toMessage(failure)}")
+        case Err(failure)     => bug!("withDb: ${failure}")
     }
 
 }

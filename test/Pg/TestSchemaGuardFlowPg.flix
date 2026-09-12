@@ -48,7 +48,7 @@ mod TestSchemaGuardFlowPg {
             discard SchemaGuard.withImpact(Session.grant(), None, () -> ContentTypes.reorderFields(Session.grant(), blogs, ids));
             (ApiId.text(added#apiId), fieldsOf(blogs))
         }));
-        Assert.assertEq(expected = Ok(Ok(("memo", List#{"body", "memo", "title"}))), result)
+        Assert.assertEq(expected = ("memo", List#{"body", "memo", "title"}), result)
 
     ///
     /// 値のあるフィールドを指紋なしで消すと止まる。
@@ -63,7 +63,7 @@ mod TestSchemaGuardFlowPg {
             CmsTestKit.failurePaths(CmsTestKit.runWithResult(() ->
                 SchemaGuard.withImpact(Session.grant(), None, () -> ContentTypes.removeField(Session.grant(), body))))
         }));
-        Assert.assertEq(expected = Ok(Ok(List#{"fields.body"})), result)
+        Assert.assertEq(expected = List#{"fields.body"}, result)
 
     ///
     /// 止まった時、フィールドを消す SQL ごと巻き戻る。
@@ -94,7 +94,7 @@ mod TestSchemaGuardFlowPg {
             SchemaGuard.withImpact(Session.grant(), Some(seen), () -> ContentTypes.removeField(Session.grant(), body));
             fieldsOf(blogs)
         }));
-        Assert.assertEq(expected = Ok(Ok(List#{"title"})), result)
+        Assert.assertEq(expected = List#{"title"}, result)
 
     ///
     /// 見た時より件数が増えていれば止まる。減っている（＝見た時の方が多い）時は止めない。
@@ -111,6 +111,6 @@ mod TestSchemaGuardFlowPg {
             pathsOf(CmsTestKit.runWithResult(() ->
                 SchemaGuard.withImpact(Session.grant(), Some(seen), () -> ContentTypes.removeField(Session.grant(), body))))
         }));
-        Assert.assertEq(expected = (Ok(Ok(List#{"expected"})), Ok(Ok(Nil))), (attempt(stale), attempt(generous)))
+        Assert.assertEq(expected = (List#{"expected"}, Nil), (attempt(stale), attempt(generous)))
 
 }

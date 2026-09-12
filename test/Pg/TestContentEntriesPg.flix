@@ -31,7 +31,7 @@ mod TestContentEntriesPg {
              (cleared#version, Map.keysOf(cleared#data) |> Set.toList |> List.map(ApiId.text)),
              ContentEntries.find(Session.grant(), created#id) |> Option.isEmpty)
         }));
-        Assert.assertEq(expected = Ok(Ok((("a1", 1, Stage.Draft, 2), (2, Some(Json.JString("hi"))), (3, List#{"title"}), true))), result)
+        Assert.assertEq(expected = (("a1", 1, Stage.Draft, 2), (2, Some(Json.JString("hi"))), (3, List#{"title"}), true), result)
 
     /// 古い version で保存すると conflict になり、中身は変わらない。
     @Test
@@ -43,7 +43,7 @@ mod TestContentEntriesPg {
             let stale = CmsTestKit.runWithResult(() -> ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("title", Json.JString("v3"))}), 1));
             (stale |> Result.map(entry -> entry#version), ContentEntries.get(Session.grant(), created#id) |> (entry -> Map.get(CmsTestKit.apiId("title"), entry#data)))
         }));
-        Assert.assertEq(expected = Ok(Ok((Err(CmsFailure.Conflict(Entity.Entry, "c1", 1, 2)), Some(Json.JString("v2"))))), result)
+        Assert.assertEq(expected = (Err(CmsFailure.Conflict(Entity.Entry, "c1", 1, 2)), Some(Json.JString("v2"))), result)
 
     /// 複数の entry の版をまとめて引くと、entry ごとに新しい順で載り、版の無い entry と無い id も空で載る。空の並びは SQL 無しで空。
     ///
@@ -63,9 +63,9 @@ mod TestContentEntriesPg {
                 |> Map.toList |> List.map(match (id, versions) -> (EntryId.text(id), versions));
             (found, ContentEntries.versionsOf(Session.grant(), Nil) |> Map.isEmpty)
         }));
-        Assert.assertEq(expected = Ok(Ok((
+        Assert.assertEq(expected = (
             List#{("v1", List#{(2, VersionReason.Save), (1, VersionReason.Save)}), ("v2", Nil), ("zz", Nil)},
-            true))), result)
+            true), result)
 
     /// 一覧は更新が新しい順、search で絞れ、totalCount は絞った後の件数。渡した id はそのまま使われる。
     @Test
@@ -80,7 +80,7 @@ mod TestContentEntriesPg {
             let paged = ContentEntries.list(Session.grant(), blogs, Nil, EntryQuery.of("", 1, 1));
             (all#totalCount, searched#entries |> List.map(entry -> EntryId.text(entry#id)) |> List.sort, searched#totalCount, paged#entries |> List.length)
         });
-        Assert.assertEq(expected = Ok(Ok((3i64, List#{"first", "third"}, 2i64, 1))), result)
+        Assert.assertEq(expected = (3i64, List#{"first", "third"}, 2i64, 1), result)
 
     /// search は値だけに当たり（キー名 "title" では当たらない）、% と _ はそのままの文字として当たる。
     @Test
@@ -94,7 +94,7 @@ mod TestContentEntriesPg {
             let byBarePercent = ContentEntries.list(Session.grant(), blogs, Nil, EntryQuery.of("%", 10, 0));
             (byKey#totalCount, byPercent#totalCount, byBarePercent#totalCount)
         }));
-        Assert.assertEq(expected = Ok(Ok((0i64, 1i64, 1i64))), result)
+        Assert.assertEq(expected = (0i64, 1i64, 1i64), result)
 
     /// ゴミ箱の entry と同じ id では作れない（PK が残っているので、500 ではなく invalid で止める）。
     @Test
@@ -105,7 +105,7 @@ mod TestContentEntriesPg {
             ContentEntries.delete(Session.grant(), Session.tryGrant(), created#id);
             CmsTestKit.failureMessage(() -> ContentEntries.create(Session.grant(), blogs, Some(created#id), CmsTestKit.entryData(Nil)))
         }));
-        Assert.assertEq(expected = Ok(Ok(Err("id: 't1' は既にあります（ゴミ箱の物を含む）"))), result)
+        Assert.assertEq(expected = Err("id: 't1' は既にあります（ゴミ箱の物を含む）"), result)
 
     /// 型に合わない中身は invalid で、entry が残っている型は消せない。
     @Test
@@ -117,7 +117,7 @@ mod TestContentEntriesPg {
             let blocked = CmsTestKit.failureMessage(() -> ContentTypes.delete(Session.grant(), blogs));
             (invalid, blocked)
         }));
-        Assert.assertEq(expected = Ok(Ok((Err("fields.title: 10 文字以内にしてください"), Err("id: entry が 1 件あります。先に消してください")))), result)
+        Assert.assertEq(expected = (Err("fields.title: 10 文字以内にしてください"), Err("id: entry が 1 件あります。先に消してください")), result)
 
     /// 管理 API のエンジンを通して JSON scalar が往復する。数値は Int、null で消す、規則外のキーは invalid。
     @Test

@@ -48,9 +48,9 @@ mod TestSchemaRestorePg {
             let restored = recorded("field.removed") |> Option.flatMap(was -> restore(blogs#id, was));
             (label(before), restored |> Option.map(label))
         });
-        Assert.assertEq(expected = Ok(Ok((
+        Assert.assertEq(expected = (
             "status status Select truefalsefalsetrue - {\"options\":[\"DRAFT\",\"LIVE\"]}",
-            Some("status status Select truefalsefalsetrue - {\"options\":[\"DRAFT\",\"LIVE\"]}")))), result)
+            Some("status status Select truefalsefalsetrue - {\"options\":[\"DRAFT\",\"LIVE\"]}")), result)
 
     ///
     /// 参照するフィールドは、参照先を apiId で残しているので足し直しても同じ型を指す。
@@ -66,7 +66,7 @@ mod TestSchemaRestorePg {
             let restored = recorded("field.removed") |> Option.flatMap(was -> restore(blogs#id, was));
             (Some(tags#id), restored |> Option.flatMap(field -> field#target))
         });
-        Assert.assertEq(expected = true, result |> Result.map(inner -> inner |> Result.map(match (expected, actual) -> expected == actual)) == Ok(Ok(true)))
+        Assert.assertEq(expected = fst(result), snd(result))
 
     ///
     /// 型を消すと、監査には型の見出しとフィールド全部が残る。子を持つフィールドも子ごと残る。
@@ -81,7 +81,7 @@ mod TestSchemaRestorePg {
             recorded("type.deleted") |> Option.map(Util.Json.toCompactString)
         });
         Assert.assertEq(
-            expected = Ok(Ok(Some("{\"apiId\":\"blogs\",\"fields\":[{\"apiId\":\"seo\",\"children\":[{\"apiId\":\"title\",\"config\":{},\"kind\":\"text\",\"localized\":false,\"many\":false,\"name\":\"title\",\"required\":false,\"unique\":false}],\"config\":{},\"kind\":\"object\",\"localized\":false,\"many\":false,\"name\":\"seo\",\"required\":false,\"unique\":false}],\"icon\":\"list\",\"kind\":\"collection\",\"name\":\"記事\",\"plural\":\"blogs\",\"singular\":\"Blog\"}"))),
+            expected = Some("{\"apiId\":\"blogs\",\"fields\":[{\"apiId\":\"seo\",\"children\":[{\"apiId\":\"title\",\"config\":{},\"kind\":\"text\",\"localized\":false,\"many\":false,\"name\":\"title\",\"required\":false,\"unique\":false}],\"config\":{},\"kind\":\"object\",\"localized\":false,\"many\":false,\"name\":\"seo\",\"required\":false,\"unique\":false}],\"icon\":\"list\",\"kind\":\"collection\",\"name\":\"記事\",\"plural\":\"blogs\",\"singular\":\"Blog\"}"),
             result)
 
     ///
@@ -99,6 +99,6 @@ mod TestSchemaRestorePg {
                 |> Option.flatMap(was -> SchemaSnapshot.toDraft(idsByApiId(), was))
                 |> Option.map(draft -> draft#config#options)
         });
-        Assert.assertEq(expected = Ok(Ok(Some(List#{"DRAFT", "LIVE", "ARCHIVED"}))), result)
+        Assert.assertEq(expected = Some(List#{"DRAFT", "LIVE", "ARCHIVED"}), result)
 
 }

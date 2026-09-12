@@ -131,7 +131,7 @@ mod TestApiKeyWritePg {
              ApiKeys.resolve(pepper, untilFarFuture#key, ProjectId.default(), farFuture - 1i64) |> summary,
              ApiKeys.resolve(pepper, untilFarFuture#key, ProjectId.default(), farFuture) |> summary)
         })));
-        Assert.assertEq(expected = Ok(Ok((Ok(("ci", ApiKeyScope.Write(Role.Owner))), Ok(("short", ApiKeyScope.Read)), Err(ApiKeyRejection.Expired)))), result)
+        Assert.assertEq(expected = (Ok(("ci", ApiKeyScope.Write(Role.Owner))), Ok(("short", ApiKeyScope.Read)), Err(ApiKeyRejection.Expired)), result)
 
     ///
     /// 使用時刻は 60 秒の粒度。続けて 2 回 touch すると 1 回目は 1 行、2 回目は 0 行。
@@ -142,7 +142,7 @@ mod TestApiKeyWritePg {
             let issued = ApiKeys.create(Session.grant(), Session.grantInteractive(), PgTestSupport.pepper(), { name = "ci", scope = ApiKeyScope.Read, expiresAt = None }, 0i64);
             (ApiKeys.touch(issued#id, ProjectId.default()), ApiKeys.touch(issued#id, ProjectId.default()))
         })));
-        Assert.assertEq(expected = Ok(Ok((1, 0))), result)
+        Assert.assertEq(expected = (1, 0), result)
 
     ///
     /// コンテンツ API で readDraft の鍵を使っても lastUsedAt は付かず、管理 API で使うと付く。

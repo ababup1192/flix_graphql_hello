@@ -45,7 +45,7 @@ mod TestSchemaGuardPg {
             (before, removed, readded)
         }));
         // 消している間は参照が無いので 0 で正しい。足し直したら戻る。
-        Assert.assertEq(expected = Ok(Ok((2, 0, 2))), result)
+        Assert.assertEq(expected = (2, 0, 2), result)
 
     ///
     /// 参照のフィールドを消して足し直した後も、指し先の entry は消せない。
@@ -61,6 +61,6 @@ mod TestSchemaGuardPg {
             discard ContentTypes.addField(Session.grant(), holders, { target = Some(targets) | CmsTestKit.fieldDraft("ref", FieldKind.Reference, FieldConfig.empty()) });
             CmsTestKit.failureMessage(() -> ContentEntries.delete(Session.grant(), Some(Session.grant()), t1))
         }));
-        Assert.assertEq(expected = Ok(Ok(Err("references: 公開中の entry 'h1' が参照しています。先にそちらを取り下げるか、参照を外してください"))), result)
+        Assert.assertEq(expected = Err("references: 公開中の entry 'h1' が参照しています。先にそちらを取り下げるか、参照を外してください"), result)
 
 }

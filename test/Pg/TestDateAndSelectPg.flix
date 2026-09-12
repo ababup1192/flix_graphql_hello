@@ -82,7 +82,7 @@ mod TestDateAndSelectPg {
              badTopic, Map.get(CmsTestKit.apiId("heldOn"), saved#data))
         });
         let bad = List#{"fields.heldOn"};
-        Assert.assertEq(expected = Ok(Ok((List#{bad, bad, bad, bad}, List#{"fields.topics[0]"}, Some(Json.JString("2026-09-08T00:00:00Z"))))), outcome)
+        Assert.assertEq(expected = (List#{bad, bad, bad, bad}, List#{"fields.topics[0]"}, Some(Json.JString("2026-09-08T00:00:00Z"))), outcome)
 
     ///
     /// milestones（name / due: DATE_ONLY）に 3 件作って公開する。
@@ -151,7 +151,7 @@ mod TestDateAndSelectPg {
              Map.get(CmsTestKit.apiId("due"), saved#data))
         });
         let bad = List#{"fields.due"};
-        Assert.assertEq(expected = Ok(Ok((List#{bad, bad, bad, bad}, Some(Json.JString("2026-09-09"))))), outcome)
+        Assert.assertEq(expected = (List#{bad, bad, bad, bad}, Some(Json.JString("2026-09-09"))), outcome)
 
     /// システムの日時の絞り込み。コンテンツ API の publishedAt_gte / createdAt_lt は entries の列で比べる。
     /// 未来から絞れば 0 件、過去から絞れば全件（3 件とも今公開した物）。

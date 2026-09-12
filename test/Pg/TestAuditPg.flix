@@ -29,9 +29,9 @@ mod TestAuditPg {
             ContentTypes.delete(Session.grant(), blogs#id);
             (actions(), targets())
         });
-        Assert.assertEq(expected = Ok(Ok((
+        Assert.assertEq(expected = (
             List#{"type.created", "field.added", "field.updated", "fields.reordered", "field.removed", "type.deleted"},
-            List#{"blogs", "blogs.title", "blogs.title", "blogs", "blogs.title", "blogs"}))), result)
+            List#{"blogs", "blogs.title", "blogs.title", "blogs", "blogs.title", "blogs"}), result)
 
     ///
     /// 主体は版の author と同じ形（この Tx は System として走る）。
@@ -42,7 +42,7 @@ mod TestAuditPg {
             discard ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("blogs", "記事"));
             Audit.latest(Session.grant(), 1i64) |> List.map(found -> found#actor)
         });
-        Assert.assertEq(expected = Ok(Ok(List#{"system"})), result)
+        Assert.assertEq(expected = List#{"system"}, result)
 
     ///
     /// メンバーと鍵の変更も 1 行ずつ積まれる。owner として招待 → 役割の変更 → 外す、鍵の発行 → 失効。
@@ -59,8 +59,8 @@ mod TestAuditPg {
             // 鍵の 2 行は発行した鍵の公開 id を指す（公開 id は乱数なので、値ではなく一致で見る）
             (actions(), targets() == List#{"editor@test.dev", issued#publicId, issued#publicId})
         }));
-        Assert.assertEq(expected = Ok(Ok((
-            List#{"member.invited", "api_key.created", "api_key.revoked"}, true))), result)
+        Assert.assertEq(expected = (
+            List#{"member.invited", "api_key.created", "api_key.revoked"}, true), result)
 
     ///
     /// 人の行は actorKind が user、actorId が users.public_id（内部の連番ではない）、actor が email。
@@ -73,7 +73,7 @@ mod TestAuditPg {
             Audit.latest(Session.grant(), 1i64)
                 |> List.map(found -> (found#actorKind, found#actorId == owner#publicId, found#actorId == "${owner#id}", found#actor))
         });
-        Assert.assertEq(expected = Ok(Ok(List#{(ActorKind.User, true, false, "owner@test")})), result)
+        Assert.assertEq(expected = List#{(ActorKind.User, true, false, "owner@test")}, result)
 
     ///
     /// 型を直すと type.updated が積まれる（作る・消す以外の道も通る）。
@@ -85,7 +85,7 @@ mod TestAuditPg {
             discard ContentTypes.update(Session.grant(), blogs#id, { name = Some("ブログ"), singular = None, plural = None, previewUrl = None, linkPath = None, icon = None });
             actions()
         });
-        Assert.assertEq(expected = Ok(Ok(List#{"type.created", "type.updated"})), result)
+        Assert.assertEq(expected = List#{"type.created", "type.updated"}, result)
 
     ///
     /// 失敗した操作は記録も残らない。entry が残っている型を消そうとすると invalid になり、
@@ -139,14 +139,14 @@ mod TestAuditPg {
              rows |> List.map(found -> found#detail),
              details |> List.exists(text -> String.contains(substr = "8f3a1c9e2b47", text)))
         });
-        let outcome = result |> Result.map(Result.map(match (actions, details, leaked) -> {
+        let outcome = result |> (match (actions, details, leaked) -> {
             let hashes = match details {
                 case deleted :: created :: Nil => (detailText(List#{"before", "url", "urlHash"}, deleted), detailText(List#{"url", "urlHash"}, created))
                 case _                         => ("?", "!")
             };
             (actions, fst(hashes) == snd(hashes), String.length(fst(hashes)), leaked)
-        }));
-        Assert.assertEq(expected = Ok(Ok((List#{("webhook.deleted", true), ("webhook.created", true)}, true, 12, false))), outcome)
+        });
+        Assert.assertEq(expected = (List#{("webhook.deleted", true), ("webhook.created", true)}, true, 12, false), outcome)
 
     ///
     /// asset の confirm を 2 回呼んでも asset.confirmed は 1 行（pending → ready に変わった時だけ）。消すと asset.deleted。
@@ -164,7 +164,7 @@ mod TestAuditPg {
             (rows |> List.map(found -> found#action),
              rows |> List.exists(found -> String.contains(substr = "見積", Util.Json.toCompactString(found#detail))))
         }));
-        Assert.assertEq(expected = Ok(Ok((List#{"asset.deleted", "asset.confirmed"}, false))), result)
+        Assert.assertEq(expected = (List#{"asset.deleted", "asset.confirmed"}, false), result)
 
     ///
     /// entry を公開して取り下げて消すと、entry.unpublished と entry.deleted が積まれる（手での公開は積まない）。
@@ -184,7 +184,7 @@ mod TestAuditPg {
                 |> List.filter(found -> found#targetKind == "entry")
                 |> List.map(found -> (found#action, found#targetId, detailText(List#{"typeApiId"}, found#detail)))
         }));
-        Assert.assertEq(expected = Ok(Ok(List#{("entry.deleted", "entry001", "blogs"), ("entry.unpublished", "entry001", "blogs"), ("entry.unpublished", "entry001", "blogs")})), result)
+        Assert.assertEq(expected = List#{("entry.deleted", "entry001", "blogs"), ("entry.unpublished", "entry001", "blogs"), ("entry.unpublished", "entry001", "blogs")}, result)
 
     ///
     /// 予約公開を tick が実行すると entry.published が積まれる。主体は system、detail に typeApiId / version / scheduledFor（予約の時刻）。
@@ -227,7 +227,7 @@ mod TestAuditPg {
              actions({ since = Some(Timestamp.fromEpochMillis(4102444800000i64)) | all }) |> List.length,
              actions({ since = Some(Timestamp.fromEpochMillis(946684800000i64)), until = Some(Timestamp.fromEpochMillis(4102444800000i64)) | all }) |> List.length)
         });
-        Assert.assertEq(expected = Ok(Ok((List#{"type.deleted", "type.created"}, 3, 0, List#{"type.deleted"}, 0, 3))), result)
+        Assert.assertEq(expected = (List#{"type.deleted", "type.created"}, 3, 0, List#{"type.deleted"}, 0, 3), result)
 
     ///
     /// 管理 API から読める。型を作って消すと、新しい順に 2 件（owner だけ）。主体はログインした人（USER）。
@@ -269,7 +269,7 @@ mod TestAuditPg {
             (filters |> List.map(filter -> Audit.count(Session.grant(), filter)),
              filters |> List.map(filter -> Audit.recent(Session.grant(), AuditFilter.toQuery(100i64, None, filter)) |> List.length |> Int32.toInt64))
         });
-        Assert.assertEq(expected = Ok(Ok((List#{3i64, 2i64, 0i64, 0i64, 3i64}, List#{3i64, 2i64, 0i64, 0i64, 3i64}))), result)
+        Assert.assertEq(expected = (List#{3i64, 2i64, 0i64, 0i64, 3i64}, List#{3i64, 2i64, 0i64, 0i64, 3i64}), result)
 
     ///
     /// 管理 API の auditEventsCount は auditEvents と同じ絞り込みで数え、recordAuditExport は audit.exported を 1 行積む

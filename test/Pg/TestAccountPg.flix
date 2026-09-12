@@ -101,7 +101,7 @@ mod TestAccountPg {
             PgTestSupport.asProject(blog#id, () -> Session.runWith(Accounts.actorFor(alice, blog#id, Login.Interactive), () ->
                 (ContentTypes.create(Session.grant(), CmsTestKit.typeDraft("posts", "記事"))#apiId, Session.current() == Actor.User(alice#id, "alice@example.com", Role.Owner :: Nil, Login.Interactive))))
         });
-        Assert.assertEq(expected = Ok(Ok((ApiId.ApiId("posts"), true))), result)
+        Assert.assertEq(expected = (ApiId.ApiId("posts"), true), result)
 
     ///
     /// CMS_SIGNUP=closed なら既定の組織の owner だけが組織を作れる。
@@ -114,6 +114,6 @@ mod TestAccountPg {
             (Session.runWith(Accounts.actorWithoutProject(stranger, Login.Interactive), () -> CmsTestKit.failureMessage(() -> Organizations.create(Signup.Closed, "x"))),
              Session.runWith(Accounts.actorWithoutProject(owner, Login.Interactive), () -> Organizations.create(Signup.Closed, "Acme"))#name)
         });
-        Assert.assertEq(expected = Ok(Ok((Err("この操作（manageProject）の権限がありません"), "Acme"))), result)
+        Assert.assertEq(expected = (Err("この操作（manageProject）の権限がありません"), "Acme"), result)
 
 }

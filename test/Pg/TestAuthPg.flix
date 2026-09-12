@@ -26,7 +26,7 @@ mod TestAuthPg {
              PgTestSupport.runAs(owner, Accounts.me) |> Option.map(me -> me#projects) |> Option.getWithDefault(Nil)
                  |> List.map(membership -> (ProjectSlug.text(membership#target#slug), membership#role)))
         });
-        Assert.assertEq(expected = Ok(Ok((true, true, true, List#{ ("default", Role.Owner) }))), result)
+        Assert.assertEq(expected = (true, true, true, List#{ ("default", Role.Owner) }), result)
 
     ///
     /// 招待 → 初回ログインで membership に写る。viewer は型を作れず、writer は公開できず、editor は公開できる。
@@ -58,14 +58,14 @@ mod TestAuthPg {
             (viewerCreatesType, viewerReads, writerPublishes, editorPublishes, invitationsLeft, members, lastOwner)
         }));
         Assert.assertEq(
-            expected = Ok(Ok((
+            expected = (
                 Err("この操作（manageTypes）の権限がありません"),
                 1,
                 Err("この操作（publishEntries）の権限がありません"),
                 Stage.Published,
                 0,
                 List#{ ("editor@test.dev", Role.Editor), ("second@test.dev", Role.Owner), ("viewer@test.dev", Role.Viewer), ("writer@test.dev", Role.Writer) },
-                Err("role: 最後の owner は外せません。先に別の owner を付けてください")))),
+                Err("role: 最後の owner は外せません。先に別の owner を付けてください")),
             result)
 
     /// dev の検証（X-Dev-User）を通した本人。email でなければテストの前提が壊れている。
@@ -93,7 +93,7 @@ mod TestAuthPg {
              PgTestSupport.asOwner(() -> Members.invitations(Session.grant()) |> List.map(invitation -> invitation#email)))
         });
         Assert.assertEq(
-            expected = Ok(Ok((List#{ ("known@test.dev", Role.Editor) }, List#{ "later@test.dev" }))),
+            expected = (List#{ ("known@test.dev", Role.Editor) }, List#{ "later@test.dev" }),
             result)
 
     ///
@@ -107,7 +107,7 @@ mod TestAuthPg {
             (user#email, PgTestSupport.asOwner(() -> Members.list(Session.grant()) |> List.map(member -> (member#email, member#role))))
         });
         Assert.assertEq(
-            expected = Ok(Ok(("editor@example.com", List#{ ("editor@example.com", Role.Editor) }))),
+            expected = ("editor@example.com", List#{ ("editor@example.com", Role.Editor) }),
             result)
 
     ///
@@ -129,7 +129,7 @@ mod TestAuthPg {
             (String.startsWith(prefix = "cms_", issued#key), resolved, otherProject, wrongKey, afterRevoke, listed)
         }));
         Assert.assertEq(
-            expected = Ok(Ok((true, Ok(ApiKeyScope.Read), Err(ApiKeyRejection.Unknown), Err(ApiKeyRejection.Unknown), Err(ApiKeyRejection.Revoked), List#{ ("site", true) }))),
+            expected = (true, Ok(ApiKeyScope.Read), Err(ApiKeyRejection.Unknown), Err(ApiKeyRejection.Unknown), Err(ApiKeyRejection.Revoked), List#{ ("site", true) }),
             result)
 
     ///
@@ -147,7 +147,7 @@ mod TestAuthPg {
                 (roleBefore, refused, roleAfter)
             })
         });
-        Assert.assertEq(expected = Ok(Ok((List#{Role.Editor}, List#{"email"}, List#{Role.Editor}))), result)
+        Assert.assertEq(expected = (List#{Role.Editor}, List#{"email"}, List#{Role.Editor}), result)
 
     /// 期限無しの read の鍵の入力。
     def readKey(name: String): ApiKeyDraft = { name = name, scope = ApiKeyScope.Read, expiresAt = None }
@@ -166,7 +166,7 @@ mod TestAuthPg {
             let reissued = CmsTestKit.runWithResult(() -> ApiKeys.create(Session.grant(), Session.grantInteractive(), pepper, readKey("site"), 0i64)) |> Result.isOk;
             (duplicated, reissued)
         }));
-        Assert.assertEq(expected = Ok(Ok((List#{"name"}, true))), result)
+        Assert.assertEq(expected = (List#{"name"}, true), result)
 
     ///
     /// 管理 API を通した形。owner の me に役割と組織とプロジェクトが出て、身元が無ければ me は null で mutation は権限エラー。

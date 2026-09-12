@@ -69,7 +69,7 @@ mod TestSchemaImpactPg {
             });
             List.sort(counted)
         }));
-        Assert.assertEq(expected = Ok(Ok(List.sort(byRule()))), result)
+        Assert.assertEq(expected = List.sort(byRule()), result)
 
     ///
     /// 入れ子（OBJECT の子）の値も数える。最上位のキーだけを見ると、子フィールドを消す時に
@@ -86,7 +86,7 @@ mod TestSchemaImpactPg {
             let (fields, _) = SchemaCounts.forChanges(List#{SchemaChange.FieldRemoved(headline)});
             fields |> List.map(count -> (ApiId.text(count#apiId), count#draft#total, count#published#total))
         }));
-        Assert.assertEq(expected = Ok(Ok(List#{("headline", 1i64, 0i64)})), result)
+        Assert.assertEq(expected = List#{("headline", 1i64, 0i64)}, result)
 
     ///
     /// required を立てた時は「公開中だが値が無い」数を、unique を立てた時は「公開中で重なっている」数を数える。
@@ -112,7 +112,7 @@ mod TestSchemaImpactPg {
         }));
         // b3 の title が空なので required は 1 件、b1 と b2 が重なるので unique は 2 件、
         // note は性質を締めていないのでどちらも数えない
-        Assert.assertEq(expected = Ok(Ok((List#{1i64}, List#{2i64}, List#{(0i64, 0i64)}))), result)
+        Assert.assertEq(expected = (List#{1i64}, List#{2i64}, List#{(0i64, 0i64)}), result)
 
 
     // ---- config を締めた時 ----
@@ -190,7 +190,7 @@ mod TestSchemaImpactPg {
             });
             List.sort(counted)
         }));
-        Assert.assertEq(expected = Ok(Ok(List.sort(blockedByRule()))), result)
+        Assert.assertEq(expected = List.sort(blockedByRule()), result)
 
 
     // ---- 見本 ----
@@ -209,6 +209,6 @@ mod TestSchemaImpactPg {
             let (fields, _) = SchemaCounts.forChanges(List#{SchemaChange.FieldRemoved(body)});
             fields |> List.map(count -> (count#draft#total, List.length(count#draft#entries), count#published#total, List.length(count#published#entries)))
         }));
-        Assert.assertEq(expected = Ok(Ok(List#{(7i64, 5, 0i64, 0)})), result)
+        Assert.assertEq(expected = List#{(7i64, 5, 0i64, 0)}, result)
 
 }

@@ -48,11 +48,11 @@ mod TestImpactPg {
              ContentEntries.find(Session.grant(), b1) |> Option.map(entry -> entry#stage))
         });
         Assert.assertEq(
-            expected = Ok(Ok((
+            expected = (
                 Violation.Violation("fields.title", "公開には値が要ります") :: Nil,
                 List#{ "b2", "p1" },
                 List#{ "b2", "b3", "p1" },
-                Some(Stage.Draft)))),
+                Some(Stage.Draft)),
             result)
 
     /// 公開した後、b2 を取り下げる影響は「b1 の body（本文のリンク）が壊れる」。削除なら下書きの参照も出る。
@@ -72,10 +72,10 @@ mod TestImpactPg {
              deleteP1#breaks |> List.map(describe) |> List.sort)
         });
         Assert.assertEq(
-            expected = Ok(Ok((
+            expected = (
                 Err("references: 参照先 'b3' が未公開です（withDependencies: true で一緒に公開できます）"),
                 List#{ ("b1", "body", Stage.Published) },
-                List#{ ("b1", "profile", Stage.Draft), ("b1", "profile", Stage.Published) }))),
+                List#{ ("b1", "profile", Stage.Draft), ("b1", "profile", Stage.Published) }),
             result)
 
 
@@ -98,10 +98,10 @@ mod TestImpactPg {
              CmsTestKit.failureMessage(() -> ContentEntries.impact(Session.grant(), CmsTestKit.entryId("nope"), ImpactAction.Delete)))
         });
         Assert.assertEq(
-            expected = Ok(Ok((
+            expected = (
                 Nil,
                 List#{ "fields.title", "fields.slug", "references" },
-                Err("entry 'nope' が見つかりません")))),
+                Err("entry 'nope' が見つかりません")),
             result)
 
     /// impact(PUBLISH) の cascades は、withDependencies で実際に一緒に公開される物と一致する。
@@ -115,7 +115,7 @@ mod TestImpactPg {
             let publishedOthers = List#{p1, b2, b3} |> List.filter(id -> ContentEntries.get(Session.grant(), id)#stage == Stage.Published) |> List.map(EntryId.text) |> List.sort;
             (cascades, publishedOthers)
         });
-        Assert.assertEq(expected = Ok(Ok((List#{ "b2", "b3", "p1" }, List#{ "b2", "b3", "p1" }))), result)
+        Assert.assertEq(expected = (List#{ "b2", "b3", "p1" }, List#{ "b2", "b3", "p1" }), result)
 
     /// 管理 API を通した形。publishCheck / impact が SDL の型で返る。依存は直接の物が id 順、cascades は依存の順（b2 → その先の b3 → p1）。
     @Test

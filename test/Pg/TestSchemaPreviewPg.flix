@@ -45,7 +45,7 @@ mod TestSchemaPreviewPg {
             let stopped = pressed(() -> ContentTypes.removeField(Session.grant(), body));
             (safe, kinds, stopped)
         }));
-        Assert.assertEq(expected = Ok(Ok((false, List#{"ValuesHidden"}, true))), result)
+        Assert.assertEq(expected = (false, List#{"ValuesHidden"}, true), result)
 
     ///
     /// 値の無いフィールドを消す時、dry-run は安全と言い、押すと通る。
@@ -58,7 +58,7 @@ mod TestSchemaPreviewPg {
             let stopped = pressed(() -> ContentTypes.removeField(Session.grant(), memo));
             (safe, kinds, stopped)
         }));
-        Assert.assertEq(expected = Ok(Ok((true, Nil, false))), result)
+        Assert.assertEq(expected = (true, Nil, false), result)
 
     ///
     /// required を立てる時、公開中に値が無い entry があれば止まる。
@@ -72,7 +72,7 @@ mod TestSchemaPreviewPg {
             let stopped = pressed(() -> ContentTypes.updateField(Session.grant(), memo, changes));
             (safe, kinds, stopped)
         }));
-        Assert.assertEq(expected = Ok(Ok((false, List#{"PublishBlocked"}, true))), result)
+        Assert.assertEq(expected = (false, List#{"PublishBlocked"}, true), result)
 
     ///
     /// entry のある型を消す時、dry-run が言う事と、消せない事が揃う。
@@ -88,7 +88,7 @@ mod TestSchemaPreviewPg {
             let stopped = pressed(() -> ContentTypes.delete(Session.grant(), blogs));
             (safe, kinds, stopped)
         }));
-        Assert.assertEq(expected = Ok(Ok((false, List#{"EntriesRemoved"}, true))), result)
+        Assert.assertEq(expected = (false, List#{"EntriesRemoved"}, true), result)
 
     ///
     /// フィールドを足すのは安全。ただし消した apiId で足し直すと、残った値が配信に戻る。
@@ -107,6 +107,6 @@ mod TestSchemaPreviewPg {
             let stopped = pressed(() -> ContentTypes.addField(Session.grant(), blogs, again));
             (harmless, safe, kinds, stopped)
         }));
-        Assert.assertEq(expected = Ok(Ok((true, false, List#{"ValuesResurrected"}, true))), result)
+        Assert.assertEq(expected = (true, false, List#{"ValuesResurrected"}, true), result)
 
 }

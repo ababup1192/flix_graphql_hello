@@ -137,7 +137,7 @@ mod TestWebhooksPg {
             (Webhooks.deliveries(Session.grant(), active#webhook#publicId, 20, None) |> List.map(delivery -> delivery#event),
              Webhooks.deliveries(Session.grant(), inactive#webhook#publicId, 20, None) |> List.length)
         }));
-        Assert.assertEq(expected = Ok(Ok((List#{WebhookEvent.EntryDeleted}, 0))), result)
+        Assert.assertEq(expected = (List#{WebhookEvent.EntryDeleted}, 0), result)
 
     ///
     /// 5 回失敗すると failed になり、理由が残る。redeliver で送る番に戻せる（attempts は積み上がる）。

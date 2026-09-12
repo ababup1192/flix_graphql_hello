@@ -44,10 +44,10 @@ mod TestContentVersionPg {
             }
         }));
         Assert.assertEq(
-            expected = Ok(Ok(List#{
+            expected = List#{
                 ("initial", 0i64), ("type", 1i64), ("field", 2i64), ("create", 2i64), ("draft", 2i64),
                 ("publish", 3i64), ("unpublish", 4i64), ("delete", 5i64), ("other project", 0i64)
-            })),
+            },
             result)
 
 }

@@ -7,7 +7,6 @@ mod TestPublishPg {
 
     use Util.Json.Json
     use CmsErr.CmsFailure
-    use DbError.DbFailure
 
     ///
     /// blogs（title: required / slug: unique / views）を作って id を返す。
@@ -44,13 +43,13 @@ mod TestPublishPg {
              (unpublished#stage, Option.isEmpty(unpublished#publishedAt)),
              versions)
         }));
-        Assert.assertEq(expected = Ok(Ok((
+        Assert.assertEq(expected = (
             Err("fields.title: 公開には値が要ります"),
             (Stage.Published, false, true),
             (Stage.Published, true),
             (Stage.Published, false),
             (Stage.Draft, true),
-            List#{(3, VersionReason.Publish, "tester"), (2, VersionReason.Publish, "tester")}))), result)
+            List#{(3, VersionReason.Publish, "tester"), (2, VersionReason.Publish, "tester")}), result)
 
     /// 公開中と同じ中身に戻すと CHANGED は消える（判定は下書きと公開中の中身の等値で、書いた時刻ではない）。
     ///
@@ -65,7 +64,7 @@ mod TestPublishPg {
             let reverted = ContentEntries.update(Session.grant(), created#id, CmsTestKit.entryData(List#{("title", Json.JString("Hello"))}), edited#version);
             ((edited#stage, edited#changedSincePublish), (reverted#stage, reverted#changedSincePublish))
         }));
-        Assert.assertEq(expected = Ok(Ok(((Stage.Published, true), (Stage.Published, false)))), result)
+        Assert.assertEq(expected = ((Stage.Published, true), (Stage.Published, false)), result)
 
     /// unique は公開中の値と照らす。同じ slug の 2 件目は invalid、取り下げれば通る。自分の再公開は通る。
     @Test
@@ -81,7 +80,7 @@ mod TestPublishPg {
             let freed = CmsTestKit.messageOr(entry -> entry#stage, () -> ContentEntries.publish(Session.grant(), second#id, "tester", false));
             (blocked, again, freed)
         }));
-        Assert.assertEq(expected = Ok(Ok((Err("fields.slug: 'same' は公開中の entry 'u1' が使っています"), Ok(Stage.Published), Ok(Stage.Published)))), result)
+        Assert.assertEq(expected = (Err("fields.slug: 'same' は公開中の entry 'u1' が使っています"), Ok(Stage.Published), Ok(Stage.Published)), result)
 
     /// 版は saveVersion で積め、restoreVersion で下書きに戻る。他の entry の版は notFound。
     @Test
@@ -96,7 +95,7 @@ mod TestPublishPg {
             let foreign = CmsTestKit.runWithResult(() -> ContentEntries.restoreVersion(Session.grant(), other#id, saved#id, other#version)) |> Result.map(entry -> entry#version);
             (saved#reason, Map.get(CmsTestKit.apiId("title"), edited#data), Map.get(CmsTestKit.apiId("title"), restored#data), restored#version, foreign)
         }));
-        Assert.assertEq(expected = Ok(Ok((VersionReason.Save, Some(Json.JString("New")), Some(Json.JString("Old")), 3, Err(CmsFailure.NotFound(Entity.Version, "1"))))), result)
+        Assert.assertEq(expected = (VersionReason.Save, Some(Json.JString("New")), Some(Json.JString("Old")), 3, Err(CmsFailure.NotFound(Entity.Version, "1"))), result)
 
     /// 差分: CHANGED の entry で PUBLISHED → DRAFT を取ると、変えたフィールド 1 件だけ出る。未公開の entry の PUBLISHED は空なので、初回公開の差分は全部 Added。
     ///
@@ -114,9 +113,9 @@ mod TestPublishPg {
             let firstPublish = ContentEntries.diff(Session.grant(), unpublished#id, VersionRef.Published, VersionRef.Draft);
             (changed, firstPublish)
         }));
-        Assert.assertEq(expected = Ok(Ok((
+        Assert.assertEq(expected = (
             FieldChange.FieldChange("title", Change.Changed(Json.JString("Old"), Json.JString("New"))) :: Nil,
-            FieldChange.FieldChange("title", Change.Added(Json.JString("Alone"))) :: FieldChange.FieldChange("slug", Change.Added(Json.JString("alone"))) :: Nil))), result)
+            FieldChange.FieldChange("title", Change.Added(Json.JString("Alone"))) :: FieldChange.FieldChange("slug", Change.Added(Json.JString("alone"))) :: Nil), result)
 
     /// 差分: versionId 同士で restore 前後の差が読める。restore した後の下書きは元のバージョンと同じ（差分無し）。他の entry のバージョンは notFound。
     ///
@@ -139,10 +138,10 @@ mod TestPublishPg {
             let foreign = CmsTestKit.runWithResult(() -> ContentEntries.diff(Session.grant(), other#id, VersionRef.Version(first#id), VersionRef.Draft));
             (between, restored, foreign)
         }));
-        Assert.assertEq(expected = Ok(Ok((
+        Assert.assertEq(expected = (
             FieldChange.FieldChange("title", Change.Changed(Json.JString("Old"), Json.JString("New"))) :: Nil,
             Nil,
-            Err(CmsFailure.NotFound(Entity.Version, "1"))))), result)
+            Err(CmsFailure.NotFound(Entity.Version, "1"))), result)
 
     /// 差分（GraphQL 越し）: RICH_TEXT の差分は kind = TEXT で lines に出て、before / after / children は null。versionId を渡す形も通る。
     ///
@@ -195,7 +194,7 @@ mod TestPublishPg {
             let publicSide = ContentEntries.findByStage(ContentTypes.get(Session.grant(), blogs), created#id, ContentEntries.StageAccess.Published) |> Option.map(entry -> Map.get(CmsTestKit.apiId("title"), entry#data));
             ((restored#changedSincePublish, Map.get(CmsTestKit.apiId("slug"), restored#data)), republished, publicSide)
         }));
-        Assert.assertEq(expected = Ok(Ok(((true, Some(Json.JString("old"))), Ok((Stage.Published, false)), Some(Some(Json.JString("Old")))))), result)
+        Assert.assertEq(expected = ((true, Some(Json.JString("old"))), Ok((Stage.Published, false)), Some(Some(Json.JString("Old")))), result)
 
     /// 復元した中身の unique が他の公開中の entry と重なる時、復元は下書きなので通るが、公開は拒まれ、公開側は動かない。
     ///
@@ -215,7 +214,7 @@ mod TestPublishPg {
             let publicSide = ContentEntries.findByStage(ContentTypes.get(Session.grant(), blogs), a#id, ContentEntries.StageAccess.Published) |> Option.map(entry -> Map.get(CmsTestKit.apiId("slug"), entry#data));
             (Map.get(CmsTestKit.apiId("slug"), restored#data), blocked, publicSide)
         }));
-        Assert.assertEq(expected = Ok(Ok((Some(Json.JString("same")), Err("fields.slug: 'same' は公開中の entry 'b' が使っています"), Some(Some(Json.JString("free")))))), result)
+        Assert.assertEq(expected = (Some(Json.JString("same")), Err("fields.slug: 'same' は公開中の entry 'b' が使っています"), Some(Some(Json.JString("free")))), result)
 
     /// 復元しただけでは配信は積まれず、復元した物を公開すると entry.published が 1 件積まれる。
     @Test
@@ -232,7 +231,7 @@ mod TestPublishPg {
             discard ContentEntries.publish(Session.grant(), created#id, "tester", false);
             (afterRestore, events())
         }));
-        Assert.assertEq(expected = Ok(Ok((Nil, List#{WebhookEvent.EntryPublished}))), result)
+        Assert.assertEq(expected = (Nil, List#{WebhookEvent.EntryPublished}), result)
 
     /// 公開するとコンテンツ API の既定（PUBLISHED）で引け、下書きの編集は公開側に出ない。消すと公開側からも消える。
     @Test
@@ -277,7 +276,7 @@ mod TestPublishPg {
             let again = ContentTypes.updateField(Session.grant(), slug#id, toggle(true)) |> (field -> field#unique);
             (turnedOn, blocked, freed, again)
         }));
-        Assert.assertEq(expected = Ok(Ok((true, Err("fields.slug: 'same' は公開中の entry 'a' が使っています"), Ok(Stage.Published), true))), result)
+        Assert.assertEq(expected = (true, Err("fields.slug: 'same' は公開中の entry 'a' が使っています"), Ok(Stage.Published), true), result)
 
     /// 未公開の entry への unpublish は何もしない（updated_at も動かさない）。数値の unique は 1 と 1.0 を同じ値と見る。
     @Test
@@ -292,7 +291,7 @@ mod TestPublishPg {
             let blocked = CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), second#id, "tester", false));
             (ApiId.text(codes#apiId), untouched#updatedAt == first#updatedAt, blocked)
         }));
-        Assert.assertEq(expected = Ok(Ok(("code", true, Err("fields.code: '1' は公開中の entry 'n1' が使っています")))), result)
+        Assert.assertEq(expected = ("code", true, Err("fields.code: '1' は公開中の entry 'n1' が使っています")), result)
 
     /// unique は文字列・数値・真偽値のどれでも同じに効く（含む（@>）で引くので値の型に厳密）。
     /// 真偽値と文字列の 2 つの unique なフィールドを立て、それぞれ同じ値の 2 件目だけが拒まれる。
@@ -316,9 +315,9 @@ mod TestPublishPg {
             (distinct, sameBool, sameText)
         }));
         Assert.assertEq(
-            expected = Ok(Ok((Stage.Published,
+            expected = (Stage.Published,
                 Err("fields.flag: 'true' は公開中の entry 't1' が使っています"),
-                Err("fields.label: '1' は公開中の entry 't1' が使っています")))),
+                Err("fields.label: '1' は公開中の entry 't1' が使っています")),
             result)
 
     /// 同じ値を同時に公開しても 1 件しか通らない。先の Tx が commit するまで後の Tx は advisory lock で待ち、commit 後に先の公開を見て invalid になる。

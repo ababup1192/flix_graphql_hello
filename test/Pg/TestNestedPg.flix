@@ -34,10 +34,10 @@ mod TestNestedPg {
              sections |> Option.map(field -> Children.toList(field#children) |> List.map(variant -> (ApiId.text(variant#apiId), Children.toList(variant#children) |> List.map(child -> ApiId.text(child#apiId))))),
              badChild)
         });
-        Assert.assertEq(expected = Ok(Ok((
+        Assert.assertEq(expected = (
             List#{"title", "related", "sections"},
             Some(List#{("hero", List#{"headline"}), ("cta", List#{"caption", "url"})}),
-            Err("parentFieldId: BLOCKS の子は OBJECT（variant）だけです")))), result)
+            Err("parentFieldId: BLOCKS の子は OBJECT（variant）だけです")), result)
 
     /// 並べ替えは最上位のフィールドだけ。子の id を混ぜると invalid。
     @Test
@@ -51,7 +51,7 @@ mod TestNestedPg {
             let mixed = CmsTestKit.failurePaths(CmsTestKit.runWithResult(() -> ContentTypes.reorderFields(Session.grant(), pages, List.reverse(ids) |> List.drop(1) |> (rest -> Option.toList(childId) ::: rest))));
             (reordered, mixed)
         });
-        Assert.assertEq(expected = Ok(Ok((List#{"sections", "related", "title"}, List#{"ids"}))), result)
+        Assert.assertEq(expected = (List#{"sections", "related", "title"}, List#{"ids"}), result)
 
     /// コンテンツ API では object が入れ子の型、blocks が union になり、中の参照も展開される。
     @Test

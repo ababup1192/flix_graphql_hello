@@ -26,7 +26,7 @@ mod TestTenantPg {
                  CmsTestKit.failureMessage(() -> ContentEntries.create(Session.grant(), blogs#id, None, CmsTestKit.entryData(Nil))))
             })
         }));
-        Assert.assertEq(expected = Ok(Ok((1, Some(true), true, true, Err("content type '1' が見つかりません"), Err("content type '1' が見つかりません")))), result)
+        Assert.assertEq(expected = (1, Some(true), true, true, Err("content type '1' が見つかりません"), Err("content type '1' が見つかりません")), result)
 
     /// プロジェクト slug の形（境界の parse）・予約・重複。既定プロジェクトは default。
     @Test
@@ -36,10 +36,10 @@ mod TestTenantPg {
              CmsTestKit.failureMessage(() -> Projects.create(OrgId.default(), ProjectSlug.ProjectSlug("account"), "x")),
              CmsTestKit.failureMessage(() -> Projects.create(OrgId.default(), ProjectSlug.default(), "x")),
              Projects.findBySlug(ProjectSlug.default())));
-        Assert.assertEq(expected = Ok(Ok((
+        Assert.assertEq(expected = (
             Err("slug: 'Shop' は 英小文字・数字・- を 1 〜 64 文字（先頭は英数字） にしてください"),
             Err("slug: 'account' は予約されています"),
             Err("slug: 'default' は既にあります"),
-            Some(ProjectId.default())))), result)
+            Some(ProjectId.default())), result)
 
 }
