@@ -143,6 +143,7 @@ mod TestCursor {
         let cases = List#{
             ((0, None),               Ok(PageStart.Offset(0))),
             ((5, None),               Ok(PageStart.Offset(5))),
+            ((Cursor.maxSkip(), None), Ok(PageStart.Offset(Cursor.maxSkip()))),
             ((0, Some(text)),         Ok(PageStart.After(cursor))),
             ((3, Some(text)),         Err(Violation.Violation("after", "after と skip は同時に指定できません（どちらか 1 つ）"))),
             ((0, Some("broken")),     Err(broken())),
@@ -151,6 +152,18 @@ mod TestCursor {
         Assert.assertEq(
             expected = cases |> List.map(match (given, outcome) -> (given, outcome)),
             cases |> List.map(match (given, _) -> { let (skip, after) = given; (given, Cursor.pageStart(Nil, skip, after)) }))
+
+    /// 上限を 1 でも超えた skip は invalid で、cursor（after）へ誘導する。after を渡していれば skip は 0 なので上限に当たらない。
+    @Test
+    def testCursorPageStartTooDeep(): Unit \ Assert =
+        let tooDeep = Violation.Violation("skip", "skip は ${Cursor.maxSkip()} まで指定できます（これより後ろは after に前のページの endCursor を指定してください）");
+        let cases = List#{
+            (Cursor.maxSkip() + 1, Err(tooDeep)),
+            (Cursor.maxSkip() * 10, Err(tooDeep))
+        };
+        Assert.assertEq(
+            expected = cases,
+            cases |> List.map(match (skip, _) -> (skip, Cursor.pageStart(Nil, skip, None))))
 
     // ---- 名前 ----
 

@@ -26,6 +26,8 @@ ContentSchemaBuilder（定義 → Schema。reference の参照先は `ContentEnt
 
 一覧は `first` / `skip` に加えて `after`（cursor）で辿れ、`<Singular>Connection` は `nodes` / `edges { cursor node }` / `pageInfo { hasNextPage endCursor }` / `totalCount`（GitHub の形）。管理 API の `entries` も同じ意味の `where` / `orderBy` / `after` を持つ（写しは AdminMapping）。システムの日時（`createdAt` / `updatedAt` / `publishedAt`）は entries の列なので、JSONB でなく列で比べる（管理 API は `where: { updatedAt: { gte: ... } }`、コンテンツ API は `updatedAt_gte`）。
 
+`skip` には上限がある（`Cursor.maxSkip()` = 10000）。OFFSET は飛ばす行も全部読むので、entry 11 万件で OFFSET 10000 が 37ms、50000 が 100ms になる（同じ位置を cursor で引けば 9ms）。超えると `skip` の違反で断り、`after` へ誘導する。管理画面の一覧は 1 ページ 50 件なので 200 ページ目まで届く。
+
 ## src/account/ — Account API
 
 `/account/graphql`。プロジェクトを選ぶ前の操作: me / 組織 / プロジェクト作成 / 組織のメンバー。Runner は Tenant を入れない。

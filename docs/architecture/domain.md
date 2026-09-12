@@ -49,9 +49,10 @@ Publishing は公開・取り下げ・削除・型の変更の副作用の Facad
 - 外向きの id: 連番は出さない。組織や鍵は乱数の public_id、配信記録のように時刻順に読む物は ULID（作成時刻が読めるので鍵や組織には使わない）
 - entry の中身は `EntryData = Map[ApiId, Json]`。GraphQL の `JSON` scalar（`Value`）との往復も `AdminMapping`
 - `FieldKind` は TEXT / TEXT_AREA / SLUG / NUMBER / BOOLEAN / SELECT / REFERENCE / OBJECT / BLOCKS / ASSET / RICH_TEXT / DATE
-- DATE に保存できる値は UTC の ISO 8601 ちょうど 1 通り（"2026-09-09T00:00:00Z"）。offset 付き・ミリ秒付き・秒なし・日付だけは受けてから直さず INVALID で断り、直せる値は言い分に送るべき形を載せる（規則は `DateValues`）。絞り込みの引数は保存しないので日付だけでも offset 付きでも読む。絞り込みと並び替えは `EntryFilterSql` が timestamptz にして比べ、一意（JSONB の `=`）は文字列で見るので形が 1 通りである事が要る
+- DATE に保存できる値は UTC の ISO 8601 ちょうど 1 通り（"2026-09-09T00:00:00Z"）。offset 付き・ミリ秒付き・秒なし・日付だけは受けてから直さず INVALID で断り、直せる値は言い分に送るべき形を載せる（規則は `DateValues`）。絞り込みの引数は保存しないので日付だけでも offset 付きでも読む。絞り込みと並び替えは `EntryFilterSql` が timestamptz にして比べ、一意（JSONB の含む）は文字列で見るので形が 1 通りである事が要る
 - DATE_ONLY（日付だけ）は DATE と別の種類。値は `"2026-09-09"` ちょうど 1 通りで、時刻付きは断る（規則は `DateOnlyValues`）。SQL は `::date`、cursor は epoch day（`CursorValue.Day`）。時刻を持たないので読む側のタイムゾーンで日がずれず、形が 1 通りなので unique もそのまま効く。microCMS には日付だけの型が無いので、取り込みは今まで通り DATE に写す
 - SELECT は `many: true` で複数選択（値は選択肢の配列。コンテンツ API では `[Enum!]!` と `_contains`）
+- 一意（unique）は写しの表を持たず、公開中の中身（JSONB）を `findUniqueHolder` が直接引く。形は `data @> jsonb_build_object(:apiId, :value)`（含む）で、`entry_contents_published_data_gin`（GIN jsonb_path_ops、`stage = 'published'` の部分索引。migrations/028）が効く。apiId が実行時に決まっても索引は 1 本で済み、フィールドごとの実行時 DDL は要らない（007 の決め）。含むの照合は jsonb の等価そのものなので 1 と 1.0 は同じ値、`"1"` とは別の値。unique は配列・OBJECT・BLOCKS・ASSET・RICH_TEXT に付けられない（`Naming.validateFlags`）ので、含むの「配列は要素を含む」の意味は出てこない。同時公開の直列化は値ごとの advisory lock（`lockUniqueValue`）
 
 ### FieldKind を足す時に触る所
 

@@ -294,6 +294,33 @@ mod TestPublishPg {
         }));
         Assert.assertEq(expected = Ok(Ok(("code", true, Err("fields.code: '1' は公開中の entry 'n1' が使っています")))), result)
 
+    /// unique は文字列・数値・真偽値のどれでも同じに効く（含む（@>）で引くので値の型に厳密）。
+    /// 真偽値と文字列の 2 つの unique なフィールドを立て、それぞれ同じ値の 2 件目だけが拒まれる。
+    ///
+    ///   t1(flag=true, label="1") 公開 ✓ → t2(flag=false, label="2") 公開 ✓ → t3(flag=true) ✗ → t4(label="1") ✗
+    @Test
+    def testPgUniqueScalarTypes(): Unit \ {IO, Assert} =
+        let result = PgTestSupport.withDb(() -> CmsTestKit.withIds(List#{"t1", "t2", "t3", "t4"}, () -> {
+            let blogs = blogsForPublish();
+            discard ContentTypes.addField(Session.grant(), blogs, { unique = true | CmsTestKit.fieldDraft("flag", FieldKind.Boolean, FieldConfig.empty()) });
+            discard ContentTypes.addField(Session.grant(), blogs, { unique = true | CmsTestKit.fieldDraft("label", FieldKind.Text, FieldConfig.empty()) });
+            let scalars = (title, slug, pairs) -> CmsTestKit.entryData(("title", Json.JString(title)) :: ("slug", Json.JString(slug)) :: pairs);
+            let first  = ContentEntries.create(Session.grant(), blogs, None, scalars("One", "one", List#{("flag", Json.JBool(true)), ("label", Json.JString("1"))}));
+            let second = ContentEntries.create(Session.grant(), blogs, None, scalars("Two", "two", List#{("flag", Json.JBool(false)), ("label", Json.JString("2"))}));
+            let third  = ContentEntries.create(Session.grant(), blogs, None, scalars("Three", "three", List#{("flag", Json.JBool(true))}));
+            let fourth = ContentEntries.create(Session.grant(), blogs, None, scalars("Four", "four", List#{("label", Json.JString("1"))}));
+            discard ContentEntries.publish(Session.grant(), first#id, "tester", false);
+            let distinct = ContentEntries.publish(Session.grant(), second#id, "tester", false) |> (entry -> entry#stage);
+            let sameBool = CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), third#id, "tester", false));
+            let sameText = CmsTestKit.failureMessage(() -> ContentEntries.publish(Session.grant(), fourth#id, "tester", false));
+            (distinct, sameBool, sameText)
+        }));
+        Assert.assertEq(
+            expected = Ok(Ok((Stage.Published,
+                Err("fields.flag: 'true' は公開中の entry 't1' が使っています"),
+                Err("fields.label: '1' は公開中の entry 't1' が使っています")))),
+            result)
+
     /// 同じ値を同時に公開しても 1 件しか通らない。先の Tx が commit するまで後の Tx は advisory lock で待ち、commit 後に先の公開を見て invalid になる。
     /// ロックが無ければ、後の Tx は commit 前の先の公開が見えず、両方通ってしまう。
     ///

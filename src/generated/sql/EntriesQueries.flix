@@ -7,7 +7,7 @@ mod EntriesQueries {
     ///
     /// 生成元 entries.q のハッシュ。テストで .q の現物と照合する。
     ///
-    pub def sourceHash(): Int32 = 865033631
+    pub def sourceHash(): Int32 = -452378923
 
     ///
     /// entryExists の 1 行。
@@ -213,10 +213,10 @@ mod EntriesQueries {
         ) yield { id = id }
 
     ///
-    /// findUniqueHolder: SELECT e.id FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'published' WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND c.data -> $3 = $4 ORDER BY e.id LIMIT 1
+    /// findUniqueHolder: SELECT e.id FROM entries AS e JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'published' WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND c.data @> jsonb_build_object($3::text, $4::jsonb) ORDER BY e.id LIMIT 1
     ///
     pub def findUniqueHolder(args: { typeId = Int64, apiId = String, value = Util.Json.Json, projectId = Int64 }): Option[FindUniqueHolderRow] \ DbRead =
-        let sql = "SELECT e.id\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'published'\n    WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND c.data -> $3 = $4\n    ORDER BY e.id LIMIT 1";
+        let sql = "SELECT e.id\n    FROM entries AS e\n    JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'published'\n    WHERE e.type_id = $1 AND e.project_id = $2 AND e.deleted_at IS NULL AND c.data @> jsonb_build_object($3::text, $4::jsonb)\n    ORDER BY e.id LIMIT 1";
         let params = List#{SqlValue.Int64(args#typeId), SqlValue.Int64(args#projectId), SqlValue.Str(args#apiId), SqlValue.ofJson(args#value)};
         RawSql.runWithAllow(() -> Sql.fetchOneAs(findUniqueHolderDecoder(), sql, params))
 

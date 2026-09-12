@@ -87,12 +87,18 @@ query lockUniqueValue(typeId: Int64, fieldId: Int64, value: Json) -> one {
     SELECT (pg_advisory_xact_lock(hashtext(concat_ws(':', :typeId, :fieldId, :value))) IS NULL)::boolean AS locked
 }
 
-// 公開中でその値を持つ entry（1 つ）
+// 公開中でその値を持つ entry（1 つ）。
+// 含む（@>）で書くのは entry_contents_published_data_gin（GIN jsonb_path_ops、stage = 'published' の部分索引）が効く形だから。
+// `data -> :apiId = :value` は索引が効かず、公開のたびに entry_contents を全部読む（11 万件で 43ms → 0.1ms）。
+// 一意は配列・OBJECT・BLOCKS に付けられない（Naming.validateFlags）ので、@> の「配列は含む」の意味は出てこず、スカラーの等価と同じになる。
+// 型の照合は jsonb の等価そのものなので、1 と 1.0 は同じ値、"1" とは別の値（-> = と同じ）。
+// :apiId::text と :value::jsonb の cast を書くのは、jsonb_build_object が variadic "any" で、
+// 素のプレースホルダだと PG が型を決められず prepare で落ちるため
 query findUniqueHolder(typeId: Int64, apiId: String, value: Json, projectId: Int64) -> one {
     SELECT e.id
     FROM entries AS e
     JOIN entry_contents AS c ON c.entry_id = e.id AND c.stage = 'published'
-    WHERE e.type_id = :typeId AND e.project_id = :projectId AND e.deleted_at IS NULL AND c.data -> :apiId = :value
+    WHERE e.type_id = :typeId AND e.project_id = :projectId AND e.deleted_at IS NULL AND c.data @> jsonb_build_object(:apiId::text, :value::jsonb)
     ORDER BY e.id LIMIT 1
 }
 

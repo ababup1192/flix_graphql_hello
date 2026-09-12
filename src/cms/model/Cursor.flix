@@ -104,13 +104,27 @@ mod Cursor {
                 else Err(Violation.Violation("after", "cursor が orderBy と合いません（並び順を変えたら先頭から読み直してください）")))
 
     ///
+    /// skip で飛ばせる上限。これより後ろは after（cursor）で読む。
+    ///
+    /// WhyNot: もっと大きくしないのは、OFFSET は飛ばす行も全部読むため。entry 11 万件で OFFSET 10000 が 37ms、
+    /// 50000 が 100ms で、同じ位置を cursor で引けば 9ms。管理画面の一覧は 1 ページ 50 件なので 200 ページ目まで届く。
+    ///
+    pub def maxSkip(): Int32 = 10000
+
+    ///
     /// ページの始まり。after と skip（0 は指定なし）を同時に渡せば Err（どちらか 1 つ）。after は orderBy と対で復号する。
+    /// skip が maxSkip を超えても Err（深い所は cursor で読む）。
     ///
     pub def pageStart(orderBy: OrderBy, skip: Int32, after: Option[String]): Result[Violation, PageStart] = match after {
-        case None                  => Ok(PageStart.Offset(skip))
-        case Some(_) if skip != 0  => Err(Violation.Violation("after", "after と skip は同時に指定できません（どちらか 1 つ）"))
-        case Some(text)            => decode(orderBy, text) |> Result.map(PageStart.After)
+        case None if skip > maxSkip() => Err(tooDeep())
+        case None                     => Ok(PageStart.Offset(skip))
+        case Some(_) if skip != 0     => Err(Violation.Violation("after", "after と skip は同時に指定できません（どちらか 1 つ）"))
+        case Some(text)               => decode(orderBy, text) |> Result.map(PageStart.After)
     }
+
+    /// skip が深すぎる時の違反。cursor（after）へ誘導する。
+    def tooDeep(): Violation =
+        Violation.Violation("skip", "skip は ${maxSkip()} まで指定できます（これより後ろは after に前のページの endCursor を指定してください）")
 
     /// cursor の並び順（値を除いた物）。
     def terms(cursor: Cursor): OrderBy = keys(cursor) |> List.map(match (key, direction, _) -> (key, direction))
