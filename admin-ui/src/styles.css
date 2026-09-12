@@ -1258,6 +1258,10 @@ body.tt-dragging-row, body.tt-dragging-row * { cursor: ns-resize !important; }
 /* 選ぶと枠が強調される。Backspace / Delete で素の URL の段落に戻る。 */
 .tt-card.ProseMirror-selectednode { border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent-bg); }
 
+/* WhyNot: ダークで地だけ塗り替えない。サムネイルの地を変えるとアイコン
+   （--tt-lc-thumb-icon）との差が変わるので、地と絵は必ず一緒に決める。
+   読み込み中の面と枠はトークン（--color-raised / --color-edge）を引いていて
+   テーマに付いて来るので、ダークで上書きしない。 */
 /* 外部リンクのカード。note と同じ形（docs/design/richtext-note-linkcard-ui.md）。
    左に タイトル / 説明（2 行で切る）/ ドメイン、右 30% にサムネイル（無ければ薄い灰色の面に画像のアイコン）。
    ライトは箱が紙色、ダークは透明で細い枠。取れるまでは白い箱に「…」。選ぶと画像と同じ水色 4px の枠。 */
@@ -1282,9 +1286,9 @@ body.tt-dragging-row, body.tt-dragging-row * { cursor: ns-resize !important; }
   cursor: default;
   user-select: none;
 }
-:root[data-theme="dark"] .tt-link-card { --tt-lc-title: #ffffff; --tt-lc-desc: #9a9fa5; --tt-lc-edge: #4a5056; --tt-lc-bg: transparent; --tt-lc-thumb: #f5f6f6; --tt-lc-loading: #ffffff; --tt-lc-loading-edge: #ffffff; }
+:root[data-theme="dark"] .tt-link-card { --tt-lc-title: #ffffff; --tt-lc-desc: #9a9fa5; --tt-lc-edge: #4a5056; --tt-lc-bg: transparent; --tt-lc-thumb: var(--color-well); --tt-lc-thumb-icon: var(--color-edge); }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .tt-link-card { --tt-lc-title: #ffffff; --tt-lc-desc: #9a9fa5; --tt-lc-edge: #4a5056; --tt-lc-bg: transparent; --tt-lc-thumb: #f5f6f6; --tt-lc-loading: #ffffff; --tt-lc-loading-edge: #ffffff; }
+  :root:not([data-theme="light"]) .tt-link-card { --tt-lc-title: #ffffff; --tt-lc-desc: #9a9fa5; --tt-lc-edge: #4a5056; --tt-lc-bg: transparent; --tt-lc-thumb: var(--color-well); --tt-lc-thumb-icon: var(--color-edge); }
 }
 .tt-link-card-text {
   display: flex;
