@@ -70,6 +70,27 @@ suite =
                     |> Url.fromString
                     |> Maybe.map Route.fromUrl
                     |> Expect.equal (Just (Settings "tech-blog" (Audit [ ( "kind", "SYSTEM" ), ( "action", "member." ) ])))
+        , test "知っているタブの名前はそのタブになる" <|
+            \_ ->
+                [ "members", "api-keys", "webhooks", "workflow", "project" ]
+                    |> List.map (\tab -> Url.fromString ("https://x/p/tech-blog/settings/" ++ tab) |> Maybe.map Route.fromUrl)
+                    |> Expect.equal
+                        [ Just (Settings "tech-blog" Members)
+                        , Just (Settings "tech-blog" ApiKeys)
+                        , Just (Settings "tech-blog" Webhooks)
+                        , Just (Settings "tech-blog" Workflow)
+                        , Just (Settings "tech-blog" ProjectSettings)
+                        ]
+        , test "知らないタブの名前は NotFound（メンバーに落とさない）" <|
+            \_ ->
+                [ "keys", "member", "audits", "Members" ]
+                    |> List.map (\tab -> Url.fromString ("https://x/p/tech-blog/settings/" ++ tab) |> Maybe.map Route.fromUrl)
+                    |> Expect.equal
+                        [ Just NotFound
+                        , Just NotFound
+                        , Just NotFound
+                        , Just NotFound
+                        ]
         , test "知らない URL は NotFound" <|
             \_ ->
                 "https://x/nope/nope"

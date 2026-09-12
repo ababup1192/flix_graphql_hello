@@ -89,7 +89,7 @@ parser url =
         , P.map Entry (P.s "p" </> P.string </> P.s "c" </> P.string </> P.string)
         , P.map Media (P.s "p" </> P.string </> P.s "assets")
         , P.map (\p -> Settings p Members) (P.s "p" </> P.string </> P.s "settings")
-        , P.map (\p tab -> Settings p (settingsTabOf (queryOf auditParams url) tab)) (P.s "p" </> P.string </> P.s "settings" </> P.string)
+        , P.map (\p tab -> settingsTabOf (queryOf auditParams url) tab |> Maybe.map (Settings p) |> Maybe.withDefault NotFound) (P.s "p" </> P.string </> P.s "settings" </> P.string)
         ]
 
 
@@ -107,27 +107,34 @@ queryOf keys url =
 
 
 {-| タブの名前から。query は監査ログだけが使う（他のタブは絞り込みを持たない）。
+
+WhyNot: 知らない名前をメンバーに落とさない。URL は打ち間違えたままで画面だけが別の物になり、
+人はそこが自分の打った場所だと思い込む。
+
 -}
-settingsTabOf : List ( String, String ) -> String -> SettingsTab
+settingsTabOf : List ( String, String ) -> String -> Maybe SettingsTab
 settingsTabOf query text =
     case text of
         "audit" ->
-            Audit query
+            Just (Audit query)
 
         "api-keys" ->
-            ApiKeys
+            Just ApiKeys
 
         "webhooks" ->
-            Webhooks
+            Just Webhooks
 
         "workflow" ->
-            Workflow
+            Just Workflow
 
         "project" ->
-            ProjectSettings
+            Just ProjectSettings
+
+        "members" ->
+            Just Members
 
         _ ->
-            Members
+            Nothing
 
 
 settingsTabText : SettingsTab -> String
