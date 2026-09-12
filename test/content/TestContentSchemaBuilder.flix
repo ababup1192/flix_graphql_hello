@@ -30,9 +30,12 @@ mod TestContentSchemaBuilder {
         };
         Assert.assertEq(expected = (true, true, true, true, true, true, true, false, true),
             // 意図した変更: id は slug と選べるように ID! から ID へ。slug の無い型に slug の引数は出ない
-            (String.contains(substr = "blog(id: ID, stage: Stage = PUBLISHED): Blog", sdl),
-             String.contains(substr = "blogs(where: BlogWhere, orderBy: [BlogOrderBy!], first: Int = 20, skip: Int = 0, after: String, stage: Stage = PUBLISHED): BlogConnection!", sdl),
-             String.contains(substr = "siteSetting(stage: Stage = PUBLISHED): SiteSetting", sdl),
+            // 意図した変更: 引数に description が付き `"説明" id: ID` の形になったので、引数の並びは名前と型の対で見る
+            (String.contains(substr = "blog(\"", sdl) and String.contains(substr = " id: ID, \"", sdl) and String.contains(substr = " stage: Stage = PUBLISHED): Blog\n", sdl),
+             String.contains(substr = "blogs(\"", sdl) and String.contains(substr = " where: BlogWhere, \"", sdl) and String.contains(substr = " orderBy: [BlogOrderBy!], \"", sdl)
+                and String.contains(substr = " first: Int = 20, \"", sdl) and String.contains(substr = " skip: Int = 0, \"", sdl) and String.contains(substr = " after: String, \"", sdl)
+                and String.contains(substr = " stage: Stage = PUBLISHED): BlogConnection!", sdl),
+             String.contains(substr = "siteSetting(\"", sdl) and String.contains(substr = " stage: Stage = PUBLISHED): SiteSetting\n", sdl),
              String.contains(substr = "title_contains: String", sdl) and String.contains(substr = "views_gte: Float", sdl) and String.contains(substr = "tags_isNull: Boolean", sdl),
              String.contains(substr = "OR: [BlogWhereLeaf!]", sdl),
              String.contains(substr = "views_DESC", sdl) and not String.contains(substr = "tags_ASC", sdl),
@@ -107,9 +110,46 @@ mod TestContentSchemaBuilder {
         let sdlOf = fields -> Schema.toSdl(ContentSchemaBuilder.build(CmsTestKit.contentType(1i64, "blogs", TypeKind.Collection, "記事", fields) :: Nil, dryRunner()));
         Assert.assertEq(
             expected = (Ok(true), Ok(false), Ok(false)),
-            (sdlOf(slugField("slug") :: Nil) |> Result.map(String.contains(substr = "blog(id: ID, slug: String, stage: Stage = PUBLISHED): Blog")),
+            // 意図した変更: 引数に description が付いたので、slug の引数は名前と型の対で見る
+            (sdlOf(slugField("slug") :: Nil) |> Result.map(sdl -> String.contains(substr = " id: ID, \"", sdl) and String.contains(substr = " slug: String, \"", sdl) and String.contains(substr = " stage: Stage = PUBLISHED): Blog\n", sdl)),
              sdlOf(CmsTestKit.fieldDef("slug", FieldKind.Slug) :: Nil) |> Result.map(String.contains(substr = "slug: String,")),
              sdlOf(slugField("slug") :: slugField("altSlug") :: Nil) |> Result.map(String.contains(substr = "slug: String,"))))
+
+    ///
+    /// 引数・input のフィールド・enum の値・オブジェクトのフィールドに description が出る（GraphiQL や codegen が拾う）。
+    ///
+    ///   引数         → `"..." first: Int = 20`（同じ行の前）
+    ///   input        → `"..." title_contains: String`
+    ///   enum の値    → 直前の行に `"..."`、次の行に `updatedAt_DESC`
+    ///   フィールド   → 直前の行に `"..."`、次の行に `totalCount: Int!`
+    ///
+    @Test
+    def testContentSchemaBuilderDescriptions(): Unit \ Assert =
+        let sdl = match Schema.toSdl(ContentSchemaBuilder.build(sampleTypes(), dryRunner())) {
+            case Ok(text)     => text
+            case Err(message) => bug!("sdl: ${message}")
+        };
+        Assert.assertEq(expected = (true, true, true, true, true, true),
+            (String.contains(substr = "\"返す件数の上限。既定 20、最大 200（超える値は 200 に丸める）。0 なら totalCount だけ\" first: Int = 20", sdl),
+             String.contains(substr = "\"部分一致。大文字小文字を区別しない\" title_contains: String", sdl),
+             String.contains(substr = "\"publishedAt が以後（以上）。値は ISO 8601 の日時（例 2026-09-01T00:00:00Z、offset 付きも可）か日付（2026-09-01 は UTC の 0 時）。読めない値は何にも合わない\" publishedAt_gte: String", sdl),
+             String.contains(substr = "  \"updatedAt の新しい順（既定）\"\n  updatedAt_DESC", sdl),
+             String.contains(substr = "  \"題名（title）の昇順。値が無い entry は末尾\"\n  title_ASC", sdl),
+             String.contains(substr = "  \"絞り込み後の総件数（ページに関係なく）\"\n  totalCount: Int!", sdl)))
+
+    ///
+    /// description を付けた SDL が graphql-java の SchemaParser を通り、クエリを流せる。
+    /// 引数の description（`"..." first: Int = 20`）と日本語の文字列リテラルを含む全種類のフィールドで組む。
+    ///
+    @Test
+    def testContentSchemaBuilderDescribedSdlBuildsEngine(): Unit \ {Assert, IO} =
+        let fields = { name = "題名", unique = true | CmsTestKit.fieldDef("slug", FieldKind.Slug) } :: CmsTestKit.fieldDef("publishOn", FieldKind.Date) :: CmsTestKit.fieldDef("day", FieldKind.DateOnly) ::
+                     CmsTestKit.fieldDef("views", FieldKind.Number) :: CmsTestKit.fieldDef("featured", FieldKind.Boolean) :: CmsTestKit.fieldDef("cover", FieldKind.Asset) ::
+                     { many = true | CmsTestKit.fieldDef("gallery", FieldKind.Asset) } :: CmsTestKit.fieldDef("body", FieldKind.RichText) :: { many = true | CmsTestKit.fieldDef("tags", FieldKind.Text) } ::
+                     { config = { options = List#{"NEWS", "TECH"} | FieldConfig.empty() } | CmsTestKit.fieldDef("topic", FieldKind.Select) } :: Nil;
+        let schema = ContentSchemaBuilder.build(CmsTestKit.contentType(1i64, "blogs", TypeKind.Collection, "記事", fields) :: Nil, dryRunner());
+        Assert.assertEq(expected = Ok((Value.Obj(Map#{ "_types" => Value.Int(1) }), None)),
+            GraphqlTestKit.executeQuery(schema, "{ _types }"))
 
     /// 型が 1 つも無くても Query は組める（_types だけ）。
     @Test

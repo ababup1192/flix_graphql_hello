@@ -120,6 +120,12 @@ mod GqlCodec {
         updateValue(value, info -> { description = Some(text) | info }, codec)
 
     ///
+    /// enum の全部の値に SDL の description を付ける。values は enumOf に渡した物、toText は値ごとの文。
+    ///
+    pub def describeValues(toText: a -> String, values: List[a], codec: GqlCodec[a]): GqlCodec[a] =
+        List.foldLeft((acc, value) -> describeValue(value, toText(value), acc), codec, values)
+
+    ///
     /// enum の値 1 つを @deprecated にする。
     ///
     pub def deprecateValue(value: a, deprecation: Deprecation, codec: GqlCodec[a]): GqlCodec[a] =

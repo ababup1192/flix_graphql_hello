@@ -51,8 +51,8 @@ mod ContentSchemaBuilder {
     ///
     def oneField(all: List[ContentType], owner: ContentType): Field[Unit, ContentEff] =
         // 引数の定義。slug は出せる型でだけ SDL に出す（出さない型には引数ごと生えない）
-        let idArg = Schema.arg("id", GqlCodec.option(GqlCodec.id()));
-        let slugArg = Schema.arg("slug", GqlCodec.option(GqlCodec.string()));
+        let idArg = Schema.arg("id", GqlCodec.option(GqlCodec.id())) |> Arg.withDescription("entry の id。slug と同時には渡せない");
+        let slugArg = Schema.arg("slug", GqlCodec.option(GqlCodec.string())) |> Arg.withDescription("unique な slug の値。id と同時には渡せない。この引数は unique な slug フィールドを 1 つだけ持つ型にだけ出る");
         let lookupSlug = slugLookupOf(owner);
         let slugInfos = match lookupSlug { case Some(_) => Arg.info(slugArg) :: Nil case None => Nil };
         let stage = stageArg();
@@ -138,11 +138,16 @@ mod ContentSchemaBuilder {
     ///
     def manyField(all: List[ContentType], owner: ContentType): Field[Unit, ContentEff] =
         // 引数の定義。SDL に出す物（infos）と、入力を読む物（Arg.decode）を同じ値から出す
-        let whereArg = Schema.arg("where", GqlCodec.option(whereCodec(owner)));
-        let orderArg = Schema.arg("orderBy", GqlCodec.option(GqlCodec.list(orderByCodec(owner))));
-        let firstArg = Schema.arg("first", GqlCodec.option(GqlCodec.int32())) |> Arg.withDefaultValue(Value.Int(20));
-        let skipArg = Schema.arg("skip", GqlCodec.option(GqlCodec.int32())) |> Arg.withDefaultValue(Value.Int(0));
-        let afterArg = Schema.arg("after", GqlCodec.option(GqlCodec.string()));
+        let whereArg = Schema.arg("where", GqlCodec.option(whereCodec(owner)))
+            |> Arg.withDescription("絞り込み。フィールド名_演算子 の形。複数書くと AND。OR は OR: [{...}, {...}]（1 段だけ）");
+        let orderArg = Schema.arg("orderBy", GqlCodec.option(GqlCodec.list(orderByCodec(owner))))
+            |> Arg.withDescription("並び順。先頭が優先。省くと updatedAt の新しい順。同じ値は id の昇順");
+        let firstArg = Schema.arg("first", GqlCodec.option(GqlCodec.int32())) |> Arg.withDefaultValue(Value.Int(20))
+            |> Arg.withDescription("返す件数の上限。既定 20、最大 200（超える値は 200 に丸める）。0 なら totalCount だけ");
+        let skipArg = Schema.arg("skip", GqlCodec.option(GqlCodec.int32())) |> Arg.withDefaultValue(Value.Int(0))
+            |> Arg.withDescription("先頭から飛ばす件数。after と同時には使えない");
+        let afterArg = Schema.arg("after", GqlCodec.option(GqlCodec.string()))
+            |> Arg.withDescription("前のページの pageInfo.endCursor。orderBy と対で意味を持つので、並び順を変えたら先頭から読み直す。skip と同時には使えない");
         let stage = stageArg();
         let infos = Arg.info(whereArg) :: Arg.info(orderArg) :: Arg.info(firstArg) :: Arg.info(skipArg) :: Arg.info(afterArg) :: Arg.info(stage) :: Nil;
         Schema.fieldRaw(ApiId.text(owner#plural), infos, Out.obj(connectionType(all, owner)), (_context, _root, args) ->
@@ -175,11 +180,11 @@ mod ContentSchemaBuilder {
     ///
     def entryType(all: List[ContentType], owner: ContentType): ObjectType[Entry, ContentEff] =
         Schema.objectType(TypeName.text(owner#singular), () ->
-            Schema.field0("id", Out.id(), (_context, entry) -> Ok(Id.Id(EntryId.text(entry#id)))) ::
-            Schema.field0("stage", Out.scalar(stageCodec()), (_context, entry) -> Ok(entry#stage)) ::
-            Schema.field0("publishedAt", Out.option(Out.string()), (_context, entry) -> Ok(entry#publishedAt |> Option.map(Timestamp.toIso8601))) ::
-            Schema.field0("createdAt", Out.string(), (_context, entry) -> Ok(Timestamp.toIso8601(entry#createdAt))) ::
-            Schema.field0("updatedAt", Out.string(), (_context, entry) -> Ok(Timestamp.toIso8601(entry#updatedAt))) ::
+            (Schema.field0("id", Out.id(), (_context, entry) -> Ok(Id.Id(EntryId.text(entry#id)))) |> Field.withDescription("entry の id。1 件のクエリの id と where の id_eq / id_in に渡す")) ::
+            (Schema.field0("stage", Out.scalar(stageCodec()), (_context, entry) -> Ok(entry#stage)) |> Field.withDescription("読んだ内容の stage（PUBLISHED / DRAFT）")) ::
+            (Schema.field0("publishedAt", Out.option(Out.string()), (_context, entry) -> Ok(entry#publishedAt |> Option.map(Timestamp.toIso8601))) |> Field.withDescription("公開した時刻（ISO 8601、UTC）。公開中でなければ null")) ::
+            (Schema.field0("createdAt", Out.string(), (_context, entry) -> Ok(Timestamp.toIso8601(entry#createdAt))) |> Field.withDescription("作った時刻（ISO 8601、UTC）")) ::
+            (Schema.field0("updatedAt", Out.string(), (_context, entry) -> Ok(Timestamp.toIso8601(entry#updatedAt))) |> Field.withDescription("最後に更新した時刻（ISO 8601、UTC）")) ::
             List.map(customField(all, TypeName.text(owner#singular)), owner#fields))
             |> ObjectType.withDescription(owner#name)
 
@@ -236,14 +241,14 @@ mod ContentSchemaBuilder {
     ///
     def assetType(): ObjectType[Asset, ContentEff] =
         Schema.objectType("Asset", () ->
-            Schema.field0("id", Out.id(), (_context, asset) -> Ok(Id.Id(AssetId.text(asset#id)))) ::
-            Schema.field0("url", Out.string(), (_context, asset) -> Ok(ObjectStore.publicUrl(asset#key))) ::
-            Schema.field0("fileName", Out.string(), (_context, asset) -> Ok(asset#fileName)) ::
-            Schema.field0("mime", Out.string(), (_context, asset) -> Ok(asset#mime)) ::
-            Schema.field0("size", Out.int32(), (_context, asset) -> Ok(EntryPage.countToInt32(asset#size))) ::
-            Schema.field0("width", Out.option(Out.int32()), (_context, asset) -> Ok(asset#width)) ::
-            Schema.field0("height", Out.option(Out.int32()), (_context, asset) -> Ok(asset#height)) ::
-            Schema.field0("alt", Out.string(), (_context, asset) -> Ok(asset#alt)) :: Nil)
+            (Schema.field0("id", Out.id(), (_context, asset) -> Ok(Id.Id(AssetId.text(asset#id)))) |> Field.withDescription("asset の id。where の <フィールド>_id_eq / _contains に渡す")) ::
+            (Schema.field0("url", Out.string(), (_context, asset) -> Ok(ObjectStore.publicUrl(asset#key))) |> Field.withDescription("配信 URL。そのまま img の src や a の href に置ける")) ::
+            (Schema.field0("fileName", Out.string(), (_context, asset) -> Ok(asset#fileName)) |> Field.withDescription("アップロード時のファイル名（パスと制御文字を除いた物）")) ::
+            (Schema.field0("mime", Out.string(), (_context, asset) -> Ok(asset#mime)) |> Field.withDescription("MIME タイプ（例 image/png）")) ::
+            (Schema.field0("size", Out.int32(), (_context, asset) -> Ok(EntryPage.countToInt32(asset#size))) |> Field.withDescription("バイト数")) ::
+            (Schema.field0("width", Out.option(Out.int32()), (_context, asset) -> Ok(asset#width)) |> Field.withDescription("画像の幅（px）。画像でなければ null")) ::
+            (Schema.field0("height", Out.option(Out.int32()), (_context, asset) -> Ok(asset#height)) |> Field.withDescription("画像の高さ（px）。画像でなければ null")) ::
+            (Schema.field0("alt", Out.string(), (_context, asset) -> Ok(asset#alt)) |> Field.withDescription("代替テキスト。未設定なら空文字")) :: Nil)
             |> ObjectType.withDescription("画像やファイル。url で配信する")
 
     ///
@@ -252,16 +257,16 @@ mod ContentSchemaBuilder {
     ///
     def richTextType(all: List[ContentType]): ObjectType[(Util.Json.Json, Entry), ContentEff] =
         Schema.objectType("RichText", () ->
-            Schema.field0("json", Out.json(), (_context, src) -> Ok(JsonValue.fromJson(fst(src)))) ::
-            Schema.field0("html", Out.string(), (_context, src) -> Ok(RichText.toHtml(imageRefs(fst(src)), linkPaths(all, src), cardRefs(fst(src)), fst(src)))) ::
-            Schema.field0("markdown", Out.string(), (_context, src) -> Ok(Markdown.toMarkdown(fst(src)))) ::
-            Schema.field0("text", Out.string(), (_context, src) -> Ok(RichText.toText(fst(src)))) ::
-            Schema.field0("assets", Out.list(Out.obj(assetType())), (_context, src) -> Ok(docAssets(fst(src)))) ::
-            Schema.field0("headings", Out.list(Out.obj(headingType())), (_context, src) -> Ok(RichText.headings(fst(src)))) ::
-            Schema.field0("links", Out.list(Out.obj(richTextLinkType())), (_context, src) -> Ok(richTextLinks(all, src))) ::
-            Schema.field1("excerpt", excerptLengthArg(), Out.string(), (_context, src, length) -> Ok(RichText.excerpt(length |> Option.getWithDefault(120), fst(src)))) ::
-            Schema.field0("wordCount", Out.int32(), (_context, src) -> Ok(RichText.wordCount(fst(src)))) ::
-            Schema.field0("readingTimeMinutes", Out.int32(), (_context, src) -> Ok(RichText.readingTimeMinutes(fst(src)))) :: Nil)
+            (Schema.field0("json", Out.json(), (_context, src) -> Ok(JsonValue.fromJson(fst(src)))) |> Field.withDescription("ProseMirror の doc（TipTap 互換）。自分で描く時に使う。画像は asset の id、entry へのリンクは entryId を持つ")) ::
+            (Schema.field0("html", Out.string(), (_context, src) -> Ok(RichText.toHtml(imageRefs(fst(src)), linkPaths(all, src), cardRefs(fst(src)), fst(src)))) |> Field.withDescription("HTML。見出しに id（headings と同じ）、画像は asset の配信 URL、外部リンクは target=\"_blank\"、entry へのリンクは型の linkPath から作った href（linkPath が無ければ #entry:ID）。文字はエスケープ済み")) ::
+            (Schema.field0("markdown", Out.string(), (_context, src) -> Ok(Markdown.toMarkdown(fst(src)))) |> Field.withDescription("Markdown。画像は asset:ID、entry へのリンクは entry:ID のまま出るので、assets と links で解く")) ::
+            (Schema.field0("text", Out.string(), (_context, src) -> Ok(RichText.toText(fst(src)))) |> Field.withDescription("平文。装飾と画像を除き、ブロックの区切りは改行")) ::
+            (Schema.field0("assets", Out.list(Out.obj(assetType())), (_context, src) -> Ok(docAssets(fst(src)))) |> Field.withDescription("本文が指している asset（アップロードが完了した物だけ）")) ::
+            (Schema.field0("headings", Out.list(Out.obj(headingType())), (_context, src) -> Ok(RichText.headings(fst(src)))) |> Field.withDescription("見出しの一覧（出現順）。目次に使う")) ::
+            (Schema.field0("links", Out.list(Out.obj(richTextLinkType())), (_context, src) -> Ok(richTextLinks(all, src))) |> Field.withDescription("本文が指している entry。消えた entry は含まない")) ::
+            (Schema.field1("excerpt", excerptLengthArg(), Out.string(), (_context, src, length) -> Ok(RichText.excerpt(length |> Option.getWithDefault(120), fst(src)))) |> Field.withDescription("抜粋。平文の改行を空白にして先頭 length 文字（既定 120）。切れたら末尾に …")) ::
+            (Schema.field0("wordCount", Out.int32(), (_context, src) -> Ok(RichText.wordCount(fst(src)))) |> Field.withDescription("語数。ひらがな・カタカナ・漢字・ハングルは 1 文字 1 語、それ以外は空白区切りの語")) ::
+            (Schema.field0("readingTimeMinutes", Out.int32(), (_context, src) -> Ok(RichText.readingTimeMinutes(fst(src)))) |> Field.withDescription("読了時間（分）。日本語など 500 文字/分、それ以外 200 語/分で切り上げ。最低 1")) :: Nil)
             |> ObjectType.withDescription("構造化した本文。json は ProseMirror の doc、html はその描画（見出しに id 付き）、markdown は CMS の方言を含む Markdown（画像は asset:ID、コンテンツへのリンクは entry:ID。assets と links で解く）、text は平文、assets は本文が指している asset、headings は目次用、links は本文が指しているコンテンツ、excerpt / wordCount / readingTimeMinutes は一覧向けの派生値")
 
     ///
@@ -269,9 +274,9 @@ mod ContentSchemaBuilder {
     ///
     def richTextLinkType(): ObjectType[(EntryId, ApiId, Option[String]), ContentEff] =
         Schema.objectType("RichTextLink", () ->
-            Schema.field0("id", Out.id(), (_context, src) -> { let (id, _, _) = src; Ok(Id.Id(EntryId.text(id))) }) ::
-            Schema.field0("apiId", Out.string(), (_context, src) -> { let (_, apiId, _) = src; Ok(ApiId.text(apiId)) }) ::
-            Schema.field0("path", Out.option(Out.string()), (_context, src) -> { let (_, _, path) = src; Ok(path) }) :: Nil)
+            (Schema.field0("id", Out.id(), (_context, src) -> { let (id, _, _) = src; Ok(Id.Id(EntryId.text(id))) }) |> Field.withDescription("指している entry の id。json の entryId / markdown の entry:ID と同じ値")) ::
+            (Schema.field0("apiId", Out.string(), (_context, src) -> { let (_, apiId, _) = src; Ok(ApiId.text(apiId)) }) |> Field.withDescription("指している entry の型の apiId")) ::
+            (Schema.field0("path", Out.option(Out.string()), (_context, src) -> { let (_, _, path) = src; Ok(path) }) |> Field.withDescription("型の linkPath から作ったパス。linkPath が無ければ null")) :: Nil)
             |> ObjectType.withDescription("本文が指しているコンテンツ。path は型の linkPath から作った物で、linkPath が無ければ null")
 
     ///
@@ -300,9 +305,9 @@ mod ContentSchemaBuilder {
     ///
     def headingType(): ObjectType[RichText.Heading, ContentEff] =
         Schema.objectType("Heading", () ->
-            Schema.field0("level", Out.int32(), (_context, heading) -> Ok(heading#level)) ::
-            Schema.field0("text", Out.string(), (_context, heading) -> Ok(heading#text)) ::
-            Schema.field0("id", Out.string(), (_context, heading) -> Ok(heading#id)) :: Nil)
+            (Schema.field0("level", Out.int32(), (_context, heading) -> Ok(heading#level)) |> Field.withDescription("見出しの深さ（1 〜 4）")) ::
+            (Schema.field0("text", Out.string(), (_context, heading) -> Ok(heading#text)) |> Field.withDescription("見出しの平文")) ::
+            (Schema.field0("id", Out.string(), (_context, heading) -> Ok(heading#id)) |> Field.withDescription("html の見出しに付いた id。目次のリンク先（#id）に使う")) :: Nil)
             |> ObjectType.withDescription("本文の見出し。id は html の見出しに付いた物と同じ")
 
     /// linkCard の OGP（表にある物だけ。取りには行かない）。無い url・失敗した url は URL だけの a になる。
@@ -387,10 +392,10 @@ mod ContentSchemaBuilder {
     ///
     def connectionType(all: List[ContentType], owner: ContentType): ObjectType[EntryPage, ContentEff] =
         Schema.objectType("${TypeName.text(owner#singular)}Connection", () ->
-            Schema.field0("nodes", Out.list(Out.obj(entryType(all, owner))), (_context, page) -> Ok(page#entries)) ::
-            Schema.field0("edges", Out.list(Out.obj(edgeType(all, owner))), (_context, page) -> Ok(EntryPage.edges(page))) ::
-            Schema.field0("pageInfo", Out.obj(pageInfoType()), (_context, page) -> Ok(EntryPage.pageInfo(page))) ::
-            Schema.field0("totalCount", Out.int32(), (_context, page) -> Ok(EntryPage.totalCountInt32(page))) :: Nil)
+            (Schema.field0("nodes", Out.list(Out.obj(entryType(all, owner))), (_context, page) -> Ok(page#entries)) |> Field.withDescription("そのページの entry")) ::
+            (Schema.field0("edges", Out.list(Out.obj(edgeType(all, owner))), (_context, page) -> Ok(EntryPage.edges(page))) |> Field.withDescription("Relay 形。cursor を after に渡せる。nodes と同じ entry")) ::
+            (Schema.field0("pageInfo", Out.obj(pageInfoType()), (_context, page) -> Ok(EntryPage.pageInfo(page))) |> Field.withDescription("次のページがあるか（hasNextPage）と、その cursor（endCursor）")) ::
+            (Schema.field0("totalCount", Out.int32(), (_context, page) -> Ok(EntryPage.totalCountInt32(page))) |> Field.withDescription("絞り込み後の総件数（ページに関係なく）")) :: Nil)
             |> ObjectType.withDescription("一覧の 1 ページ。nodes か edges のどちらかを読む。次のページは pageInfo.endCursor を after に渡す（orderBy と対。skip とは同時に渡せない）")
 
     ///
@@ -398,16 +403,17 @@ mod ContentSchemaBuilder {
     ///
     def edgeType(all: List[ContentType], owner: ContentType): ObjectType[EntryEdge, ContentEff] =
         Schema.objectType("${TypeName.text(owner#singular)}Edge", () ->
-            Schema.field0("cursor", Out.string(), (_context, edge) -> Ok(edge#cursor)) ::
-            Schema.field0("node", Out.obj(entryType(all, owner)), (_context, edge) -> Ok(edge#node)) :: Nil)
+            (Schema.field0("cursor", Out.string(), (_context, edge) -> Ok(edge#cursor)) |> Field.withDescription("この entry の位置。after に渡すとこの次から読める")) ::
+            (Schema.field0("node", Out.obj(entryType(all, owner)), (_context, edge) -> Ok(edge#node)) |> Field.withDescription("entry")) :: Nil)
+            |> ObjectType.withDescription("一覧の 1 件と、その位置（cursor）")
 
     ///
     /// `PageInfo { hasNextPage, endCursor }`。全型で共通の 1 つ。
     ///
     def pageInfoType(): ObjectType[PageInfo, ContentEff] =
         Schema.objectType("PageInfo", () ->
-            Schema.field0("hasNextPage", Out.bool(), (_context, info) -> Ok(info#hasNextPage)) ::
-            Schema.field0("endCursor", Out.option(Out.string()), (_context, info) -> Ok(info#endCursor)) :: Nil)
+            (Schema.field0("hasNextPage", Out.bool(), (_context, info) -> Ok(info#hasNextPage)) |> Field.withDescription("次のページがあるか")) ::
+            (Schema.field0("endCursor", Out.option(Out.string()), (_context, info) -> Ok(info#endCursor)) |> Field.withDescription("このページの最後の entry の cursor。次のページを読む時に after に渡す。ページが空なら null")) :: Nil)
             |> ObjectType.withDescription("ページの続き。hasNextPage なら endCursor を after に渡して次を読む")
 
     // ---- 引数 ----
@@ -417,12 +423,15 @@ mod ContentSchemaBuilder {
     ///
     def stageArg(): Arg[Option[Stage]] =
         Schema.arg("stage", GqlCodec.option(stageCodec())) |> Arg.withDefaultValue(Value.Str("PUBLISHED"))
+            |> Arg.withDescription("PUBLISHED（既定）は公開中の内容。DRAFT は下書きも含む。DRAFT は API キー（READ_DRAFT）かプレビュートークンが要る（一覧はプレビュートークンでは読めない）")
 
     def stageOrDefault(given: Option[Stage]): Stage = given |> Option.getWithDefault(Stage.Published)
 
     def stageCodec(): GqlCodec[Stage] =
         GqlCodec.enumOf("Stage", stage -> match stage { case Stage.Draft => "DRAFT" case Stage.Published => "PUBLISHED" }, Stage.Draft :: Stage.Published :: Nil)
             |> GqlCodec.describe("entry の状態。省けば公開中の物")
+            |> GqlCodec.describeValue(Stage.Published, "公開中の内容。認証無しで読める（public なプロジェクト）")
+            |> GqlCodec.describeValue(Stage.Draft, "下書きの内容（未公開の entry も含む）。API キー（READ_DRAFT）かプレビュートークンが要る")
 
     ///
     /// `<Singular>OrderBy` の enum。共通のキーと、配列でないフィールド。
@@ -432,10 +441,29 @@ mod ContentSchemaBuilder {
             (owner#fields |> List.filter(field -> not field#many and not List.memberOf(field#kind, FieldKind.Reference :: FieldKind.Object :: FieldKind.Blocks :: FieldKind.Asset :: FieldKind.RichText :: Nil)) |> List.map(field -> SortKey.ByField(field#apiId)));
         let values = keys |> List.flatMap(key -> (key, Direction.Asc) :: (key, Direction.Desc) :: Nil);
         GqlCodec.enumOf("${TypeName.text(owner#singular)}OrderBy", orderByName, values)
+            |> GqlCodec.describe("並び順のキーと向き。省くと updatedAt_DESC。同じ値は id の昇順で安定する")
+            |> GqlCodec.describeValues(orderByDescription(owner), values)
 
     def orderByName(term: (SortKey, Direction)): String =
         let (key, direction) = term;
         "${SortKey.toText(key)}_${Direction.toText(direction)}"
+
+    ///
+    /// OrderBy の値の説明。時刻のキーは新しい順 / 古い順、それ以外は昇順 / 降順。NULL を取りうるキー（publishedAt とフィールド）は向きに関わらず末尾。
+    ///
+    def orderByDescription(owner: ContentType, term: (SortKey, Direction)): String =
+        let (key, direction) = term;
+        let newestFirst = match direction { case Direction.Desc => "新しい順" case Direction.Asc => "古い順" };
+        let descending = match direction { case Direction.Desc => "降順" case Direction.Asc => "昇順" };
+        match key {
+            case SortKey.ById           => "id の${descending}"
+            case SortKey.ByUpdatedAt    => "updatedAt の${newestFirst}（既定）"
+            case SortKey.ByCreatedAt    => "createdAt の${newestFirst}"
+            case SortKey.ByPublishedAt  => "publishedAt の${newestFirst}。未公開（null）は末尾"
+            case SortKey.ByField(apiId) =>
+                let label = owner#fields |> List.find(field -> field#apiId == apiId) |> Option.map(field -> field#name) |> Option.filter(String.nonEmpty) |> Option.getWithDefault(ApiId.text(apiId));
+                "${label}（${ApiId.text(apiId)}）の${descending}。値が無い entry は末尾"
+        }
 
     ///
     /// `<Singular>Where`。葉の条件と、OR / AND（それぞれ WhereLeaf のリスト）。
@@ -444,8 +472,10 @@ mod ContentSchemaBuilder {
         // 葉の引数と、それを束ねる OR / AND の引数
         let leaves = leafArgs(owner);
         let leaf = leafCodec(owner, leaves);
-        let orArg = Schema.arg("OR", GqlCodec.option(GqlCodec.list(leaf)));
-        let andArg = Schema.arg("AND", GqlCodec.option(GqlCodec.list(leaf)));
+        let orArg = Schema.arg("OR", GqlCodec.option(GqlCodec.list(leaf)))
+            |> Arg.withDescription("どれか 1 つに合えば良い条件の一覧。直に書いた条件とは AND。入れ子は 1 段（中に AND / OR は書けない）。空の一覧は何にも合わない");
+        let andArg = Schema.arg("AND", GqlCodec.option(GqlCodec.list(leaf)))
+            |> Arg.withDescription("全部に合う条件の一覧。直に書いた条件と同じ意味（束ねて書くための物）。入れ子は 1 段（中に AND / OR は書けない）");
         let infos = List.map(leafInfo, leaves) ::: Arg.info(andArg) :: Arg.info(orArg) :: Nil;
         GqlCodec.inputObject("${TypeName.text(owner#singular)}Where", infos, fields ->
             // 入力から条件の一覧にする。自分の葉 → AND（平らに繋ぐ）→ OR（1 つの AnyOf）の順
@@ -454,6 +484,7 @@ mod ContentSchemaBuilder {
                 ands <- Arg.decodeField(andArg, fields);
                 ors  <- Arg.decodeField(orArg, fields)
             ) yield own ::: (ands |> Option.getWithDefault(Nil) |> List.flatten) ::: orConditions(ors))
+            |> GqlCodec.describe("絞り込み。フィールド名_演算子 の形で、複数書くと AND。OR は 1 段だけ")
 
     ///
     /// OR の入力を条件にする。無ければ空、空の並びなら Never、あれば AnyOf 1 つ。
@@ -471,6 +502,7 @@ mod ContentSchemaBuilder {
     ///
     def leafCodec(owner: ContentType, leaves: List[LeafArg]): GqlCodec[Where] =
         GqlCodec.inputObject("${TypeName.text(owner#singular)}WhereLeaf", List.map(leafInfo, leaves), fields -> decodeLeaves(leaves, fields))
+            |> GqlCodec.describe("AND / OR の中に書く条件。Where と同じフィールドで、AND / OR だけ持たない")
 
     ///
     /// 葉の条件の引数 1 つ。SDL に出す情報と、入力から条件を取り出す関数の組。
@@ -489,13 +521,31 @@ mod ContentSchemaBuilder {
         let arg = Schema.arg(name, GqlCodec.option(codec));
         { info = Arg.info(arg), decode = fields -> Arg.decodeField(arg, fields) |> Result.map(found -> found |> Option.map(toConditions) |> Option.getWithDefault(Nil)) }
 
+    /// 葉の条件に SDL の description を付ける。
+    def describeLeaf(text: String, leaf: LeafArg): LeafArg =
+        { info = { description = Some(text) | leaf#info } | leaf }
+
+    /// 日時の引数の値の形。DATE のフィールドとシステムの日時で同じ。
+    def dateValueHint(): String = "値は ISO 8601 の日時（例 2026-09-01T00:00:00Z、offset 付きも可）か日付（2026-09-01 は UTC の 0 時）。読めない値は何にも合わない"
+
+    /// 日付の引数の値の形。
+    def dateOnlyValueHint(): String = "値は日付（例 2026-09-01）。時刻付きは UTC で見た日付として読む。読めない値は何にも合わない"
+
+    /// 範囲の演算子の日本語。
+    def rangeText(op: RangeOp): String = match op {
+        case RangeOp.Gt  => "より後（より大きい）"
+        case RangeOp.Gte => "以後（以上）"
+        case RangeOp.Lt  => "より前（より小さい）"
+        case RangeOp.Lte => "以前（以下）"
+    }
+
     ///
     /// 型の全フィールドの葉の条件。id は _eq / _in、フィールドは kind ごと（DATE は _eq と範囲。値は ISO 8601 の文字列）。
     /// 配列は _isNull と（文字列・SELECT・REFERENCE・ASSET なら）_contains。OBJECT / BLOCKS / RICH_TEXT は _isNull だけ。
     ///
     def leafArgs(owner: ContentType): List[LeafArg] =
-        idLeaf("id_eq", EntryId.parse, Condition.IdEq) ::
-        idsLeaf("id_in", EntryId.parse, Condition.IdIn) ::
+        (idLeaf("id_eq", EntryId.parse, Condition.IdEq) |> describeLeaf("entry の id が一致")) ::
+        (idsLeaf("id_in", EntryId.parse, Condition.IdIn) |> describeLeaf("entry の id が一覧のどれかに一致")) ::
         systemDateLeaves() :::
         List.flatMap(fieldLeafArgs(TypeName.text(owner#singular)), owner#fields)
 
@@ -506,11 +556,13 @@ mod ContentSchemaBuilder {
     def systemDateLeaves(): List[LeafArg] =
         SystemDate.all() |> List.flatMap(key ->
             RangeOp.all() |> List.map(op ->
-                dateLeaf("${SystemDate.toText(key)}_${RangeOp.toText(op)}", at -> Condition.SystemDateCmp(key, op, at))))
+                dateLeaf("${SystemDate.toText(key)}_${RangeOp.toText(op)}", at -> Condition.SystemDateCmp(key, op, at))
+                    |> describeLeaf("${SystemDate.toText(key)} が${rangeText(op)}。${dateValueHint()}")))
 
     def fieldLeafArgs(prefix: String, field: FieldDef): List[LeafArg] =
         let name = ApiId.text(field#apiId);
-        let isNull = leafArg("${name}_isNull", GqlCodec.bool(), flag -> Condition.IsNull(field#apiId, flag) :: Nil);
+        let isNull = leafArg("${name}_isNull", GqlCodec.bool(), flag -> Condition.IsNull(field#apiId, flag) :: Nil)
+            |> describeLeaf("値が無い（true）・ある（false）");
         isNull :: (if (field#many) arrayLeafArgs(prefix, field) else scalarLeafArgs(prefix, field))
 
     ///
@@ -527,10 +579,10 @@ mod ContentSchemaBuilder {
             case FieldKind.Boolean   => Nil
             case FieldKind.Date      => Nil
             case FieldKind.DateOnly  => Nil
-            case FieldKind.Reference => idLeaf(name, EntryId.parse, found -> Condition.ArrayContains(apiId, EntryId.text(found))) :: Nil
-            case FieldKind.Asset     => idLeaf(name, AssetId.parse, found -> Condition.ArrayContains(apiId, AssetId.text(found))) :: Nil
-            case FieldKind.Select    => leafArg(name, selectCodec(prefix, field), text -> Condition.ArrayContains(apiId, text) :: Nil) :: Nil
-            case _                   => leafArg(name, GqlCodec.string(), text -> Condition.ArrayContains(apiId, text) :: Nil) :: Nil
+            case FieldKind.Reference => (idLeaf(name, EntryId.parse, found -> Condition.ArrayContains(apiId, EntryId.text(found))) |> describeLeaf("参照先の一覧にその entry の id を含む。slug で絞りたい時は参照先の一覧を先に引いて id を得る")) :: Nil
+            case FieldKind.Asset     => (idLeaf(name, AssetId.parse, found -> Condition.ArrayContains(apiId, AssetId.text(found))) |> describeLeaf("一覧にその asset の id を含む")) :: Nil
+            case FieldKind.Select    => (leafArg(name, selectCodec(prefix, field), text -> Condition.ArrayContains(apiId, text) :: Nil) |> describeLeaf("一覧にその選択肢を含む")) :: Nil
+            case _                   => (leafArg(name, GqlCodec.string(), text -> Condition.ArrayContains(apiId, text) :: Nil) |> describeLeaf("一覧にその値を含む（要素と完全一致。大文字小文字を区別する）")) :: Nil
         }
 
     ///
@@ -543,45 +595,50 @@ mod ContentSchemaBuilder {
             case FieldKind.Object    => Nil
             case FieldKind.Blocks    => Nil
             case FieldKind.RichText  => Nil
-            case FieldKind.Asset     => idLeaf("${name}_id_eq", AssetId.parse, found -> Condition.TextEq(apiId, AssetId.text(found))) :: Nil
+            case FieldKind.Asset     => (idLeaf("${name}_id_eq", AssetId.parse, found -> Condition.TextEq(apiId, AssetId.text(found))) |> describeLeaf("asset の id が一致")) :: Nil
             case FieldKind.Reference =>
-                idLeaf("${name}_id_eq", EntryId.parse, found -> Condition.TextEq(apiId, EntryId.text(found))) ::
-                idsLeaf("${name}_id_in", EntryId.parse, found -> Condition.TextIn(apiId, List.map(EntryId.text, found))) :: Nil
-            case FieldKind.Select    => equalityLeaves(name, apiId, selectCodec(prefix, field))
+                (idLeaf("${name}_id_eq", EntryId.parse, found -> Condition.TextEq(apiId, EntryId.text(found))) |> describeLeaf("参照先の entry の id が一致。slug で絞りたい時は参照先の一覧を先に引いて id を得る")) ::
+                (idsLeaf("${name}_id_in", EntryId.parse, found -> Condition.TextIn(apiId, List.map(EntryId.text, found))) |> describeLeaf("参照先の entry の id が一覧のどれかに一致")) :: Nil
+            case FieldKind.Select    => equalityLeaves(name, apiId, selectCodec(prefix, field), "選択肢")
             case FieldKind.Number    => numberLeaves(name, apiId)
             case FieldKind.Date      => dateLeaves(name, apiId)
             case FieldKind.DateOnly  => dateOnlyLeaves(name, apiId)
-            case FieldKind.Boolean   => leafArg("${name}_eq", GqlCodec.bool(), b -> Condition.BoolEq(apiId, b) :: Nil) :: Nil
-            case _                   => equalityLeaves(name, apiId, GqlCodec.string()) ::: searchLeaves(name, apiId)
+            case FieldKind.Boolean   => (leafArg("${name}_eq", GqlCodec.bool(), b -> Condition.BoolEq(apiId, b) :: Nil) |> describeLeaf("真偽が一致")) :: Nil
+            case _                   => equalityLeaves(name, apiId, GqlCodec.string(), "文字列") ::: searchLeaves(name, apiId)
         }
 
-    /// `_eq` / `_in`。SELECT なら enum の codec、文字列なら String。
-    def equalityLeaves(name: String, apiId: ApiId, codec: GqlCodec[String]): List[LeafArg] =
-        leafArg("${name}_eq", codec, text -> Condition.TextEq(apiId, text) :: Nil) ::
-        leafArg("${name}_in", GqlCodec.list(codec), texts -> Condition.TextIn(apiId, texts) :: Nil) :: Nil
+    /// `_eq` / `_in`。SELECT なら enum の codec、文字列なら String。what は説明に出す値の呼び名。
+    def equalityLeaves(name: String, apiId: ApiId, codec: GqlCodec[String], what: String): List[LeafArg] =
+        (leafArg("${name}_eq", codec, text -> Condition.TextEq(apiId, text) :: Nil) |> describeLeaf("${what}が一致（完全一致。大文字小文字を区別する）")) ::
+        (leafArg("${name}_in", GqlCodec.list(codec), texts -> Condition.TextIn(apiId, texts) :: Nil) |> describeLeaf("${what}が一覧のどれかに一致（完全一致。大文字小文字を区別する）")) :: Nil
 
     /// `_contains` / `_startsWith`。文字列だけ。
     def searchLeaves(name: String, apiId: ApiId): List[LeafArg] =
-        leafArg("${name}_contains", GqlCodec.string(), text -> Condition.TextContains(apiId, text) :: Nil) ::
-        leafArg("${name}_startsWith", GqlCodec.string(), text -> Condition.TextStartsWith(apiId, text) :: Nil) :: Nil
+        (leafArg("${name}_contains", GqlCodec.string(), text -> Condition.TextContains(apiId, text) :: Nil) |> describeLeaf("部分一致。大文字小文字を区別しない")) ::
+        (leafArg("${name}_startsWith", GqlCodec.string(), text -> Condition.TextStartsWith(apiId, text) :: Nil) |> describeLeaf("前方一致。大文字小文字を区別しない")) :: Nil
 
     /// `_eq` と範囲の 4 つ。
     def numberLeaves(name: String, apiId: ApiId): List[LeafArg] =
-        leafArg("${name}_eq", GqlCodec.float64(), x -> Condition.NumberEq(apiId, x) :: Nil) ::
-        leafArg("${name}_gt", GqlCodec.float64(), x -> Condition.NumberGt(apiId, x) :: Nil) ::
-        leafArg("${name}_gte", GqlCodec.float64(), x -> Condition.NumberGte(apiId, x) :: Nil) ::
-        leafArg("${name}_lt", GqlCodec.float64(), x -> Condition.NumberLt(apiId, x) :: Nil) ::
-        leafArg("${name}_lte", GqlCodec.float64(), x -> Condition.NumberLte(apiId, x) :: Nil) :: Nil
+        (leafArg("${name}_eq", GqlCodec.float64(), x -> Condition.NumberEq(apiId, x) :: Nil) |> describeLeaf("数値が一致")) ::
+        (leafArg("${name}_gt", GqlCodec.float64(), x -> Condition.NumberGt(apiId, x) :: Nil) |> describeLeaf("より大きい")) ::
+        (leafArg("${name}_gte", GqlCodec.float64(), x -> Condition.NumberGte(apiId, x) :: Nil) |> describeLeaf("以上")) ::
+        (leafArg("${name}_lt", GqlCodec.float64(), x -> Condition.NumberLt(apiId, x) :: Nil) |> describeLeaf("より小さい")) ::
+        (leafArg("${name}_lte", GqlCodec.float64(), x -> Condition.NumberLte(apiId, x) :: Nil) |> describeLeaf("以下")) :: Nil
 
     ///
     /// DATE の `_eq` と範囲の 4 つ。値は ISO 8601 の日時か日付（"2026-09-08" は UTC の 0 時）。読めない文字列は Never（何にも合わない）に倒す。
     ///
     def dateLeaves(name: String, apiId: ApiId): List[LeafArg] =
-        dateLeaf("${name}_eq", at -> Condition.DateEq(apiId, at)) ::
-        dateLeaf("${name}_gt", at -> Condition.DateGt(apiId, at)) ::
-        dateLeaf("${name}_gte", at -> Condition.DateGte(apiId, at)) ::
-        dateLeaf("${name}_lt", at -> Condition.DateLt(apiId, at)) ::
-        dateLeaf("${name}_lte", at -> Condition.DateLte(apiId, at)) :: Nil
+        (dateLeaf("${name}_eq", at -> Condition.DateEq(apiId, at)) |> describeLeaf("同じ瞬間。${dateValueHint()}")) ::
+        (RangeOp.all() |> List.map(op -> dateLeaf("${name}_${RangeOp.toText(op)}", dateCondition(apiId, op)) |> describeLeaf("${rangeText(op)}。${dateValueHint()}")))
+
+    /// DATE の範囲の条件。RangeOp ごとに Condition の case が分かれている。
+    def dateCondition(apiId: ApiId, op: RangeOp, at: Timestamp.Timestamp): Condition = match op {
+        case RangeOp.Gt  => Condition.DateGt(apiId, at)
+        case RangeOp.Gte => Condition.DateGte(apiId, at)
+        case RangeOp.Lt  => Condition.DateLt(apiId, at)
+        case RangeOp.Lte => Condition.DateLte(apiId, at)
+    }
 
     def dateLeaf(name: String, make: Timestamp.Timestamp -> Condition): LeafArg =
         leafArg(name, GqlCodec.string(), text -> (DateValues.parse(text) |> Option.map(make) |> Option.getWithDefault(Condition.Never)) :: Nil)
@@ -590,8 +647,8 @@ mod ContentSchemaBuilder {
     /// DATE_ONLY の `_eq` と範囲の 4 つ。値は日付（"2026-09-09"）。時刻付きの引数は UTC で見た日付として読む。読めない文字列は Never（何にも合わない）に倒す。
     ///
     def dateOnlyLeaves(name: String, apiId: ApiId): List[LeafArg] =
-        dateOnlyLeaf("${name}_eq", on -> Condition.DateOnlyEq(apiId, on)) ::
-        (RangeOp.all() |> List.map(op -> dateOnlyLeaf("${name}_${RangeOp.toText(op)}", on -> Condition.DateOnlyCmp(apiId, op, on))))
+        (dateOnlyLeaf("${name}_eq", on -> Condition.DateOnlyEq(apiId, on)) |> describeLeaf("同じ日。${dateOnlyValueHint()}")) ::
+        (RangeOp.all() |> List.map(op -> dateOnlyLeaf("${name}_${RangeOp.toText(op)}", on -> Condition.DateOnlyCmp(apiId, op, on)) |> describeLeaf("${rangeText(op)}。${dateOnlyValueHint()}")))
 
     def dateOnlyLeaf(name: String, make: Date.Date -> Condition): LeafArg =
         leafArg(name, GqlCodec.string(), text -> (DateOnlyValues.parse(text) |> Option.map(make) |> Option.getWithDefault(Condition.Never)) :: Nil)
