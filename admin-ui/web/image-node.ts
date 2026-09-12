@@ -32,6 +32,7 @@ import { leaveBlock } from "./block-edges";
 import { isHttpUrl } from "./note-input";
 import { ICONS, svg } from "./icons";
 import { bar as barOf, iconButton } from "./ui";
+import { IMAGE_FAILED } from "./asset-thumb";
 
 export type AssetInfo = { id: string; url: string; alt?: string };
 
@@ -112,9 +113,13 @@ function paintImage(box: HTMLElement, img: HTMLImageElement, note: HTMLElement, 
     box.classList.add("is-unknown");
     box.classList.remove("is-loading");
   };
+  // WhyNot: 断りに asset の id を混ぜない。`951665f9b457` は利用者には意味の無い文字列で、
+  // 何が起きたのかも次に何をすれば良いのかも読み取れなくする。
+  // **開発者が追えるように title には残す。**
+  box.title = assetId;
   if (!found) {
     img.removeAttribute("src");
-    unknown(assetId ? assetId : "（メディアが選ばれていません）");
+    unknown(assetId ? "メディアを読み込み中…" : "（メディアが選ばれていません）");
     return;
   }
   const size = (name: string) => (typeof attrs[name] === "number" && (attrs[name] as number) > 0 ? String(attrs[name]) : null);
@@ -128,7 +133,7 @@ function paintImage(box: HTMLElement, img: HTMLImageElement, note: HTMLElement, 
     img.removeAttribute("height");
   }
   img.alt = alt;
-  const failed = `${assetId} 読み込めませんでした`;
+  const failed = IMAGE_FAILED;
   if (img.dataset.failed === found.url) {
     unknown(failed);
     return;

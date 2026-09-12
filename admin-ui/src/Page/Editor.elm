@@ -3333,11 +3333,14 @@ viewAssetCard model assetId actions =
                     ++ actions
 
             Nothing ->
-                [ div [ class "flex h-20 items-center justify-center rounded bg-well" ]
-                    [ span [ class "text-[10px] text-ink-faint" ] [ text "読み込み中…" ] ]
-                , span [ class "truncate font-mono text-[10px] text-ink-faint" ] [ text assetId ]
-                ]
-                    ++ actions
+                -- WhyNot: id は画面に出さず title だけに置く。利用者には意味の無い文字列で、
+                -- 開発者が追う時にだけ要る
+                div
+                    [ class "flex h-20 items-center justify-center rounded bg-well"
+                    , Html.Attributes.title assetId
+                    ]
+                    [ span [ class "text-[10px] text-ink-faint" ] [ text "メディアを読み込み中…" ] ]
+                    :: actions
         )
 
 
