@@ -519,8 +519,55 @@ viewFilter filter =
     Ui.rowOf shapeColumns
         [ mono filter.field
         , div [ class "flex flex-wrap gap-1" ] (List.map viewOperator filter.operators)
-        , faint (filter.operators |> List.map .description |> List.filter (not << String.isEmpty) |> List.head |> Maybe.withDefault "")
+        , viewOperatorDescriptions filter.operators
         ]
+
+
+{-| 説明は演算子ごとに違う。
+
+WhyNot: 最初の 1 つだけを出さない。`title` の行に `isNull` の「値が無い」だけが出て、
+部分一致や前方一致の説明が無いように見えた（実機）。全部が同じ文なら 1 行にまとめる。
+
+-}
+viewOperatorDescriptions : List ApiShape.Operator -> Html Msg
+viewOperatorDescriptions operators =
+    let
+        described : List ApiShape.Operator
+        described =
+            List.filter (\operator -> not (String.isEmpty operator.description)) operators
+
+        distinct : List String
+        distinct =
+            described |> List.map .description |> uniqueKeepingOrder
+    in
+    case distinct of
+        [ only ] ->
+            faint only
+
+        _ ->
+            div [ class "flex flex-col gap-0.5" ]
+                (List.map
+                    (\operator ->
+                        div [ class "text-[12px] text-ink-soft" ]
+                            [ span [ class "font-mono text-ink-faint" ] [ text (operator.operator ++ " ") ]
+                            , text operator.description
+                            ]
+                    )
+                    described
+                )
+
+
+uniqueKeepingOrder : List String -> List String
+uniqueKeepingOrder =
+    List.foldl
+        (\x acc ->
+            if List.member x acc then
+                acc
+
+            else
+                acc ++ [ x ]
+        )
+        []
 
 
 {-| 演算子 1 つ。押すと `where` に入る。**名前と型を並べる**（型は値の形を決める手掛かり）。
