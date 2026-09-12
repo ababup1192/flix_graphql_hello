@@ -39,6 +39,21 @@ function selectCells(h: Harness, from: number, to: number) {
   view.view.focus();
 }
 
+// 升にマウスを乗せる。帯はカーソルが無くても乗せれば出る。
+function hover(h: Harness, index: number) {
+  const cells = [...h.editor.querySelectorAll<HTMLElement>(".tt-body table th, .tt-body table td")];
+  cells[index].dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+}
+
+// 升の寄せを出た順に並べる。
+function aligns(h: Harness): string[] {
+  const found: string[] = [];
+  inner(h).state.doc.descendants((node: any) => {
+    if (node.type.name === "tableCell" || node.type.name === "tableHeader") found.push(node.attrs.align ?? "-");
+  });
+  return found;
+}
+
 // 帯が出るまで待つ。
 async function tableBar(h: Harness) {
   await vi.waitFor(() => expect(h.editor.querySelector(".tt-tablebar")).not.toBeNull());
@@ -94,7 +109,7 @@ test("押せない時のヒントが title に出る", async () => {
   caretInCell(h);
   await tableBar(h);
   expect([button(h, "セルを結合する").title, button(h, "結合を解く").title]).toEqual([
-    "セルを結合する（2 つ以上選ぶと押せます）",
+    "セルを結合する（セルを跨いでドラッグして選ぶと押せます）",
     "結合を解く（結合したセルで押せます）",
   ]);
 });
@@ -168,6 +183,80 @@ test("解除を押すと結合した升が割れる", async () => {
       [1, 1],
     ]),
   );
+});
+
+// 結合した直後は選択が升の範囲のまま（`CellSelection`）。**カーソルを置き直さない**道。
+test("結合した直後、カーソルを置き直さずに解除できる", async () => {
+  const h = (harness = await mount("table"));
+  caretInCell(h);
+  await tableBar(h);
+  selectCells(h, 0, 1);
+  await vi.waitFor(() => expect(off(h, "セルを結合する")).toBe(false));
+  press(button(h, "セルを結合する"));
+  await vi.waitFor(() => expect(off(h, "結合を解く")).toBe(false));
+  press(button(h, "結合を解く"));
+  await vi.waitFor(() =>
+    expect(spans(h)).toEqual([
+      [1, 1],
+      [1, 1],
+      [1, 1],
+      [1, 1],
+      [1, 1],
+      [1, 1],
+    ]),
+  );
+});
+
+// 帯はマウスを乗せただけでも出る。その帯は**乗せた表**を相手にする。
+test("カーソルが表の外にあっても、乗せた結合セルの解除が押せる", async () => {
+  const h = (harness = await mount("table"));
+  caretInCell(h);
+  await tableBar(h);
+  selectCells(h, 0, 1);
+  await vi.waitFor(() => expect(off(h, "セルを結合する")).toBe(false));
+  press(button(h, "セルを結合する"));
+  await vi.waitFor(() => expect(spans(h)[0]).toEqual([2, 1]));
+  inner(h).commands.focus("end");
+  await vi.waitFor(() => expect(h.editor.querySelector(".tt-tablebar")).toBeNull());
+  hover(h, 0);
+  await tableBar(h);
+  expect(off(h, "結合を解く")).toBe(false);
+});
+
+test("カーソルが表の外の時、乗せた結合セルを解除すると割れる", async () => {
+  const h = (harness = await mount("table"));
+  caretInCell(h);
+  await tableBar(h);
+  selectCells(h, 0, 1);
+  await vi.waitFor(() => expect(off(h, "セルを結合する")).toBe(false));
+  press(button(h, "セルを結合する"));
+  await vi.waitFor(() => expect(spans(h)[0]).toEqual([2, 1]));
+  inner(h).commands.focus("end");
+  await vi.waitFor(() => expect(h.editor.querySelector(".tt-tablebar")).toBeNull());
+  hover(h, 0);
+  await vi.waitFor(() => expect(off(h, "結合を解く")).toBe(false));
+  press(button(h, "結合を解く"));
+  await vi.waitFor(() =>
+    expect(spans(h)).toEqual([
+      [1, 1],
+      [1, 1],
+      [1, 1],
+      [1, 1],
+      [1, 1],
+      [1, 1],
+    ]),
+  );
+});
+
+// カーソルが別の表にある時、乗せた表の帯が動かすのは乗せた表。
+test("寄せは、カーソルのある表ではなく乗せた表に効く", async () => {
+  const h = (harness = await mount("table-two"));
+  caretInCell(h, 0);
+  await tableBar(h);
+  hover(h, 4);
+  await tableBar(h);
+  press(button(h, "中央に寄せる"));
+  await vi.waitFor(() => expect(aligns(h)).toEqual(["-", "-", "-", "-", "center", "-", "center", "-"]));
 });
 
 test("押せないボタンは消えずに残る", async () => {

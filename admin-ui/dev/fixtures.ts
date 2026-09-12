@@ -262,6 +262,29 @@ export const FIXTURES: Fixture[] = [
     },
   },
   {
+    name: "table-two",
+    title: "表が 2 つ",
+    doc: {
+      type: "doc",
+      content: [
+        ...["A", "B"].flatMap((tag) => [
+          {
+            type: "table",
+            content: [1, 2].map((row) => ({
+              type: "tableRow",
+              content: [1, 2].map((column) => ({
+                type: row === 1 ? "tableHeader" : "tableCell",
+                attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                content: [paragraph(`${tag}${row}-${column}`)],
+              })),
+            })),
+          },
+          paragraph(`${tag} の後`),
+        ]),
+      ],
+    },
+  },
+  {
     name: "table-wide",
     title: "列の多い表",
     doc: {

@@ -1047,7 +1047,12 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
    塗ると、サイト側の CSS で色を決める時に管理画面の見た目が正になってしまう。
    編集中に見分けが付けば足りる。 */
 .tt-body table th { font-weight: 700; text-align: left; }
-.tt-body table .selectedCell { background: var(--color-well); }
+/* WhyNot: 枠を `border` で引かない。`border-collapse: collapse` なので隣の升と線を取り合い、
+   選んだ範囲の中の線が消える。内側の影なら升ごとに閉じた枠になる。 */
+.tt-body table .selectedCell {
+  background: color-mix(in srgb, var(--color-accent) 26%, var(--color-panel));
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
 
 /* 表の上の帯。**表そのものへの操作**（大きさ・列の寄せ・削除）。
    WhyNot: 表の中に入れない。表の node view は書き換えの度に中を作り直すので、

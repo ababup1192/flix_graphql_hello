@@ -11,9 +11,9 @@ import { TableMap } from "@tiptap/pm/tables";
 
 export type Align = "left" | "center" | "right";
 
-// カーソルが入っている表と、その位置。
-function tableAt(editor: Editor): { node: PmNode; pos: number; depth: number } | null {
-  const $from = editor.state.selection.$from;
+// 表と、その位置。**`at` を渡した時はそこを起点にする**（帯はカーソルの無い表にも出る）。
+function tableAt(editor: Editor, at?: number): { node: PmNode; pos: number; depth: number } | null {
+  const $from = at === undefined ? editor.state.selection.$from : editor.state.doc.resolve(at);
   for (let depth = $from.depth; depth > 0; depth -= 1) {
     const node = $from.node(depth);
     if (node.type.name === "table") return { node, pos: $from.before(depth), depth };
@@ -22,8 +22,8 @@ function tableAt(editor: Editor): { node: PmNode; pos: number; depth: number } |
 }
 
 /** 今の表の大きさ。表の中にいなければ null。 */
-export function tableSize(editor: Editor): { rows: number; cols: number } | null {
-  const found = tableAt(editor);
+export function tableSize(editor: Editor, at?: number): { rows: number; cols: number } | null {
+  const found = tableAt(editor, at);
   if (!found) return null;
   const map = TableMap.get(found.node);
   return { rows: map.height, cols: map.width };
@@ -35,15 +35,15 @@ export function tableSize(editor: Editor): { rows: number; cols: number } | null
  * WhyNot: セル 1 つだけに入れない。Markdown の区切り行は列に 1 つしか寄せを持てないので、
  * 列の中で混ざると書き出しで落ちる（MCP の出力と履歴の差分がここを通る）。
  */
-export function alignColumn(editor: Editor, align: Align | null): boolean {
-  const found = tableAt(editor);
+export function alignColumn(editor: Editor, align: Align | null, at?: number): boolean {
+  const found = tableAt(editor, at);
   if (!found) return false;
   const { state, view } = editor;
   const map = TableMap.get(found.node);
   const start = found.pos + 1;
 
-  // カーソルのセルが何列目か。
-  const $from = state.selection.$from;
+  // 起点のセルが何列目か。
+  const $from = at === undefined ? state.selection.$from : state.doc.resolve(at);
   let cellPos = -1;
   for (let depth = $from.depth; depth > found.depth; depth -= 1) {
     const node = $from.node(depth);
@@ -55,12 +55,12 @@ export function alignColumn(editor: Editor, align: Align | null): boolean {
   const tr = state.tr;
   const done = new Set<number>();
   for (let row = 0; row < map.height; row += 1) {
-    const at = map.map[row * map.width + column];
-    if (at === undefined || done.has(at)) continue;
-    done.add(at);
-    const cell = tr.doc.nodeAt(at + start);
+    const inColumn = map.map[row * map.width + column];
+    if (inColumn === undefined || done.has(inColumn)) continue;
+    done.add(inColumn);
+    const cell = tr.doc.nodeAt(inColumn + start);
     if (!cell) continue;
-    tr.setNodeMarkup(at + start, undefined, { ...cell.attrs, align });
+    tr.setNodeMarkup(inColumn + start, undefined, { ...cell.attrs, align });
   }
   if (!tr.docChanged) return false;
   view.dispatch(tr);
@@ -69,10 +69,10 @@ export function alignColumn(editor: Editor, align: Align | null): boolean {
 }
 
 /** カーソルのある列の今の寄せ。揃っていなければ null。 */
-export function columnAlign(editor: Editor): Align | null {
-  const found = tableAt(editor);
+export function columnAlign(editor: Editor, at?: number): Align | null {
+  const found = tableAt(editor, at);
   if (!found) return null;
-  const $from = editor.state.selection.$from;
+  const $from = at === undefined ? editor.state.selection.$from : editor.state.doc.resolve(at);
   for (let depth = $from.depth; depth > found.depth; depth -= 1) {
     const node = $from.node(depth);
     if (node.type.name === "tableCell" || node.type.name === "tableHeader") {
@@ -229,8 +229,8 @@ export function moveColumn(editor: Editor, from: number, to: number): boolean {
  * はみ出す結合だけを 1 マスに割る。** 大きさを変えるのは表の外枠の話なので、枠の中に収まって
  * いる結合まで割ると、直したつもりのない所の中身の読み方が変わる。
  */
-export function resizeTable(editor: Editor, rows: number, cols: number): boolean {
-  const found = tableAt(editor);
+export function resizeTable(editor: Editor, rows: number, cols: number, at?: number): boolean {
+  const found = tableAt(editor, at);
   if (!found) return false;
   const map = TableMap.get(found.node);
   if (map.height === rows && map.width === cols) return false;

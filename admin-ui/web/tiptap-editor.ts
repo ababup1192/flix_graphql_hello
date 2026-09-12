@@ -51,7 +51,8 @@ import { UrlPaste } from "./url-cards";
 import { BlockMenu } from "./block-menu";
 import type { ResolvedPos } from "@tiptap/pm/model";
 import BubbleMenu from "@tiptap/extension-bubble-menu";
-import { NodeSelection } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection } from "@tiptap/pm/state";
+import { mergeCells, splitCell } from "@tiptap/pm/tables";
 import { createLowlight } from "lowlight";
 
 // 色付けの入れ物。言語の文法は使われた時に入る（`web/code-languages.ts`）。
@@ -254,6 +255,9 @@ class TiptapEditor extends HTMLElement {
   private linked = new Map<string, Linked>();
   private asked = "";
   private tip: HTMLElement | null = null;
+  // 最後にマウスが乗った升。**帯は乗せただけでも出る**ので、カーソルが外にある帯は
+  // これを相手にする。
+  private hoveredCell: HTMLElement | null = null;
   private assets = new AssetStore();
   // 外部リンクのカードの OGP。**エディタは API を知らない**（`linkresolve` と同じ決まり）。
   // 開いた時に doc に居る URL は `linkcardlookup`（表から引く）、貼った瞬間の 1 つは
@@ -1200,6 +1204,8 @@ class TiptapEditor extends HTMLElement {
   private watchTableHover(mount: HTMLElement) {
     mount.addEventListener("mouseover", (event) => {
       const table = (event.target as Element | null)?.closest?.("table") as HTMLTableElement | null;
+      const cell = (event.target as Element | null)?.closest?.("th, td") as HTMLElement | null;
+      if (cell) this.hoveredCell = cell;
       if (table) this.paintTableTools(table);
     });
     mount.addEventListener("mouseout", (event) => {
@@ -1297,11 +1303,15 @@ class TiptapEditor extends HTMLElement {
     bar.style.top = `${at.top - base.top - 26}px`;
     bar.style.width = `${Math.min(at.right, clip.right) - Math.max(at.left, clip.left)}px`;
 
+    // **帯は、出ている表を相手にする。** カーソルが別の所にあってもマウスを乗せれば出るので、
+    // 乗っている升を起点にする。カーソルがこの表の中にある時は `null`（今の選択のまま）。
+    const cell = this.barCell(table);
+
     const left = document.createElement("div");
     left.className = "tt-tablebar-left";
-    left.appendChild(this.barButton(ICONS.size, "大きさを変える", (button) => this.sizeMenu(button)));
+    left.appendChild(this.barButton(ICONS.size, "大きさを変える", (button) => this.sizeMenu(button, cell)));
 
-    const now = this.editor ? columnAlign(this.editor) : null;
+    const now = this.editor ? columnAlign(this.editor, cell) : null;
     const aligns: Array<[Align, string, string]> = [
       ["left", ICONS.alignLeft, "左に寄せる"],
       ["center", ICONS.alignCenter, "中央に寄せる"],
@@ -1311,7 +1321,7 @@ class TiptapEditor extends HTMLElement {
       // **押した列全体に効く**（マークダウンの寄せは列の属性）。もう一度押すと外す。
       const button = this.barButton(icon, title, () => {
         if (!this.editor) return;
-        alignColumn(this.editor, columnAlign(this.editor) === align ? null : align);
+        alignColumn(this.editor, columnAlign(this.editor, cell) === align ? null : align, cell);
         this.paintTableTools();
       });
       button.classList.toggle("is-on", now === align);
@@ -1322,24 +1332,60 @@ class TiptapEditor extends HTMLElement {
     // **押せるかは TipTap の can() に聞く。** L 字の選択のように「見た目は複数でも結合できない形」が
     // あり、選んだ升の数を自分で数えると食い違う。
     left.appendChild(
-      this.cellButton(ICONS.merge, "セルを結合する", "2 つ以上選ぶと押せます", !!this.editor?.can().mergeCells(), () =>
-        this.editor?.chain().focus().mergeCells().run(),
+      this.cellButton(ICONS.merge, "セルを結合する", "セルを跨いでドラッグして選ぶと押せます", this.canOnCell("mergeCells", cell), () =>
+        this.onCell(cell).mergeCells().run(),
       ),
     );
     left.appendChild(
-      this.cellButton(ICONS.split, "結合を解く", "結合したセルで押せます", !!this.editor?.can().splitCell(), () =>
-        this.editor?.chain().focus().splitCell().run(),
+      this.cellButton(ICONS.split, "結合を解く", "結合したセルで押せます", this.canOnCell("splitCell", cell), () =>
+        this.onCell(cell).splitCell().run(),
       ),
     );
 
     const remove = this.barButton(ICONS.trash, "表を消す", () => {
-      this.editor?.chain().focus().deleteTable().run();
+      this.onCell(cell).deleteTable().run();
       this.paintTableTools();
     });
     remove.classList.add("tt-tablebar-remove");
 
     bar.append(left, remove);
     return bar;
+  }
+
+  //
+  // 帯が相手にする升の中の位置。**カーソルがその表の中にあれば `undefined`**（今の選択で良い）。
+  //
+  // WhyNot: 帯が出ている間だけ乗っている升を覚える、にしない。帯そのものへマウスを移すと
+  // 升から離れるので、押す時には必ず忘れている。
+  //
+  private barCell(table: HTMLTableElement): number | undefined {
+    if (!this.editor || this.currentTable() === table) return undefined;
+    const on = this.hoveredCell && table.contains(this.hoveredCell) ? this.hoveredCell : table.querySelector("th, td");
+    if (!on) return undefined;
+    const at = this.editor.view.posAtDOM(on, 0);
+    return at < 0 ? undefined : at + 1;
+  }
+
+  // 升を起点にする命令の並び。
+  private onCell(cell: number | undefined) {
+    const chain = this.editor!.chain().focus();
+    return cell === undefined ? chain : chain.setTextSelection(cell);
+  }
+
+  //
+  // 升を起点にした時に押せるか。
+  //
+  // WhyNot: `can().chain().setTextSelection(...)` で聞かない。can の中の命令は tr を書かない
+  // ので選択が動かず、答えが今のカーソルの物のままになる。
+  //
+  private canOnCell(name: "mergeCells" | "splitCell", cell: number | undefined): boolean {
+    if (!this.editor) return false;
+    const ask = name === "mergeCells" ? mergeCells : splitCell;
+    const now = this.editor.state;
+    if (cell === undefined) return ask(now);
+    const doc = now.doc;
+    if (cell < 0 || cell > doc.content.size) return false;
+    return ask(now.apply(now.tr.setSelection(TextSelection.create(doc, cell))));
   }
 
   //
@@ -1381,13 +1427,13 @@ class TiptapEditor extends HTMLElement {
   // 大きさを選び直す面。**升目をなぞると、消える行・列が表の上で赤く出る。**
   // 出さないと、縮めた時に何が消えたか押した後にしか分からない。
   //
-  private sizeMenu(at: HTMLElement) {
+  private sizeMenu(at: HTMLElement, from: number | undefined) {
     if (!this.editor) return;
     if (this.menu) {
       this.closeMenu();
       return;
     }
-    const size = tableSize(this.editor);
+    const size = tableSize(this.editor, from);
     if (!size) return;
 
     const dom = document.createElement("div");
@@ -1416,7 +1462,7 @@ class TiptapEditor extends HTMLElement {
         cell.addEventListener("mousemove", () => mark(row, col));
         cell.addEventListener("mousedown", (event) => {
           event.preventDefault();
-          resizeTable(this.editor!, row, col);
+          resizeTable(this.editor!, row, col, from);
           this.closeMenu();
           this.paintTableTools();
         });
