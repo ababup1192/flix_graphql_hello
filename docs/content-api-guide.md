@@ -38,7 +38,8 @@ curl -s -G http://127.0.0.1:8080/p/demo/graphql \
 {"data":{"blogs":{"nodes":[{"id":"3d1de1352b2a"}]}}}
 ```
 
-Query の root には、型ごとに **一覧**（`blogs` のように apiId をそのまま）と **1 件**（`blog` のように型名の先頭 1 文字を小文字に）が生えます。
+Query の root には、型ごとに **一覧**と **1 件**が生えます。名前は既定で、一覧が apiId そのまま（`blogs`）、1 件が型名の先頭 1 文字を小文字にした物（`blog`）です。
+型を作る時に別の名前を指定してあればそれが使われます（`demo` の `insidesalesCategoryList` はその例）。**自分のプロジェクトの名前は introspection か管理画面の「API プレビュー」で確かめます**（13 章）。
 `_types` は型の数で、どのプロジェクトにもあります（型が 0 個でもスキーマが組めるようにする物。サイトから使う事はありません）。
 
 ```graphql
@@ -208,6 +209,8 @@ asset（`demo` の `thumbnail` `coverImage`）:
 | `_id_eq` | asset id が一致 | `thumbnail_id_eq: "e70ff098754d"` |
 
 richText / オブジェクト / ブロック: `_isNull` だけ。本文の全文検索はありません。
+
+この文書で確かめていない物: **多言語（localized）のフィールド**と、**参照以外の複数値（テキストの配列など）のフィールド**の `where` と返り方。`demo` / `fresh-blog` に該当するフィールドが無く実測できていません。自分の型にある場合は introspection で確かめてください。
 
 ### AND / OR
 
@@ -574,14 +577,14 @@ Vary: X-Api-Key, X-Preview-Token, Authorization
 | ヘッダ | 意味 |
 |---|---|
 | `Cache-Control: public, s-maxage=10, max-age=0, stale-while-revalidate=60` | CDN（共有キャッシュ）は 10 秒持つ。ブラウザは持たない（`max-age=0`）。期限切れから 60 秒は裏で取り直しながら古い物を返す。値はサーバの環境変数で変わります |
-| `ETag: W/"v<版>-<ハッシュ>"` | weak な ETag。`<版>` はプロジェクト単位の番号で、公開・取り下げ・削除・型の変更で +1。`<ハッシュ>` は query + variables + operationName から。**本文のハッシュではない**ので、同じ文書なら応答の中身を読まずに 304 を返せる |
+| `ETag: W/"v<番号>-<ハッシュ>"` | weak な ETag。`<番号>` はプロジェクト単位で、公開・取り下げ・削除・型の変更のたびに +1。`<ハッシュ>` は query + variables + operationName から。**本文のハッシュではない**ので、同じ文書なら応答の中身を読まずに 304 を返せる |
 | `Vary: X-Api-Key, X-Preview-Token, Authorization` | 鍵付きと匿名の応答を混ぜないため |
 
 CDN を前に置く時の考え方（詳細は `docs/design/cdn.md`、Cloudflare の設定は `deploy/cloudflare-cache-rules.md`）:
 
 - **サイトから CMS を読むのは GET にする。** POST はキャッシュされません（POST の応答には `Cache-Control` も `ETag` も付きません）
-- 版はプロジェクト単位なので、**1 回の公開でそのプロジェクトのキャッシュは全部無効になります**。`s-maxage=10` なので、公開が公開サイトに届くまで最長 10 秒（purge を入れれば最長 2 秒）
-- 下書きの保存では版は進みません（匿名の応答の中身が変わらないため）
+- この番号はプロジェクト単位なので、**1 回の公開でそのプロジェクトのキャッシュは全部無効になります**。`s-maxage=10` なので、公開が公開サイトに届くまで最長 10 秒（purge を入れれば最長 2 秒）
+- 下書きの保存では番号は進みません（匿名の応答の中身が変わらないため）
 - Cloudflare は `Vary` をキャッシュの鍵に使いません。cache rule で `X-Api-Key` / `X-Preview-Token` / `Authorization` が付いた要求をキャッシュの対象から外す事。外さないと匿名の応答が鍵付きの要求に返ります
 - Next.js の ISR や Astro の SSG のように**サイト側でも持つ**なら、CMS の Webhook（公開・取り下げ）を受けて再検証します。毎リクエスト CMS を叩く構成（`force-dynamic` + `no-store`）は CMS を単一障害点にします
 
@@ -589,7 +592,7 @@ CDN を前に置く時の考え方（詳細は `docs/design/cdn.md`、Cloudflare
 
 - `errors` がある GET の応答は `Cache-Control: private, no-store` で、ETag も付きません。失敗をキャッシュしません
 - 鍵付きは `private, no-store`。下書きのプレビューは毎回 origin に届きます
-- 版の読み取りと本文の読み取りが別の Tx なので、公開の瞬間に「古い ETag に新しい中身」が乗る事があります。逆（新しい ETag に古い中身）は起きません。古い物を見せ続ける事はありません
+- 番号の読み取りと本文の読み取りが別のトランザクションなので、公開の瞬間に「古い ETag に新しい中身」が乗る事があります。逆（新しい ETag に古い中身）は起きません。古い物を見せ続ける事はありません
 
 ---
 
