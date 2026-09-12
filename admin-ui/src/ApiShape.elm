@@ -20,6 +20,7 @@ description はサーバが埋めている途中なので、**無い前提で読
 
 -}
 
+import Dict exposing (Dict)
 import Json.Decode as D
 
 
@@ -86,18 +87,22 @@ type alias Argument =
 -- introspection
 
 
-{-| 型 1 つ分の introspection。`singular` は `Blog`、`apiId` は `blogs`。
+{-| introspection。
+
+WhyNot: 型ごとに `__type` を並べない。graphql-java は 1 つの query に `__type` が複数あると
+`BadFaithIntrospection` で断る（実際に断られて表が出なかった）。`__schema.types` を 1 回で取り、
+必要な型は root の field の引数と返り値の型名から辿る。`singular` の綴りも要らなくなる。
+
 -}
-query : { singular : String, apiId : String } -> String
-query names =
+query : String
+query =
     String.join "\n"
         [ "query apiShape {"
-        , "  where: __type(name: \"" ++ names.singular ++ "Where\") { inputFields { name description type { ...T } } }"
-        , "  orderBy: __type(name: \"" ++ names.singular ++ "OrderBy\") { enumValues { name description } }"
-        , "  entry: __type(name: \"" ++ names.singular ++ "\") { fields { name description type { ...T } } }"
-        , "  richText: __type(name: \"RichText\") { fields { name description type { ...T } } }"
-        , "  asset: __type(name: \"Asset\") { fields { name description type { ...T } } }"
-        , "  root: __type(name: \"Query\") { fields { name args { name description defaultValue type { ...T } } } }"
+        , "  __schema { types { name kind"
+        , "    inputFields { name description type { ...T } }"
+        , "    enumValues { name description }"
+        , "    fields { name description type { ...T } args { name description defaultValue type { ...T } } }"
+        , "  } }"
         , "}"
         , "fragment T on __Type { kind name ofType { kind name ofType { kind name ofType { kind name } } } }"
         ]
@@ -107,24 +112,61 @@ query names =
 -}
 decoder : String -> D.Decoder Shape
 decoder apiId =
-    D.field "data"
-        (D.map4 Shape
-            (D.field "where" (nullable (D.field "inputFields" (D.list leafDecoder))) |> D.map fold)
-            (D.field "orderBy" (nullable (D.field "enumValues" (D.list orderDecoder))))
-            (D.map3 returns
-                (D.field "entry" (nullable (D.field "fields" (D.list returnedDecoder))))
-                (D.field "richText" (nullable (D.field "fields" (D.list childDecoder))))
-                (D.field "asset" (nullable (D.field "fields" (D.list childDecoder))))
-            )
-            (D.field "root" (nullable (D.field "fields" (D.list rootFieldDecoder))) |> D.map (argumentsOf apiId))
-        )
+    D.at [ "data", "__schema", "types" ] (D.list (D.map2 Tuple.pair (D.field "name" D.string) D.value))
+        |> D.andThen (\pairs -> fromTypes apiId (Dict.fromList pairs))
 
 
-{-| `__type` は無い型なら null。**無くても表を出す**（サーバの型名の付け方が変わっても壊れない）。
+{-| 型の一覧から表を組む。root の field `apiId` の引数の型名で `Where` と `OrderBy` を、
+返り値（Connection）の `nodes` の型名で entry の型を引く。無い物は空。
 -}
-nullable : D.Decoder (List a) -> D.Decoder (List a)
-nullable inner =
-    D.oneOf [ D.null [], inner ]
+fromTypes : String -> Dict String D.Value -> D.Decoder Shape
+fromTypes apiId types =
+    let
+        run : D.Decoder (List a) -> Maybe D.Value -> List a
+        run inner value =
+            value |> Maybe.andThen (D.decodeValue inner >> Result.toMaybe) |> Maybe.withDefault []
+
+        rootFields : List ( String, List Argument, String )
+        rootFields =
+            run (D.field "fields" (D.list rootFieldDecoder)) (Dict.get "Query" types)
+
+        listField : Maybe ( String, List Argument, String )
+        listField =
+            rootFields |> List.filter (\( name, _, _ ) -> name == apiId) |> List.head
+
+        arguments : List Argument
+        arguments =
+            listField |> Maybe.map (\( _, args, _ ) -> args) |> Maybe.withDefault []
+
+        argumentType : String -> Maybe String
+        argumentType name =
+            arguments |> List.filter (\a -> a.name == name) |> List.head |> Maybe.map (.typeText >> bareName)
+
+        entryType : Maybe String
+        entryType =
+            listField
+                |> Maybe.andThen (\( _, _, connection ) -> Dict.get (bareName connection) types)
+                |> Maybe.andThen (D.decodeValue (D.field "fields" (D.list (D.map2 Tuple.pair (D.field "name" D.string) (D.field "type" typeDecoder)))) >> Result.toMaybe)
+                |> Maybe.andThen (List.filter (\( name, _ ) -> name == "nodes") >> List.head)
+                |> Maybe.map (Tuple.second >> bareName)
+
+        fieldsOf : Maybe String -> D.Decoder (List a) -> List a
+        fieldsOf typeName inner =
+            run (D.field "fields" inner) (typeName |> Maybe.andThen (\n -> Dict.get n types))
+    in
+    D.succeed
+        { filters = fold (run (D.field "inputFields" (D.list leafDecoder)) (argumentType "where" |> Maybe.andThen (\n -> Dict.get n types)))
+        , orders = run (D.field "enumValues" (D.list orderDecoder)) (argumentType "orderBy" |> Maybe.andThen (\n -> Dict.get n types))
+        , returns = returns (fieldsOf entryType (D.list returnedDecoder)) (fieldsOf (Just "RichText") (D.list childDecoder)) (fieldsOf (Just "Asset") (D.list childDecoder))
+        , arguments = arguments
+        }
+
+
+{-| `[BlogOrderBy!]!` → `BlogOrderBy`。
+-}
+bareName : String -> String
+bareName typeText =
+    typeText |> String.filter (\c -> c /= '[' && c /= ']' && c /= '!')
 
 
 text : String -> D.Decoder String
@@ -168,11 +210,12 @@ childDecoder =
         (text "description")
 
 
-rootFieldDecoder : D.Decoder ( String, List Argument )
+rootFieldDecoder : D.Decoder ( String, List Argument, String )
 rootFieldDecoder =
-    D.map2 Tuple.pair
+    D.map3 (\name args typeText -> ( name, args, typeText ))
         (D.field "name" D.string)
         (D.field "args" (D.list argumentDecoder))
+        (D.field "type" typeDecoder)
 
 
 argumentDecoder : D.Decoder Argument
@@ -284,15 +327,6 @@ returns entry richText asset =
 baseName : String -> String
 baseName typeText =
     String.filter (\c -> c /= '[' && c /= ']' && c /= '!') typeText
-
-
-argumentsOf : String -> List ( String, List Argument ) -> List Argument
-argumentsOf apiId fields =
-    fields
-        |> List.filter (\( name, _ ) -> name == apiId)
-        |> List.head
-        |> Maybe.map Tuple.second
-        |> Maybe.withDefault []
 
 
 

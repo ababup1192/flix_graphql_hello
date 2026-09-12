@@ -143,7 +143,7 @@ update ctx msg model =
             ( rebuild next
             , case result of
                 Ok (Just detail) ->
-                    entriesCall ctx.project detail.id :: shapeCall ctx.project detail :: currentCall ctx.project detail.id model.entryId
+                    entriesCall ctx.project detail.id :: shapeCall ctx.project :: currentCall ctx.project detail.id model.entryId
 
                 _ ->
                     []
@@ -287,10 +287,10 @@ currentCall project typeId entryId =
 {-| この API の形。コンテンツ API に introspection を投げる。**応答は生で受ける**（`Api.call` は
 errors を失敗に畳むが、ここは型が 1 つ無いだけでも表を出したい）。
 -}
-shapeCall : Slug -> ContentTypeDetail -> Api.Call Msg
-shapeCall project detail =
+shapeCall : Slug -> Api.Call Msg
+shapeCall project =
     Api.preview
-        { kind = "apiShape", project = project, document = ApiShape.query { singular = detail.singular, apiId = detail.apiId } }
+        { kind = "apiShape", project = project, document = ApiShape.query }
         GotShape
 
 

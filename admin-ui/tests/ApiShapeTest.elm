@@ -14,8 +14,19 @@ import Test exposing (Test, describe, test)
 body : String
 body =
     """
-{ "data": {
-  "where": { "inputFields": [
+{ "data": { "__schema": { "types": [
+  { "name": "Query", "kind": "OBJECT", "inputFields": null, "enumValues": null, "fields": [
+    { "name": "blogs", "description": null, "type": { "kind": "NON_NULL", "name": null, "ofType": { "kind": "OBJECT", "name": "BlogConnection", "ofType": null } }, "args": [
+      { "name": "first", "description": "1 ページの件数", "defaultValue": "20", "type": { "kind": "SCALAR", "name": "Int", "ofType": null } },
+      { "name": "where", "description": null, "defaultValue": null, "type": { "kind": "INPUT_OBJECT", "name": "BlogWhere", "ofType": null } },
+      { "name": "orderBy", "description": null, "defaultValue": null, "type": { "kind": "LIST", "name": null, "ofType": { "kind": "NON_NULL", "name": null, "ofType": { "kind": "ENUM", "name": "BlogOrderBy", "ofType": null } } } }
+    ] },
+    { "name": "authors", "description": null, "type": { "kind": "OBJECT", "name": "AuthorConnection", "ofType": null }, "args": [] }
+  ] },
+  { "name": "BlogConnection", "kind": "OBJECT", "inputFields": null, "enumValues": null, "fields": [
+    { "name": "nodes", "description": null, "type": { "kind": "NON_NULL", "name": null, "ofType": { "kind": "LIST", "name": null, "ofType": { "kind": "NON_NULL", "name": null, "ofType": { "kind": "OBJECT", "name": "Blog", "ofType": null } } } }, "args": [] }
+  ] },
+  { "name": "BlogWhere", "kind": "INPUT_OBJECT", "enumValues": null, "fields": null, "inputFields": [
     { "name": "id_eq", "description": null, "type": { "kind": "SCALAR", "name": "ID", "ofType": null } },
     { "name": "title_eq", "description": "完全一致", "type": { "kind": "SCALAR", "name": "String", "ofType": null } },
     { "name": "title_in", "description": null, "type": { "kind": "LIST", "name": null, "ofType": { "kind": "NON_NULL", "name": null, "ofType": { "kind": "SCALAR", "name": "String", "ofType": null } } } },
@@ -23,26 +34,19 @@ body =
     { "name": "author_id_eq", "description": null, "type": { "kind": "SCALAR", "name": "ID", "ofType": null } },
     { "name": "AND", "description": null, "type": { "kind": "LIST", "name": null, "ofType": { "kind": "INPUT_OBJECT", "name": "BlogWhereLeaf", "ofType": null } } }
   ] },
-  "orderBy": { "enumValues": [
+  { "name": "BlogOrderBy", "kind": "ENUM", "inputFields": null, "fields": null, "enumValues": [
     { "name": "publishedAt_ASC", "description": null },
     { "name": "publishedAt_DESC", "description": "公開日時の新しい順" }
   ] },
-  "entry": { "fields": [
-    { "name": "id", "description": null, "type": { "kind": "NON_NULL", "name": null, "ofType": { "kind": "SCALAR", "name": "ID", "ofType": null } } },
-    { "name": "body", "description": "本文", "type": { "kind": "OBJECT", "name": "RichText", "ofType": null } }
+  { "name": "Blog", "kind": "OBJECT", "inputFields": null, "enumValues": null, "fields": [
+    { "name": "id", "description": null, "type": { "kind": "NON_NULL", "name": null, "ofType": { "kind": "SCALAR", "name": "ID", "ofType": null } }, "args": [] },
+    { "name": "body", "description": "本文", "type": { "kind": "OBJECT", "name": "RichText", "ofType": null }, "args": [] }
   ] },
-  "richText": { "fields": [
-    { "name": "html", "description": null, "type": { "kind": "NON_NULL", "name": null, "ofType": { "kind": "SCALAR", "name": "String", "ofType": null } } }
+  { "name": "RichText", "kind": "OBJECT", "inputFields": null, "enumValues": null, "fields": [
+    { "name": "html", "description": null, "type": { "kind": "NON_NULL", "name": null, "ofType": { "kind": "SCALAR", "name": "String", "ofType": null } }, "args": [] }
   ] },
-  "asset": { "fields": [] },
-  "root": { "fields": [
-    { "name": "blogs", "args": [
-      { "name": "first", "description": "1 ページの件数", "defaultValue": "20", "type": { "kind": "SCALAR", "name": "Int", "ofType": null } },
-      { "name": "where", "description": null, "defaultValue": null, "type": { "kind": "INPUT_OBJECT", "name": "BlogWhere", "ofType": null } }
-    ] },
-    { "name": "authors", "args": [] }
-  ] }
-} }
+  { "name": "Asset", "kind": "OBJECT", "inputFields": null, "enumValues": null, "fields": [] }
+] } } }
 """
 
 
@@ -89,7 +93,7 @@ suite =
                 \_ ->
                     decoded
                         |> Result.map (.arguments >> List.map (\arg -> ( arg.name, arg.typeText, arg.defaultValue )))
-                        |> Expect.equal (Ok [ ( "first", "Int", "20" ), ( "where", "BlogWhere", "" ) ])
+                        |> Expect.equal (Ok [ ( "first", "Int", "20" ), ( "where", "BlogWhere", "" ), ( "orderBy", "[BlogOrderBy!]", "" ) ])
             , test "root field が無い（1 件の名前を渡した等）なら引数は空" <|
                 \_ ->
                     D.decodeString (ApiShape.decoder "nothing") body
