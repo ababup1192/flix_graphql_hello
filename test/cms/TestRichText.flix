@@ -371,7 +371,19 @@ mod TestRichText {
             expected = List#{ "fields.body.content[0].content[0].content[0].content[1]" },
             CmsTestKit.violationPaths(RichText.validate("fields.body", bad)))
 
-    /// 引用の中に引用は入らない。段落・箇条書き・表は入る。
+    /// 折りたたみの中に折りたたみは入らない。段落・コードブロック・表は入る。
+    @Test
+    def testValidateDetailsNesting(): Unit \ Assert =
+        let wrap = child -> node("doc", List#{ details(Some(Json.JString("手順")), List#{ child }) });
+        let cases = List#{
+            (node("paragraph", List#{ text("文") }), true),
+            (node("codeBlock", List#{ text("x = 1") }), true),
+            (node("table", List#{ node("tableRow", List#{ node("tableCell", List#{ node("paragraph", List#{ text("c") }) }) }) }), true),
+            (details(Some(Json.JString("中")), List#{ node("paragraph", List#{ text("中") }) }), false)
+        };
+        Assert.assertEq(expected = cases |> List.map(snd), cases |> List.map(match (child, _) -> List.isEmpty(RichText.validate("fields.body", wrap(child)))))
+
+    /// 引用の中に引用は入れられない。
     @Test
     def testValidateBlockquoteNesting(): Unit \ Assert =
         let quote = child -> node("doc", List#{ node("blockquote", List#{ child }) });

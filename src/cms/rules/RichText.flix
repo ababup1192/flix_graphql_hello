@@ -206,7 +206,7 @@ mod RichText {
             case Some("embed") => checkEmbed(path, fields)
             case Some("gallery") => checkGallery(path, fields)
             case Some("linkCard") => checkLinkCard(path, fields)
-            case Some("details") => checkDetails(path, fields) ::: checkChildren(path, fields)
+            case Some("details") => checkDetails(path, fields) ::: checkDetailsChildren(path, fields) ::: checkChildren(path, fields)
             case Some("listItem") => checkListItem(path, fields) ::: checkChildren(path, fields)
             case Some("tableCell") => checkTableCell(path, fields) ::: checkCellChildren(path, fields) ::: checkChildren(path, fields)
             case Some("tableHeader") => checkTableCell(path, fields) ::: checkCellChildren(path, fields) ::: checkChildren(path, fields)
@@ -453,6 +453,18 @@ mod RichText {
         case Some(summary) if String.nonEmpty(String.trim(summary)) => Nil
         case _ => Violation.Violation(path, "details の attrs.summary は空でない文字列にしてください") :: Nil
     }
+
+    ///
+    /// 折りたたみの子。折りたたみの中に折りたたみは入れない。
+    ///
+    /// WhyNot: 入れ子を許さないのは、Markdown の `</details>` が最初の 1 つで閉じるため。
+    /// 内側の閉じタグで外側が閉じ、往復で形が変わる（引用の入れ子を断るのと同じ理由）。
+    ///
+    def checkDetailsChildren(path: String, fields: Map[String, Json]): List[Violation] =
+        children(fields) |> List.zipWithIndex |> List.flatMap(match (index, child) ->
+            if (nodeType(child) == Some("details"))
+                Violation.Violation("${path}.content[${index}]", "折りたたみ（details）の中に折りたたみは入れられません") :: Nil
+            else Nil)
 
     /// listItem。attrs.checked は任意で、あれば Bool（タスクリストの項目）。
     def checkListItem(path: String, fields: Map[String, Json]): List[Violation] = match Map.get("checked", attrs(fields)) {
