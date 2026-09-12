@@ -63,26 +63,44 @@ mod TestRichText {
             expected = List#{
                 ("fields.body", "richText は { type: \"doc\", content: [...] } の形にしてください"),
                 ("fields.body.content[0]", "知らないノード 'iframe' です（paragraph, heading, bulletList, orderedList, listItem, blockquote, quoteCite, codeBlock, table, tableRow, tableCell, tableHeader, callout, image, imageItem, gallery, details, text, hardBreak, horizontalRule, embed, linkCard, mathBlock, video）"),
-                ("fields.body.content[1].content[0].marks[0]", "link は attrs.href（http(s):// か mailto:）か attrs.entryId（entry の id）のどちらか 1 つにしてください"),
+                ("fields.body.content[1].content[0].marks[0]", "link は attrs.href（http(s):// / mailto: / `/` で始まるパス / `#` の断片）か attrs.entryId（entry の id）のどちらか 1 つにしてください"),
                 ("fields.body.content[2]", "heading の attrs.level は 1 〜 4 にしてください"),
                 ("fields.body.content[3]", "image の attrs.assetId は asset の id にしてください")
             },
             (RichText.validate("fields.body", node("paragraph", Nil)) ::: RichText.validate("fields.body", bad))
                 |> List.map(violation -> { let Violation.Violation(path, message) = violation; (path, message) }))
 
-    /// link の href は http(s) と mailto だけ。javascript: / data: は大文字でも通らず、相対パスと # も通らない。
+    /// link の href は http(s) / mailto / `/` で始まるパス / `#` の断片だけ。
+    /// `//` と `/\` は別のホストへ出るので通らず、javascript: / data: / vbscript: は大文字小文字が混ざっても
+    /// 前後に空白やタブや改行が付いても通らない。scheme の無い相対パス（about.html）も通らない。
     @Test
     def testIsSafeHref(): Unit \ Assert =
         let cases = List#{
-            ("https://example.com/",   true),
-            ("http://example.com/",    true),
-            ("mailto:a@example.com",   true),
-            ("javascript:alert(1)",    false),
-            ("JAVASCRIPT:alert(1)",    false),
-            ("data:text/html,x",       false),
-            ("/docs/intro",            false),
-            ("#top",                   false),
-            ("",                       false)
+            ("https://example.com/",       true),
+            ("http://example.com/",        true),
+            ("mailto:a@example.com",       true),
+            ("/docs/intro",                true),
+            ("/",                          true),
+            ("#top",                       true),
+            ("#",                          true),
+            ("//evil.example.com/x",       false),
+            ("/\\evil.example.com/x",      false),
+            ("javascript:alert(1)",        false),
+            ("JAVASCRIPT:alert(1)",        false),
+            ("JaVaScRiPt:alert(1)",        false),
+            (" javascript:alert(1)",       false),
+            ("javascript:alert(1) ",       false),
+            ("\tjavascript:alert(1)",      false),
+            ("\njavascript:alert(1)",      false),
+            ("java\tscript:alert(1)",      false),
+            ("java\nscript:alert(1)",      false),
+            ("vbscript:msgbox(1)",         false),
+            ("VBScript:msgbox(1)",         false),
+            ("data:text/html,x",           false),
+            ("DATA:text/html,x",           false),
+            ("about.html",                 false),
+            ("../up.html",                 false),
+            ("",                           false)
         };
         Assert.assertEq(expected = cases, cases |> List.map(match (href, _) -> (href, RichText.isSafeHref(href))))
 
@@ -473,6 +491,20 @@ mod TestRichText {
             expected = "<figure data-gallery=\"2\"><img src=\"u1\" alt=\"a\" width=\"640\" height=\"480\"><figure><img src=\"u2\" alt=\"\"><figcaption>図 1</figcaption></figure></figure>"
                 ++ "<img src=\"u1\" alt=\"\" width=\"640\" height=\"480\">",
             RichText.toHtml(images, Map.empty(), Map.empty(), doc))
+
+    /// 同じサイトへのリンク（/ と #）は別タブで開かない。外へ出るリンクだけ target と rel が付く。
+    @Test
+    def testToHtmlLinkSameSite(): Unit \ Assert =
+        let cases = List#{
+            ("/about", "<p><a href=\"/about\">こ</a></p>"),
+            ("#top", "<p><a href=\"#top\">こ</a></p>"),
+            ("https://example.com/", "<p><a href=\"https://example.com/\" target=\"_blank\" rel=\"noopener noreferrer\">こ</a></p>"),
+            ("mailto:a@example.com", "<p><a href=\"mailto:a@example.com\" target=\"_blank\" rel=\"noopener noreferrer\">こ</a></p>")
+        };
+        Assert.assertEq(
+            expected = List.map(snd, cases),
+            List.map(href -> RichText.toHtml(Map.empty(), Map.empty(), Map.empty(),
+                node("doc", List#{ node("paragraph", List#{ marked("こ", List#{ link(href) }) }) })), List.map(fst, cases)))
 
     /// linkCard は data-link-card 付きの a で、中身は url。文字はエスケープ。
     @Test

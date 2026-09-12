@@ -408,11 +408,12 @@ mod TestMarkdown {
             expected = (quotedMarkdown, quoted, boldTableMarkdown, boldTable),
             (Markdown.toMarkdown(quoted), Markdown.fromMarkdown(quotedMarkdown), Markdown.toMarkdown(boldTable), Markdown.fromMarkdown(boldTableMarkdown)))
 
-    /// エスケープ対象の文字（* _ [ ] ` \ # | < > ~）は書く時にエスケープし、読むと戻る。行頭の - と 1. も段落のまま。
+    /// エスケープ対象の文字（* _ [ ] ` \ # | < > ~ ^ =）は書く時にエスケープし、読むと戻る。行頭の - と 1. も段落のまま。
+    /// 平文の `2^10^` は上付きに、`m==n` はハイライトにならない。
     @Test
     def testEscapes(): Unit \ Assert =
-        let special = doc(List#{ simpleParagraph("a*b_c[d]e`f\\g#h|i<j>k~l") });
-        let specialMarkdown = "a\\*b\\_c\\[d\\]e\\`f\\\\g\\#h\\|i\\<j\\>k\\~l";
+        let special = doc(List#{ simpleParagraph("a*b_c[d]e`f\\g#h|i<j>k~l2^10^m==n") });
+        let specialMarkdown = "a\\*b\\_c\\[d\\]e\\`f\\\\g\\#h\\|i\\<j\\>k\\~l2\\^10\\^m\\=\\=n";
         let lineStart = doc(List#{ simpleParagraph("- 箇条書きではない"), simpleParagraph("1. 番号ではない") });
         Assert.assertEq(
             expected = (specialMarkdown, special, lineStart),
@@ -433,7 +434,7 @@ mod TestMarkdown {
 
     // ---- 5. 壊れた入力 ----
 
-    /// 閉じない ``` は末尾まで codeBlock、閉じない [ は文字、未知の alert は普通の blockquote。javascript: のリンクは読めるが validate で止まる。
+    /// 閉じない ``` は末尾まで codeBlock、閉じない [ は文字、未知の alert は普通の blockquote。javascript: のリンクは link マークが落ちて validate を通る。
     @Test
     def testBrokenInput(): Unit \ Assert =
         Assert.assertEq(
@@ -441,11 +442,33 @@ mod TestMarkdown {
                 doc(List#{ codeBlock(None, "code\nmore") }),
                 doc(List#{ simpleParagraph("a [b") }),
                 doc(List#{ blockquote(List#{ simpleParagraph("[!FOO]\nx") }) }),
-                List#{ "fields.body.content[0].content[0].marks[0]" }),
+                Nil),
             (Markdown.fromMarkdown("```\ncode\nmore"),
              Markdown.fromMarkdown("a [b"),
              Markdown.fromMarkdown("> [!FOO]\n> x"),
              CmsTestKit.violationPaths(RichText.validate("fields.body", Markdown.fromMarkdown("[x](javascript:alert(1))")))))
+
+    ///
+    /// 相対リンク（`/` で始まるパスと `#` の断片）は link マークが残る。
+    /// validate を通らない href（javascript: / data: / vbscript: / `//` の protocol-relative / scheme の無い相対パス）は
+    /// link マークだけ落ちて文字が残り、doc は違反ゼロで返る。
+    ///
+    @Test
+    def testRelativeAndUnsafeLinks(): Unit \ Assert =
+        let cases = List#{
+            ("[会社概要](/about)",       doc(List#{ paragraph(List#{ linked("/about", "会社概要") }) })),
+            ("[上へ](#top)",             doc(List#{ paragraph(List#{ linked("#top", "上へ") }) })),
+            ("[x](javascript:alert(1))", doc(List#{ simpleParagraph("x") })),
+            ("[x](JaVaScRiPt:alert(1))", doc(List#{ simpleParagraph("x") })),
+            ("[x](data:text/html,y)",    doc(List#{ simpleParagraph("x") })),
+            ("[x](vbscript:msgbox(1))",  doc(List#{ simpleParagraph("x") })),
+            ("[x](//evil.example.com/)", doc(List#{ simpleParagraph("x") })),
+            ("[x](about.html)",          doc(List#{ simpleParagraph("x") }))
+        };
+        Assert.assertEq(
+            expected = cases |> List.map(match (markdown, expectedDoc) -> (markdown, expectedDoc, Nil)),
+            cases |> List.map(match (markdown, _) ->
+                (markdown, Markdown.fromMarkdown(markdown), CmsTestKit.violationPaths(RichText.validate("fields.body", Markdown.fromMarkdown(markdown))))))
 
     /// 1 行に画像と文字が混ざれば普通の段落（gallery にも image にもならない）。閉じない details は末尾まで、`</details>` だけの行は何も作らない。
     @Test

@@ -188,12 +188,12 @@ mod RichText {
 
     def hasMathMark(fields: Map[String, Json]): Bool = marksOf(fields) |> List.exists(mark -> typeOf(mark) == Some("math"))
 
-    /// link は href（http(s) / mailto）か entryId（entry の id）のどちらか 1 つ。
+    /// link は href（http(s) / mailto / `/` で始まるパス / `#` の断片）か entryId（entry の id）のどちらか 1 つ。
     def checkMark(path: String, mark: Map[String, Json]): List[Violation] = match typeOf(mark) {
         case Some("link") => match (attrString("href", mark), attrString("entryId", mark)) {
             case (Some(href), None) if isSafeHref(href) => Nil
             case (None, Some(entryId)) if Option.nonEmpty(EntryId.parse(entryId)) => Nil
-            case _ => Violation.Violation(path, "link は attrs.href（http(s):// か mailto:）か attrs.entryId（entry の id）のどちらか 1 つにしてください") :: Nil
+            case _ => Violation.Violation(path, "link は attrs.href（http(s):// / mailto: / `/` で始まるパス / `#` の断片）か attrs.entryId（entry の id）のどちらか 1 つにしてください") :: Nil
         }
         case Some(name) if List.memberOf(name, markNames()) => Nil
         case Some(name) => Violation.Violation(path, "知らないマーク '${name}' です（${List.join(", ", markNames())}）") :: Nil
@@ -412,8 +412,35 @@ mod RichText {
     /// コードの言語名に許す形（ts / c++ / c# / objective-c）。
     pub def isLanguage(language: String): Bool = String.isMatch(regex = "^[a-z0-9+#-]{1,32}$", language)
 
-    /// link に許す href。javascript: 等を通さない。
-    pub def isSafeHref(href: String): Bool = isHttpUrl(href) or String.startsWith(prefix = "mailto:", href)
+    ///
+    /// link に許す href。http(s) / mailto: / `/` で始まるパス / `#` の断片。javascript: 等を通さない。
+    ///
+    /// WhyNot: scheme の無い相対パス（`about.html`）まで広げない。許す物の一覧では書けず
+    /// 「scheme が無い事」を見る形になるので、通さない物の一覧に変わる。`JaVaScRiPt:` や
+    /// 途中にタブ・改行を挟んだ形で抜けられる。
+    ///
+    pub def isSafeHref(href: String): Bool =
+        isHttpUrl(href) or String.startsWith(prefix = "mailto:", href) or isRootRelativePath(href) or String.startsWith(prefix = "#", href)
+
+    ///
+    /// 外へ出るリンクに付ける属性。同じサイトの中（`/` と `#`）では空。
+    ///
+    /// WhyNot: 全部に `target="_blank"` を付けない。同じサイトの中のリンクまで別タブで開くと、
+    /// 読んでいる人の戻る道が切れて、タブが溜まる。`rel` も外へ出る時だけ要る。
+    ///
+    def outLinkAttrs(href: String): String =
+        if (isRootRelativePath(href) or String.startsWith(prefix = "#", href))
+            ""
+        else
+            " target=\"_blank\" rel=\"noopener noreferrer\""
+
+    ///
+    /// `/` で始まるパス。
+    ///
+    /// WhyNot: `//` と `/\` は通さない。ブラウザが別のホストへの URL として読むので、外へ出る道になる。
+    ///
+    def isRootRelativePath(href: String): Bool =
+        String.startsWith(prefix = "/", href) and not String.startsWith(prefix = "//", href) and not String.startsWith(prefix = "/\\", href)
 
     /// linkCard に許す url。http(s) だけ。
     pub def isHttpUrl(url: String): Bool = String.startsWith(prefix = "https://", url) or String.startsWith(prefix = "http://", url)
@@ -668,7 +695,7 @@ mod RichText {
     ///
     /// HTML にする。images は image と video（poster も）の asset id → 配信 URL と寸法。無い asset の image / video は出さない。文字は全部エスケープする。
     /// 見出しには headings と同じ id が付く。空の段落は出さない。
-    /// 外部リンクは `target="_blank" rel="noopener noreferrer"`、entry へのリンクは `href="#entry:{id}" data-entry-id`
+    /// 外へ出るリンクは `target="_blank" rel="noopener noreferrer"`（同じサイトの中は付けない）、entry へのリンクは `href="#entry:{id}" data-entry-id`
     /// （サイトが slug に置き換える。json 側の entryId と同じ値）。
     ///
     /// cards は linkCard の url → OGP（表にある物だけ）。無い url は URL だけの a になる。
@@ -864,7 +891,7 @@ mod RichText {
             case Some("highlight") => "<mark>${acc}</mark>"
             case Some("math")      => "<span data-math=\"inline\">${acc}</span>"
             case Some("link")      => match (attrString("href", mark), attrString("entryId", mark) |> Option.flatMap(EntryId.parse)) {
-                case (Some(href), _) if isSafeHref(href) => "<a href=\"${escape(href)}\" target=\"_blank\" rel=\"noopener noreferrer\">${acc}</a>"
+                case (Some(href), _) if isSafeHref(href) => "<a href=\"${escape(href)}\"${outLinkAttrs(href)}>${acc}</a>"
                 // **型に linkPath があれば踏める href を出す。** 無ければ `#entry:{id}` のままで、
                 // サイトが data-entry-id を見て差し替える。data-entry-id はどちらでも付ける。
                 case (_, Some(entryId)) =>

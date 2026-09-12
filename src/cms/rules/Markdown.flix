@@ -14,6 +14,7 @@
 /// 読む時は少し広く受け（`*` の箇条書き、`1)`、`***`、`__` と `*`、行末 2 空白、summary の無い `<details>`、`- [X]`）、
 /// 読めない物は段落の text に落として必ず RichText.validate に通る doc を返す。
 /// image は asset 管理の物だけ（`asset:`）。`![alt](URL)` は image にせず、alt を URL へのリンクにした文字に落とす。
+/// link の href は `RichText.isSafeHref` が通す物（http(s) / mailto: / `/` で始まるパス / `#` の断片）だけで、他は link マークを落として文字だけ残す。
 ///
 /// WhyNot: asset 管理外の画像を違反にしないのは、fromMarkdown が「必ず validate に通る doc を返す」約束で、違反は doc の検査の仕事のため。
 /// 文字に落とす時に URL をリンクとして残すのは、書いた物が読み戻しで消えず、`\[` に化けた文字にもならないようにするため。
@@ -630,13 +631,13 @@ mod Markdown {
     }
 
     ///
-    /// text の中で Markdown の記号になる文字（* _ [ ] ` \ # | < > ~ $）を \ で逃がす。読む時に戻る。
+    /// text の中で Markdown の記号になる文字（* _ [ ] ` \ # | < > ~ $ ^ =）を \ で逃がす。読む時に戻る。
     ///
     def escape(text: String): String =
         text |> String.toList |> List.map(c -> if (isMarkdownSpecial(c)) "\\${c}" else Char.toString(c)) |> List.join("")
 
     def isMarkdownSpecial(c: Char): Bool =
-        c == '*' or c == '_' or c == '[' or c == ']' or c == '`' or c == '\\' or c == '#' or c == '|' or c == '<' or c == '>' or c == '~' or c == '$'
+        c == '*' or c == '_' or c == '[' or c == ']' or c == '`' or c == '\\' or c == '#' or c == '|' or c == '<' or c == '>' or c == '~' or c == '$' or c == '^' or c == '='
 
     ///
     /// 段落の各行が箇条書き・番号・罫線・引用の出典に見えないようにする（`- a` → `\- a`、`1. a` → `1\. a`、`---` → `\---`、`— a` → `\— a`）。
@@ -1271,10 +1272,21 @@ mod Markdown {
             }, (None, 0, false))
             |> match (found, _, _) -> found
 
+    ///
     /// link の中身を link マーク付きで解析した 1 歩。pos は `[` の位置。
+    ///
+    /// WhyNot: RichText.isSafeHref を通らない href（`javascript:` など）で link マークを作らない。
+    /// fromMarkdown は「必ず RichText.validate に通る doc を返す」約束で、作ると取り込みがそこで止まる。
+    ///
     def linkNested(marks: List[Mark], text: String, pos: Int32, labelEnd: Int32, targetEnd: Int32): Step =
         let target = linkTarget(String.slice(start = labelEnd + 2, end = targetEnd, text));
-        Step.Nested(scanInlines(marks ::: (Mark.Link(target) :: Nil), String.slice(start = pos + 1, end = labelEnd, text)), targetEnd + 1)
+        let linked = if (isValidTarget(target)) marks ::: (Mark.Link(target) :: Nil) else marks;
+        Step.Nested(scanInlines(linked, String.slice(start = pos + 1, end = labelEnd, text)), targetEnd + 1)
+
+    def isValidTarget(target: LinkTarget): Bool = match target {
+        case LinkTarget.Href(href) => RichText.isSafeHref(href)
+        case LinkTarget.Entry(_)   => true
+    }
 
     /// 括弧の対応を数えて閉じる `)` の位置。
     def closingParen(text: String, start: Int32): Option[Int32] =
