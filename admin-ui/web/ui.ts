@@ -396,6 +396,20 @@ export function stickyFloor(root: ParentNode): number {
   return Math.max(0, bar.getBoundingClientRect().bottom);
 }
 
+/** 浮く面を伏せる / 戻す。**置き所は保ったまま見えなくする。**
+ *
+ * WhyNot: `display: none` にしない。Floating UI は伏せている間も位置を測るので、高さが 0 に
+ * なると戻した時の置き所がずれる。
+ *
+ * WhyNot: class と CSS でやらない。BubbleMenu は `style.visibility` をインラインで書くので、
+ * class の規則では勝てなかった（実測: class は付いていたが `visible` のままだった）。
+ */
+export function veil(dom: HTMLElement | null, on: boolean): void {
+  if (!dom) return;
+  if (on) dom.style.setProperty("visibility", "hidden", "important");
+  else dom.style.removeProperty("visibility");
+}
+
 // 外のクリックと Esc で閉じる見張りは `dismiss.ts`（Elm の dismissLayer と揃えてある）。
 // 浮く面を自前で組む所からも引けるよう、ここから出し直す。
 export { dismissOn };

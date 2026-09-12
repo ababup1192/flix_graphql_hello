@@ -186,10 +186,9 @@ test("変換中にバブルメニューが出ない", async () => {
 // 選んだ文字を変換で置き換える道。**帯が出ている所から変換に入る**ので、
 // 「出さない」ではなく「引っ込む」を見る（未確定の間も帯が残ると文字に被る）。
 //
-// **今は残ってしまう**（2026-09-12 の実測: 未確定の 200ms 後も `.tt-bubble` が
-// `opacity: 1` で居た。同じ手順を変換ではなく素の打鍵で置き換えると引っ込む＝IME の側だけ）。
-// 直りしだい `test.fails` を `test` に戻す。
-test.fails("選んだ文字を変換で置き換えるとバブルメニューが引っ込む", async () => {
+// WhyNot: 要素が消える事で見ない。変換の最中は transaction が起きず判定が呼び直されないので、
+// 直し方は `compositionstart` で伏せる形になった。要素は残る。見えていない事だけを見る。
+test("選んだ文字を変換で置き換えるとバブルメニューが引っ込む", async () => {
   const h = (harness = await mount("empty"));
   await commit("えらぶ");
   h.selectBack(3);
@@ -197,7 +196,8 @@ test.fails("選んだ文字を変換で置き換えるとバブルメニュー�
   await vi.waitFor(() => expect(h.editor.querySelector(".tt-bubble")).not.toBeNull());
   await compose("にほんご");
   await new Promise((done) => window.setTimeout(done, 200));
-  expect(h.editor.querySelector(".tt-bubble")).toBeNull();
+  const bar = h.editor.querySelector(".tt-bubble");
+  expect(bar === null || getComputedStyle(bar).visibility === "hidden").toBe(true);
 });
 
 // 確定して選べば出る（帯を殺すのではない）。
@@ -218,7 +218,7 @@ test("確定した文字を選べばバブルメニューが出る", async () =>
 // **今は出てしまう**（2026-09-12 の実測: 「にほん」の未確定で docchange が 1 回、detail の
 // doc に「にほん」が入っていた）。直りしだい `test.fails` を `test` に戻す。
 // WhyNot: 期待の側を「出る」に書き換えない。書き換えると直した時に誰も気付かない。
-test.fails("変換中は docchange が出ない", async () => {
+test("変換中は docchange が出ない", async () => {
   const h = (harness = await mount("text"));
   const beats: string[] = [];
   h.editor.addEventListener("docchange", (event) => beats.push((event as CustomEvent).detail));

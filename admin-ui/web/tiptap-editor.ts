@@ -35,7 +35,7 @@ type Linked = {
 type LinkChoice = { seq: number; href: string; entryId: string; label: string; remove: boolean; cancel: boolean };
 import { dismissOn } from "./dismiss";
 import { placeUnder } from "./place";
-import { type Popover, popover, selectAllInBlock, stickyFloor } from "./ui";
+import { type Popover, popover, selectAllInBlock, stickyFloor, veil } from "./ui";
 import { isDraggingTable, tableHandles } from "./table-drag";
 import { Highlight, RaisedCaret, Subscript, Superscript } from "./text-marks";
 import { type Align, alignColumn, columnAlign, resizeTable, tableSize } from "./table-tools";
@@ -470,7 +470,10 @@ class TiptapEditor extends HTMLElement {
           };
           return { getBoundingClientRect: rect, getClientRects: () => [rect()] as unknown as DOMRectList };
         },
-        shouldShow: ({ state, from, to }) => {
+        shouldShow: ({ state, view, from, to }) => {
+          // **変換の最中は出さない。** 選んだ文字を変換で置き換えると、未確定の間ずっと
+          // 帯が残って変換候補のウィンドウに重なる（素の打鍵なら引っ込む）。
+          if (view.composing) return false;
           if (state.selection instanceof NodeSelection) return false;
           if (insideImage(state)) return true;
           // 出典はカーソルを置いただけでは出さない（空の出典に帯が被る）。選んだ時だけ 3 つ。
@@ -561,6 +564,19 @@ class TiptapEditor extends HTMLElement {
       onUpdate: () => {
         this.emit();
         this.askLinked();
+      },
+      // WhyNot: 変換の確定を onUpdate 任せにしない。確定の時に transaction が起きない道があり、
+      // `emit` を飛ばしたままだと「未保存」が付かずに変換した分が保存されない。
+      onCreate: ({ editor }) => {
+        editor.view.dom.addEventListener("compositionend", () => this.emit());
+        // **変換の間だけ帯を伏せる。**
+        //
+        // WhyNot: `shouldShow` で断るだけにしない。変換の最中は transaction が起きないので
+        // 判定が呼び直されず、選んだ文字を変換で置き換えると帯が残って候補のウィンドウに
+        // 重なる（素の打鍵なら引っ込む）。確定すると transaction が起きるので、そこで
+        // 印を外せば帯の置き所は Floating UI に戻る。
+        editor.view.dom.addEventListener("compositionstart", () => veil(this.bubble, true));
+        editor.view.dom.addEventListener("compositionend", () => veil(this.bubble, false));
       },
       onFocus: () => this.blocks?.update(),
       onBlur: () => {
@@ -1719,6 +1735,10 @@ class TiptapEditor extends HTMLElement {
     // **疑似行がある間は出さない。** 打たずに離れれば消える行なので、
     // 出すと触っていないのに「未保存」になる。
     if (hasPendingLine(this.editor.state)) return;
+    // **変換の最中も出さない。** 未確定の読みがそのまま doc に入っているので、
+    // 下書きの自動保存が走ると「にほん」のまま保存される（実際に入っていた）。
+    // 確定した時は compositionend から出す。
+    if (this.editor.view.composing) return;
     const doc = fromTaskList(unfold(this.editor.getJSON()));
     const text = JSON.stringify(doc);
     if (text === this.lastSent) return;
