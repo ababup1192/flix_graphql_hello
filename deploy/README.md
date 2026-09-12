@@ -19,6 +19,11 @@ curl -s localhost:8080/health # {"status":"ok","version":"..."}
 管理画面（`admin-ui/dist`）には GraphiQL の入口 `graphiql.html` が別に入っている。配信側は `/p/{プロジェクト slug}/graphiql` を `graphiql.html?project={プロジェクト slug}` に読み替える（Caddy の書き方は [Caddyfile](Caddyfile) のコメント。vite の dev サーバも同じ読み替えをする）。
 開いた GraphiQL は**同じホストの `/p/{プロジェクト slug}/graphql`**（コンテンツ API）に Access の cookie だけで問い合わせるので、管理画面のホストはこのパスを cms に転送する（`/p/{プロジェクト slug}/admin/graphql` と同じ扱い。docs/design/admin-ui-spec.md 13.2）。既定は公開中を読み、下書きは `stage: DRAFT` を付けるとログインした人の権限で読める。API キーを試すならヘッダの欄に `X-Api-Key` を書く。
 
+## コンテンツ API のリファレンス（`/p/{プロジェクト slug}/docs`）
+
+管理画面（admin-ui）の `docs.html` が、開いた時にブラウザから `POST /p/{プロジェクト slug}/graphql` に introspection を 1 回投げて、Queries / Objects / Input objects / Enums / Scalars の一覧を描く（docs.github.com/graphql の reference と同じ形）。サーバに専用のルートは無い。
+管理画面を配る側で `/p/{プロジェクト slug}/docs` → `/docs.html?project={プロジェクト slug}` の rewrite が要る（Caddy は [Caddyfile](Caddyfile) の `(admin_docs)` snippet を管理画面のホストで `import admin_docs` する。vite dev は `vite.config.ts` が同じ書き換えをする）。各 query の「Explorer で開く」は `/p/{プロジェクト slug}/graphiql?query=…` へ飛ぶ。
+
 ## テナント分離（RLS）
 
 プロジェクトの中身の表（content_types / content_fields / entries / entry_versions / entry_links / assets）と auth の表（memberships / invitations / api_keys）には PostgreSQL の RLS が掛かっている。

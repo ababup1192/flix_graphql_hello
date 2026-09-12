@@ -68,11 +68,30 @@ function graphiqlRewrite() {
   };
 }
 
+// リファレンス（`/p/{slug}/docs`）は Elm と別の入口 `docs.html`。dev では URL を書き換えて渡す。
+// 本番は静的配信の側で同じ rewrite をする（deploy/Caddyfile）。
+//
+// WhyNot: index.html の SPA fallback に乗せて Elm から開かない。リファレンスは読者が
+// エンジニアで、ログイン無しのコンテンツ API だけを叩く独立したページ。Elm のバンドルを
+// 読ませる理由が無い。
+function docsRewrite() {
+  return {
+    name: "docs-page-rewrite",
+    configureServer(server: { middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void } }) {
+      server.middlewares.use((req, _res, next) => {
+        const m = /^\/p\/([^/?]+)\/docs\/?(\?.*)?$/.exec(req.url ?? "");
+        if (m) req.url = `/docs.html?project=${m[1]}`;
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [elmPlugin({ debug: false }), tailwindcss(), localOnly(), graphiqlRewrite()],
+  plugins: [elmPlugin({ debug: false }), tailwindcss(), localOnly(), graphiqlRewrite(), docsRewrite()],
   build: {
     rollupOptions: {
-      input: { index: "index.html", graphiql: "graphiql.html" },
+      input: { index: "index.html", graphiql: "graphiql.html", docs: "docs.html" },
     },
   },
   server: {

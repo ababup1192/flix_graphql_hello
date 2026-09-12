@@ -7,6 +7,13 @@
 #   @graphiql path_regexp graphiql ^/p/([^/]+)/graphiql/?$
 #   rewrite @graphiql /graphiql.html?project={re.graphiql.1}
 
+# 管理画面のホスト（docs/design/admin-ui-spec.md 13.2）で静的配信の前に import する。
+# コンテンツ API のリファレンス `/p/{slug}/docs` は admin-ui の別の入口 `docs.html` で、slug は query で渡す。
+(admin_docs) {
+	@docs path_regexp docs ^/p/([^/]+)/docs/?$
+	rewrite @docs /docs.html?project={re.docs.1}
+}
+
 {$CMS_DOMAIN} {
 	encode zstd gzip
 	# コンテンツ API の GET は cms が Cache-Control / ETag / Vary を決める（docs/design/cdn.md）。

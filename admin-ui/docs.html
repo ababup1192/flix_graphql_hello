@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>API リファレンス</title>
+    <script>
+      // 最初のちらつきを防ぐため、描く前にテーマを当てる。管理画面と同じキー。
+      try {
+        var t = localStorage.getItem("theme");
+        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="docs"></div>
+    <script type="module" src="/src/js/docs.ts"></script>
+  </body>
+</html>
