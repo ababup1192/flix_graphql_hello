@@ -10,6 +10,7 @@
 /// codeBlock は ```` ```言語:ファイル名 {1,3-5} ````、details は `<details><summary>…</summary>` から `</details>` の行まで、
 /// entry へのリンクは `[text](entry:ID)`、underline は `<u>…</u>`、下付きは `~x~`、上付きは `^x^`、蛍光ペンは `==x==`。入れ子は 2 空白、番号は 1 から振り直す。
 /// 表のセルの結合は中身の後ろに `{colspan=2 rowspan=3}`（2 以上の時だけ。結合に覆われる所には空のセルを置いて列の数を合わせる）、
+/// 見出し行の無い表（1 行目が tableHeader で埋まっていない表）は空の見出し行を挟んで書き、読む時は中身が空の見出し行を落とす、
 /// 数式は `$…$`（math マーク。TeX はそのまま）と `$$` の行で囲む mathBlock、text の `$` は `\$`。タスクリストは `- [ ]` `- [x]`（orderedList でも `1. [ ]`）。
 /// video は `@[video](asset:ID "caption"){poster=asset:ID}`。Mermaid は language が mermaid の codeBlock で、Markdown では普通のフェンス。
 /// 読む時は少し広く受け（`*` の箇条書き、`1)`、`***`、`__` と `*`、行末 2 空白、summary の無い `<details>`、`- [X]`）、
@@ -559,17 +560,32 @@ mod Markdown {
     def leadingBacktickCount(line: String): Int32 =
         line |> String.trimLeft |> String.toList |> List.takeWhile(c -> c == '`') |> List.length
 
+    ///
     /// GFM の表。1 行目の次に区切り行。列数は 1 行目に合わせる。
     /// **寄せは 1 行目のセルから取る**（区切り行は列に 1 つしか持てない）。
+    /// 1 行目が tableHeader で埋まっていない表には、空の見出し行を足す。
+    ///
+    /// WhyNot: 見出し行の無い表をそのまま書き出さない。GFM は 1 行目を必ず見出しとして読むので、
+    /// 読み戻すと 1 行目だけが tableHeader に化けて往復で中身が変わる。
+    ///
     def renderTable(rows: List[List[Cell]]): String =
         let headRow = rows |> List.head |> Option.getWithDefault(Nil);
         let headMarks = headRow |> List.flatMap(cell -> alignMark(cell) :: List.repeat(colspanOf(cell) - 1, "---"));
         let marks = if (List.isEmpty(headMarks)) "---" :: Nil else headMarks;
         let separator = "| ${marks |> List.join(" | ")} |";
-        match gridRows(Map.empty(), rows) |> List.map(renderRow) {
-            case first :: rest => (first :: separator :: rest) |> List.join("\n")
-            case Nil           => separator
+        match (isHeaderRow(headRow), gridRows(Map.empty(), rows) |> List.map(renderRow)) {
+            case (_, Nil)              => separator
+            case (true, first :: rest) => (first :: separator :: rest) |> List.join("\n")
+            case (false, body)         => (renderRow(List.repeat(List.length(marks), "")) :: separator :: body) |> List.join("\n")
         }
+
+    /// 見出し行はセルが 1 つ以上あり、全部が tableHeader（RichText.isHeaderRow と同じ判定）。
+    def isHeaderRow(cells: List[Cell]): Bool =
+        not List.isEmpty(cells) and List.forAll(isHeaderCell, cells)
+
+    def isHeaderCell(cell: Cell): Bool =
+        let Cell.Cell(isHeader, _, _, _) = cell;
+        isHeader
 
     ///
     /// 行ごとのセルの文字。**結合に覆われる所に空のセルを置く**（列の数を行ごとに合わせる）。
@@ -1016,11 +1032,20 @@ mod Markdown {
     def isTableSeparator(line: String): Bool =
         String.isMatch(regex = "^\\s*\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|?\\s*$", line) and String.contains(substr = "-", line)
 
+    ///
     /// 1 行目が tableHeader、2 行目（区切り）は寄せを読んで捨て、`|` を含む行が続く間が表。
     /// **寄せは列の属性なので、その列の全セルに同じ値を入れる**（JSON にはセルごとに乗る）。
+    /// 中身が空の見出し行は落として、続く行を全部 tableCell にする。
+    ///
+    /// WhyNot: 空の見出し行を tableHeader として残さない。renderTable が見出し行の無い表に
+    /// 足す行なので、残すと往復で空の見出し行が増える。
+    ///
     def parseTable(lines: List[String]): (Option[Block], List[String]) =
         let (rowLines, after) = List.span(line -> not isBlank(line) and String.contains(substr = "|", line), lines);
         let rows = match rowLines {
+            case header :: separator :: body if isBlankCellLine(header) and not List.isEmpty(body) =>
+                let aligns = alignsOf(separator);
+                body |> List.map(line -> cellsOf(false, aligns, line))
             case header :: separator :: body =>
                 let aligns = alignsOf(separator);
                 cellsOf(true, aligns, header) :: (body |> List.map(line -> cellsOf(false, aligns, line)))
@@ -1028,6 +1053,11 @@ mod Markdown {
             case Nil           => Nil
         };
         (Some(Block.Table(dropCoveredCells(Map.empty(), rows))), after)
+
+    /// セルが 1 つ以上あり、全部が空の行。
+    def isBlankCellLine(line: String): Bool =
+        let cells = splitCells(line);
+        not List.isEmpty(cells) and List.forAll(String.isEmpty, cells)
 
     def cellsOf(isHeader: Bool, aligns: List[Option[String]], line: String): List[Cell] =
         splitCells(line) |> List.zipWithIndex
@@ -1365,17 +1395,16 @@ mod Markdown {
 
     /// 角括弧の対応を数えて閉じる `]` の位置。`\` の次の文字は数えない。
     def closingBracket(text: String, start: Int32): Option[Int32] =
-        List.range(start, String.length(text))
-            |> List.foldLeft((state, index) -> match state {
-                case (Some(found), depth, _)                                          => (Some(found), depth, false)
-                case (None, depth, true)                                              => (None, depth, false)
-                case (None, depth, false) if String.charAt(index, text) == '\\'       => (None, depth, true)
-                case (None, depth, false) if String.charAt(index, text) == '['        => (None, depth + 1, false)
-                case (None, 0, false) if String.charAt(index, text) == ']'            => (Some(index), 0, false)
-                case (None, depth, false) if String.charAt(index, text) == ']'        => (None, depth - 1, false)
-                case other                                                            => other
-            }, (None, 0, false))
-            |> match (found, _, _) -> found
+        closingBracketAt(text, start, 0)
+
+    def closingBracketAt(text: String, index: Int32, depth: Int32): Option[Int32] =
+        if (index >= String.length(text)) None
+        else match String.charAt(index, text) {
+            case '\\' => closingBracketAt(text, index + 2, depth)
+            case '['  => closingBracketAt(text, index + 1, depth + 1)
+            case ']'  => if (depth == 0) Some(index) else closingBracketAt(text, index + 1, depth - 1)
+            case _    => closingBracketAt(text, index + 1, depth)
+        }
 
     ///
     /// link の中身を link マーク付きで解析した 1 歩。pos は `[` の位置。
@@ -1395,15 +1424,15 @@ mod Markdown {
 
     /// 括弧の対応を数えて閉じる `)` の位置。
     def closingParen(text: String, start: Int32): Option[Int32] =
-        List.range(start, String.length(text))
-            |> List.foldLeft((state, index) -> match state {
-                case (Some(found), depth)          => (Some(found), depth)
-                case (None, depth) if String.charAt(index, text) == '(' => (None, depth + 1)
-                case (None, 0) if String.charAt(index, text) == ')'     => (Some(index), 0)
-                case (None, depth) if String.charAt(index, text) == ')' => (None, depth - 1)
-                case other                          => other
-            }, (None, 0))
-            |> fst
+        closingParenAt(text, start, 0)
+
+    def closingParenAt(text: String, index: Int32, depth: Int32): Option[Int32] =
+        if (index >= String.length(text)) None
+        else match String.charAt(index, text) {
+            case '(' => closingParenAt(text, index + 1, depth + 1)
+            case ')' => if (depth == 0) Some(index) else closingParenAt(text, index + 1, depth - 1)
+            case _   => closingParenAt(text, index + 1, depth)
+        }
 
     def linkTarget(target: String): LinkTarget =
         String.stripPrefix(substr = "entry:", target) |> Option.flatMap(EntryId.parse) |> Option.map(id -> LinkTarget.Entry(EntryId.text(id))) |> Option.getWithDefault(LinkTarget.Href(target))

@@ -104,6 +104,23 @@ mod RichText {
     pub def maxHeadingLevel(): Int32 = 4
 
     ///
+    /// doc の入れ子の深さの上限。doc 自身を 1 と数える。
+    ///
+    /// WhyNot: 手前の JSON パーサ（Util.Json.parse）の「maximum nesting depth 64」に任せない。
+    /// パーサが止めると richText の違反ではなく JSON の読み込みエラーになり、どの field の
+    /// どこが悪いか返せない。取り込みのように Json を組み立てて渡す道はパーサを通らない。
+    ///
+    pub def maxDepth(): Int32 = 20
+
+    ///
+    /// doc のノード数の上限。marks は数えない。
+    ///
+    /// WhyNot: HTTP のボディの 1 MiB（Http.maxBodyBytes）に任せない。ボディの上限は
+    /// 入口の 1 つにしか無く、取り込みと DB から読み直した doc には掛からない。
+    ///
+    pub def maxNodes(): Int32 = 10000
+
+    ///
     /// 見出し 1 つ。目次用。
     ///
     /// - level: 1 〜 4
@@ -140,8 +157,35 @@ mod RichText {
     /// ホワイトリストで検査する。path は違反の場所（"fields.body" から始まり、".content[0]" と伸びる）。
     ///
     pub def validate(path: String, doc: Json): List[Violation] = match doc {
-        case Json.JObject(fields) if typeOf(fields) == Some("doc") => checkChildren(path, fields)
+        case Json.JObject(fields) if typeOf(fields) == Some("doc") => match checkSize(path, doc) {
+            case Nil      => checkChildren(path, fields)
+            case tooLarge => tooLarge
+        }
         case _ => Violation.Violation(path, "richText は { type: \"doc\", content: [...] } の形にしてください") :: Nil
+    }
+
+    ///
+    /// 深さとノード数。超えたら中身は見ない。
+    ///
+    /// WhyNot: 例外にしない。この関数は Tx の中から呼ばれるので、投げると接続が開いたまま飛ぶ。
+    ///
+    def checkSize(path: String, doc: Json): List[Violation] =
+        let depthCheck =
+            if (depthOf(doc) > maxDepth()) Violation.Violation(path, "richText の入れ子は ${maxDepth()} 段までにしてください") :: Nil
+            else Nil;
+        let countCheck =
+            if (countNodes(doc) > maxNodes()) Violation.Violation(path, "richText のノードは ${maxNodes()} 個までにしてください") :: Nil
+            else Nil;
+        depthCheck ::: countCheck
+
+    def depthOf(node: Json): Int32 = match node {
+        case Json.JObject(fields) => 1 + (children(fields) |> List.foldLeft((deepest, child) -> Int32.max(deepest, depthOf(child)), 0))
+        case _                    => 0
+    }
+
+    def countNodes(node: Json): Int32 = match node {
+        case Json.JObject(fields) => 1 + (children(fields) |> List.foldLeft((total, child) -> total + countNodes(child), 0))
+        case _                    => 0
     }
 
     def checkChildren(path: String, fields: Map[String, Json]): List[Violation] = match Map.get("content", fields) {
@@ -170,12 +214,27 @@ mod RichText {
             case Some("quoteCite") => Violation.Violation(path, "出典（quoteCite）は引用（blockquote）の最後の子にだけ置けます") :: Nil
             case Some("mathBlock") => checkMathBlock(path, fields)
             case Some("video") => checkVideo(path, fields)
+            case Some("table") => checkChildTypes("tableRow" :: Nil, "表（table）の中は行（tableRow）だけにしてください", path, fields) ::: checkChildren(path, fields)
+            case Some("tableRow") => checkChildTypes("tableCell" :: "tableHeader" :: Nil, "行（tableRow）の中はセル（tableCell / tableHeader）だけにしてください", path, fields) ::: checkChildren(path, fields)
+            case Some("bulletList") => checkChildTypes("listItem" :: Nil, "箇条書き（bulletList）の中は項目（listItem）だけにしてください", path, fields) ::: checkChildren(path, fields)
+            case Some("orderedList") => checkChildTypes("listItem" :: Nil, "番号付きリスト（orderedList）の中は項目（listItem）だけにしてください", path, fields) ::: checkChildren(path, fields)
             case Some(name) if List.memberOf(name, containerNodes()) => checkChildren(path, fields)
             case Some(name) if List.memberOf(name, leafNodes()) => Nil
             case Some(name) => Violation.Violation(path, "知らないノード '${name}' です（${List.join(", ", containerNodes() ::: leafNodes())}）") :: Nil
         }
         case _ => Violation.Violation(path, "ノードはオブジェクトにしてください") :: Nil
     }
+
+    ///
+    /// 子の種類を allowed に絞る。
+    ///
+    /// WhyNot: 汎用の腕（containerNodes）に任せない。table の直下の heading のように、
+    /// HTML では不正な形が通り、Markdown へ書き出すと黙って消える。
+    ///
+    def checkChildTypes(allowed: List[String], message: String, path: String, fields: Map[String, Json]): List[Violation] =
+        children(fields) |> List.zipWithIndex |> List.flatMap(match (index, child) ->
+            if (nodeType(child) |> Option.exists(name -> List.memberOf(name, allowed))) Nil
+            else Violation.Violation("${path}.content[${index}]", message) :: Nil)
 
     /// text ノード。text は文字列、marks は許可リストの物だけ。math が付く text は TeX なので空でなく、他のマークと混ぜない。
     def checkText(path: String, fields: Map[String, Json]): List[Violation] =
@@ -541,18 +600,33 @@ mod RichText {
     ///
     /// attrs.id の無い heading に出現順の `h-N` を入れた doc。html と headings が同じ id を見るための前処理。
     ///
-    def withHeadingIds(doc: Json): Json = fst(numberHeadings(1, doc))
+    def withHeadingIds(doc: Json): Json = fst(numberHeadings(takenHeadingIds(doc), 1, doc))
+
+    ///
+    /// doc がすでに持っている heading の attrs.id。
+    ///
+    /// WhyNot: 採番の前に集めておかないと、doc が明示的に持つ `h-2` と自動採番の `h-2` がぶつかり、
+    /// HTML と headings に同じ id が 2 つ出る（isHeadingId は `h-2` を許すので入力として作れる）。
+    ///
+    def takenHeadingIds(doc: Json): Set[String] =
+        nodes(doc) |> List.filter(fields -> typeOf(fields) == Some("heading")) |> List.filterMap(attrString("id")) |> List.toSet
+
+    /// taken に無い最初の番号まで送る。
+    def freeHeadingNumber(taken: Set[String], next: Int32): Int32 =
+        if (Set.memberOf("h-${next}", taken)) freeHeadingNumber(taken, next + 1) else next
 
     /// ノードとその子に id を入れる。次に使う番号を一緒に返す。
-    def numberHeadings(next: Int32, node: Json): (Json, Int32) = match node {
+    def numberHeadings(taken: Set[String], next: Int32, node: Json): (Json, Int32) = match node {
         case Json.JObject(fields) =>
             let (numbered, afterSelf) =
-                if (typeOf(fields) == Some("heading") and Option.isEmpty(attrString("id", fields)))
-                    (Map.insert("attrs", Json.JObject(Map.insert("id", Json.JString("h-${next}"), attrs(fields))), fields), next + 1)
+                if (typeOf(fields) == Some("heading") and Option.isEmpty(attrString("id", fields))) {
+                    let number = freeHeadingNumber(taken, next);
+                    (Map.insert("attrs", Json.JObject(Map.insert("id", Json.JString("h-${number}"), attrs(fields))), fields), number + 1)
+                }
                 else (fields, next);
             let (childrenNumbered, afterChildren) = List.foldLeft((state, child) -> {
                 let (acc, counter) = state;
-                let (done, following) = numberHeadings(counter, child);
+                let (done, following) = numberHeadings(taken, counter, child);
                 (done :: acc, following)
             }, (Nil, afterSelf), children(numbered));
             let content = childrenNumbered |> List.reverse |> List.toVector |> Json.JArray;
@@ -998,11 +1072,6 @@ mod RichText {
     }
 
     ///
-    /// セルの結合。**2 以上の時だけ出す。**
-    /// エディタは結合していないセルにも colspan / rowspan を 1 で付けるので、そのまま出すと
-    /// 全セルに意味の無い属性が並ぶ。落とすと、API や取り込みが入れた結合が消えて表が崩れる。
-    ///
-    ///
     /// セルの寄せ。**style で出す**（属性の align は HTML5 で廃止）。
     /// colgroup には出せない（CSS の text-align は col から効かない）ので、セルごとに書く。
     ///
@@ -1010,6 +1079,11 @@ mod RichText {
         attrString("align", fields) |> Option.filter(align -> List.memberOf(align, cellAligns()))
             |> Option.map(align -> " style=\"text-align: ${align}\"") |> Option.getWithDefault("")
 
+    ///
+    /// セルの結合。**2 以上の時だけ出す。**
+    /// エディタは結合していないセルにも colspan / rowspan を 1 で付けるので、そのまま出すと
+    /// 全セルに意味の無い属性が並ぶ。落とすと、API や取り込みが入れた結合が消えて表が崩れる。
+    ///
     def spanAttrs(fields: Map[String, Json]): String =
         spanAttr("colspan", fields) ++ spanAttr("rowspan", fields)
 

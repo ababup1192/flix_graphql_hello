@@ -693,4 +693,61 @@ mod TestRichText {
             expected = List#{ "asset001", "asset002" },
             RichText.assetIds(node("doc", List#{ video(List#{ ("assetId", Json.JString("asset001")), ("poster", Json.JString("asset002")) }), image("asset001", "") })) |> List.map(AssetId.text))
 
+
+
+    // ---- 大きすぎる doc ----
+
+    /// doc の下に bulletList / listItem を levels 組、一番下に paragraph を置いた doc。全体の深さは levels * 2 + 2。
+    def listNest(levels: Int32): Json =
+        node("doc", List#{ List.range(0, levels) |> List.foldLeft((inner, _) -> node("bulletList", List#{ node("listItem", List#{ inner }) }), node("paragraph", Nil)) })
+
+    /// 入れ子の深さ。上限ちょうど（9 組で 20 段）は通り、1 組深い（22 段）と止まる。
+    @Test
+    def testValidateDepthLimit(): Unit \ Assert =
+        Assert.assertEq(
+            expected = List#{ 0, 1 },
+            List#{ RichText.maxDepth() / 2 - 1, RichText.maxDepth() / 2 } |> List.map(levels -> List.length(RichText.validate("fields.body", listNest(levels)))))
+
+    /// ノード数。上限ちょうどは通り、1 つ多いと止まる。
+    @Test
+    def testValidateNodeLimit(): Unit \ Assert =
+        Assert.assertEq(
+            expected = List#{ 0, 1 },
+            List#{ RichText.maxNodes() - 1, RichText.maxNodes() }
+                |> List.map(count -> List.length(RichText.validate("fields.body", node("doc", List.repeat(count, node("paragraph", Nil)))))))
+
+    // ---- 子の種類 ----
+
+    /// table の中は tableRow、tableRow の中はセル、bulletList / orderedList の中は listItem だけ。
+    @Test
+    def testValidateChildTypes(): Unit \ Assert =
+        let bad = node("doc", List#{
+            node("table", List#{ nodeWith("heading", List#{("level", CmsTestKit.intJson(1))}, Nil) }),
+            node("tableRow", List#{ node("paragraph", Nil) }),
+            node("bulletList", List#{ node("paragraph", Nil) }),
+            node("orderedList", List#{ node("paragraph", Nil) })
+        });
+        Assert.assertEq(
+            expected = List#{
+                "fields.body.content[0].content[0]",
+                "fields.body.content[1].content[0]",
+                "fields.body.content[2].content[0]",
+                "fields.body.content[3].content[0]"
+            },
+            RichText.validate("fields.body", bad) |> List.map(violation -> { let Violation.Violation(path, _) = violation; path }))
+
+    // ---- 見出しの id ----
+
+    /// 明示の id `h-2` があっても、自動採番はその番号を飛ばすので id は重ならない。
+    @Test
+    def testHeadingIdsAvoidCollision(): Unit \ Assert =
+        let doc = node("doc", List#{
+            nodeWith("heading", List#{("level", CmsTestKit.intJson(2))}, List#{text("A")}),
+            nodeWith("heading", List#{("level", CmsTestKit.intJson(2)), ("id", Json.JString("h-2"))}, List#{text("B")}),
+            nodeWith("heading", List#{("level", CmsTestKit.intJson(2))}, List#{text("C")})
+        });
+        Assert.assertEq(
+            expected = List#{ "h-1", "h-2", "h-3" },
+            RichText.headings(doc) |> List.map(heading -> heading#id))
+
 }

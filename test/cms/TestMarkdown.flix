@@ -452,6 +452,50 @@ mod TestMarkdown {
             expected = (quotedMarkdown, quoted, boldTableMarkdown, boldTable),
             (Markdown.toMarkdown(quoted), Markdown.fromMarkdown(quotedMarkdown), Markdown.toMarkdown(boldTable), Markdown.fromMarkdown(boldTableMarkdown)))
 
+    ///
+    /// 見出し行の無い表（全セルが tableCell）は、空の見出し行を挟んで書き出し、読み戻すと同じ形に戻る。
+    ///
+    ///   | (空) | (空) |
+    ///   | ---  | ---  |
+    ///   | a    | b    |
+    ///   | c    | d    |
+    ///
+    @Test
+    def testHeaderlessTableRoundTrip(): Unit \ Assert =
+        let headerless = doc(List#{ table(List#{
+            tableRow(List#{ tableCell(List#{ plain("a") }), tableCell(List#{ plain("b") }) }),
+            tableRow(List#{ tableCell(List#{ plain("c") }), tableCell(List#{ plain("d") }) }) }) });
+        let headerlessMarkdown = "|  |  |\n| --- | --- |\n| a | b |\n| c | d |";
+        Assert.assertEq(
+            expected = (headerlessMarkdown, headerless, headerless),
+            (Markdown.toMarkdown(headerless), Markdown.fromMarkdown(headerlessMarkdown),
+             Markdown.fromMarkdown(Markdown.toMarkdown(headerless))))
+
+    ///
+    /// 括弧の対応を数えて閉じる位置を返す（`closingBracket` / `closingParen`）。
+    /// 入れ子・エスケープ・閉じが無い・文字列の終わりで切れる、の境界を link の切れ目で見る。
+    ///
+    def bracketPairs(): List[(String, Json)] = List#{
+        // 入れ子の `[` は対応する `]` まで数える（内側で切らない）
+        ("[a[b]c](https://example.com/)", doc(List#{ paragraph(List#{ linked("https://example.com/", "a[b]c") }) })),
+        // `\` の次の `]` は数えない
+        ("[a\\]b](https://example.com/)", doc(List#{ paragraph(List#{ linked("https://example.com/", "a]b") }) })),
+        // 入れ子の `(` は対応する `)` まで数える
+        ("[a](https://example.com/x(y)z)", doc(List#{ paragraph(List#{ linked("https://example.com/x(y)z", "a") }) })),
+        // 閉じる `]` が無ければ link にせず文字のまま
+        ("[a(https://example.com/)", doc(List#{ simpleParagraph("[a(https://example.com/)") })),
+        // 閉じる `)` が無ければ link にせず文字のまま
+        ("[a](https://example.com/", doc(List#{ simpleParagraph("[a](https://example.com/") })),
+        // 文字列の終わりが `\` でも数え続けない
+        ("[a\\", doc(List#{ simpleParagraph("[a\\") }))
+    }
+
+    @Test
+    def testFromMarkdownBrackets(): Unit \ Assert =
+        Assert.assertEq(
+            expected = bracketPairs(),
+            bracketPairs() |> List.map(match (markdown, _) -> (markdown, Markdown.fromMarkdown(markdown))))
+
     /// エスケープ対象の文字（* _ [ ] ` \ # | < > ~ ^ =）は書く時にエスケープし、読むと戻る。行頭の - と 1. も段落のまま。
     /// 平文の `2^10^` は上付きに、`m==n` はハイライトにならない。
     @Test
