@@ -76,8 +76,23 @@ mod LinkCards {
             |> HttpRequest.setHeader("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5")
             |> HttpRequest.withTimeout(Time.Duration.seconds(Ogp.timeoutSeconds()))
 
+    ///
     /// User-Agent。プロジェクト名入り（相手のサイトが誰が取りに来たか分かる）。
-    pub def userAgent(projectName: String): String = "flix-cms-linkcard/1.0 (+${projectName})"
+    ///
+    /// WhyNot: プロジェクト名をそのまま入れない。HTTP のヘッダの値は ASCII だけで、日本語の名前を
+    /// 入れると送る前に JDK の HttpClient が弾き、そのプロジェクトのリンクカードが 1 件も取れなくなる
+    /// （「ブログの作例」という名前で実際に全部落ちた）。日本語の CMS で日本語の名前は普通なので、
+    /// 名前を捨てるのではなく入れられる文字だけ残す。
+    ///
+    /// WhyNot: 括弧も落とす。User-Agent の注記は `(` と `)` で囲む決まりなので、名前の中の括弧が
+    /// 途中で閉じると相手のパーサが読み違える。
+    ///
+    pub def userAgent(projectName: String): String =
+        let safe = projectName
+            |> String.replaceMatches(regex = "[^\\x20-\\x7E]", to = "")
+            |> String.replaceMatches(regex = "[()]", to = "")
+            |> String.trim;
+        if (String.isEmpty(safe)) "flix-cms-linkcard/1.0" else "flix-cms-linkcard/1.0 (+${safe})"
 
     /// 応答 → OGP か理由。着いた先（リダイレクト後）がプライベートなら断り、2xx 以外・HTML 以外・OGP も title も無い物は理由。
     def readResponse(url: String, response: HttpResponse): Result[String, Ogp.Meta] =
