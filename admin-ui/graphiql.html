@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GraphiQL</title>
+    <script>
+      // 最初のちらつきを防ぐため、描く前にテーマを当てる（index.html と同じ）。
+      try {
+        var t = localStorage.getItem("theme");
+        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    </script>
+    <style>
+      /* WhyNot: styles.css を読まない。あれは Tailwind と管理画面の部品の全部で、
+         この帯 1 本のために Elm 側の CSS を引き込むと、GraphiQL 自身の CSS と競合する。
+         色の値は styles.css の同じ名前の物を写している。 */
+      :root {
+        color-scheme: light;
+        --color-panel: #ffffff;
+        --color-edge: #d1d9e0;
+        --color-ink: #1f2328;
+        --color-ink-soft: #59636e;
+        --color-link: #0969da;
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --color-panel: #0d1117;
+        --color-edge: #3d444d;
+        --color-ink: #f0f6fc;
+        --color-ink-soft: #9198a1;
+        --color-link: #4493f8;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          color-scheme: dark;
+          --color-panel: #0d1117;
+          --color-edge: #3d444d;
+          --color-ink: #f0f6fc;
+          --color-ink-soft: #9198a1;
+          --color-link: #4493f8;
+        }
+      }
+      html,
+      body,
+      #app {
+        margin: 0;
+        height: 100%;
+      }
+      #app {
+        display: flex;
+        flex-direction: column;
+        background: var(--color-panel);
+        color: var(--color-ink);
+        font: 13px system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      .band {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 6px 12px;
+        border-bottom: 1px solid var(--color-edge);
+        white-space: nowrap;
+        overflow-x: auto;
+      }
+      .band strong {
+        font-weight: 600;
+      }
+      .band .note {
+        color: var(--color-ink-soft);
+      }
+      .band code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+      }
+      .band a {
+        margin-left: auto;
+        color: var(--color-link);
+        text-decoration: none;
+      }
+      .band a:hover {
+        text-decoration: underline;
+      }
+      .graphiql-container {
+        flex: 1;
+        min-height: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/js/graphiql.tsx"></script>
+  </body>
+</html>

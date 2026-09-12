@@ -14,6 +14,11 @@ curl -s localhost:8080/health # {"status":"ok","version":"..."}
 - **Cloudflare Tunnel（おすすめ。ポートを開けない）**: cloudflared をこの VPS に入れ、`cms.example.com → http://localhost:8080`、`assets.example.com → http://localhost:9000` の 2 本を向ける。`ASSET_PUBLIC_URL=https://assets.example.com/cms`
 - **Caddy**: `docker compose --profile caddy up -d`。`CMS_DOMAIN` と `ASSET_DOMAIN` の DNS をこの VPS に向ければ TLS は自動
 
+## GraphiQL（管理画面のホストで `/p/{プロジェクト slug}/graphiql`）
+
+管理画面（`admin-ui/dist`）には GraphiQL の入口 `graphiql.html` が別に入っている。配信側は `/p/{プロジェクト slug}/graphiql` を `graphiql.html?project={プロジェクト slug}` に読み替える（Caddy の書き方は [Caddyfile](Caddyfile) のコメント。vite の dev サーバも同じ読み替えをする）。
+開いた GraphiQL は**同じホストの `/p/{プロジェクト slug}/graphql`**（コンテンツ API）に Access の cookie だけで問い合わせるので、管理画面のホストはこのパスを cms に転送する（`/p/{プロジェクト slug}/admin/graphql` と同じ扱い。docs/design/admin-ui-spec.md 13.2）。既定は公開中を読み、下書きは `stage: DRAFT` を付けるとログインした人の権限で読める。API キーを試すならヘッダの欄に `X-Api-Key` を書く。
+
 ## テナント分離（RLS）
 
 プロジェクトの中身の表（content_types / content_fields / entries / entry_versions / entry_links / assets）と auth の表（memberships / invitations / api_keys）には PostgreSQL の RLS が掛かっている。

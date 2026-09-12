@@ -1,6 +1,11 @@
 # Cloudflare Tunnel を使わない時の入口。TLS は Let's Encrypt で自動。
 # {$CMS_DOMAIN} は API、{$ASSET_DOMAIN} は MinIO の画像配信（バケットは匿名の読み取りだけ）。
 # サブドメインでプロジェクトを分ける（{slug}.{$CMS_DOMAIN}）のは認証の段で足す。
+#
+# 管理画面のホスト（Access の内側。docs/design/admin-ui-spec.md 13.2）で admin-ui/dist を配る時は、
+# GraphiQL の URL を別の入口の静的ファイルに読み替える。`/p` の残りは index.html の SPA fallback。
+#   @graphiql path_regexp graphiql ^/p/([^/]+)/graphiql/?$
+#   rewrite @graphiql /graphiql.html?project={re.graphiql.1}
 
 {$CMS_DOMAIN} {
 	encode zstd gzip

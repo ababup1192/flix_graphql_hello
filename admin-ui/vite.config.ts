@@ -49,8 +49,32 @@ function localOnly() {
   };
 }
 
+// `/p/{slug}/graphiql` を `graphiql.html?project={slug}` に読み替える。
+//
+// WhyNot: GraphiQL を Elm のルートに足さない。React と monaco で 1 つの塊になる物を
+// index.html の入口に混ぜると、管理画面を開くたびに読む量が増える。別の入口にして、
+// URL の形だけを配信側で揃える（本番は deploy/Caddyfile が同じ読み替えをする）。
+function graphiqlRewrite() {
+  const pattern = /^\/p\/([^/?#]+)\/graphiql\/?(?:\?.*)?$/;
+  return {
+    name: "graphiql-rewrite",
+    configureServer(server: { middlewares: { use: (fn: (req: any, _res: any, next: () => void) => void) => void } }) {
+      server.middlewares.use((req, _res, next) => {
+        const matched = pattern.exec(req.url ?? "");
+        if (matched) req.url = `/graphiql.html?project=${matched[1]}`;
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [elmPlugin({ debug: false }), tailwindcss(), localOnly()],
+  plugins: [elmPlugin({ debug: false }), tailwindcss(), localOnly(), graphiqlRewrite()],
+  build: {
+    rollupOptions: {
+      input: { index: "index.html", graphiql: "graphiql.html" },
+    },
+  },
   server: {
     port: 5173,
     strictPort: true,

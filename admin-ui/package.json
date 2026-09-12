@@ -20,6 +20,8 @@
   "devDependencies": {
     "@dillonkearns/elm-graphql": "^4.3.2",
     "@types/node": "^22.20.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@vitest/browser": "^5.0.0",
     "@vitest/browser-playwright": "^5.0.0",
     "elm": "^0.19.2-0",
@@ -34,6 +36,7 @@
     "vitest": "^5.0.0"
   },
   "dependencies": {
+    "@graphiql/toolkit": "^0.12.1",
     "@tailwindcss/vite": "^4.3.3",
     "@tiptap/core": "^3.31.3",
     "@tiptap/extension-blockquote": "^3.31.3",
@@ -46,9 +49,13 @@
     "@tiptap/extension-underline": "^3.31.3",
     "@tiptap/pm": "^3.31.3",
     "@tiptap/starter-kit": "^3.31.3",
+    "graphiql": "^5.4.0",
+    "graphql": "^17.0.2",
     "katex": "^0.18.7",
     "lowlight": "^3.3.0",
     "mermaid": "^11.17.2",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "tailwindcss": "^4.3.3"
   }
 }
