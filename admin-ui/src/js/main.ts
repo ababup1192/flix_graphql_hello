@@ -8,6 +8,18 @@ import "../../web/asset-thumb";
 const root = document.getElementById("app");
 const app = Elm.Main.init({ node: root, flags: null });
 
+// Elm が変わったら、差し替えではなくページを読み直す。
+//
+// WhyNot: vite-plugin-elm のホットスワップに任せない。あれは model を残して新しい view を
+// 当て直すが、仮想 DOM が実 DOM とずれて、保存する度に上のバーが増えていく（実際に 940 個に
+// なった）。開発中に画面を開いたまま Elm を保存するのは普通の事なので、壊れた見た目で
+// 不具合を探させない。model は失うが、URL がほぼ全部の状態を持っているので戻れる。
+if (import.meta.hot) {
+  import.meta.hot.on("vite:afterUpdate", (payload) => {
+    if (payload.updates.some((update) => update.path.endsWith(".elm"))) window.location.reload();
+  });
+}
+
 app.ports.apiRequest_Api_JS.subscribe(async (envelope: Envelope) => {
   const reply = await send(envelope);
   app.ports.apiResponse_Api_ELM.send(reply);
