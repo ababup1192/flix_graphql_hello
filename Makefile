@@ -11,7 +11,8 @@ TEST_DB = cms_test
 PG_BASE = CMS_DB_USER=cms CMS_DB_PASSWORD=cms \
 	ASSET_ENDPOINT=http://127.0.0.1:9000 ASSET_BUCKET=cms ASSET_ACCESS_KEY=cms ASSET_SECRET_KEY=cms-secret \
 	ASSET_REGION=us-east-1 ASSET_PUBLIC_URL=http://127.0.0.1:9000/cms \
-	CMS_AUTH=dev CMS_BOOTSTRAP_OWNER=dev@localhost CMS_API_KEY_PEPPER=dev-pepper
+	CMS_AUTH=dev CMS_BOOTSTRAP_OWNER=dev@localhost CMS_API_KEY_PEPPER=dev-pepper \
+	CMS_PUBLIC_ORIGIN=http://localhost:8080
 
 # 開発（make run / make import-microcms）が使う DB
 PG_ENV = CMS_DSN=jdbc:postgresql://127.0.0.1:5432/$(DEV_DB) $(PG_BASE)

@@ -79,6 +79,16 @@ versions object____ =
     Object.selectionForCompositeField "versions" [] object____ (Basics.identity >> Decode.list)
 
 
+{-| 自分の自動保存。無ければ（下書きと同じ中身の時も）null。他の人の物は見えず、
+人でない主体（API キー・プレビュー）には常に null
+-}
+autosave :
+    SelectionSet decodesTo Api.Admin.Object.EntryAutosave
+    -> SelectionSet (Maybe decodesTo) Api.Admin.Object.Entry
+autosave object____ =
+    Object.selectionForCompositeField "autosave" [] object____ (Basics.identity >> Decode.nullable)
+
+
 type alias DiffRequiredArguments =
     { from : Api.Admin.InputObject.VersionRef
     , to : Api.Admin.InputObject.VersionRef

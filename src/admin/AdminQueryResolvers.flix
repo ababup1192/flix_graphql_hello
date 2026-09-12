@@ -183,9 +183,17 @@ mod AdminQueryResolvers {
 
     def listApiKeys(): List[ApiKey] \ DbRead + CmsErr + Tenant + Session = ApiKeys.list(Session.grant())
 
+    /// Query.publicOrigin
+    ///
+    /// WhyNot: 管理画面に自分のオリジンから組ませない。管理画面と コンテンツ API / MCP は
+    /// 別のホストに置く（docs/design/admin-ui-spec.md 13.2）。管理側は Cloudflare Access の
+    /// 内側なので、そのオリジンを案内に出すと MCP クライアントは Access を通れず繋がらない。
+    pub def publicOrigin(deps: Deps): GeneratedAdmin.QueryPublicOriginResolver[AdminEff] =
+        _context -> Ok(deps#publicOrigin |> Option.getWithDefault(""))
+
     /// type Query のリゾルバ一式
-    pub def resolvers(): GeneratedAdmin.QueryResolvers[AdminEff] =
+    pub def resolvers(deps: Deps): GeneratedAdmin.QueryResolvers[AdminEff] =
         { contentTypes = contentTypes(), contentType = contentType(), entries = entries(), entry = entry(), assets = assets(), asset = asset(),
-          publishCheck = publishCheck(), impact = impact(), fieldImpact = fieldImpact(), publishPlan = publishPlan(), viewer = viewer(), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries(), schedules = schedules(), auditEvents = auditEvents(), auditEventsCount = auditEventsCount(), linkCards = linkCards() }
+          publishCheck = publishCheck(), impact = impact(), fieldImpact = fieldImpact(), publishPlan = publishPlan(), viewer = viewer(), publicOrigin = publicOrigin(deps), me = me(), members = members(), invitations = invitations(), apiKeys = apiKeys(), webhooks = webhooks(), webhookDeliveries = webhookDeliveries(), schedules = schedules(), auditEvents = auditEvents(), auditEventsCount = auditEventsCount(), linkCards = linkCards() }
 
 }

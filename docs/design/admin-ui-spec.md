@@ -498,6 +498,7 @@ richText の編集はスマホでもできるが、挿せるのは段落・見�
 /account/graphql
 ```
 - パスで Access を切る案は採らない（`/p/*/admin/graphql` のワイルドカードが中間にあり、1 文字の設定ミスで保護漏れが起きる）
+- **管理画面は公開側のホストを自分では知れない。** `/mcp` の案内のように公開側の URL を出す所は、サーバの `CMS_PUBLIC_ORIGIN` を管理 API の `publicOrigin` で受け取って組む。管理画面自身のオリジン（Access の内側）で代わりに組むと、コピーしても繋がらない URL を出す事になる（実際に出していた）
 - `/jobs/tick` は VPS のローカルから叩く（compose は 127.0.0.1 にしか publish しない）。Cloudflare の cron を使う時だけ Access の Service Auth でバイパスし、CMS 側は `X-Jobs-Token` で二重に守る
 - 前段に **Cloudflare Access**（`CMS_AUTH=jwks`、`CMS_AUTH_HEADER=Cf-Access-Jwt-Assertion`、`CMS_AUTH_ISSUER` / `CMS_AUTH_JWKS_URL` / `CMS_AUTH_AUDIENCE`）。ブラウザは Access の cookie を持ち、Cloudflare が JWT のヘッダを足す
 - **管理画面は `Authorization` を自分で付けない。** リクエストは `credentials: "same-origin"` で投げるだけ

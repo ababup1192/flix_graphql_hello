@@ -43,6 +43,9 @@ type alias Project =
 type alias ViewerInfo =
     { name : String
     , permissions : List String
+
+    {- コンテンツ API と MCP を外から叩くオリジン。未設定なら空。 -}
+    , publicOrigin : String
     }
 
 

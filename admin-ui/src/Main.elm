@@ -139,6 +139,12 @@ type alias Workspace =
     -}
     , typesArrived : Bool
     , origin : String
+
+    {- コンテンツ API と MCP を外から叩くオリジン（配備の値。サーバの CMS_PUBLIC_ORIGIN）。
+       WhyNot: `origin` で代用しない。管理画面は Access の内側に置くので、その
+       オリジンを MCP の案内に出すと、クライアントは Access を通れず繋がらない。
+    -}
+    , publicOrigin : String
     , page : Page
     }
 
@@ -360,6 +366,10 @@ update msg model =
                             result
                                 |> Result.map (.permissions >> Permission.fromList)
                                 |> Result.withDefault []
+                        , publicOrigin =
+                            result
+                                |> Result.map .publicOrigin
+                                |> Result.withDefault ""
                     }
                 )
                 model
@@ -1121,6 +1131,7 @@ gotPerson person model =
                 -- プロジェクトが選べなければ問い合わせ自体を出さない。待っても届かない
                 , typesArrived = project == Nothing
                 , origin = model.origin
+                , publicOrigin = ""
                 , page = Placeholder ""
                 }
 
@@ -1631,7 +1642,7 @@ pageView workspace =
             Account.view page |> Html.map AccountMsg
 
         ProjectPage page ->
-            ProjectPage.view { origin = workspace.origin }
+            ProjectPage.view { publicOrigin = workspace.publicOrigin }
                 page
                 |> Html.map ProjectMsg
 

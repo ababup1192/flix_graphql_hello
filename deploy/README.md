@@ -404,5 +404,6 @@ ASSET_PUBLIC_URL=https://assets.example.com
 | `CMS_MAX_CONNECTIONS` | HTTP の同時接続の上限。超えた接続は `503` と `Retry-After: 1` で断る（待ち行列は無い）。今の数は `/health` の `connections` | 256 |
 | `CMS_LOG_LEVEL` | ログの最低 severity（`debug` / `info` / `warn` / `error`）。`debug` で `/health` の行も出る | info |
 | `CMS_BASE_DOMAIN` | `{プロジェクト slug}.{base}` の Host でプロジェクトを選ぶ。無ければ `/p/{プロジェクト slug}/` だけ | 無し |
+| `CMS_PUBLIC_ORIGIN` | コンテンツ API と `/mcp` を外から叩く時のオリジン（`https://cms.example.com`。末尾の `/` は落とす）。管理画面が「AI からつなぐ」の URL に使う。管理画面は Access の内側なので自分のオリジンでは案内できない。無ければ画面は URL を出さず設定を促す | 無し |
 | `CMS_API_KEY_PEPPER` / `CMS_API_KEY_PEPPER_ID` | API キーと PAT のハッシュ、プレビュートークンの署名に混ぜる秘密と版。無ければ鍵と PAT を発行できない | 無し / v1 |
 | `JAVA_OPTS` | JVM の引数。`ExitOnOutOfMemoryError` は OutOfMemoryError で（スレッド 1 本でなく）プロセスごと落として docker に再起動させる | `-Xss32m -XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError` |

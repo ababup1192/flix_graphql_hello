@@ -261,11 +261,15 @@ createProject id args =
 viewer : String -> Slug -> ( Api.Request, D.Decoder ViewerInfo )
 viewer id project =
     Api.query { id = id, kind = "viewer", project = project }
-        (Api.Admin.Query.viewer
-            (SS.map2 (\name permissions -> { name = name, permissions = permissions })
-                Viewer.name
-                Viewer.permissions
+        (SS.map2 (\who publicOrigin -> { name = who.name, permissions = who.permissions, publicOrigin = publicOrigin })
+            (Api.Admin.Query.viewer
+                (SS.map2 (\name permissions -> { name = name, permissions = permissions })
+                    Viewer.name
+                    Viewer.permissions
+                )
             )
+            -- 配備の値。身元と一緒に 1 往復で取る（画面を開く度に別の問い合わせを出さない）
+            Api.Admin.Query.publicOrigin
         )
 
 
@@ -1030,7 +1034,7 @@ createEntry id project args =
 updateEntry : String -> Slug -> { entryId : String, fields : D.Value, expectedVersion : Int } -> ( Api.Request, D.Decoder EntryRow )
 updateEntry id project args =
     Api.mutation { id = id, kind = "updateEntry", project = project }
-        (AdminMutation.updateEntry
+        (AdminMutation.updateEntry (\optional -> optional)
             { id = args.entryId, fields = args.fields, expectedVersion = args.expectedVersion }
             entryRow
         )

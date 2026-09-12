@@ -68,6 +68,7 @@ def start(version: String, sink: Log.Sink): Unit \ {IO, Fs.FileRead, Sys.Exit, S
 /// - defaultProjectSlug: 同じ物をログに出す形（既定 default。空なら None）
 /// - server: ルート表に渡す物（CORS / version / CMS_JOBS_TOKEN / CMS_CACHE_*）
 /// - baseDomain: CMS_BASE_DOMAIN（Host でプロジェクトを選ぶ。空なら None）
+/// - publicOrigin: CMS_PUBLIC_ORIGIN（コンテンツ API と MCP を外から叩くオリジン。末尾の / は落とす。空なら None）
 /// - jobsOn: CMS_JOBS が off でない
 /// - jobsDrainSeconds: CMS_JOBS_DRAIN_SECONDS
 /// - scheduler: 予約公開の tick の設定（CMS_SCHEDULER_CHUNK_SIZE / CMS_SCHEDULER_TICK_BUDGET_SECONDS）
@@ -82,10 +83,22 @@ type alias EnvConfig = {
     owner = Jdbc.ConnectionConfig, app = Option[Jdbc.ConnectionConfig], db = Jdbc.ConnectionConfig, pool = Pool.PoolConfig, borrowTimeoutMs = Int32,
     storage = Option[StorageConfig.StorageConfig], auth = AuthConfig.AuthConfig,
     defaultProject = Option[String], defaultProjectSlug = Option[String],
-    server = ServerConfig, baseDomain = Option[String],
+    server = ServerConfig, baseDomain = Option[String], publicOrigin = Option[String],
     jobsOn = Bool, jobsDrainSeconds = Int64, scheduler = Scheduler.Config, purge = Option[PurgeTarget], selfHeal = Option[SelfHeal.Settings],
     maxConnections = Int32, shutdownTimeoutMs = Int64,
     importDir = String, importImageDir = String, importCount = Int32 }
+
+///
+/// CMS_PUBLIC_ORIGIN を使える形にする。前後の空白と末尾の `/` を落とし、空なら None。
+///
+/// WhyNot: 末尾の `/` をそのまま残さない。画面はこの後ろにパスを繋ぐので、
+/// `https://cms.example.com/` を入れた人だけ `//p/demo/mcp` になる。
+///
+pub def publicOriginOf(raw: Option[String]): Option[String] =
+    raw
+        |> Option.map(String.trim)
+        |> Option.map(text -> if (String.endsWith(suffix = "/", text)) String.dropRight(1, text) else text)
+        |> Option.filter(text -> not String.isEmpty(text))
 
 ///
 /// 環境変数を全部読む段。形が悪い物（CMS_DSN 無し、ASSET_* や CMS_AUTH の不足）は Err で起動を止める。
@@ -111,6 +124,7 @@ def readConfig(version: String): Result[String, EnvConfig] \ {IO, Sys.Env} =
                      jobsToken = Sys.Env.getVar("CMS_JOBS_TOKEN") |> Option.filter(text -> not String.isEmpty(text)),
                      cache = cache },
           baseDomain = Sys.Env.getVar("CMS_BASE_DOMAIN") |> Option.filter(text -> not String.isEmpty(text)),
+          publicOrigin = publicOriginOf(Sys.Env.getVar("CMS_PUBLIC_ORIGIN")),
           jobsOn = Sys.Env.getVar("CMS_JOBS") |> Option.getWithDefault("on") != "off",
           jobsDrainSeconds = Sys.Env.getVar("CMS_JOBS_DRAIN_SECONDS") |> Option.flatMap(Int64.fromString) |> Option.getWithDefault(15i64),
           scheduler = Scheduler.configFromEnv(),
@@ -154,7 +168,7 @@ def boot(config: EnvConfig, sink: Log.Sink): Result[String, Started] \ {IO, Fs.F
         _              <- ensureAppRole(config#owner, config#app);
         pool           <- openPool(config#pool);
         // 依存と既定プロジェクト
-        deps           <- Ok({ storage = config#storage, auth = config#auth, http = OutboundHttp.newClient(), log = sink });
+        deps           <- Ok({ storage = config#storage, auth = config#auth, http = OutboundHttp.newClient(), log = sink, publicOrigin = config#publicOrigin });
         defaultProject <- resolveDefaultProject(pool, config#defaultProject);
         // エンジン。管理 API は既定プロジェクトの分を先に組んで、型定義が壊れていれば起動で止める
         accountEngine  <- AccountSchema.engine(pool, deps);

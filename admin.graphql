@@ -25,6 +25,9 @@ type Query {
   publishPlan(ids: [ID!]!, withDependencies: Boolean = true): PublishPlan!
   """今の身元（API キー / PAT / ログイン）と、できる事。何者としてこの API を叩いているかを確かめる"""
   viewer: Viewer!
+  """コンテンツ API と MCP を外から叩く時のオリジン（CMS_PUBLIC_ORIGIN）。末尾に / は付かない。
+  管理画面は Access の内側に置くので、案内に自分のオリジンを使えない。未設定なら空"""
+  publicOrigin: String!
 
   """自分。ログインしていなければ null。organizations と projects は自分が触れる物だけ"""
   me: Me

@@ -203,6 +203,10 @@ createEntry fillInOptionals____ requiredArgs____ object____ =
     Object.selectionForCompositeField "createEntry" (optionalArgs____ ++ [ Argument.required "typeId" requiredArgs____.typeId (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId), Argument.required "fields" requiredArgs____.fields (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecJson) ]) object____ Basics.identity
 
 
+type alias UpdateEntryOptionalArguments =
+    { saveVersion : OptionalArgument Bool }
+
+
 type alias UpdateEntryRequiredArguments =
     { id : ScalarCodecs.Id
     , fields : ScalarCodecs.Json
@@ -210,14 +214,25 @@ type alias UpdateEntryRequiredArguments =
     }
 
 
-{-| 下書きを直す。fields のキーだけ上書きし、null で消す。expectedVersion が今の version と違えば CONFLICT
+{-| 下書きを直す。fields のキーだけ上書きし、null で消す。expectedVersion が今の version と違えば CONFLICT。
+saveVersion なら同じ Tx で今の下書きをバージョンとしても積む（saveVersion mutation を続けて呼ぶのと同じ中身だが、
+保存だけ通って版が積まれない形にならない）
 -}
 updateEntry :
-    UpdateEntryRequiredArguments
+    (UpdateEntryOptionalArguments -> UpdateEntryOptionalArguments)
+    -> UpdateEntryRequiredArguments
     -> SelectionSet decodesTo Api.Admin.Object.Entry
     -> SelectionSet decodesTo RootMutation
-updateEntry requiredArgs____ object____ =
-    Object.selectionForCompositeField "updateEntry" [ Argument.required "id" requiredArgs____.id (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId), Argument.required "fields" requiredArgs____.fields (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecJson), Argument.required "expectedVersion" requiredArgs____.expectedVersion Encode.int ] object____ Basics.identity
+updateEntry fillInOptionals____ requiredArgs____ object____ =
+    let
+        filledInOptionals____ =
+            fillInOptionals____ { saveVersion = Absent }
+
+        optionalArgs____ =
+            [ Argument.optional "saveVersion" filledInOptionals____.saveVersion Encode.bool ]
+                |> List.filterMap Basics.identity
+    in
+    Object.selectionForCompositeField "updateEntry" (optionalArgs____ ++ [ Argument.required "id" requiredArgs____.id (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId), Argument.required "fields" requiredArgs____.fields (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecJson), Argument.required "expectedVersion" requiredArgs____.expectedVersion Encode.int ]) object____ Basics.identity
 
 
 type alias DeleteEntryRequiredArguments =
@@ -332,6 +347,38 @@ restoreVersion :
     -> SelectionSet decodesTo RootMutation
 restoreVersion requiredArgs____ object____ =
     Object.selectionForCompositeField "restoreVersion" [ Argument.required "id" requiredArgs____.id (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId), Argument.required "versionId" requiredArgs____.versionId (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId), Argument.required "expectedVersion" requiredArgs____.expectedVersion Encode.int ] object____ Basics.identity
+
+
+type alias AutosaveEntryRequiredArguments =
+    { id : ScalarCodecs.Id
+    , fields : ScalarCodecs.Json
+    }
+
+
+{-| 編集中の中身を自分だけの置き場に預かる（自動保存）。下書き（entry\_contents）には書かないので、
+version も stage も CHANGED も動かず、他の人からは何も変わって見えない。
+fields は patch ではなく編集中の中身そのもの。型の定義で削らず、下書きの検査も通さない（打鍵を落とさないため）。
+下書きと同じ中身なら置き場を空にして null を返す。預かり物を読めるのは置いた本人だけ
+-}
+autosaveEntry :
+    AutosaveEntryRequiredArguments
+    -> SelectionSet decodesTo Api.Admin.Object.EntryAutosave
+    -> SelectionSet (Maybe decodesTo) RootMutation
+autosaveEntry requiredArgs____ object____ =
+    Object.selectionForCompositeField "autosaveEntry" [ Argument.required "id" requiredArgs____.id (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId), Argument.required "fields" requiredArgs____.fields (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecJson) ] object____ (Basics.identity >> Decode.nullable)
+
+
+type alias DiscardAutosaveRequiredArguments =
+    { id : ScalarCodecs.Id }
+
+
+{-| 自分の預かり物を捨てる。無くても成功。返すのは entry の id
+-}
+discardAutosave :
+    DiscardAutosaveRequiredArguments
+    -> SelectionSet ScalarCodecs.Id RootMutation
+discardAutosave requiredArgs____ =
+    Object.selectionForField "ScalarCodecs.Id" "discardAutosave" [ Argument.required "id" requiredArgs____.id (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapEncoder .codecId) ] (ScalarCodecs.codecs |> Api.Admin.Scalar.unwrapCodecs |> .codecId |> .decoder)
 
 
 type alias CreateUploadUrlRequiredArguments =

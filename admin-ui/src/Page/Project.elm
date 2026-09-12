@@ -1,4 +1,4 @@
-module Page.Project exposing (Model, Msg, init, update, view)
+module Page.Project exposing (Model, Msg, init, mcpUrl, update, view)
 
 {-| プロジェクト設定 › プロジェクトと、AI からつなぐ（MCP）。
 
@@ -48,7 +48,7 @@ update ctx msg model =
             ( { model | busy = False, errors = [ (Api.problemToText problem).message ] }, [] )
 
 
-view : { origin : String } -> Model -> Html Msg
+view : { publicOrigin : String } -> Model -> Html Msg
 view args model =
     Ui.page [ class "max-w-2xl" ]
         [ Ui.pageHeader { title = "プロジェクト", icon = Nothing, meta = [], actions = [] }
@@ -87,12 +87,23 @@ view args model =
         , Ui.sectionTitle "AI からつなぐ（MCP）"
         , Ui.note [ text "Claude Code などの AI から、管理画面と同じ物を読み書きできます。見える範囲と権限は API キーと同じで、管理画面だけの隠し API はありません。" ]
         , Ui.card [ class "flex flex-col gap-4 p-4" ]
-            [ Ui.field { label = "つなぎ先の URL", hint = Nothing, errors = [] }
-                [ Ui.codeBlock [] (mcpUrl { project = model.project, origin = args.origin }) ]
-            , Ui.field { label = "つなぐコマンド", hint = Just "API キーは「API キーと Webhook」で発行します", errors = [] }
-                [ Ui.codeBlock [ class "text-[11px]" ]
-                    ("claude mcp add --transport http cms " ++ mcpUrl { project = model.project, origin = args.origin } ++ " --header \"X-Api-Key: <発行した API キー>\"")
-                ]
+            [ case mcpUrl { project = model.project, publicOrigin = args.publicOrigin } of
+                Just url ->
+                    div [ class "flex flex-col gap-4" ]
+                        [ Ui.field { label = "つなぎ先の URL", hint = Nothing, errors = [] }
+                            [ Ui.codeBlock [] url ]
+                        , Ui.field { label = "つなぐコマンド", hint = Just "API キーは「API キーと Webhook」で発行します", errors = [] }
+                            [ Ui.codeBlock [ class "text-[11px]" ]
+                                ("claude mcp add --transport http cms " ++ url ++ " --header \"X-Api-Key: <発行した API キー>\"")
+                            ]
+                        ]
+
+                Nothing ->
+                    -- WhyNot: 管理画面のオリジンで代わりに組まない。管理側は Access の内側なので、
+                    -- コピーしても繋がらない URL を自信ありげに出す事になる。
+                    Ui.callout Ui.toneWarn
+                        []
+                        [ text "つなぎ先の URL を出せません。サーバの CMS_PUBLIC_ORIGIN に、コンテンツ API のオリジン（https://cms.example.com の形）を設定してください。" ]
             , div [ class "flex flex-wrap gap-1.5" ]
                 (List.map (\label -> Ui.chip Ui.toneNeutral label)
                     [ "API の一覧と定義の取得"
@@ -106,6 +117,13 @@ view args model =
         ]
 
 
-mcpUrl : { project : Project, origin : String } -> String
+{-| MCP のつなぎ先。サーバは `/mcp` を `/p/{slug}` 付きでも受ける（Router.withProjectPrefix）ので、
+プロジェクトをパスで名指しする。オリジンが未設定なら Nothing。
+-}
+mcpUrl : { project : Project, publicOrigin : String } -> Maybe String
 mcpUrl args =
-    args.origin ++ "/p/" ++ args.project.slug ++ "/mcp"
+    if String.isEmpty args.publicOrigin then
+        Nothing
+
+    else
+        Just (args.publicOrigin ++ "/p/" ++ args.project.slug ++ "/mcp")

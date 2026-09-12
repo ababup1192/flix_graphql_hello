@@ -13,7 +13,7 @@ import java.net.http.HttpClient
 ///
 /// WhyNot: HttpClient を handler を入れる所で作らないのは、HttpClient ごとにスレッドが残り、フィールドごとの handler で native thread の OOM になるため（OutboundHttp）。
 ///
-pub type alias Deps = { storage = Option[StorageConfig.StorageConfig], auth = AuthConfig.AuthConfig, http = HttpClient, log = Log.Sink }
+pub type alias Deps = { storage = Option[StorageConfig.StorageConfig], auth = AuthConfig.AuthConfig, http = HttpClient, log = Log.Sink, publicOrigin = Option[String] }
 
 mod Deps {
 
@@ -27,6 +27,7 @@ mod Deps {
                    signup = Signup.Open,
                    pepper = Some({ pepperId = "test", secret = "test-pepper" }) },
           http = OutboundHttp.newClient(),
-          log = Log.Sink.silent() }
+          log = Log.Sink.silent(),
+          publicOrigin = None }
 
 }

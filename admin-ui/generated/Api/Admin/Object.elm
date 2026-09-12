@@ -37,6 +37,10 @@ type Entry
     = Entry
 
 
+type EntryAutosave
+    = EntryAutosave
+
+
 type EntryEdge
     = EntryEdge
 

@@ -208,6 +208,14 @@ viewer object____ =
     Object.selectionForCompositeField "viewer" [] object____ Basics.identity
 
 
+{-| コンテンツ API と MCP を外から叩く時のオリジン（CMS\_PUBLIC\_ORIGIN）。末尾に / は付かない。
+管理画面は Access の内側に置くので、案内に自分のオリジンを使えない。未設定なら空
+-}
+publicOrigin : SelectionSet String RootQuery
+publicOrigin =
+    Object.selectionForField "String" "publicOrigin" [] Decode.string
+
+
 {-| 自分。ログインしていなければ null。organizations と projects は自分が触れる物だけ
 -}
 me :

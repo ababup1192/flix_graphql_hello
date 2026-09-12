@@ -8,7 +8,7 @@ mod AdminSchema {
     ///
     pub def make(deps: Deps, runner: Runner[AdminEff]): Schema =
         GeneratedAdmin.schema({
-            queryRoot    = AdminQueryResolvers.resolvers(),
+            queryRoot    = AdminQueryResolvers.resolvers(deps),
             mutationRoot = AdminMutationResolvers.resolvers(deps),
             me                     = MeResolvers.resolvers(),
             viewer                 = ViewerResolvers.resolvers(),
