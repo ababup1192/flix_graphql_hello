@@ -1,4 +1,4 @@
-# ロードマップ（2026-09-11 更新）
+# ロードマップ（2026-09-12 更新）
 
 目標は 2 段。**(A) 今月中に自社の 2 サイト（Consumer / Business）が microCMS 無しで回る。(B) その後、他社に出せる。**
 見積もりは「この進め方（Claude が書き、人が仕様と優先順位を決める）での作業時間」。暦の上では実データの検証や外部設定の待ちが加わる。
@@ -9,7 +9,7 @@
 
 | # | 機能 | 誰に | 時間 | 中身 |
 |---|---|---|---|---|
-| 9 | 管理画面（Elm、`admin-ui/`） | 編集者 | 目で見る往復が律速 | プロジェクト切り替え・型の編集（消す前・締める前の影響と見本、消したフィールドの復元）・entry の一覧とボード・⌘K・エディタ（TipTap。表の行列の入れ替え、上付き / 下付き / 蛍光ペン、チェックリスト、本文のリンクの行き先）・バージョン履歴と差分・メディア・メンバー・API キーと PAT（GitHub と同じ発行の形）・Webhook・監査ログ（絞り込み、CSV / JSON Lines、行の固定 URL）・API プレビュー・dry-run と impact の表示は入った（ログイン画面は Cloudflare Access が持つので作らない）。文言は 7.1 の表に揃え `wording-check.mjs` が見張り、反応は 7.2 の 4 つ（`Ui.Reply` / `Ui.Confirm` / Esc）。残りは **richText の編集部品の穴**（linkCard / 動画 / callout / details / embed は素通しで保持するだけ。note 風の書き心地は [richtext-note-style.md](richtext-note-style.md) で作業中）、**まとめて公開の導線**（`publishPlan` / `publishMany` / `deleteEntry` / `createPreviewToken` を画面から呼んでいない）、GraphiQL の埋め込み。ワークフローの画面は #22a 待ち。仕様は [admin-ui-spec.md](admin-ui-spec.md)、段取りは [admin-ui-phases.md](admin-ui-phases.md) |
+| 9 | 管理画面（Elm、`admin-ui/`） | 編集者 | 目で見る往復が律速 | プロジェクト切り替え・型の編集（消す前・締める前の影響と見本、消したフィールドの復元）・entry の一覧とボード・⌘K・エディタ（TipTap。表の行列の入れ替え、上付き / 下付き / 蛍光ペン、チェックリスト、本文のリンクの行き先）・バージョン履歴と差分・メディア・メンバー・API キーと PAT（GitHub と同じ発行の形）・Webhook・監査ログ（絞り込み、CSV / JSON Lines、行の固定 URL）・API プレビュー・dry-run と impact の表示は入った（ログイン画面は Cloudflare Access が持つので作らない）。文言は 7.1 の表に揃え `wording-check.mjs` が見張り、反応は 7.2 の 4 つ（`Ui.Reply` / `Ui.Confirm` / Esc）。エディタは linkCard / 埋め込み / 数式 / コード / 表（セル内の装飾。**セルの結合は画面に入口が無く、取り込んだ物を読めるだけ**）/ 囲み / 折りたたみまで入口が揃った（2026-09-12）。残りは **`+` と `/` が本文の直下でしか出ない**事（囲みと折りたたみの中でブロックを入れられない）、**まとめて公開の導線**（`publishPlan` / `publishMany` / `deleteEntry` / `createPreviewToken` を画面から呼んでいない）、`Route.Organization` の中身（組織の切り替え）、GraphiQL の埋め込み。`video` はエディタに入口を作らない（YouTube の埋め込みで足り、CMS 側は素通しで受ける）。ワークフローの画面は #22a 待ち。書き心地の元は [richtext-note-style.md](richtext-note-style.md)、今日の残りは [2026-09-12-handover.md](2026-09-12-handover.md) の 5 章。仕様は [admin-ui-spec.md](admin-ui-spec.md)、段取りは [admin-ui-phases.md](admin-ui-phases.md) |
 | 10 | 公開サイトの載せ替え | 自社 | 半日 | elm-pages を GraphQL に。`headings` で目次、`html` で本文。Cloudflare Pages の再ビルドは Webhook |
 
 ここまでで **(A) 達成**。microCMS を解約できる。
@@ -28,6 +28,7 @@
 | 18 | 監査ログの残り | 企業 | 半日 | 表・記録・読み出し・画面・書き出しまで入った（下の「済み」と [audit-log.md](audit-log.md)）。残りは **組織レベル**（Account API の組織メンバー・プロジェクト作成・PAT。`Audit.record` が `Tenant` を要求するので project_id の持ち方を先に決める）、**MCP の actor 種別**（`actor_kind` に `mcp`。#24 と一緒に）、**変更前の姿から戻す口**（`detail.before` は残るが押して戻す mutation が無い）、予約公開の `scheduledBy`。全プランで出し、差は読める期間と持ち出しで付ける |
 | 19 | 編集中の表示（在席） | 編集者 | 半日 | 楽観ロックは済み。誰が開いているかを出す |
 | 20 | AI 補助（alt / 抜粋 / 見出し） | 編集者 | 半日 | `Assistant` effect。セルフホストでは無効化できる |
+| 20b | **公開側の組み込みガイドと見本**（未着手） | 開発者 | 1 日 | 数式 / mermaid / コード / X の埋め込みは「サイト側で描く」契約なのに、今その説明は `RichText.flix` のコードコメント 1 行しか無い。囲みと折りたたみが入った事で入れ子の中に画像・表・コードが入る道ができ、`.prose > img` のような直下セレクタが外れる（サンプルブログで実際に外れた）ので、その注意も同じ文書に。配り方の方針は [starter-kit.md](starter-kit.md)（`article.css` の 3 テーマ・型付きクライアント・Markdown の方言のプラグイン） |
 
 ## 後回し: 並ぶための物、または規模が要る物
 
@@ -54,6 +55,24 @@
 | 見つけた物 | 誰に | 時間 | 直す所 |
 |---|---|---|---|
 | **存在しない entry id を REFERENCE に入れても create / update が通る**。存在確認が `publish_check` まで遅れる | 編集者 | 半日 | 今は意図的（`EntryValidation` は DB を見ない純粋な規則で、参照先は publish が見る）。書いた時に気付ける方が良いなら、ユースケース側で存在を引く |
+
+### 直した物（2026-09-12）
+
+`RichText.flix` と `Markdown.flix` の通しレビューと、エディタの検査を 177 → 379 件に厚くする過程で出た分。
+本文や doc が壊れる 14 件の一覧は [2026-09-12-handover.md](2026-09-12-handover.md) の 2 章。
+
+| 見つけた物 | どう直したか |
+|---|---|
+| `validate` に深さとノード数の上限が無く、深い doc は sqlfx のパーサ（深さ 64 で Err）が先に止めて「どの field のどこが」を返せなかった | 入口に深さ 20 / ノード 10000 の上限。閾値をパーサの 1/3 に置いて、必ず Violation の側で先に止まるようにした |
+| `table` / `tableRow` / `bulletList` / `orderedList` の子の種類を誰も見ておらず、`thead` の中に `h1` を吐いていた | 子の検査を足した |
+| 見出し id が明示（`h-2`）と自動採番でぶつかり、HTML に同じ id が 2 つ出ていた | 採番の前に既にある id を集め、空いている番号まで送る |
+| `isSafeHref` が `/about` のような相対リンクを違反にして、取り込んだ entry が保存できなかった | `/` で始まるパスと `#` の断片を通す（`//` と `/\` は引き続き弾く）。素の相対パスは通さない（許可リストが拒否リストに反転するため）。合わせて `target="_blank"` を全部には付けないようにした |
+| Markdown の往復で平文にマークが生えた（`2^10^` が上付き、`x == y` がハイライト） | escape する文字に `^` と `=` を足した |
+| 表のセルの結合が Markdown の往復で失われた | `{colspan=2 rowspan=3}` の後ろ書き。覆われるセルは空のセルで列数を合わせ、読む時に落とす。`maxCellSpan() = 1000` を `validate` にも置いた |
+| 公開のたびに走る unique の確認が 43.5 ms（JSONB に索引が 1 本も無かった） | `c.data -> :apiId = :value` を `@>` に書き換え、`WHERE stage = 'published'` の部分索引で `GIN(jsonb_path_ops)`。0.142 ms。部分索引にしたのは、一番回数の多い書き込み（下書きの自動保存）に索引の保守を掛けないため |
+| 深い `skip` が 99.9 ms（`OFFSET 50000`） | `skip` は 10000 まで。それより後ろは `after`（cursor）へ誘導する Violation |
+
+一覧のクエリ（`listEntriesByStage`）は `->>` の等価で JOIN が entries 主導のままなので、この索引は効かない。**そちらは手つかず。**
 
 ### 直した物（2026-09-11）
 
@@ -97,9 +116,9 @@ MCP の asset・予約公開・主体ごとの tools/list は #24（MCP v2）、
 
 機能の中身は SDL（`admin.graphql` / `account.graphql`）と [../architecture/](../architecture/) にあるので、ここには一覧だけ置く。
 
-**API と機能** — 管理 API / コンテンツ API（動的スキーマ、where / orderBy / after、参照、OBJECT / BLOCKS）、公開・版・一意（advisory lock）、dry-run（`publishCheck`）、影響の見える化（`impact`）、公開計画（`publishPlan` / `publishMany`）、スキーマ変更の影響（`fieldImpact`。純粋な規則 `SchemaChange` + Tx の中の数え直し `SchemaGuard`。`expected` と食い違えば止める）、バージョン間の差分（`Entry.diff`）、テナント、asset（S3 互換、署名付き URL、`usedBy`、動画は mp4 / webm で上限 200 MB）、richText（doc / html / markdown / text / assets / 目次 / 抜粋 / links / wordCount と readingTimeMinutes）と Markdown の双方向変換、1 件を slug で直引き、DATE と複数選択の SELECT、GraphQL の GET 対応、MCP v1（15 ツール）、microCMS の API スキーマの取り込み、型のアイコン。
+**API と機能** — 管理 API / コンテンツ API（動的スキーマ、where / orderBy / after、参照、OBJECT / BLOCKS）、公開・版・一意（advisory lock）、dry-run（`publishCheck`）、影響の見える化（`impact`）、公開計画（`publishPlan` / `publishMany`）、スキーマ変更の影響（`fieldImpact`。純粋な規則 `SchemaChange` + Tx の中の数え直し `SchemaGuard`。`expected` と食い違えば止める）、バージョン間の差分（`Entry.diff`）、テナント、asset（S3 互換、署名付き URL、`usedBy`、動画は mp4 / webm で上限 200 MB）、richText（doc / html / markdown / text / assets / 目次 / 抜粋 / links / wordCount と readingTimeMinutes）と Markdown の双方向変換、1 件を slug で直引き、DATE と複数選択の SELECT、GraphQL の GET 対応、MCP v1（15 ツール）、microCMS の API スキーマの取り込み（`make import-microcms`。作例用の blogs / authors / tags は `import/blog-example/` と `make import-blog-example` で別プロジェクトへ）、型のアイコン。
 
-**richText の node** — 段落 / 見出し / リスト / タスク（listItem の checked）/ 引用 / codeBlock（language・fileName・highlightLines。language が mermaid なら `data-diagram`）/ 表（セルの寄せ。HTML は結合を落とさない）/ callout / details / gallery（columns 2〜4）/ image（alt・caption）/ video（poster）/ embed（YouTube・Vimeo・X）/ linkCard / 数式（`math` mark と `mathBlock`。TeX のまま持ち描画はサイト側）。mark は bold / italic / strike / underline / code / link / math / sub / sup / highlight。**型ごとのパスの形**（`ContentType.linkPath` の型紙 `/blog/{slug}`。`{id}` と `{slug}`）から `Entry.path` と本文の href を作る。
+**richText の node** — 段落 / 見出し / リスト / タスク（listItem の checked）/ 引用 / codeBlock（language・fileName・highlightLines。language が mermaid なら `data-diagram`）/ 表（セルの寄せ、セルの中のマーク、セルの結合。HTML も Markdown も `{colspan=2 rowspan=3}` で往復する）/ callout（ノート / ヒント / 警告）/ details（入れ子は不可）/ gallery（読む側だけの互換）/ image（alt・caption）/ video（poster）/ embed（YouTube・Vimeo・X）/ linkCard / 数式（`math` mark と `mathBlock`。TeX のまま持ち描画はサイト側）。mark は bold / italic / strike / underline / code / link / math / sub / sup / highlight。**型ごとのパスの形**（`ContentType.linkPath` の型紙 `/blog/{slug}`。`{id}` と `{slug}`）から `Entry.path` と本文の href を作る。
 
 **監査ログ** — 表 `audit_events`（RLS で append-only、保持は無期限）、`Audit.record` を業務と同じ Tx で（型 / フィールド / メンバー / 招待 / API キー / Webhook / asset / 公開範囲 / entry の取り下げ・削除・予約公開の実行）、主体の種類と id（USER / API_KEY / PAT / SYSTEM）、消した物の変更前の姿（`detail.before`。Webhook の URL は host / pathHint / urlHash に落とし、asset のファイル名は入れない）、読み出し（`auditEvents` の actorKind / action 前方一致 / since / until、`auditEventsCount`。ULID の範囲で引く）、書き出し（`GET /admin/audit.csv` / `audit.jsonl`。上限 100,000 件、`audit.exported` を積む）、画面（プロジェクト設定 › 監査ログ。行を人の言葉で読める形に、行の固定 URL）。残りは #18。
 
@@ -112,6 +131,9 @@ MCP の asset・予約公開・主体ごとの tools/list は #24（MCP v2）、
 - **予約公開**: 同じ時刻の 1000 件が 1 tick・10 チャンクで run_at から 4.7 秒で全部 done（tick が来るまで 1.3 秒 + 実行 3.4 秒、100 件あたり約 0.33 秒）。チャンク化の前は 20 件 / 2 秒で末尾が 100 秒後
 - **一覧の N+1**: 管理 API の `entries` 50 件 × 10 フィールドが JWT で 209 → 12 本、API キーで 204 → 7 本。Tx は「読むだけの文書は 1 リクエスト 1 Tx」で 504 → 2
 - **障害注入**: 復帰秒数と OOM / SIGTERM の挙動は [trials/](trials/)
+- **Pg テストの土台**: reset を DROP + migration 28 本の再適用から TRUNCATE に変えて、テスト本体が 68.6s → 53.0s。reset 1 回は psql で 50ms。migration 直後の `public` を `test_baseline` schema に控えて戻す形（素の TRUNCATE では migration 008 / 010 が入れる既定の組織とプロジェクト、sequence の位置が消える）
+- **entry 11 万件**: 公開のたびの unique の確認 43.5 ms → 0.142 ms（部分索引）、`OFFSET 10000` が 36.8 ms、`OFFSET 50000` が 99.9 ms
+- **エディタの検査**: Playwright の通し実行 175 件（1 回 10 分・10 万トークン）を廃止し、Vitest のブラウザモードで 379 件。`npm run check` と CI に載っている
 
 ### 分かった事
 

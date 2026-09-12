@@ -17,8 +17,8 @@ microCMS の移行先として作っている（動的に content type を定義
 | `/health` | DB に届けば `{"status":"ok","version":"<git の sha>"}`。接続プールが張り付いていれば 200 のまま `"status":"degraded"`、DB に届かないかワーカーが止まっていれば 503（[deploy/README.md](deploy/README.md)） |
 
 管理画面は Elm で `admin-ui/`（別のビルド。`make ui-dev`）。CMS 本体は API だけを出す。
-画面にあるのは、プロジェクト選択と組織、API スキーマ（型とフィールド。消す前・締める前に当たるコンテンツの件数と見本を出す）、
-コンテンツの一覧とボード、エディタ（TipTap。表・callout・数式・チェックリストなど）、バージョン履歴と差分、メディア、メンバー、
+画面にあるのは、プロジェクト選択と組織（作成と、組織ごとのプロジェクトの一覧。組織そのものの画面はまだ無い）、API スキーマ（型とフィールド。消す前・締める前に当たるコンテンツの件数と見本を出す）、
+コンテンツの一覧とボード、エディタ（TipTap v3。「+」の一覧は画像・区切り線・引用・囲み・折りたたみ・コード・表・数式・チェックリスト・埋め込みの 10 項目）、バージョン履歴と差分、メディア、メンバー、
 API キーと PAT（GitHub と同じ「権限のチェックと有効期限」の形）、Webhook、監査ログ（絞り込みと CSV / JSON Lines の書き出し、行の固定 URL）、
 API プレビュー、⌘K。画面の文言は [docs/design/admin-ui-spec.md](docs/design/admin-ui-spec.md) の 7.1 の表に揃え、`wording-check.mjs` が見張る。
 
@@ -35,7 +35,13 @@ make db-up     # PostgreSQL と MinIO を docker compose で起動
 make migrate   # migrations/ を当てる（初回と、migration を足した時）
 make run       # サーバ起動（CMS_DSN 等は Makefile が渡す。初回は Maven 依存の取得で時間がかかる）
 make query     # 起動中のサーバへ /health と管理 API・コンテンツ API のサンプルを投げる
+
+make import-microcms      # import/microcms/schema/（microCMS の API スキーマ）を既定プロジェクトへ
+make import-blog-example  # import/blog-example/schema/（blogs / authors / tags）を blog-example プロジェクトへ
 ```
+
+取り込みはサーバを立てずに走る一発処理。`import/microcms/schema/` は実在の 9 型（relation / relationList / repeater / unsupported が揃っていて、取り込みの実力を測る材料）で、
+作例サイト用の blogs / authors / tags は apiId が衝突するので `import/blog-example/` に分けて別プロジェクトに流す。
 
 環境変数の一覧（認証、asset、CDN、仕事、自己回復、停止）は [deploy/README.md](deploy/README.md)。手元では `CMS_AUTH=dev` で `X-Dev-User` が使える（`CMS_VERSION=dev` の時だけで、その時は 127.0.0.1 にしか bind しない）。
 
@@ -104,12 +110,15 @@ introspection から型を作るクライアント（graphql-codegen）では `i
 `where` はフィールドの kind ごとに `_eq` / `_in` / `_contains` / `_startsWith`（文字列）、`_eq` / `_gt` / `_gte` / `_lt` / `_lte`（数値と DATE）、
 `_eq`（真偽値）、`_eq` / `_in`（select）、`_id_eq` / `_id_in`（reference）、配列には `_contains`、全部に `_isNull` が生え、`OR` / `AND` は 1 段。
 値は全部プレースホルダで SQL に渡す。一覧は `first` / `skip` に加えて `after`（cursor）で辿れる（[docs/design/pagination.md](docs/design/pagination.md)）。
+**`skip` は 10000 まで**で、それより後ろは `after` に前のページの `endCursor` を渡す（`OFFSET 50000` が 99.9 ms だったため。`after` と `skip` は同時に渡せない）。
 
 `REFERENCE` は参照先の型として展開され、同じ stage の物を返す（一覧は 1 本の SELECT で先読み）。`SELECT` は型ごとの enum（`BlogCategory`）で、
 `many: true` なら複数選択。`DATE` は ISO 8601 の文字列。
 
 `RICH_TEXT` は `RichText { json html markdown text assets headings links excerpt(length) wordCount readingTimeMinutes }` で返る。
-`json` は ProseMirror の doc、`html` はその描画（見出しに id、表・callout・gallery・数式・Mermaid は class ではなく `data-*`）、`headings` は目次用。
+`json` は ProseMirror の doc、`html` はその描画（見出しに id、表・callout・details・embed・linkCard・数式・Mermaid は class ではなく `data-*`）、`headings` は目次用。
+**数式（TeX）と Mermaid は CMS が描かない**（中身をそのまま持って出す）ので、描くのはサイト側。
+doc は入口で深さ 20 / ノード 10000 を超えると `Violation` で断る（JSON のパーサに任せると「どの field のどこが」を返せないため）。
 
 ```bash
 curl -s -X POST localhost:8080/graphql \
@@ -118,7 +127,8 @@ curl -s -X POST localhost:8080/graphql \
   -d '{"query": "{ blogs { body { markdown assets { id url width height alt } } } }"}'
 ```
 
-**`markdown` は CMS の方言を含む。** 画像は `![alt](asset:ID)`、コンテンツへのリンクは `entry:ID` のまま出る（URL に焼き込まない。
+**`markdown` は CMS の方言を含む。** 画像は `![alt](asset:ID)`、表のセルの結合は中身の後ろの `{colspan=2 rowspan=3}`（GFM に結合の書き方が無いので、`{#id}` / `{width=W height=H}` と同じ `{key=value}` に揃えた。`colspan=1` は書かない）、
+コンテンツへのリンクは `entry:ID` のまま出る（URL に焼き込まない。
 焼き込むと Markdown から doc に戻せず往復が壊れる）。**画像は `assets`、entry のリンクは `links` で解く**（どちらも本文 1 つにつき 1 本の SELECT で、
 `markdown` と同じ 1 往復で取れる）。解決済みの物が要るなら `html` を読む。
 
@@ -127,6 +137,8 @@ curl -s -X POST localhost:8080/graphql \
 `links[].path` にも同じ物が出る。型紙が無い型は href が `#entry:{id}` のままで、サイトが置き換える。
 **`data-entry-id` は型紙のあるなしに関わらず必ず付く**ので、`json` を自分で描くサイトも `links` から id → path を引ける。
 型紙は `/` か `http(s)://` で始まる物だけを受ける（`//evil.example.com/` は scheme 相対なので弾く）。
+本文の自由なリンクは `http(s)://` の他に **`/about` のような相対パスと `#section` の断片**を受ける（`//` と `/\` は別ホストとして読まれるので弾き、`javascript:` / `vbscript:` / `data:` は大文字小文字を問わず弾く）。
+外に出るリンクにだけ `target="_blank"` が付く（同じサイトの中のリンクまで別タブにすると読む人の戻る道が切れるため）。
 
 匿名の GET はプロジェクトの版から weak な ETag を組み、`If-None-Match` が合えば GraphQL を実行せず 304 を返す。
 
@@ -193,8 +205,14 @@ make fatjar    # 実行可能な jar（artifact/）
 
 make ui-gen    # admin.graphql / account.graphql → admin-ui/generated/（elm-graphql）
 make ui-dev    # 管理画面の dev サーバ（CMS は別のターミナルで make run）
-make ui-check  # 文言の見張り（wording-check.mjs）・elm-format の検査・elm-review・elm-test・tsc
+make ui-check  # 文言の見張り（wording-check.mjs）・手組みの見張り（editor-check.mjs）・elm-format の検査・
+               # elm-review・elm-test・tsc・エディタの検査（Vitest のブラウザモード 379 件）
 ```
+
+エディタの検査は **`admin-ui/dev/`** の開発用の画面（`dev/editor.html`。CMS のサーバも DB もログインも要らず、手元からしか開けない）と
+同じ初期状態（`dev/fixtures.ts`）を使い、裸の chromium で打鍵して doc と座標を読む。Playwright の通し実行は 2026-09-12 に無くした。
+`editor-check.mjs` は「部品を使わずに帯や浮く面を手組みする」印（`getBoundingClientRect` / `offsetHeight` / `style.top` など）を数え、
+`scripts/editor-check-allow.json` の件数より増えた時だけ落ちる。
 
 `bin/flix` は `--Xsubeffecting=lambdas` を付けて呼ぶ（純粋なリゾルバのラムダをそのまま effect 付きの関数型に置くため）。
 VS Code の Flix 拡張にも同じフラグが要り、`.vscode/settings.json` の `flix.extraFlixArgs` で渡している。
@@ -223,7 +241,9 @@ src/graphql/                      graphql-java の境界と Schema の DSL
 src/app/                          AppEnv・認証・ルート表・DbRunner・仕事・ログ・/health・停止
 src/mcp/ src/import/              MCP サーバ、microCMS からの取り込み
 src/http/ src/log/ src/crypto/ src/auth/ src/storage/
-admin-ui/                         管理画面（Elm + Vite。src/ が画面、web/ が TipTap の Web Component）
+admin-ui/                         管理画面（Elm 0.19.2 + Vite。src/ が画面、web/ が TipTap v3 の Web Component、
+                                  dev/ が開発用の画面とエディタの検査）
+import/microcms/ import/blog-example/   取り込み用の API スキーマ（実在の 9 型 / 作例サイト用）
 deploy/                           本番とセルフホスト（compose + Caddy / Alloy）
 test/                             src と同じ構成。test/Pg/ だけ実 PG
 ```
@@ -239,5 +259,6 @@ test/                             src と同じ構成。test/Pg/ だけ実 PG
 | 認証と権限 | [docs/architecture/auth.md](docs/architecture/auth.md) |
 | 管理画面の仕様 | [docs/design/admin-ui-spec.md](docs/design/admin-ui-spec.md) |
 | これから作る物 | [docs/design/roadmap.md](docs/design/roadmap.md) |
+| 直近の決めと未解決 | [docs/design/2026-09-12-handover.md](docs/design/2026-09-12-handover.md) |
 | Flix の書き方 | [docs/flix-conventions.md](docs/flix-conventions.md) |
 | コードの流儀 | [AGENTS.md](AGENTS.md) |

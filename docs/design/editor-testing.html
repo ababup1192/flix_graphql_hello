@@ -1,4 +1,16 @@
 <title>エディタの守り方</title>
+<!--
+  2026-09-12 の朝の提案。この後どうなったかの追記（記録として残す。本文は当時のまま）:
+  - 3 案とも実施した（開発用の画面 admin-ui/dev/、手組みを禁じる editor-check.mjs、検査の移設）
+  - ただし「軽い層と重い層に分ける」は採らなかった。位置もはみ出しも掴みも窓の幅も裸の
+    chromium で測れる事が分かり、Playwright の通し実行（rich-check.mjs）ごと無くして
+    Vitest のブラウザモード 1 本にした。CMS 往復の 12 件は同じ事を見ている Flix の
+    テストがあったので消した
+  - 本文の「175 件」「140 / 35 に分ける」は当時の数字で、今は 379 件が 1 層で回っている
+  残している理由は、分類の仕方と他社（TipTap / ProseMirror / Lexical）の調査が、
+  今の置き所の根拠として使えるため。
+-->
+
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
   :root {
