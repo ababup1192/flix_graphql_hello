@@ -35,7 +35,7 @@ type Linked = {
 type LinkChoice = { seq: number; href: string; entryId: string; label: string; remove: boolean; cancel: boolean };
 import { dismissOn } from "./dismiss";
 import { placeUnder } from "./place";
-import { type Popover, popover, selectAllInBlock } from "./ui";
+import { type Popover, popover, selectAllInBlock, stickyFloor } from "./ui";
 import { isDraggingTable, tableHandles } from "./table-drag";
 import { Highlight, RaisedCaret, Subscript, Superscript } from "./text-marks";
 import { type Align, alignColumn, columnAlign, resizeTable, tableSize } from "./table-tools";
@@ -77,6 +77,9 @@ const Passthrough = Node.create({
 // 直後にツールバーの引用・コードブロック・表・箇条書きを押しても何も起きなかった
 // （文字を打つと段落ができて、そこから先は効く）。
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
+
+/** バブルメニューが画面の下端から空けておく余白。`ui.ts` の `EDGE` と同じ 8px。 */
+const BUBBLE_EDGE = 8;
 
 type Tool = {
   kind: "button" | "divider" | "spacer" | "block" | "more";
@@ -285,6 +288,9 @@ class TiptapEditor extends HTMLElement {
     mount.className = "tt-mount";
     this.appendChild(mount);
 
+    // バブルメニューの置き所を測る getter から引くので、`this` を閉じ込めておく。
+    const host = this;
+
     const extensions = [
       // codeBlock は色付きの物に差し替える。
       // gapcursor は切る。**置ける所と置けない所ができ、見た目も横一本の線で
@@ -413,6 +419,26 @@ class TiptapEditor extends HTMLElement {
           // Floating UI は明示しないと隠さず、画面の端に貼り付いたまま残る。本文を送ると
           // 帯が上の帯（保存・公開）とタイトルに重なった（実際に重なった）。
           hide: true,
+          // **上へ逃げる時、貼り付いた帯より上には出さない。**
+          //
+          // WhyNot: `hide` だけで足りる事にしない。`hide` が消すのは基準が画面の**外**に
+          // 出た時だけで、実際に起きるのは「基準は画面の中に居るまま帯の裏に潜る」方。
+          // 実測で 33px 潜っていた（帯の上端 23px に対し、上の帯の下端 56px）。
+          //
+          // WhyNot: 余白を定数で持たない。`padding` は getter にしてあり、Floating UI は
+          // 位置を測るたびに `middlewares` を組み直すので、そのたびに実測が入る。
+          // 貼り付いた帯は本文を送ると位置が変わる。
+          shift: {
+            crossAxis: true,
+            get padding() {
+              return { top: stickyFloor(host), bottom: BUBBLE_EDGE };
+            },
+          },
+          flip: {
+            get padding() {
+              return { top: stickyFloor(host), bottom: BUBBLE_EDGE };
+            },
+          },
         },
         // WhyNot: キャプションでは placement を top にしない。placement は configure で固定なので、
         // 基準の矩形をキャプションの上に持ち上げて、bottom のまま「キャプションの真上」に置く。

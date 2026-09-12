@@ -369,6 +369,23 @@ export function owns(parts: (HTMLElement | null | undefined)[], event: Event): b
   return parts.some((part) => !!part && part.contains(target));
 }
 
+/** 浮く面が上へ逃げて良い下限（画面の座標）。貼り付いた道具の帯の下端。
+ *
+ * **`popover()` の `bounds` と同じ役目を、Floating UI で置く面（バブルメニュー）に渡すための物。**
+ *
+ * WhyNot: 画面の上端（0）を下限にしない。エディタの画面は上に「下書き保存 / 公開」の帯が
+ * 貼り付いていて（`Page/Editor.elm` の `sticky top-0`、64px）、その下に道具の帯（`.tt-bar`）が
+ * 続く。0 まで許すと選んだ文字が上の方にある時に帯がその裏へ潜り、タイトルと保存の表示を隠す。
+ *
+ * WhyNot: 64px と書かない。道具の帯は本文の枠の中で貼り付くので、本文を見ていない間は
+ * 下限が上の帯の分だけで済む。実測すれば両方の場合で正しい値になる。
+ */
+export function stickyFloor(root: ParentNode): number {
+  const bar = root.querySelector<HTMLElement>(".tt-bar");
+  if (!bar) return 0;
+  return Math.max(0, bar.getBoundingClientRect().bottom);
+}
+
 // 外のクリックと Esc で閉じる見張りは `dismiss.ts`（Elm の dismissLayer と揃えてある）。
 // 浮く面を自前で組む所からも引けるよう、ここから出し直す。
 export { dismissOn };

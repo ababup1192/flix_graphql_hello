@@ -119,11 +119,9 @@ test("低い窓で上端の行を選んでも、帯がエディタの枠より�
 // WhyNot: 帯の高さを当てずっぽうで決めない。56px は管理画面の `.app-bar` の高さ。
 const APP_BAR = 56;
 
-// **今は落ちる（実測: 帯の上端 23px、上の帯の下端 56px）。** `test.fails` は
-// 「落ちる事」を検査にしている。直すとこの行が赤くなるので、その時に素の `test` へ戻す。
-//
-// WhyNot: skip にしない。skip は直っても何も言わないので、忘れたまま残る。
-test.fails("上の帯がある時、キャプションの帯がその下に潜らない", async () => {
+// 直す前は 33px 潜っていた（帯の上端 23px、上の帯の下端 56px）。`shift` の `padding` を
+// 貼り付いた帯の下端にして直した（`tiptap-editor.ts`）。
+test("上の帯がある時、キャプションの帯がその下に潜らない", async () => {
   const bar = document.createElement("div");
   bar.style.cssText = `position: fixed; top: 0; left: 0; right: 0; height: ${APP_BAR}px; z-index: 1;`;
   document.body.appendChild(bar);
