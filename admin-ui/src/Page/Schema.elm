@@ -1,4 +1,4 @@
-module Page.Schema exposing (Model, Msg(..), init, load, update, view)
+module Page.Schema exposing (Model, Msg(..), apiIdReady, apiIdSay, init, load, update, view)
 
 {-| API スキーマ（型の定義）。フィールドの追加・編集・並び替え・削除。
 
@@ -748,23 +748,33 @@ updateNewType change model =
     change model.newType
 
 
-{-| API に出す名前として使えるか。**送る前にここで止める。**
+{-| 欄の下に出す理由。**送る前にここで止める。**
 
 表示名が日本語だと `camelize` は何も作れない（英数字が 1 文字も無い）。
-そのまま送ると CMS が「lowerCamel にしてください」と断るが、**人には
-どこを直せばいいか分からない**（実際に、空のまま送って断られた）。
+そのまま送ると CMS が「lowerCamel にしてください」と断るが、**人にはどこを直せばいいか
+分からない**。
+
+WhyNot: 未入力を理由にしない。画面を開いた時点で赤が出て、まだ何も入力していない人に
+間違いを告げる事になる。空のまま送れない事は、押せないボタン（`apiIdReady`）が伝える。
 
 -}
-apiIdError : String -> Maybe String
-apiIdError apiId =
+apiIdSay : String -> Maybe String
+apiIdSay apiId =
     if String.isEmpty apiId then
-        Just "API に出す名前を入れてください（表示名が日本語だと自動では作れません）"
+        Nothing
 
     else if not (startsLower apiId && String.all Char.isAlphaNum apiId) then
         Just "英字で始まり、英数字だけにしてください（例: publishedAt）"
 
     else
         Nothing
+
+
+{-| 送信できるか。
+-}
+apiIdReady : String -> Bool
+apiIdReady apiId =
+    not (String.isEmpty apiId) && apiIdSay apiId == Nothing
 
 
 startsLower : String -> Bool
@@ -897,7 +907,7 @@ viewNewType model =
                     , Ui.field
                         { label = "エンドポイント"
                         , hint = Just "URL と API に出る名前。英小文字の複数形"
-                        , errors = (apiIdError model.newType.apiId |> Maybe.map List.singleton |> Maybe.withDefault []) ++ Reply.errorsFor "apiId" model.reply
+                        , errors = (apiIdSay model.newType.apiId |> Maybe.map List.singleton |> Maybe.withDefault []) ++ Reply.errorsFor "apiId" model.reply
                         }
                         [ Ui.input [ value model.newType.apiId, onInput TypeApiIdTyped, class "font-mono", placeholder "blogs" ] ]
                     , Ui.checkbox
@@ -907,7 +917,7 @@ viewNewType model =
                         }
                     , Reply.addButton
                         { label = "作成"
-                        , ready = apiIdError model.newType.apiId == Nothing
+                        , ready = apiIdReady model.newType.apiId
                         , reply = model.reply
                         , onAdd = TypeSubmitted
                         }
@@ -1092,7 +1102,7 @@ viewAddPanel args model form =
         , Ui.field
             { label = "フィールド ID"
             , hint = Just "API に出る名前。作成した後は変更できません"
-            , errors = (apiIdError form.apiId |> Maybe.map List.singleton |> Maybe.withDefault []) ++ Reply.errorsFor "apiId" model.reply
+            , errors = (apiIdSay form.apiId |> Maybe.map List.singleton |> Maybe.withDefault []) ++ Reply.errorsFor "apiId" model.reply
             }
             [ Ui.input [ value form.apiId, onInput ApiIdTyped, class "font-mono", placeholder "title" ] ]
         , viewKindConfig args model form
@@ -1105,7 +1115,7 @@ viewAddPanel args model form =
         , div [ class "flex items-center gap-2" ]
             [ Reply.addButton
                 { label = "追加"
-                , ready = apiIdError form.apiId == Nothing
+                , ready = apiIdReady form.apiId
                 , reply = model.reply
                 , onAdd =
                     if model.confirmAdd == Nothing then
