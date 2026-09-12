@@ -1451,3 +1451,118 @@ body.tt-dragging-row, body.tt-dragging-row * { cursor: ns-resize !important; }
    WhyNot: BubbleMenu の blur では消えない。入力欄はエディタの DOM の中なので「中への移動」と見なされる。 */
 /* 帯は Floating UI が本文の親に付けるが、焦点のある欄とは親子の関係が無いので根から見る。 */
 :root:has(.tt-body input:focus, .tt-body textarea:focus, .tt-body select:focus) .tt-bubble { display: none; }
+
+/* 注目点と切り抜き枠（`web/focal-crop.ts`）。左に画像、右に 3 つのプレビュー、下に数値。
+   枠と印は舞台（画像を包む要素）に対する % で置く。
+   WhyNot: 覆いを別の要素で描かない。枠の外側に大きな box-shadow を落とし、舞台の
+   overflow で切れば、枠を動かすだけで覆いも付いてくる（4 枚の帯を追わせない）。
+   WhyNot: 枠の線と印の縁をトークンで塗らない。写真の上に載る物で、写真は light / dark で
+   変わらない。白で固定し、暗い写真では黒の細い影で縁を取る。 */
+focal-crop {
+  --fc-shade: color-mix(in srgb, var(--color-ink) 50%, transparent);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 11rem;
+  gap: 0.75rem 1rem;
+  align-items: start;
+  color: var(--color-ink);
+}
+:root[data-theme="dark"] focal-crop { --fc-shade: color-mix(in srgb, var(--color-app) 60%, transparent); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) focal-crop { --fc-shade: color-mix(in srgb, var(--color-app) 60%, transparent); }
+}
+@media (max-width: 40rem) {
+  focal-crop { grid-template-columns: minmax(0, 1fr); }
+}
+.fc-stage {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  line-height: 0;
+  background: var(--color-well);
+  border: 1px solid var(--color-edge);
+  border-radius: 6px;
+  user-select: none;
+  touch-action: none;
+}
+.fc-stage img { display: block; max-width: 100%; max-height: 28rem; width: auto; height: auto; }
+.fc-stage img[hidden] { display: none; }
+.fc-note { display: block; padding: 2rem 1rem; color: var(--color-ink-faint); font-size: 12px; line-height: 1.4; }
+.fc-note[hidden] { display: none; }
+.fc-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid #fff;
+  box-shadow: 0 0 0 100vmax var(--fc-shade), 0 0 0 1px color-mix(in srgb, #000 30%, transparent) inset;
+  cursor: move;
+  transition: inset 80ms ease-out;
+}
+.fc-box:focus-visible, .fc-dot:focus-visible, .fc-handle:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.fc-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  border: 1px solid color-mix(in srgb, #000 40%, transparent);
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+.fc-handle-nw { top: -6px; left: -6px; cursor: nwse-resize; }
+.fc-handle-n { top: -6px; left: calc(50% - 6px); cursor: ns-resize; }
+.fc-handle-ne { top: -6px; right: -6px; cursor: nesw-resize; }
+.fc-handle-e { top: calc(50% - 6px); right: -6px; cursor: ew-resize; }
+.fc-handle-se { bottom: -6px; right: -6px; cursor: nwse-resize; }
+.fc-handle-s { bottom: -6px; left: calc(50% - 6px); cursor: ns-resize; }
+.fc-handle-sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+.fc-handle-w { top: calc(50% - 6px); left: -6px; cursor: ew-resize; }
+.fc-dot {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: color-mix(in srgb, var(--color-accent) 70%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, #000 40%, transparent), 0 1px 4px color-mix(in srgb, #000 40%, transparent);
+  translate: -50% -50%;
+  cursor: grab;
+  transition: inset 80ms ease-out;
+}
+.fc-dragging .fc-box, .fc-dragging .fc-dot { transition: none; }
+.fc-dragging .fc-dot { cursor: grabbing; }
+focal-crop[data-disabled] .fc-dot, focal-crop[data-disabled] .fc-box, focal-crop[data-disabled] .fc-handle { cursor: default; }
+focal-crop[data-disabled] .fc-handle { display: none; }
+.fc-previews { display: flex; flex-direction: column; gap: 0.75rem; }
+.fc-preview { margin: 0; }
+.fc-preview figcaption { margin-top: 0.25rem; font-size: 11px; color: var(--color-ink-soft); }
+.fc-preview-box {
+  width: 100%;
+  background-color: var(--color-well);
+  background-repeat: no-repeat;
+  border: 1px solid var(--color-edge);
+  border-radius: 4px;
+  transition: background-size 80ms ease-out, background-position 80ms ease-out;
+}
+.fc-dragging ~ .fc-previews .fc-preview-box { transition: none; }
+.fc-preview-card { aspect-ratio: 16 / 9; }
+.fc-preview-ogp { aspect-ratio: 1.91 / 1; }
+.fc-preview-square { aspect-ratio: 1 / 1; }
+.fc-ogp-note { margin: 0.25rem 0 0; font-size: 11px; color: var(--color-warn); }
+.fc-ogp-note[hidden] { display: none; }
+.fc-foot { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; font-size: 12px; color: var(--color-ink-soft); }
+.fc-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.fc-reset {
+  margin-left: auto;
+  padding: 0.25rem 0.75rem;
+  font-size: 12px;
+  color: var(--color-ink);
+  background: var(--color-raised);
+  border: 1px solid var(--color-edge);
+  border-radius: 6px;
+}
+.fc-reset:hover:not(:disabled) { background: var(--color-well); }
+.fc-reset:disabled { color: var(--color-ink-faint); }
+@media (prefers-reduced-motion: reduce) {
+  .fc-box, .fc-dot, .fc-preview-box { transition: none; }
+}

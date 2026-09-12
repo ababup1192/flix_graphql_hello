@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>注目点と切り抜き（開発用）</title>
+    <script>
+      try {
+        var t = localStorage.getItem("theme");
+        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    </script>
+    <style>
+      .dev-shell { max-width: 64rem; margin: 0 auto; padding: 1rem; display: flex; flex-direction: column; gap: 1rem; }
+      .dev-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; font-size: 0.8rem; }
+      .dev-head input[type="url"] { flex: 1; min-width: 16rem; }
+      #json { margin: 0; padding: 0.5rem; font-size: 0.7rem; line-height: 1.4; border: 1px solid currentColor; white-space: pre-wrap; word-break: break-all; }
+    </style>
+  </head>
+  <body>
+    <div class="dev-shell">
+      <div class="dev-head">
+        <label for="src">画像の URL</label>
+        <input id="src" type="url" value="http://127.0.0.1:9000/cms/sample.jpg" />
+        <label for="ratio">比率</label>
+        <select id="ratio">
+          <option value="free">free</option>
+          <option value="16:9">16:9</option>
+          <option value="4:3">4:3</option>
+          <option value="1:1">1:1</option>
+          <option value="3:4">3:4</option>
+        </select>
+        <label><input id="disabled" type="checkbox" /> disabled</label>
+        <label for="theme">テーマ</label>
+        <select id="theme">
+          <option value="">system</option>
+          <option value="light">light</option>
+          <option value="dark">dark</option>
+        </select>
+      </div>
+      <focal-crop src="http://127.0.0.1:9000/cms/sample.jpg" width="2000" height="1333" focal-x="0.5" focal-y="0.5"></focal-crop>
+      <pre id="json">（まだイベントは出ていません）</pre>
+    </div>
+    <script type="module" src="/dev/focal-crop.ts"></script>
+  </body>
+</html>
