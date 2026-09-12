@@ -11,8 +11,9 @@ import Api.Permission as Permission exposing (Permission)
 import Html exposing (Html, div, span, text)
 import Html.Attributes exposing (class, href)
 import Html.Events
-import Model exposing (ContentTypeSummary, Person, Project)
+import Model exposing (ContentTypeSummary, Person, Project, Slug)
 import Route exposing (Route)
+import Sidebar
 import Ui
 import Ui.Icon as Icon
 
@@ -96,12 +97,12 @@ viewBreadcrumb config =
 -}
 viewTypeTabs : Config msg -> Html msg
 viewTypeTabs config =
-    case typeApiIdOf config.route of
-        Just apiId ->
+    case ( typeApiIdOf config.route, config.project ) of
+        ( Just apiId, Just project ) ->
             let
-                slug : String
+                slug : Slug
                 slug =
-                    slugOf config
+                    project.slug
 
                 tab : String -> Route -> { label : String, url : String, on : Bool }
                 tab label route =
@@ -126,7 +127,7 @@ viewTypeTabs config =
                     )
                 ]
 
-        Nothing ->
+        _ ->
             text ""
 
 
@@ -138,12 +139,12 @@ viewTypeTabs config =
 -}
 viewSettingsTabs : Config msg -> Html msg
 viewSettingsTabs config =
-    case config.route of
-        Route.Settings _ current ->
+    case ( config.route, config.project ) of
+        ( Route.Settings _ current, Just project ) ->
             let
-                slug : String
+                slug : Slug
                 slug =
-                    slugOf config
+                    project.slug
 
                 tab : String -> Route.SettingsTab -> { label : String, url : String, on : Bool }
                 tab label target =
@@ -473,26 +474,61 @@ sidebar config =
 
     else
         div [ class "flex w-60 shrink-0 flex-col gap-0.5 overflow-auto border-r border-edge bg-raised px-2 py-3" ]
-            (sectionLabel "API"
-                :: List.map (typeLink config) config.types
-                ++ [ if Permission.has Permission.ManageTypes config.permissions then
-                        Html.a
-                            [ href (Route.toString (Route.TypeSchema (slugOf config) "new"))
-                            , class "px-2 py-2 pl-6 text-[13px] text-ink-soft hover:text-ink"
-                            ]
-                            [ text "+ API を作成" ]
-
-                     else
-                        text ""
-                   , sectionLabel "その他"
-                   , linkWith config (mediaRoute config) "メディア" Icon.media
-                   , if Permission.canSeeProjectSettings config.permissions then
-                        linkWith config (settingsRoute config) "プロジェクト設定" Icon.project
-
-                     else
-                        text ""
-                   ]
+            (Sidebar.items { project = config.project, permissions = config.permissions, types = config.types }
+                |> List.concatMap (sidebarRow config)
             )
+
+
+{-| サイドバーの 1 行。見出しは次に来る行の頭に付ける。
+-}
+sidebarRow : Config msg -> Sidebar.Item -> List (Html msg)
+sidebarRow config item =
+    case item of
+        Sidebar.ApiRow slug summary ->
+            [ firstApiLabel config summary, typeLink config slug summary ]
+
+        Sidebar.NewApiRow slug ->
+            [ newApiLabel config
+            , Html.a
+                [ href (Route.toString (Route.TypeSchema slug "new"))
+                , class "px-2 py-2 pl-6 text-[13px] text-ink-soft hover:text-ink"
+                ]
+                [ text "+ API を作成" ]
+            ]
+
+        Sidebar.MediaRow slug ->
+            [ sectionLabel "その他", linkWith config (Route.Media slug) "メディア" Icon.media ]
+
+        Sidebar.ProjectSettingsRow slug ->
+            [ linkWith config (Route.Settings slug Route.Members) "プロジェクト設定" Icon.project ]
+
+        Sidebar.PickProjectRow ->
+            [ sectionLabel "プロジェクト"
+            , Ui.quietLink [ href (Route.toString Route.Projects), class "px-2 py-2 text-[13px]" ]
+                [ text "プロジェクトを選択" ]
+            ]
+
+
+{-| API の見出しは最初の 1 本の上にだけ出す。
+-}
+firstApiLabel : Config msg -> ContentTypeSummary -> Html msg
+firstApiLabel config summary =
+    if List.head config.types == Just summary then
+        sectionLabel "API"
+
+    else
+        text ""
+
+
+{-| API が 1 本も無ければ「+ API を作成」の上に見出しを出す。
+-}
+newApiLabel : Config msg -> Html msg
+newApiLabel config =
+    if List.isEmpty config.types then
+        sectionLabel "API"
+
+    else
+        text ""
 
 
 sectionLabel : String -> Html msg
@@ -503,32 +539,17 @@ sectionLabel label =
 {-| サイドバーの API 1 本。**アイコンは人が選ぶ**（`ContentType.icon`）。
 選び直すのは API スキーマの画面。既定は種類で決まる（何件も持つ物か、1 件だけの物か）。
 -}
-typeLink : Config msg -> ContentTypeSummary -> Html msg
-typeLink config summary =
+typeLink : Config msg -> Slug -> ContentTypeSummary -> Html msg
+typeLink config slug summary =
     navRow config
-        (Route.Entries (slugOf config) summary.apiId [])
+        (Route.Entries slug summary.apiId [])
         (Icon.byName summary.icon)
         (truncated summary.name)
 
 
-mediaRoute : Config msg -> Route
-mediaRoute config =
-    Route.Media (slugOf config)
-
-
-settingsRoute : Config msg -> Route
-settingsRoute config =
-    Route.Settings (slugOf config) Route.Members
-
-
 projectName : Config msg -> String
 projectName config =
-    config.project |> Maybe.map .name |> Maybe.withDefault "プロジェクト"
-
-
-slugOf : Config msg -> String
-slugOf config =
-    config.project |> Maybe.map .slug |> Maybe.withDefault "default"
+    config.project |> Maybe.map .name |> Maybe.withDefault "プロジェクト未選択"
 
 
 {-| アイコン付きの行。アイコンは**文字より薄く**して、名前が読みやすいままにする。

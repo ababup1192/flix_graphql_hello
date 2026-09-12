@@ -16,7 +16,8 @@ import Ui
 
 
 type alias Model =
-    { visibility : String
+    { project : Project
+    , visibility : String
     , busy : Bool
     , errors : List String
     }
@@ -29,7 +30,7 @@ type Msg
 
 init : Project -> Model
 init project =
-    { visibility = project.visibility, busy = False, errors = [] }
+    { project = project, visibility = project.visibility, busy = False, errors = [] }
 
 
 update : { project : Slug } -> Msg -> Model -> ( Model, List (Api.Call Msg) )
@@ -47,7 +48,7 @@ update ctx msg model =
             ( { model | busy = False, errors = [ (Api.problemToText problem).message ] }, [] )
 
 
-view : { project : Project, origin : String } -> Model -> Html Msg
+view : { origin : String } -> Model -> Html Msg
 view args model =
     Ui.page [ class "max-w-2xl" ]
         [ Ui.pageHeader { title = "プロジェクト", icon = Nothing, meta = [], actions = [] }
@@ -87,10 +88,10 @@ view args model =
         , Ui.note [ text "Claude Code などの AI から、管理画面と同じ物を読み書きできます。見える範囲と権限は API キーと同じで、管理画面だけの隠し API はありません。" ]
         , Ui.card [ class "flex flex-col gap-4 p-4" ]
             [ Ui.field { label = "つなぎ先の URL", hint = Nothing, errors = [] }
-                [ Ui.codeBlock [] (mcpUrl args) ]
+                [ Ui.codeBlock [] (mcpUrl { project = model.project, origin = args.origin }) ]
             , Ui.field { label = "つなぐコマンド", hint = Just "API キーは「API キーと Webhook」で発行します", errors = [] }
                 [ Ui.codeBlock [ class "text-[11px]" ]
-                    ("claude mcp add --transport http cms " ++ mcpUrl args ++ " --header \"X-Api-Key: <発行した API キー>\"")
+                    ("claude mcp add --transport http cms " ++ mcpUrl { project = model.project, origin = args.origin } ++ " --header \"X-Api-Key: <発行した API キー>\"")
                 ]
             , div [ class "flex flex-wrap gap-1.5" ]
                 (List.map (\label -> Ui.chip Ui.toneNeutral label)

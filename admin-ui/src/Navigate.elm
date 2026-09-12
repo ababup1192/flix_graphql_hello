@@ -1,4 +1,4 @@
-module Navigate exposing (Move(..), moveFor, pick)
+module Navigate exposing (Asked(..), Move(..), askedOf, moveFor, pick)
 
 {-| URL のプロジェクトをどう扱うか、の判断だけを持つ。
 
@@ -8,6 +8,19 @@ module Navigate exposing (Move(..), moveFor, pick)
 -}
 
 import Model exposing (Project, Slug)
+import Route exposing (Route)
+
+
+{-| URL が求めているプロジェクト。
+
+WhyNot: `Maybe Slug` で持たない。「プロジェクトを持たないルート」と「URL を読めなかった」が
+同じ `Nothing` になり、読めなかった URL で先頭のプロジェクトを開いてしまう。
+
+-}
+type Asked
+    = ForProject Slug
+    | NoProject
+    | Unreadable
 
 
 {-| URL のプロジェクトに対して何をするか。
@@ -18,13 +31,33 @@ type Move
     | Unknown Slug
 
 
-moveFor : { wanted : Maybe Slug, current : Maybe Slug, known : List Slug } -> Move
+askedOf : Route -> Asked
+askedOf route =
+    case route of
+        Route.NotFound ->
+            Unreadable
+
+        _ ->
+            case Route.projectOf route of
+                Just slug ->
+                    ForProject slug
+
+                Nothing ->
+                    NoProject
+
+
+moveFor : { wanted : Asked, current : Maybe Slug, known : List Slug } -> Move
 moveFor { wanted, current, known } =
     case wanted of
-        Nothing ->
+        NoProject ->
             Stay
 
-        Just slug ->
+        Unreadable ->
+            -- WhyNot: 読み込み直さない。読めなかった URL には行き先が無く、
+            -- 読み込み直しても同じ所に戻る。404 はその場で出す。
+            Stay
+
+        ForProject slug ->
             if current == Just slug then
                 Stay
 
@@ -39,13 +72,18 @@ moveFor { wanted, current, known } =
 
 {-| URL のプロジェクトを選ぶ。
 -}
-pick : Maybe Slug -> List Project -> Maybe Project
+pick : Asked -> List Project -> Maybe Project
 pick wanted projects =
     case wanted of
-        Just slug ->
+        ForProject slug ->
             -- WhyNot: 見つからない時に別のプロジェクトへ落とさない。
             -- 人が気付かないまま別のプロジェクトを編集する事になる。
             projects |> List.filter (\project -> project.slug == slug) |> List.head
 
-        Nothing ->
+        NoProject ->
             List.head projects
+
+        Unreadable ->
+            -- WhyNot: 先頭へ落とさない。本文が 404 のまま上のバーとサイドバーだけ
+            -- 別のプロジェクトを指し、リンクを押すと本当にそこへ入ってしまう。
+            Nothing

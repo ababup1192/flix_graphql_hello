@@ -988,7 +988,7 @@ mapPage toPage toMsg workspace ( pageModel, calls ) =
 
 context : Workspace -> { project : Slug }
 context workspace =
-    { project = workspace.project |> Maybe.map .slug |> Maybe.withDefault "default" }
+    { project = workspace.project |> Maybe.map .slug |> Maybe.withDefault "" }
 
 
 {-| API プレビューの引き出しを開く。**今の型で開く**（どの API を見ているかは URL が持つ）。
@@ -1039,7 +1039,7 @@ projectSlugOf model =
             context workspace |> .project
 
         _ ->
-            Route.projectOf model.route |> Maybe.withDefault "default"
+            Route.projectOf model.route |> Maybe.withDefault ""
 
 
 withPage : ModelWith key -> (Workspace -> ( Workspace, List (Api.Call Msg) )) -> ( ModelWith key, Effect Msg )
@@ -1130,12 +1130,7 @@ gotPerson person model =
 -}
 pickProject : Route -> Person -> Maybe Project
 pickProject route person =
-    Navigate.pick (Route.projectOf route) person.projects
-
-
-emptyProject : Project
-emptyProject =
-    { id = "", slug = "", name = "", visibility = "PUBLIC", role = "" }
+    Navigate.pick (Navigate.askedOf route) person.projects
 
 
 {-| URL が変わった時にページを作る。
@@ -1209,7 +1204,7 @@ enterNewRoute route model =
 moveFor : Workspace -> Route -> Navigate.Move
 moveFor workspace route =
     Navigate.moveFor
-        { wanted = Route.projectOf route
+        { wanted = Navigate.askedOf route
         , current = workspace.project |> Maybe.map .slug
         , known = workspace.person.projects |> List.map .slug
         }
@@ -1220,9 +1215,11 @@ enterPage route model =
     case model.phase of
         Ready workspace ->
             let
+                -- WhyNot: プロジェクトが選ばれていない時に別のプロジェクトの slug を入れない。
+                -- 空なら問い合わせが落ちるだけで済むが、他人の slug は黙って通る。
                 slug : Slug
                 slug =
-                    workspace.project |> Maybe.map .slug |> Maybe.withDefault "default"
+                    workspace.project |> Maybe.map .slug |> Maybe.withDefault ""
             in
             case route of
                 Route.Home ->
@@ -1301,18 +1298,12 @@ enterPage route model =
                             )
 
                 Route.Settings _ Route.ProjectSettings ->
-                    ( { model
-                        | route = route
-                        , phase =
-                            Ready
-                                { workspace
-                                    | page =
-                                        ProjectPage
-                                            (ProjectPage.init (workspace.project |> Maybe.withDefault emptyProject))
-                                }
-                      }
-                    , Effect.none
-                    )
+                    case workspace.project of
+                        Just project ->
+                            ( { model | route = route, phase = Ready { workspace | page = ProjectPage (ProjectPage.init project) } }, Effect.none )
+
+                        Nothing ->
+                            ( { model | route = route, phase = Ready { workspace | page = NotFoundPage } }, Effect.none )
 
                 Route.Media _ ->
                     { model | route = route, phase = Ready { workspace | page = MediaPage Media.init } }
@@ -1500,7 +1491,7 @@ breadcrumbOf workspace route =
     let
         slug : Slug
         slug =
-            workspace.project |> Maybe.map .slug |> Maybe.withDefault "default"
+            workspace.project |> Maybe.map .slug |> Maybe.withDefault ""
 
         typeName : String -> String
         typeName apiId =
@@ -1613,10 +1604,7 @@ pageView workspace =
             Account.view page |> Html.map AccountMsg
 
         ProjectPage page ->
-            ProjectPage.view
-                { project = workspace.project |> Maybe.withDefault emptyProject
-                , origin = workspace.origin
-                }
+            ProjectPage.view { origin = workspace.origin }
                 page
                 |> Html.map ProjectMsg
 
