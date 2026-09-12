@@ -131,7 +131,7 @@ MCP はこれを写す（`search_entries` の status、`set_status` ツール）
 5. asset
 6. ワークフロー（status / assignee / ボード）← CMS の 2 章を待つ
 7. 履歴と diff、予約、複数公開
-8. 設定（owner）、Playground
+8. 設定（owner）、Explorer（GraphiQL）
 9. richText の段階 2 → 3
 
 CMS 側の並走は 10 章の優先順に従う。
@@ -151,7 +151,7 @@ CMS 側の並走は 10 章の優先順に従う。
 │   + 型を作る                  │  一覧 [テーブル|ボード] [定義] [設定] │ 予約             │
 │ asset                         │   or                                │ プレビュー        │
 │ 設定（owner だけ出す）          │  エディタ（フォーム + richText）      │ 履歴 / diff      │
-│ Playground                    │                                     │ 編集中の人        │
+│ Explorer                      │                                     │ 編集中の人        │
 └───────────────────────────────┴─────────────────────────────────────┴──────────────────┘
 ```
 
@@ -174,7 +174,8 @@ CMS 側の並走は 10 章の優先順に従う。
 | `/p/{slug}/c/{typeApiId}/{entryId}` | エディタ | `?version={id}` で履歴の版を読むだけで開く、`?diff={from}..{to}` |
 | `/p/{slug}/assets` | asset の一覧（グリッド）。ドロップでアップロード | 1 件は同じ画面の右のパネル（遷移しない） |
 | `/p/{slug}/settings/{members\|api-keys\|webhooks\|workflow\|project}` | プロジェクトの設定 | owner |
-| `/p/{slug}/playground` | GraphiQL | |
+| `/p/{slug}/graphiql` | Explorer（GraphiQL） | query を組み立てる |
+| `/p/{slug}/docs` | リファレンス | 型・フィールド・引数を調べる |
 | `/account`、`/account/tokens`、`/account/orgs/{id}` | 自分 / PAT / 組織 | Account API |
 
 ### 6.3 遷移を減らす決め
@@ -212,7 +213,9 @@ CMS 側の並走は 10 章の優先順に従う。
 | メディア | asset | |
 | メンバー / 権限 | members / role | 権限は「管理者 / 編集者 / 投稿者 / 閲覧者」（owner / editor / writer / viewer） |
 | API キー / Webhook | apiKeys / webhooks | そのまま |
-| API プレビュー | Playground（GraphiQL） | microCMS の語 |
+| API プレビュー | 一覧 / エディタから開く引き出し | microCMS の語。実物を 1 回見る所で、query を組む所ではない |
+| Explorer | GraphiQL | GitHub と同じ呼び名。初出だけ「Explorer（GraphiQL）」と括弧を添える |
+| リファレンス | GraphQL のスキーマの文書（`/p/{slug}/docs`） | 「ドキュメント」「Docs」とは呼ばない |
 | 検索（⌘K） | Cmd+K | 「コマンドパレット」とは呼ばない |
 | 代替テキスト / キャプション / 出典 / 出典の URL / 適用 / 閉じる | richText の image の `alt` / 中身（text と link / bold / italic / strike / code の mark）/ `source` / `sourceUrl`、blockquote の最後の子の `quoteCite` の中身（text と同じ 5 つの mark） | キャプションは画像の直下の figcaption で、カーソルがある間はキャプションの真上（画像の下端に重なる）に 太字 / 打ち消し / リンク の 3 つの帯が浮く（画像の枠と帯は出ない。見出しと引用は無い）。空で選ぶと placeholder「キャプションを入力」（中央・ラベル無し）。Enter は何もしない、上下の矢印で外の段落へ。旧い `caption` の文字列は読む時だけ中身に写す。代替テキストは画像の上の帯の ALT から（帯が「代替テキストの欄 + 適用 + ×」に入れ替わる）。画像の出典は帯には無い。`source` か `sourceUrl` がある時だけキャプションの下に小さく「出典: …」（URL があればリンク風）と出し、押すと帯の位置に「出典」と「出典の URL」の 2 欄 + 適用 + × が出る（直す・両方空にして消す。新しく付けるのは Markdown / API から）。引用の出典は箱の外の下の右で、**キャプションと同じ編集できる場所**（引用の最後の子の `quoteCite`。placeholder は「出典を入力」）。文字を選ぶと帯が出て、太字 / 打ち消し / リンクを掛けられる。入れた出典は本文と同じ濃さ（下線も枠も出さない）。URL は出典の文字に掛かる link の mark で、行に印もボタンも置かない。Enter は何もしない、上下の矢印で引用の外の行へ。出典が空なら `quoteCite` ごと出さず、焦点が引用の外にあれば行の中身も出さない。旧い `attrs.cite` / `citeUrl` は読む時だけ `quoteCite` に写す（`citeUrl` はその文字の link に。書き出しには出さない）（2026-09-11） |
 | リンク / リンクの URL（キャプションの帯） | link mark の `href` | キャプションの帯のリンクを押すと、帯が「URL の欄（placeholder `https://`）+ 適用 + ×」に入れ替わる。Enter / 適用で掛かり（空なら外す）、× / Esc で戻る。リンクの掛かった文字を選ぶとリンクが押した状態になり、選択の下に小さな面で URL を文字で見せる（note と同じ。2026-09-11） |
@@ -735,6 +738,16 @@ HTTP の番号も印で出す。
 
 `curl` の 1 行も出す。**API キーは画面に出さない**（出すと共有されて漏れる）。
 公開中の物は鍵無しで読めるので、その形で通る。
+
+### 17.4 組む・調べるは引き出しの外
+
+引き出しの読者は管理者と制作会社で、ここは**実物を 1 回見る**所。query を組み立てるのは
+Explorer（GraphiQL、`/p/{slug}/graphiql`）、フィールドや引数を調べるのはリファレンス
+（`/p/{slug}/docs`）。トグルの下に「詳しく:」と 2 本のリンクを並べ、別のタブで開く。
+Explorer には今の query を `?query=` で渡す。
+
+引き出しの中に絞り込みや返る物の表は置かない（検索も補完も型を辿る事もできる 2 つの
+劣った写しになる）。
 
 ## 18. API スキーマの画面
 

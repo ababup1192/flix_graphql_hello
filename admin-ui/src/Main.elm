@@ -859,6 +859,14 @@ editorUpdate pageMsg model =
                             _ ->
                                 Effect.none
 
+                        -- コンテンツ ID のコピー。クリップボードは port の先。返事は 2 秒で下ろす
+                        , case pageMsg of
+                            Editor.IdCopyRequested entryId ->
+                                Effect.batch [ Effect.Copy entryId, Effect.After copiedMillis (EditorMsg Editor.IdCopyShown) ]
+
+                            _ ->
+                                Effect.none
+
                         -- 本文に貼られた画像。メディアの画面と同じ道（署名付き URL に PUT）。
                         , case upload of
                             Just chosen ->

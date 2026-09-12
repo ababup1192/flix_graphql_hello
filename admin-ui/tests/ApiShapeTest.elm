@@ -1,6 +1,6 @@
 module ApiShapeTest exposing (suite)
 
-{-| ApiShape: コンテンツ API の introspection を表の行にし、押した行を query に差し込む。
+{-| ApiShape: コンテンツ API の introspection を読み、型の綴りを組み立てる。
 -}
 
 import ApiShape
@@ -55,11 +55,6 @@ decoded =
     D.decodeString (ApiShape.decoder "blogs") body
 
 
-listDocument : String
-listDocument =
-    "query blogs {\n  blogs(first: 10) {\n    totalCount\n  }\n}"
-
-
 suite : Test
 suite =
     describe "ApiShape"
@@ -100,6 +95,12 @@ suite =
                         |> Result.map .arguments
                         |> Expect.equal (Ok [])
             ]
+        , describe "query"
+            [ test "__type を並べず __schema を 1 回だけ引く" <|
+                \_ ->
+                    ( String.contains "__schema" ApiShape.query, String.contains "__type " ApiShape.query )
+                        |> Expect.equal ( True, False )
+            ]
         , describe "operatorName"
             [ test "参照の _id_in は 1 つの演算子" <|
                 \_ ->
@@ -113,47 +114,5 @@ suite =
                 \_ ->
                     ApiShape.splitLeaf "sub_title_startsWith"
                         |> Expect.equal ( "sub_title", "startsWith" )
-            ]
-        , describe "placeholder"
-            [ test "文字列は空の引用符" <|
-                \_ ->
-                    ApiShape.placeholder "String"
-                        |> Expect.equal "\"\""
-            , test "配列は空の括弧" <|
-                \_ ->
-                    ApiShape.placeholder "[String!]"
-                        |> Expect.equal "[]"
-            , test "数と真偽はそのままの形" <|
-                \_ ->
-                    ( ApiShape.placeholder "Float", ApiShape.placeholder "Boolean" )
-                        |> Expect.equal ( "0", "true" )
-            ]
-        , describe "insertWhere"
-            [ test "where が無ければ root field の引数の頭に足す" <|
-                \_ ->
-                    ApiShape.insertWhere "blogs" "title_contains: \"\"" listDocument
-                        |> Expect.equal "query blogs {\n  blogs(where: { title_contains: \"\" }, first: 10) {\n    totalCount\n  }\n}"
-            , test "where が既にあればその中の頭に足す" <|
-                \_ ->
-                    ApiShape.insertWhere "blogs" "id_eq: \"\"" "query blogs {\n  blogs(where: { title_contains: \"a\" }, first: 10) {\n  }\n}"
-                        |> Expect.equal "query blogs {\n  blogs(where: { id_eq: \"\", title_contains: \"a\" }, first: 10) {\n  }\n}"
-            , test "root field が見つからなければ触らない" <|
-                \_ ->
-                    ApiShape.insertWhere "blogs" "id_eq: \"\"" "query blog {\n  blog(id: \"x\") {\n  }\n}"
-                        |> Expect.equal "query blog {\n  blog(id: \"x\") {\n  }\n}"
-            ]
-        , describe "insertOrderBy"
-            [ test "orderBy が無ければ root field の引数の頭に足す" <|
-                \_ ->
-                    ApiShape.insertOrderBy "blogs" "publishedAt_DESC" listDocument
-                        |> Expect.equal "query blogs {\n  blogs(orderBy: publishedAt_DESC, first: 10) {\n    totalCount\n  }\n}"
-            , test "orderBy が既にあれば値を置き換える" <|
-                \_ ->
-                    ApiShape.insertOrderBy "blogs" "title_ASC" "query blogs {\n  blogs(orderBy: publishedAt_DESC, first: 10) {\n  }\n}"
-                        |> Expect.equal "query blogs {\n  blogs(orderBy: title_ASC, first: 10) {\n  }\n}"
-            , test "引数の括弧が無い root field には括弧ごと足す" <|
-                \_ ->
-                    ApiShape.insertOrderBy "blogs" "title_ASC" "query blogs {\n  blogs {\n  }\n}"
-                        |> Expect.equal "query blogs {\n  blogs(orderBy: title_ASC) {\n  }\n}"
             ]
         ]

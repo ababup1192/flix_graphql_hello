@@ -134,6 +134,9 @@ type alias Model =
     {- レールは先頭だけ出す。全部はここを開いて見せる。 -}
     , historyOpen : Bool
 
+    {- id をコピーした印。数秒で下ろす。 -}
+    , idCopied : Bool
+
     {- 本文を画面いっぱいに広げている項目の apiId。**1 つだけ。** -}
     , expanded : Maybe String
     , schedulesOpen : Bool
@@ -265,6 +268,8 @@ type Msg
     | DiscardOpened Model.EntryVersion
     | RestoreWanted
     | DeleteOpened
+    | IdCopyRequested String
+    | IdCopyShown
     | DeleteWanted
     | GotDeleted (Result Api.Problem String)
     | GotVersionSaved (Result Api.Problem String)
@@ -295,6 +300,7 @@ init project apiId entryId =
     , report = Nothing
     , publishing = False
     , history = Loaded.Loading
+    , idCopied = False
     , schedules = []
     , scheduler = Nothing
     , dates = Dict.empty
@@ -462,6 +468,13 @@ update ctx msg model =
 
         DiscardOpened version ->
             ( { model | asking = AskingDiscard version, actionError = Nothing }, [] )
+
+        -- クリップボードへ書くのは親（port の先）。ここは返事を出すだけ
+        IdCopyRequested _ ->
+            ( { model | idCopied = True }, [] )
+
+        IdCopyShown ->
+            ( { model | idCopied = False }, [] )
 
         DeleteOpened ->
             ( { model | asking = AskingDelete, actionError = Nothing }, [] )
@@ -2109,6 +2122,7 @@ viewRail args model =
         , viewReferrers args model
         , viewSchedules model
         , viewHistory model
+        , viewEntryId model
         , case model.entryId of
             Nothing ->
                 text ""
@@ -2117,6 +2131,31 @@ viewRail args model =
                 -- 他の操作から離す。公開に関わる列の続きに見えると、履歴の「戻す」の隣で押される。
                 div [ class "border-t border-edge pt-4" ] [ Ui.dangerLink DeleteOpened "削除" ]
         ]
+
+
+{-| コンテンツ ID をそのまま渡せる口。
+
+WhyNot: 引き出しを開かせない。編集者が制作会社に id を伝えるだけのために
+GraphQL の JSON を見る事になっていた。
+
+-}
+viewEntryId : Model -> Html Msg
+viewEntryId model =
+    case model.entryId of
+        Nothing ->
+            text ""
+
+        Just entryId ->
+            div [ class "flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]" ]
+                [ Ui.quietActionLink [ onClick (IdCopyRequested entryId), class "inline-flex items-center gap-1 text-[11px]" ]
+                    [ Icon.view Icon.copy, text "id をコピー" ]
+                , if model.idCopied then
+                    span [ class "text-[color:var(--color-ok)]" ] [ text "コピーしました" ]
+
+                  else
+                    text ""
+                , span [ class "font-mono text-ink-faint" ] [ text entryId ]
+                ]
 
 
 {-| このコンテンツを参照している物。

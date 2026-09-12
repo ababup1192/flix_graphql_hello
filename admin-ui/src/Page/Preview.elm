@@ -1,4 +1,4 @@
-module Page.Preview exposing (Model, Msg(..), init, load, update, view)
+module Page.Preview exposing (Model, Msg(..), docsUrl, explorerUrl, init, load, update, view)
 
 {-| API プレビュー。**この API に何を投げると何が返るか**を、実物で見せる。
 
@@ -17,13 +17,12 @@ query は**書き換えられる**。型から作った物はあくまで下書�
 **投げ先はコンテンツ API**（`/p/{slug}/graphql`）。管理 API ではない。
 公開中の物だけが匿名で読めるので、既定は `stage` を付けない（= 公開中）。
 
-query の上に**この API の形**（何で絞れるか・何の順に並ぶか・何が返るか）を introspection から
-表で出す。行を押すと query に差し込まれる。
+**組む・調べるは別の場所**。query を組み立てるのは Explorer、フィールドや引数を調べるのは
+リファレンス。ここは「実物を 1 回見る」だけに絞り、その 2 つへのリンクを置く。
 
 -}
 
 import Api
-import ApiShape
 import Html exposing (Html, div, span, text)
 import Html.Attributes exposing (class, value)
 import Html.Events exposing (onClick, onInput)
@@ -33,6 +32,7 @@ import Loaded exposing (Loaded)
 import Model exposing (ContentTypeDetail, EntryList, EntryRow, FieldDef, Slug)
 import Queries
 import Ui
+import Url
 
 
 type alias Model =
@@ -53,16 +53,7 @@ type alias Model =
     , edited : Bool
     , answer : Maybe Answer
     , sending : Bool
-    , apiShape : ShapeState
     }
-
-
-{-| introspection の結果。**失敗しても引き出しは使える**（表が出ないだけ）。
--}
-type ShapeState
-    = ShapeLoading
-    | ShapeMissing
-    | ShapeReady ApiShape.Shape
 
 
 {-| 何を見せるか。一覧と 1 件で query の形が変わる。
@@ -92,9 +83,6 @@ type Msg
     | ResetWanted
     | SendWanted
     | GotAnswer Api.Response
-    | GotShape Api.Response
-    | FilterPicked ApiShape.Operator
-    | OrderPicked String
     | Closed
     | Ignored
 
@@ -122,7 +110,6 @@ init project apiId one =
     , edited = False
     , answer = Nothing
     , sending = False
-    , apiShape = ShapeLoading
     }
 
 
@@ -143,7 +130,7 @@ update ctx msg model =
             ( rebuild next
             , case result of
                 Ok (Just detail) ->
-                    entriesCall ctx.project detail.id :: shapeCall ctx.project :: currentCall ctx.project detail.id model.entryId
+                    entriesCall ctx.project detail.id :: currentCall ctx.project detail.id model.entryId
 
                 _ ->
                     []
@@ -216,28 +203,6 @@ update ctx msg model =
             , []
             )
 
-        GotShape response ->
-            ( { model
-                | apiShape =
-                    D.decodeValue (ApiShape.decoder model.apiId) response.body
-                        |> Result.map ShapeReady
-                        |> Result.withDefault ShapeMissing
-              }
-            , []
-            )
-
-        FilterPicked operator ->
-            -- 差し込んだ後は人が書いた物として扱う（型から作り直して消さない）。
-            ( { model
-                | document = ApiShape.insertWhere model.apiId (operator.leaf ++ ": " ++ ApiShape.placeholder operator.typeText) model.document
-                , edited = True
-              }
-            , []
-            )
-
-        OrderPicked name ->
-            ( { model | document = ApiShape.insertOrderBy model.apiId name model.document, edited = True }, [] )
-
 
 {-| 型と今の選びから query を組み直す。**人が書き換えた後は触らない。**
 -}
@@ -282,16 +247,6 @@ currentCall project typeId entryId =
             )
             GotCurrent
         ]
-
-
-{-| この API の形。コンテンツ API に introspection を投げる。**応答は生で受ける**（`Api.call` は
-errors を失敗に畳むが、ここは型が 1 つ無いだけでも表を出したい）。
--}
-shapeCall : Slug -> Api.Call Msg
-shapeCall project =
-    Api.preview
-        { kind = "apiShape", project = project, document = ApiShape.query }
-        GotShape
 
 
 entriesCall : Slug -> String -> Api.Call Msg
@@ -452,7 +407,7 @@ viewPanel env model detail =
     div [ class "flex flex-col gap-4" ]
         [ Ui.note [ text "この API で query を実行すると何が返るかを、実物で見せます。query は書き換えられます。" ]
         , viewControls model detail
-        , viewShape model
+        , viewLinks model
         , viewRequest model detail
         , viewAnswer model
         , viewCurl env model
@@ -460,215 +415,49 @@ viewPanel env model detail =
 
 
 
--- この API の形
+-- 詳しく
 
 
-{-| 何で絞れるか・何の順に並ぶか・何が返るか。**行を押すと query に入る。**
+{-| 組む時と調べる時の行き先。
+
+WhyNot: ここに表を置き直さない。検索も補完も型を辿る事もできる Explorer と
+リファレンスがあり、引き出しの中の表はその劣った写しになる。
+
 -}
-viewShape : Model -> Html Msg
-viewShape model =
-    Ui.card [ class "flex flex-col gap-3 p-4" ]
-        (Ui.subheading "この API の形"
-            :: (case model.apiShape of
-                    ShapeLoading ->
-                        [ span [ class "text-xs text-ink-faint" ] [ text "読み込み中…" ] ]
-
-                    ShapeMissing ->
-                        [ span [ class "text-xs text-ink-faint" ] [ text "この API の形を取得できませんでした" ] ]
-
-                    ShapeReady shape ->
-                        [ Ui.note [ text "演算子や並び順を押すと query に入ります。値は書き換えてください。" ]
-                        , viewFilters shape.filters
-                        , viewOrders shape.orders
-                        , viewReturns shape.returns
-                        , viewArguments shape.arguments
-                        ]
-               )
-        )
-
-
-shapeColumns : String
-shapeColumns =
-    "grid-cols-[minmax(7rem,1fr)_minmax(10rem,2fr)_minmax(8rem,2fr)]"
-
-
-{-| 見出し付きの表。行が無ければ表ごと出さない（型名の付け方が違う等で introspection に無い時）。
--}
-viewTable : String -> List (Html Msg) -> List (Html Msg) -> Html Msg
-viewTable heading head rows =
-    case rows of
-        [] ->
-            text ""
-
-        _ ->
-            div [ class "flex flex-col gap-1.5" ]
-                [ span [ class "text-xs font-semibold text-ink-soft" ] [ text heading ]
-                , Ui.table (Ui.headRowOf shapeColumns head :: rows)
-                ]
-
-
-viewFilters : List ApiShape.Filter -> Html Msg
-viewFilters filters =
-    viewTable "絞り込み（where）"
-        [ text "フィールド", text "演算子", text "説明" ]
-        (List.map viewFilter filters)
-
-
-viewFilter : ApiShape.Filter -> Html Msg
-viewFilter filter =
-    Ui.rowOf shapeColumns
-        [ mono filter.field
-        , div [ class "flex flex-wrap gap-1" ] (List.map viewOperator filter.operators)
-        , viewOperatorDescriptions filter.operators
+viewLinks : Model -> Html Msg
+viewLinks model =
+    div [ class "flex flex-wrap items-center gap-3 text-xs" ]
+        [ span [ class "text-ink-faint" ] [ text "詳しく:" ]
+        , outLink (explorerUrl model.project model.document) "Explorer（GraphiQL）で開く"
+        , outLink (docsUrl model.project) "リファレンス"
         ]
 
 
-{-| 説明は演算子ごとに違う。
-
-WhyNot: 最初の 1 つだけを出さない。`title` の行に `isNull` の「値が無い」だけが出て、
-部分一致や前方一致の説明が無いように見えた（実機）。全部が同じ文なら 1 行にまとめる。
-
--}
-viewOperatorDescriptions : List ApiShape.Operator -> Html Msg
-viewOperatorDescriptions operators =
-    let
-        described : List ApiShape.Operator
-        described =
-            List.filter (\operator -> not (String.isEmpty operator.description)) operators
-
-        distinct : List String
-        distinct =
-            described |> List.map .description |> uniqueKeepingOrder
-    in
-    case distinct of
-        [ only ] ->
-            faint only
-
-        _ ->
-            div [ class "flex flex-col gap-0.5" ]
-                (List.map
-                    (\operator ->
-                        div [ class "text-[12px] text-ink-soft" ]
-                            [ span [ class "font-mono text-ink-faint" ] [ text (operator.operator ++ " ") ]
-                            , text operator.description
-                            ]
-                    )
-                    described
-                )
-
-
-uniqueKeepingOrder : List String -> List String
-uniqueKeepingOrder =
-    List.foldl
-        (\x acc ->
-            if List.member x acc then
-                acc
-
-            else
-                acc ++ [ x ]
-        )
-        []
-
-
-{-| 演算子 1 つ。押すと `where` に入る。**名前と型を並べる**（型は値の形を決める手掛かり）。
--}
-viewOperator : ApiShape.Operator -> Html Msg
-viewOperator operator =
-    Html.button
-        [ class "rounded border border-edge bg-raised px-1.5 py-0.5 font-mono text-[11px] text-ink hover:border-accent hover:text-accent"
-        , onClick (FilterPicked operator)
-        , Html.Attributes.title (operator.leaf ++ ": " ++ operator.typeText ++ suffixed operator.description)
+outLink : String -> String -> Html Msg
+outLink href label =
+    Ui.quietLink
+        [ Html.Attributes.href href
+        , Html.Attributes.target "_blank"
+        , Html.Attributes.rel "noopener"
         ]
-        [ text
-            (if String.isEmpty operator.operator then
-                operator.leaf ++ ": " ++ operator.typeText
-
-             else
-                operator.operator ++ ": " ++ operator.typeText
-            )
-        ]
+        [ text label ]
 
 
-suffixed : String -> String
-suffixed description =
-    if String.isEmpty description then
-        ""
+{-| Explorer を今の query で開く URL。空の query は `?query=` ごと付けない
+（Explorer が自前の下書きを出せる）。
+-}
+explorerUrl : Slug -> String -> String
+explorerUrl project document =
+    if String.isEmpty document then
+        "/p/" ++ project ++ "/graphiql"
 
     else
-        "（" ++ description ++ "）"
+        "/p/" ++ project ++ "/graphiql?query=" ++ Url.percentEncode document
 
 
-viewOrders : List ApiShape.Order -> Html Msg
-viewOrders orders =
-    viewTable "並び順（orderBy）"
-        [ text "値", text "", text "説明" ]
-        (List.map viewOrder orders)
-
-
-viewOrder : ApiShape.Order -> Html Msg
-viewOrder order =
-    Ui.rowOf shapeColumns
-        [ Html.button
-            [ class "font-mono text-[12px] text-ink hover:text-accent", onClick (OrderPicked order.name) ]
-            [ text order.name ]
-        , text ""
-        , faint order.description
-        ]
-
-
-viewReturns : List ApiShape.Returned -> Html Msg
-viewReturns returns =
-    viewTable "返る物"
-        [ text "フィールド", text "種類", text "説明" ]
-        (List.concatMap viewReturned returns)
-
-
-{-| 返るフィールド 1 行と、RichText / Asset の中身の行（1 段だけ、名前を字下げ）。
--}
-viewReturned : ApiShape.Returned -> List (Html Msg)
-viewReturned field =
-    Ui.rowOf shapeColumns [ mono field.name, mono field.typeText, faint field.description ]
-        :: List.map
-            (\child ->
-                Ui.rowOf shapeColumns
-                    [ span [ class "pl-4 font-mono text-[12px] text-ink-soft" ] [ text (field.name ++ "." ++ child.name) ]
-                    , mono child.typeText
-                    , faint child.description
-                    ]
-            )
-            field.children
-
-
-viewArguments : List ApiShape.Argument -> Html Msg
-viewArguments arguments =
-    viewTable "引数"
-        [ text "名前", text "種類", text "説明" ]
-        (List.map viewArgument arguments)
-
-
-viewArgument : ApiShape.Argument -> Html Msg
-viewArgument argument =
-    Ui.rowOf shapeColumns
-        [ mono argument.name
-        , mono
-            (if String.isEmpty argument.defaultValue then
-                argument.typeText
-
-             else
-                argument.typeText ++ " = " ++ argument.defaultValue
-            )
-        , faint argument.description
-        ]
-
-
-mono : String -> Html Msg
-mono value_ =
-    span [ class "font-mono text-[12px] text-ink" ] [ text value_ ]
-
-
-faint : String -> Html Msg
-faint value_ =
-    span [ class "text-xs text-ink-soft" ] [ text value_ ]
+docsUrl : Slug -> String
+docsUrl project =
+    "/p/" ++ project ++ "/docs"
 
 
 viewControls : Model -> ContentTypeDetail -> Html Msg
