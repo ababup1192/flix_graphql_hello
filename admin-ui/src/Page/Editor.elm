@@ -1,4 +1,4 @@
-module Page.Editor exposing (Model, Msg(..), SaveState(..), autosaveDelay, autosaveTick, init, load, previewOf, richInputId, takeRichUpload, title, unsaved, update, view)
+module Page.Editor exposing (Model, Msg(..), SaveState(..), autosaveDelay, autosaveTick, entryIdOf, init, load, previewOf, richInputId, takeRichUpload, title, unsaved, update, view)
 
 {-| コンテンツの編集。
 
@@ -1159,6 +1159,13 @@ publish ctx msg model =
 previewOf : Model -> Maybe { entryId : String, draft : Bool }
 previewOf model =
     model.entryId |> Maybe.map (\entryId -> { entryId = entryId, draft = model.stage /= "PUBLISHED" })
+
+
+{-| 開いている（または作られた）entry の id。
+-}
+entryIdOf : Model -> Maybe String
+entryIdOf model =
+    model.entryId
 
 
 {-| まだ書いていない入力があるか。

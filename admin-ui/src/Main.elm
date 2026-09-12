@@ -815,10 +815,17 @@ editorUpdate pageMsg model =
                         ( sent, effect ) =
                             sendAll (List.map (Api.mapCall EditorMsg) calls)
                                 { model | phase = Ready { workspace | page = EditorPage next } }
+
+                        created : Maybe Route
+                        created =
+                            Navigate.createdRoute { route = model.route, entryId = Editor.entryIdOf next }
                     in
-                    ( sent
+                    ( { sent | route = created |> Maybe.withDefault sent.route }
                     , Effect.batch
                         [ effect
+
+                        -- WhyNot: pushUrl にしない。戻るボタンで空の新規画面に戻り、書いた物が消えたように見える。
+                        , created |> Maybe.map (Route.toString >> Effect.ReplaceRoute) |> Maybe.withDefault Effect.none
                         , Effect.SetUnsaved (Editor.unsaved next)
                         , scheduleToday pageMsg next
                         , autosaveDebounce page next
@@ -1199,6 +1206,15 @@ staysOnPage model to =
             case workspace.page of
                 AuditPage _ ->
                     fromProject == toProject
+
+                _ ->
+                    False
+
+        -- 新規の画面で作られた entry の URL への差し替え。作り直すと入力中の値と焦点が消える。
+        ( Ready workspace, Route.Entry fromProject fromApiId fromEntry, Route.Entry toProject toApiId toEntry ) ->
+            case workspace.page of
+                EditorPage page ->
+                    fromProject == toProject && fromApiId == toApiId && fromEntry == toEntry && Editor.entryIdOf page == Just toEntry
 
                 _ ->
                     False

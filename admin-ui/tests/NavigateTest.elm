@@ -139,4 +139,16 @@ suite =
                 ]
                     |> List.map Navigate.needsTypes
                     |> Expect.equal [ True, True, False, False, False, False ]
+        , test "新規の画面で entry が作られたら、その entry のルートへ差し替える" <|
+            \_ ->
+                Navigate.createdRoute { route = Route.NewEntry "tech-blog" "blogs", entryId = Just "e1" }
+                    |> Expect.equal (Just (Route.Entry "tech-blog" "blogs" "e1"))
+        , test "まだ作られていない・既存の entry・他の画面では差し替えない" <|
+            \_ ->
+                [ ( Route.NewEntry "tech-blog" "blogs", Nothing )
+                , ( Route.Entry "tech-blog" "blogs" "e1", Just "e1" )
+                , ( Route.Entries "tech-blog" "blogs" [], Just "e1" )
+                ]
+                    |> List.map (\( route, entryId ) -> Navigate.createdRoute { route = route, entryId = entryId })
+                    |> Expect.equal [ Nothing, Nothing, Nothing ]
         ]

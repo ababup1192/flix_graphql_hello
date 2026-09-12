@@ -1,4 +1,4 @@
-module Navigate exposing (Asked(..), Landing(..), Move(..), askedOf, landingOf, moveFor, needsTypes, pick)
+module Navigate exposing (Asked(..), Landing(..), Move(..), askedOf, createdRoute, landingOf, moveFor, needsTypes, pick)
 
 {-| URL のプロジェクトをどう扱うか、の判断だけを持つ。
 
@@ -120,6 +120,18 @@ needsTypes route =
 
         _ ->
             False
+
+
+{-| 新規の画面で entry が作られた時に、URL を差し替える先。
+-}
+createdRoute : { route : Route, entryId : Maybe String } -> Maybe Route
+createdRoute { route, entryId } =
+    case ( route, entryId ) of
+        ( Route.NewEntry slug apiId, Just id ) ->
+            Just (Route.Entry slug apiId id)
+
+        _ ->
+            Nothing
 
 
 {-| URL のプロジェクトを選ぶ。
