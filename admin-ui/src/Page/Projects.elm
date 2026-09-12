@@ -1,4 +1,4 @@
-module Page.Projects exposing (Model, Msg, currentPerson, init, load, notFound, update, view)
+module Page.Projects exposing (Model, Msg, currentPerson, init, load, notFound, slugify, update, view)
 
 {-| プロジェクトを選ぶ画面。組織ごとに並べ、そこから組織とプロジェクトを作る。
 
@@ -116,6 +116,16 @@ update msg model =
                 | busy = False
                 , newProject = Nothing
                 , person = addProject project model.person
+
+                -- WhyNot: 組織ごとの一覧を取り直すまで待たない。待つと、作った直後だけ
+                -- 「招待されたプロジェクト」の下に出て、自分の組織の物に見えない。
+                , orgProjects =
+                    case model.newProject of
+                        Just form ->
+                            Dict.update form.orgId (Maybe.withDefault [] >> (\ids -> ids ++ [ project.id ]) >> Just) model.orgProjects
+
+                        Nothing ->
+                            model.orgProjects
               }
             , []
             )
@@ -156,7 +166,12 @@ addProject project person =
     { person | projects = person.projects ++ [ project ] }
 
 
-{-| 名前からプロジェクト slug を作る。DNS のラベルの形（英小文字・数字・ハイフン）に落とす。
+{-| 名前から slug の候補を作る。英数字はそのまま、空白と記号は `-`、それ以外の文字は落とす。
+
+WhyNot: 英数字でない文字を全部 `-` にしない。日本語の名前だと 1 文字ごとに `-` が並び
+（「商店ブログ」→ `-----`）、その後ろに打った物が `-----shop-blog` になって弾かれる。
+日本語の名前からは slug を導けないので、空のまま人に打たせる。
+
 -}
 slugify : String -> String
 slugify name =
@@ -164,13 +179,19 @@ slugify name =
         |> String.toLower
         |> String.map
             (\c ->
-                if Char.isAlphaNum c then
+                if Char.isAlphaNum c && Char.toCode c < 128 then
                     c
 
-                else
+                else if c == ' ' || c == '-' || c == '_' || c == '.' || c == '/' then
                     '-'
+
+                else
+                    '\u{0000}'
             )
-        |> String.filter (\c -> Char.isAlphaNum c || c == '-')
+        |> String.filter (\c -> c /= '\u{0000}')
+        |> String.split "-"
+        |> List.filter (not << String.isEmpty)
+        |> String.join "-"
         |> String.left 63
 
 
