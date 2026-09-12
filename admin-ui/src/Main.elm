@@ -1566,12 +1566,24 @@ view model =
         , -- API プレビューの引き出し。ページの上に重ねる（ページは閉じない）。
           case model.preview of
             Just page ->
-                Preview.view page |> Html.map PreviewMsg
+                Preview.view { publicOrigin = publicOriginOf model } page |> Html.map PreviewMsg
 
             Nothing ->
                 Html.text ""
         ]
     }
+
+
+{-| 引き出しは Ready の外に居るので、Workspace から自分で引く（無ければ空 = 仮の URL）。
+-}
+publicOriginOf : ModelWith key -> String
+publicOriginOf model =
+    case model.phase of
+        Ready workspace ->
+            workspace.publicOrigin
+
+        _ ->
+            ""
 
 
 {-| パンくず。最後の 1 つは今いる場所（リンクにしない）。

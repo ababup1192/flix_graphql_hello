@@ -17,9 +17,13 @@ query は**書き換えられる**。型から作った物はあくまで下書�
 **投げ先はコンテンツ API**（`/p/{slug}/graphql`）。管理 API ではない。
 公開中の物だけが匿名で読めるので、既定は `stage` を付けない（= 公開中）。
 
+query の上に**この API の形**（何で絞れるか・何の順に並ぶか・何が返るか）を introspection から
+表で出す。行を押すと query に差し込まれる。
+
 -}
 
 import Api
+import ApiShape
 import Html exposing (Html, div, span, text)
 import Html.Attributes exposing (class, value)
 import Html.Events exposing (onClick, onInput)
@@ -49,7 +53,16 @@ type alias Model =
     , edited : Bool
     , answer : Maybe Answer
     , sending : Bool
+    , apiShape : ShapeState
     }
+
+
+{-| introspection の結果。**失敗しても引き出しは使える**（表が出ないだけ）。
+-}
+type ShapeState
+    = ShapeLoading
+    | ShapeMissing
+    | ShapeReady ApiShape.Shape
 
 
 {-| 何を見せるか。一覧と 1 件で query の形が変わる。
@@ -79,6 +92,9 @@ type Msg
     | ResetWanted
     | SendWanted
     | GotAnswer Api.Response
+    | GotShape Api.Response
+    | FilterPicked ApiShape.Operator
+    | OrderPicked String
     | Closed
     | Ignored
 
@@ -106,6 +122,7 @@ init project apiId one =
     , edited = False
     , answer = Nothing
     , sending = False
+    , apiShape = ShapeLoading
     }
 
 
@@ -126,7 +143,7 @@ update ctx msg model =
             ( rebuild next
             , case result of
                 Ok (Just detail) ->
-                    entriesCall ctx.project detail.id :: currentCall ctx.project detail.id model.entryId
+                    entriesCall ctx.project detail.id :: shapeCall ctx.project detail :: currentCall ctx.project detail.id model.entryId
 
                 _ ->
                     []
@@ -199,6 +216,28 @@ update ctx msg model =
             , []
             )
 
+        GotShape response ->
+            ( { model
+                | apiShape =
+                    D.decodeValue (ApiShape.decoder model.apiId) response.body
+                        |> Result.map ShapeReady
+                        |> Result.withDefault ShapeMissing
+              }
+            , []
+            )
+
+        FilterPicked operator ->
+            -- 差し込んだ後は人が書いた物として扱う（型から作り直して消さない）。
+            ( { model
+                | document = ApiShape.insertWhere model.apiId (operator.leaf ++ ": " ++ ApiShape.placeholder operator.typeText) model.document
+                , edited = True
+              }
+            , []
+            )
+
+        OrderPicked name ->
+            ( { model | document = ApiShape.insertOrderBy model.apiId name model.document, edited = True }, [] )
+
 
 {-| 型と今の選びから query を組み直す。**人が書き換えた後は触らない。**
 -}
@@ -243,6 +282,16 @@ currentCall project typeId entryId =
             )
             GotCurrent
         ]
+
+
+{-| この API の形。コンテンツ API に introspection を投げる。**応答は生で受ける**（`Api.call` は
+errors を失敗に畳むが、ここは型が 1 つ無いだけでも表を出したい）。
+-}
+shapeCall : Slug -> ContentTypeDetail -> Api.Call Msg
+shapeCall project detail =
+    Api.preview
+        { kind = "apiShape", project = project, document = ApiShape.query { singular = detail.singular, apiId = detail.apiId } }
+        GotShape
 
 
 entriesCall : Slug -> String -> Api.Call Msg
@@ -380,8 +429,8 @@ missingOf detail =
 
 {-| 右から出る引き出し。**画面は閉じない**（今見ていた一覧や編集の上に重ねる）。
 -}
-view : Model -> Html Msg
-view model =
+view : { publicOrigin : String } -> Model -> Html Msg
+view env model =
     Ui.drawer
         { title = "API プレビュー"
         , meta = [ span [ class "font-mono text-[11px] text-ink-faint" ] [ text ("/" ++ model.apiId) ] ]
@@ -392,21 +441,187 @@ view model =
             { loading = Ui.loadingCard
             , missing = Ui.messageCard "この API はありません" []
             , failed = Ui.failedCard
-            , present = viewPanel model
+            , present = viewPanel env model
             }
             model.contentType
         ]
 
 
-viewPanel : Model -> ContentTypeDetail -> Html Msg
-viewPanel model detail =
+viewPanel : { publicOrigin : String } -> Model -> ContentTypeDetail -> Html Msg
+viewPanel env model detail =
     div [ class "flex flex-col gap-4" ]
         [ Ui.note [ text "この API で query を実行すると何が返るかを、実物で見せます。query は書き換えられます。" ]
         , viewControls model detail
+        , viewShape model
         , viewRequest model detail
         , viewAnswer model
-        , viewCurl model
+        , viewCurl env model
         ]
+
+
+
+-- この API の形
+
+
+{-| 何で絞れるか・何の順に並ぶか・何が返るか。**行を押すと query に入る。**
+-}
+viewShape : Model -> Html Msg
+viewShape model =
+    Ui.card [ class "flex flex-col gap-3 p-4" ]
+        (Ui.subheading "この API の形"
+            :: (case model.apiShape of
+                    ShapeLoading ->
+                        [ span [ class "text-xs text-ink-faint" ] [ text "読み込み中…" ] ]
+
+                    ShapeMissing ->
+                        [ span [ class "text-xs text-ink-faint" ] [ text "この API の形を取得できませんでした" ] ]
+
+                    ShapeReady shape ->
+                        [ Ui.note [ text "演算子や並び順を押すと query に入ります。値は書き換えてください。" ]
+                        , viewFilters shape.filters
+                        , viewOrders shape.orders
+                        , viewReturns shape.returns
+                        , viewArguments shape.arguments
+                        ]
+               )
+        )
+
+
+shapeColumns : String
+shapeColumns =
+    "grid-cols-[minmax(7rem,1fr)_minmax(10rem,2fr)_minmax(8rem,2fr)]"
+
+
+{-| 見出し付きの表。行が無ければ表ごと出さない（型名の付け方が違う等で introspection に無い時）。
+-}
+viewTable : String -> List (Html Msg) -> List (Html Msg) -> Html Msg
+viewTable heading head rows =
+    case rows of
+        [] ->
+            text ""
+
+        _ ->
+            div [ class "flex flex-col gap-1.5" ]
+                [ span [ class "text-xs font-semibold text-ink-soft" ] [ text heading ]
+                , Ui.table (Ui.headRowOf shapeColumns head :: rows)
+                ]
+
+
+viewFilters : List ApiShape.Filter -> Html Msg
+viewFilters filters =
+    viewTable "絞り込み（where）"
+        [ text "フィールド", text "演算子", text "説明" ]
+        (List.map viewFilter filters)
+
+
+viewFilter : ApiShape.Filter -> Html Msg
+viewFilter filter =
+    Ui.rowOf shapeColumns
+        [ mono filter.field
+        , div [ class "flex flex-wrap gap-1" ] (List.map viewOperator filter.operators)
+        , faint (filter.operators |> List.map .description |> List.filter (not << String.isEmpty) |> List.head |> Maybe.withDefault "")
+        ]
+
+
+{-| 演算子 1 つ。押すと `where` に入る。**名前と型を並べる**（型は値の形を決める手掛かり）。
+-}
+viewOperator : ApiShape.Operator -> Html Msg
+viewOperator operator =
+    Html.button
+        [ class "rounded border border-edge bg-raised px-1.5 py-0.5 font-mono text-[11px] text-ink hover:border-accent hover:text-accent"
+        , onClick (FilterPicked operator)
+        , Html.Attributes.title (operator.leaf ++ ": " ++ operator.typeText ++ suffixed operator.description)
+        ]
+        [ text
+            (if String.isEmpty operator.operator then
+                operator.leaf ++ ": " ++ operator.typeText
+
+             else
+                operator.operator ++ ": " ++ operator.typeText
+            )
+        ]
+
+
+suffixed : String -> String
+suffixed description =
+    if String.isEmpty description then
+        ""
+
+    else
+        "（" ++ description ++ "）"
+
+
+viewOrders : List ApiShape.Order -> Html Msg
+viewOrders orders =
+    viewTable "並び順（orderBy）"
+        [ text "値", text "", text "説明" ]
+        (List.map viewOrder orders)
+
+
+viewOrder : ApiShape.Order -> Html Msg
+viewOrder order =
+    Ui.rowOf shapeColumns
+        [ Html.button
+            [ class "font-mono text-[12px] text-ink hover:text-accent", onClick (OrderPicked order.name) ]
+            [ text order.name ]
+        , text ""
+        , faint order.description
+        ]
+
+
+viewReturns : List ApiShape.Returned -> Html Msg
+viewReturns returns =
+    viewTable "返る物"
+        [ text "フィールド", text "種類", text "説明" ]
+        (List.concatMap viewReturned returns)
+
+
+{-| 返るフィールド 1 行と、RichText / Asset の中身の行（1 段だけ、名前を字下げ）。
+-}
+viewReturned : ApiShape.Returned -> List (Html Msg)
+viewReturned field =
+    Ui.rowOf shapeColumns [ mono field.name, mono field.typeText, faint field.description ]
+        :: List.map
+            (\child ->
+                Ui.rowOf shapeColumns
+                    [ span [ class "pl-4 font-mono text-[12px] text-ink-soft" ] [ text (field.name ++ "." ++ child.name) ]
+                    , mono child.typeText
+                    , faint child.description
+                    ]
+            )
+            field.children
+
+
+viewArguments : List ApiShape.Argument -> Html Msg
+viewArguments arguments =
+    viewTable "引数"
+        [ text "名前", text "種類", text "説明" ]
+        (List.map viewArgument arguments)
+
+
+viewArgument : ApiShape.Argument -> Html Msg
+viewArgument argument =
+    Ui.rowOf shapeColumns
+        [ mono argument.name
+        , mono
+            (if String.isEmpty argument.defaultValue then
+                argument.typeText
+
+             else
+                argument.typeText ++ " = " ++ argument.defaultValue
+            )
+        , faint argument.description
+        ]
+
+
+mono : String -> Html Msg
+mono value_ =
+    span [ class "font-mono text-[12px] text-ink" ] [ text value_ ]
+
+
+faint : String -> Html Msg
+faint value_ =
+    span [ class "text-xs text-ink-soft" ] [ text value_ ]
 
 
 viewControls : Model -> ContentTypeDetail -> Html Msg
@@ -587,16 +802,32 @@ statusTone status =
 {-| そのまま貼れる形。**API キーは出さない**（画面に出すと共有されて漏れる）。
 公開中の物は鍵無しで読めるので、この形で通る。
 -}
-viewCurl : Model -> Html Msg
-viewCurl model =
+viewCurl : { publicOrigin : String } -> Model -> Html Msg
+viewCurl env model =
+    let
+        origin : String
+        origin =
+            if String.isEmpty env.publicOrigin then
+                "https://<あなたのドメイン>"
+
+            else
+                env.publicOrigin
+    in
     Ui.card [ class "flex flex-col gap-2 p-4" ]
         [ Ui.subheading "手元から実行"
         , Ui.codeBlock []
-            ("curl -X POST https://<あなたのドメイン>/p/"
+            ("curl -X POST "
+                ++ origin
+                ++ "/p/"
                 ++ model.project
                 ++ "/graphql -H 'Content-Type: application/json' -d '"
                 ++ E.encode 0 (E.object [ ( "query", E.string model.document ) ])
                 ++ "'"
             )
+        , if String.isEmpty env.publicOrigin then
+            Ui.note [ text "サーバーの CMS_PUBLIC_ORIGIN を設定すると、実際の URL が出ます。" ]
+
+          else
+            text ""
         , Ui.note [ text "非公開のプロジェクトと下書きを読むには X-Api-Key が要ります。API キーは「API キー」の画面で発行します。" ]
         ]
