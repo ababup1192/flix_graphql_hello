@@ -152,6 +152,7 @@ type Page
     | AccountPage Account.Model
     | ProjectPage ProjectPage.Model
     | Placeholder String
+    | NotFoundPage
 
 
 type Msg
@@ -1337,6 +1338,9 @@ enterPage route model =
                     , Effect.Today (\zone year month day -> AuditMsg (Audit.ZoneKnown zone year month day))
                     )
 
+                Route.NotFound ->
+                    ( { model | route = route, phase = Ready { workspace | page = NotFoundPage } }, Effect.none )
+
                 _ ->
                     ( { model | route = route, phase = Ready { workspace | page = Placeholder (Route.toString route) } }, Effect.none )
 
@@ -1633,3 +1637,6 @@ pageView workspace =
 
         Placeholder url ->
             View.placeholder url
+
+        NotFoundPage ->
+            View.notFound

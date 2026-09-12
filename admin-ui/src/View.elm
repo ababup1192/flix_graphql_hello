@@ -1,4 +1,4 @@
-module View exposing (broken, loading, notMember, placeholder, signedOut)
+module View exposing (broken, loading, notFound, notMember, placeholder, signedOut)
 
 {-| 入口の状態と、中に入った後の枠。
 
@@ -80,12 +80,27 @@ broken failure =
         ]
 
 
+{-| 読めなかった URL。どこに来たのかを出す。
+
+WhyNot: URL を本文にも出さない。アドレス欄と同じ物が 2 つ並ぶだけになる。
+
+WhyNot: 近そうな画面へ勝手に送らない。送ると URL と中身が食い違ったまま操作が続く。
+
+-}
+notFound : Html msg
+notFound =
+    div [ class "flex flex-col items-center gap-2 py-20 text-center" ]
+        [ span [ class "text-[13px] text-ink-soft" ] [ text "この URL の画面はありません" ]
+        , paragraph [ text "アドレスを確かめ直すか、左の一覧から選び直してください。" ]
+        ]
+
+
 {-| まだ作っていないページ。どの URL に来たかだけ出す。
 -}
 placeholder : String -> Html msg
 placeholder url =
     div [ class "flex flex-col items-center gap-2 py-20 text-center" ]
-        [ span [ class "text-[13px] text-ink-soft" ] [ text "この URL の画面はありません" ]
+        [ span [ class "text-[13px] text-ink-soft" ] [ text "この画面はまだありません" ]
         , span [ class "font-mono text-xs text-ink-faint" ] [ text url ]
         , paragraph [ text "左の一覧から選び直してください。" ]
         ]
