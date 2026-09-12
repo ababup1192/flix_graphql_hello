@@ -207,7 +207,10 @@ tiptap-editor.is-big .tt-body { padding-bottom: 6rem; }
   min-height: 12rem;
   max-width: 40rem;
   margin: 0 auto;
-  padding: 0.9rem 1rem;
+  /* WhyNot: 左右 1rem にしない。「+」は行の左に置くので、余白が 16px だと 24px の円が入らず
+     枠の左端へ丸められて行頭の文字に重なる（実際に 10px 重なり、カーソルが円の縁に紛れた）。
+     円 24px と文字との隙間 12px が入る幅を本文の側で空けておく。 */
+  padding: 0.9rem 2.5rem;
   outline: none;
   font-size: 16px;
   line-height: 1.9;

@@ -289,6 +289,10 @@ test("引用の出典の行を押して打っても、引用の本文は変わ�
 for (const fixture of ["image-between", "long", "parts"]) {
   test(`${fixture}: 「+」が行の文字に重ならない`, async () => {
     const h = (harness = await mount(fixture));
+    // **本文の枠を実機と同じ幅に絞る。** 広い見本では左に余白が余っていて、置き場が無い時に
+    // 「+」が枠の左端へ丸められる道（`Math.max(…, 2)`）を通らない（実際に通らず素通りした）。
+    h.editor.style.width = "640px";
+    await settle();
     inner(h).commands.focus("end");
     await settle();
     const plus = h.editor.querySelector<HTMLElement>(".tt-plus")!;
