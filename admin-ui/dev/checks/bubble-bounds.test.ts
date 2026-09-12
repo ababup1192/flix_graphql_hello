@@ -107,3 +107,44 @@ test("低い窓で上端の行を選んでも、帯がエディタの枠より�
   const bubble = await bubbleOf(h);
   expect(Math.round(bubble.top - box(h.editor).top)).toBeGreaterThanOrEqual(0);
 });
+
+// 管理画面の上の帯を土台にも置いて、その下に潜らない事を見る。
+//
+// **枠に収まっているだけでは足りない。** 上の 9 件は緑だが、Floating UI は画面
+// （viewport）にクランプしていて、`dev/editor.html` ではエディタの上端が画面の上端と
+// 同じなので差が出ない。実機で重なるのは、上の帯が画面の上端を占めているため。
+// ここでは同じ高さの帯を `position: fixed` で置き、キャプションをその直下まで送って
+// 帯が上へ逃げる道を作る。
+//
+// WhyNot: 帯の高さを当てずっぽうで決めない。56px は管理画面の `.app-bar` の高さ。
+const APP_BAR = 56;
+
+// **今は落ちる（実測: 帯の上端 23px、上の帯の下端 56px）。** `test.fails` は
+// 「落ちる事」を検査にしている。直すとこの行が赤くなるので、その時に素の `test` へ戻す。
+//
+// WhyNot: skip にしない。skip は直っても何も言わないので、忘れたまま残る。
+test.fails("上の帯がある時、キャプションの帯がその下に潜らない", async () => {
+  const bar = document.createElement("div");
+  bar.style.cssText = `position: fixed; top: 0; left: 0; right: 0; height: ${APP_BAR}px; z-index: 1;`;
+  document.body.appendChild(bar);
+  // 本文の下に余白を積んで、頁を送れるようにする。
+  //
+  // WhyNot: 余白なしで送ろうとしない。土台は本文がそのまま頁の高さなので
+  // `scrollHeight === innerHeight` で 1px も動かず、キャプションが画面の上端に来ない
+  // （実測: scrollY が 0 のまま、帯は 113 で上の帯の下に収まっていた）。
+  const filler = document.createElement("div");
+  filler.style.height = "2000px";
+  try {
+    const h = (harness = await mount("image-between"));
+    document.body.appendChild(filler);
+    const caption = h.editor.querySelector<HTMLElement>("figcaption");
+    // キャプションを上の帯の直下へ送る（帯は真上に出るので、逃げ先が帯の裏になる）。
+    if (caption) window.scrollTo(0, window.scrollY + box(caption).top - APP_BAR - 8);
+    await pickInCaption(h);
+    const bubble = await bubbleOf(h);
+    expect(Math.round(bubble.top - APP_BAR)).toBeGreaterThanOrEqual(0);
+  } finally {
+    bar.remove();
+    filler.remove();
+  }
+});

@@ -125,12 +125,15 @@ export const QuoteCite = Node.create({
       if (depth < 1) return false;
       return leaveBlock(this.editor.view, $from.before(depth), $from.node(depth).nodeSize, dir);
     };
-    // 端で Backspace / Delete を素の動きに任せると、引用の段落と結合して出典が消える。
-    const atEdge = (end: boolean) => () => {
+    // 末尾で Delete を素の動きに任せると、引用の段落と結合して出典が消える。
+    //
+    // WhyNot: Backspace は書かない。先頭の Backspace は blockEdges が先に受けていて、
+    // ここに書いても一度も呼ばれない（2026-09-12 に外して振る舞いが変わらない事を見た）。
+    const atEnd = () => {
       const state = this.editor.state;
       if (!inCite() || !state.selection.empty) return false;
       const $from = state.selection.$from;
-      return $from.parentOffset === (end ? $from.parent.content.size : 0);
+      return $from.parentOffset === $from.parent.content.size;
     };
     return {
       Enter: swallow,
@@ -138,8 +141,7 @@ export const QuoteCite = Node.create({
       "Mod-Enter": swallow,
       ArrowUp: leave(-1),
       ArrowDown: leave(1),
-      Backspace: atEdge(false),
-      Delete: atEdge(true),
+      Delete: atEnd,
     };
   },
 

@@ -205,12 +205,15 @@ export function imageItemNode(store: AssetStore) {
         const pos = $from.before($from.depth);
         return leaveBlock(this.editor.view, pos, $from.node($from.depth).nodeSize, dir);
       };
-      // 端で Backspace / Delete を素の動きに任せると、隣の段落と結合して画像が消える。
-      const atEdge = (end: boolean) => () => {
+      // 末尾で Delete を素の動きに任せると、隣の段落と結合して画像が消える。
+      //
+      // WhyNot: Backspace は書かない。先頭の Backspace は blockEdges が先に受けていて、
+      // ここに書いても一度も呼ばれない（2026-09-12 に外して振る舞いが変わらない事を見た）。
+      const atEnd = () => {
         const state = this.editor.state;
         if (!inCaption() || !state.selection.empty) return false;
         const $from = state.selection.$from;
-        return $from.parentOffset === (end ? $from.parent.content.size : 0);
+        return $from.parentOffset === $from.parent.content.size;
       };
       return {
         Enter: swallow,
@@ -218,8 +221,7 @@ export function imageItemNode(store: AssetStore) {
         "Mod-Enter": swallow,
         ArrowUp: leave(-1),
         ArrowDown: leave(1),
-        Backspace: atEdge(false),
-        Delete: atEdge(true),
+        Delete: atEnd,
         // 配置の 3 つに入れ替わった帯を元に戻す（入力の欄の Esc は欄が自分で受ける）。
         Escape: () => {
           let handled = false;
