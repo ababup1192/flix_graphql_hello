@@ -183,7 +183,11 @@ export class BlockMenu {
     const base = this.mount.getBoundingClientRect();
     const at = dom.getBoundingClientRect();
     const size = 24;
-    this.plus.style.left = `${Math.max(at.left - base.left - size - 6, 2)}px`;
+    // **行の文字から 12px 空ける。** 「+」は円で描くので、近すぎると行頭のカーソルが円の縁と
+    // 重なって見分けが付かない（6px だった時に「カーソルが消えた」と読めた）。note も帯 1 つ分
+    // 離した所に置いている。
+    const gap = 12;
+    this.plus.style.left = `${Math.max(at.left - base.left - size - gap, 2)}px`;
     this.plus.style.top = `${at.top - base.top + (at.height - size) / 2}px`;
   }
 

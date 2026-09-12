@@ -280,3 +280,20 @@ test("引用の出典の行を押して打っても、引用の本文は変わ�
   const quoted = (h.doc() as any).content[0].content[0].content[0].text;
   expect(quoted).toBe("引用された文章がここに入ります。");
 });
+
+// 「+」は行の文字に重ならない。
+//
+// **重なると「カーソルが消えた」ように見える。** 「+」は円で描くので、行頭のカーソルが
+// 円の縁と重なると見分けが付かない（実際に見分けが付かなかった）。note は帯を置いて
+// 余白を取っている。ここでは重なっていない事だけを見る。
+for (const fixture of ["image-between", "long", "parts"]) {
+  test(`${fixture}: 「+」が行の文字に重ならない`, async () => {
+    const h = (harness = await mount(fixture));
+    inner(h).commands.focus("end");
+    await settle();
+    const plus = h.editor.querySelector<HTMLElement>(".tt-plus")!;
+    if (plus.hidden) return expect(plus.hidden).toBe(true);
+    const line = inner(h).view.coordsAtPos(inner(h).state.selection.from);
+    expect(Math.round(line.left - box(plus).right)).toBeGreaterThanOrEqual(8);
+  });
+}
